@@ -1,0 +1,50 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsx .cicd/scripts/setup-electron.ts
+      - name: Fast validation
+        run: npx tsx .cicd/scripts/run-tests.ts
+      - name: Build nightly
+        env:
+          CAVAL_RELEASE_CHANNEL: nightly
+          CAVAL_BUILD_PLATFORM: ${{ matrix.platform }}
+        run: npx tsx .cicd/scripts/build-installer.ts
+      - name: Tag nightly
+        if: matrix.platform == 'linux'
+        run: |
+          git tag nightly-$(date +%F)
+          git push origin nightly-$(date +%F)
+      - name: Publish nightly feed
+        env:
+          CAVAL_RELEASE_CHANNEL: nightly
+          PUBLISH_RELEASE: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tsx .cicd/scripts/publish-release.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-${{ matrix.platform }}
+          path: release/**

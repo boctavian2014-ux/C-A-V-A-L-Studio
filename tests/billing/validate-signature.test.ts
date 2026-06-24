@@ -1,0 +1,12 @@
+import crypto from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { validateRevenueCatSignature } from "../../billing/revenuecat/validate-signature";
+
+describe("validateRevenueCatSignature (co-located)", () => {
+  it("accepts valid sha256 signatures", () => {
+    process.env.REVENUECAT_WEBHOOK_SECRET = "test-secret";
+    const body = JSON.stringify({ event: { id: "1", type: "RENEWAL", app_user_id: "u1", event_timestamp_ms: 1 } });
+    const signature = crypto.createHmac("sha256", "test-secret").update(body).digest("hex");
+    expect(validateRevenueCatSignature(body, signature)).toBe(true);
+  });
+});

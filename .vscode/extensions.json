@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "eamodio.gitlens",
+    "ms-vscode.vscode-typescript-next",
+    "esbenp.prettier-vscode",
+    "ms-azuretools.vscode-docker",
+    "pkief.material-icon-theme",
+    "vscode-icons-team.vscode-icons",
+    "ms-vscode.cpptools",
+    "msjsdiag.debugger-for-chrome"
+  ]
+}

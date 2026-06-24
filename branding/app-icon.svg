@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Caval Studio app icon">
+  <defs>
+    <radialGradient id="icon-bg" cx="50%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#0A1A2F"/>
+      <stop offset="100%" stop-color="#0E0E0F"/>
+    </radialGradient>
+    <filter id="icon-cyan-glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="40" y="40" width="432" height="432" rx="112" fill="url(#icon-bg)"/>
+  <rect x="126" y="76" width="260" height="360" rx="130" fill="none" stroke="rgba(245,247,250,0.14)" stroke-width="8"/>
+  <path d="M198 176V336" stroke="#F5F7FA" stroke-width="20" stroke-linecap="round" opacity="0.58"/>
+  <path d="M256 136V376" stroke="#00E0FF" stroke-width="22" stroke-linecap="round" filter="url(#icon-cyan-glow)"/>
+  <path d="M314 188V324" stroke="#F5F7FA" stroke-width="20" stroke-linecap="round" opacity="0.78"/>
+  <path d="M176 214C204 184 308 184 336 214" fill="none" stroke="#D4A857" stroke-width="12" stroke-linecap="round" opacity="0.9"/>
+</svg>

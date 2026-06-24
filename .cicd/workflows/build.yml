@@ -1,0 +1,48 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop, "release/**"]
+  pull_request:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Setup pnpm
+        run: npx tsx .cicd/scripts/setup-node.ts
+      - name: Install dependencies
+        run: npm ci
+      - name: Setup Electron deps
+        run: npx tsx .cicd/scripts/setup-electron.ts
+      - name: Build installer
+        env:
+          CAVAL_BUILD_PLATFORM: ${{ matrix.platform }}
+          CAVAL_RELEASE_CHANNEL: beta
+        run: npx tsx .cicd/scripts/build-installer.ts
+      - name: Upload build metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-${{ matrix.platform }}
+          path: .cicd-metrics.json
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: caval-${{ matrix.platform }}-artifacts
+          path: release/**

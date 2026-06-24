@@ -1,0 +1,20 @@
+{
+  "name": "pulse-tech-theme",
+  "displayName": "Pulse Tech",
+  "description": "Dark theme for Caval Studio — cyan pulse accents on deep blue surfaces.",
+  "version": "0.1.0",
+  "publisher": "caval-studio",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": ["Themes"],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Pulse Tech",
+        "uiTheme": "vs-dark",
+        "path": "./themes/pulse-tech-theme.json"
+      }
+    ]
+  }
+}

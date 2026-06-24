@@ -1,0 +1,9 @@
+{
+  "identityEnv": "CAVAL_MAC_DEVELOPER_ID",
+  "appleIdEnv": "CAVAL_APPLE_ID",
+  "appleTeamIdEnv": "CAVAL_APPLE_TEAM_ID",
+  "appleAppSpecificPasswordEnv": "CAVAL_APPLE_APP_PASSWORD",
+  "hardenedRuntime": true,
+  "notarize": true,
+  "bundleId": "com.caval.studio"
+}

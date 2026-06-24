@@ -1,0 +1,19 @@
+{
+  // Caval Studio config — echivalent kilo.jsonc
+  "models": {
+    "default": "caval-auto/free",
+    "perMode": {
+      "ask": "caval-auto/free",
+      "code": "caval-auto/balanced",
+      "architect": "caval-auto/frontier",
+      "debug": "caval-auto/balanced"
+    }
+  },
+  "autocomplete": {
+    "model": "north-mini-code",
+    "enabled": true
+  },
+  "mcp": {
+    "servers": []
+  }
+}

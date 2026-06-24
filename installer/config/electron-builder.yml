@@ -1,0 +1,101 @@
+appId: com.caval.studio
+productName: Caval Studio
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+directories:
+  output: release/${channel}
+  buildResources: installer/assets
+files:
+  - dist/**
+  - package.json
+  - branding/**
+  - installer/assets/**
+asar: true
+compression: maximum
+publish:
+  - provider: github
+    owner: caval-studio
+    repo: caval-studio
+    releaseType: release
+  - provider: s3
+    bucket: caval-studio-releases
+    region: eu-central-1
+  - provider: generic
+    url: https://updates.caval.studio/${channel}
+extraMetadata:
+  main: dist/main/electron-main.js
+protocols:
+  - name: Caval Studio
+    schemes:
+      - caval
+win:
+  icon: installer/assets/icons/win/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: msi
+      arch:
+        - x64
+  publisherName: Caval Studio
+  verifyUpdateCodeSignature: true
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Caval Studio
+mac:
+  icon: installer/assets/icons/mac/icon.icns
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: installer/config/signing/entitlements.mac.plist
+  entitlementsInherit: installer/config/signing/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: pkg
+      arch:
+        - x64
+        - arm64
+dmg:
+  sign: false
+  backgroundColor: "#0A1A2F"
+pkg:
+  scripts: installer/assets/pkg-scripts
+linux:
+  icon: installer/assets/icons/linux
+  category: Development
+  target:
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+deb:
+  depends:
+    - gconf2
+    - gconf-service
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+rpm:
+  depends:
+    - libnotify
+    - nss
+    - xdg-utils
+electronUpdaterCompatibility: ">=6.0.0"
+generateUpdatesFilesForAllChannels: true

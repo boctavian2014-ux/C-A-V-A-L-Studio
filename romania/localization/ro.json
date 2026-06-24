@@ -1,0 +1,13 @@
+{
+  "app.name": "Caval Studio",
+  "command.ai.chat": "Deschide chat AI",
+  "command.ai.compose": "Compune modificari",
+  "command.context.search": "Cauta semantic in proiect",
+  "command.romania.anaf": "Verifica ANAF",
+  "command.romania.efactura": "Deschide eFactura",
+  "command.romania.onrc": "Cauta firma in ONRC",
+  "view.marketplace": "Marketplace Caval",
+  "view.education": "Mod Educatie",
+  "status.context.indexing": "Indexare context in curs",
+  "status.context.ready": "Context pregatit"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "Caval Ivory",
+  "type": "light",
+  "colors": {
+    "editor.background": "#F8FAFC",
+    "editor.foreground": "#111827",
+    "sideBar.background": "#EEF2F7",
+    "activityBar.background": "#E2E8F0",
+    "statusBar.background": "#FFFFFF",
+    "titleBar.activeBackground": "#F8FAFC",
+    "button.background": "#00E0FF",
+    "button.foreground": "#0E0E0F",
+    "focusBorder": "#00E0FF",
+    "textLink.foreground": "#0A1A2F",
+    "errorForeground": "#B91C1C"
+  },
+  "tokenColors": [
+    {
+      "scope": "keyword",
+      "settings": {
+        "foreground": "#0A1A2F"
+      }
+    },
+    {
+      "scope": "string",
+      "settings": {
+        "foreground": "#047857"
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "certificateType": "EV",
+  "provider": "signtool",
+  "certificateSha1Env": "CAVAL_WIN_CERT_SHA1",
+  "certificateFileEnv": "CAVAL_WIN_CERT_FILE",
+  "certificatePasswordEnv": "CAVAL_WIN_CERT_PASSWORD",
+  "timestampServer": "http://timestamp.digicert.com",
+  "digestAlgorithm": "sha256",
+  "description": "Caval Studio",
+  "url": "https://caval.studio"
+}

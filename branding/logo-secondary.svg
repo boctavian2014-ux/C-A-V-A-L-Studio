@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Caval Studio secondary logo">
+  <defs>
+    <filter id="cyan-glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="28" y="14" width="72" height="100" rx="36" fill="none" stroke="rgba(245,247,250,0.18)" stroke-width="2"/>
+  <path d="M48 40V88" stroke="#F5F7FA" stroke-width="6" stroke-linecap="round" opacity="0.58"/>
+  <path d="M64 28V100" stroke="#00E0FF" stroke-width="6" stroke-linecap="round" filter="url(#cyan-glow)"/>
+  <path d="M80 44V84" stroke="#F5F7FA" stroke-width="6" stroke-linecap="round" opacity="0.78"/>
+  <path d="M42 52C50 43 78 43 86 52" fill="none" stroke="#D4A857" stroke-width="3" stroke-linecap="round" opacity="0.88"/>
+</svg>

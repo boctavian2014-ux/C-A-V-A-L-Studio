@@ -1,0 +1,188 @@
+import { create } from 'zustand';
+
+// ──────────────────────────────────────────────
+//  Types
+// ──────────────────────────────────────────────
+
+export interface EditorTab {
+  id: string;          // path complet al fișierului
+  name: string;        // nume fișier
+  path: string;
+  content: string;
+  language: string;
+  isDirty: boolean;    // modificat nesalvat
+  viewState?: unknown; // Monaco editor view state (cursor, scroll)
+}
+
+export interface FileNode {
+  id: string;
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  ext?: string;
+  children?: FileNode[];
+}
+
+interface EditorStore {
+  // ── Proiect ────────────────────────────────
+  projectPath: string | null;
+  fileTree: FileNode[];
+  setProjectPath: (path: string) => void;
+  setFileTree: (tree: FileNode[]) => void;
+  refreshTree: () => Promise<void>;
+
+  // ── Tabs ───────────────────────────────────
+  tabs: EditorTab[];
+  activeTabId: string | null;
+  openFile: (path: string) => Promise<void>;
+  closeTab: (id: string) => void;
+  setActiveTab: (id: string) => void;
+  updateTabContent: (id: string, content: string) => void;
+  saveTab: (id: string) => Promise<void>;
+  saveViewState: (id: string, viewState: unknown) => void;
+
+  // ── Sidebar ────────────────────────────────
+  expandedDirs: Set<string>;
+  toggleDir: (path: string) => void;
+}
+
+// ──────────────────────────────────────────────
+//  Helpers
+// ──────────────────────────────────────────────
+
+function detectLanguage(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript',
+    js: 'javascript', jsx: 'javascript',
+    json: 'json', md: 'markdown',
+    css: 'css', scss: 'scss',
+    html: 'html', py: 'python',
+    rs: 'rust', go: 'go',
+    sh: 'shell', yaml: 'yaml', yml: 'yaml',
+    toml: 'toml', env: 'plaintext',
+  };
+  return map[ext] ?? 'plaintext';
+}
+
+// ──────────────────────────────────────────────
+//  Store
+// ──────────────────────────────────────────────
+
+export const useEditorStore = create<EditorStore>((set, get) => ({
+  // ── Proiect ────────────────────────────────
+  projectPath: null,
+  fileTree: [],
+
+  setProjectPath: (path) => set({ projectPath: path }),
+  setFileTree: (tree) => set({ fileTree: tree }),
+
+  refreshTree: async () => {
+    const { projectPath } = get();
+    if (!projectPath) return;
+    const tree: FileNode[] = await window.caval.fs.readTree(projectPath);
+    set({ fileTree: tree });
+  },
+
+  // ── Tabs ───────────────────────────────────
+  tabs: [],
+  activeTabId: null,
+
+  openFile: async (filePath) => {
+    const { tabs } = get();
+
+    // Dacă e deja deschis, activează-l
+    const existing = tabs.find((t) => t.path === filePath);
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return;
+    }
+
+    const result = await window.caval.fs.readFile(filePath);
+    if (!result.ok) {
+      console.error('Nu pot citi fișierul:', result.error);
+      return;
+    }
+
+    const name = filePath.split(/[/\\]/).pop() ?? filePath;
+    const tab: EditorTab = {
+      id: filePath,
+      name,
+      path: filePath,
+      content: result.content,
+      language: detectLanguage(name),
+      isDirty: false,
+    };
+
+    set((state) => ({
+      tabs: [...state.tabs, tab],
+      activeTabId: filePath,
+    }));
+  },
+
+  closeTab: (id) => {
+    set((state) => {
+      const idx = state.tabs.findIndex((t) => t.id === id);
+      const newTabs = state.tabs.filter((t) => t.id !== id);
+      let newActive = state.activeTabId;
+
+      if (state.activeTabId === id) {
+        // Activează tab-ul din stânga, sau primul rămas
+        if (newTabs.length === 0) {
+          newActive = null;
+        } else {
+          newActive = newTabs[Math.max(0, idx - 1)].id;
+        }
+      }
+
+      return { tabs: newTabs, activeTabId: newActive };
+    });
+  },
+
+  setActiveTab: (id) => set({ activeTabId: id }),
+
+  updateTabContent: (id, content) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, content, isDirty: true } : t
+      ),
+    }));
+  },
+
+  saveTab: async (id) => {
+    const tab = get().tabs.find((t) => t.id === id);
+    if (!tab) return;
+
+    const result = await window.caval.fs.writeFile(tab.path, tab.content);
+    if (result.ok) {
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === id ? { ...t, isDirty: false } : t
+        ),
+      }));
+    }
+  },
+
+  saveViewState: (id, viewState) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, viewState } : t
+      ),
+    }));
+  },
+
+  // ── Sidebar ────────────────────────────────
+  expandedDirs: new Set<string>(),
+
+  toggleDir: (path) => {
+    set((state) => {
+      const next = new Set(state.expandedDirs);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return { expandedDirs: next };
+    });
+  },
+}));

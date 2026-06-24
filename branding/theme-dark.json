@@ -1,0 +1,31 @@
+{
+  "name": "Caval Graphite",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#0E0E0F",
+    "editor.foreground": "#F5F7FA",
+    "sideBar.background": "#0A1A2F",
+    "activityBar.background": "#0E0E0F",
+    "statusBar.background": "#0A1A2F",
+    "titleBar.activeBackground": "#0E0E0F",
+    "button.background": "#00E0FF",
+    "button.foreground": "#0E0E0F",
+    "focusBorder": "#00E0FF",
+    "textLink.foreground": "#00E0FF",
+    "errorForeground": "#F87171"
+  },
+  "tokenColors": [
+    {
+      "scope": "keyword",
+      "settings": {
+        "foreground": "#D4A857"
+      }
+    },
+    {
+      "scope": "string",
+      "settings": {
+        "foreground": "#86EFAC"
+      }
+    }
+  ]
+}
