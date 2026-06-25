@@ -1,0 +1,19 @@
+{
+  "name": "caval-cad-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Caval Studio Text-to-CAD API (OpenSCAD + Supabase)",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "tsx standalone.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "tsx": "^4.22.4"
+  }
+}
