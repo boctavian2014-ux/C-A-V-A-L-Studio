@@ -1,17 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAIStore, getModelDisplayLabel } from './ai-store';
 import { ApiKeysModal } from './ApiKeysModal';
 import { getChatModelGroups } from '../models/model-catalog';
 import type { CavalModelCatalog, CavalModelCatalogEntry } from '../../src/main/preload';
-
-function getCavalApi() {
-  return (window as unknown as {
-    caval?: {
-      modelsList?: () => Promise<{ catalog?: CavalModelCatalog }>;
-      modelsRefresh?: () => Promise<{ catalog?: CavalModelCatalog }>;
-    };
-  }).caval;
-}
 
 function renderOptions(entries: CavalModelCatalogEntry[]) {
   return entries.map((entry) => (
@@ -21,28 +12,14 @@ function renderOptions(entries: CavalModelCatalogEntry[]) {
   ));
 }
 
-export function ChatModelSelect() {
+interface ChatModelSelectProps {
+  catalog: CavalModelCatalog | null;
+  loading: boolean;
+}
+
+export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
   const { selectedModel, setModel, activeResolvedModel, modelLabels } = useAIStore();
-  const [catalog, setCatalog] = useState<CavalModelCatalog | null>(null);
-  const [loading, setLoading] = useState(true);
   const [showKeys, setShowKeys] = useState(false);
-
-  const loadCatalog = async (refresh = false) => {
-    setLoading(true);
-    try {
-      const caval = getCavalApi();
-      const result = refresh
-        ? await caval?.modelsRefresh?.()
-        : await caval?.modelsList?.();
-      if (result?.catalog) setCatalog(result.catalog);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadCatalog(false);
-  }, []);
 
   const groups = useMemo(
     () => (catalog ? getChatModelGroups(catalog) : { auto: [], free: [], paid: [], coding: [] }),
@@ -124,29 +101,6 @@ export function ChatModelSelect() {
               ▾
             </span>
           </div>
-
-          <button
-            type="button"
-            onClick={() => void loadCatalog(true)}
-            disabled={loading}
-            title="Refresh modele OpenRouter"
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 4,
-              border: '1px solid var(--caval-border)',
-              background: 'none',
-              color: 'var(--caval-text-muted)',
-              cursor: loading ? 'wait' : 'pointer',
-              fontSize: 11,
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            ↻
-          </button>
 
           <button
             type="button"

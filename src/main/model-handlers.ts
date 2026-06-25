@@ -1,5 +1,7 @@
 import { ipcMain, type WebContents } from "electron";
 import { AIClient } from "../../ai/ai-client";
+import { preloadManager } from "../../ai/preload/preload-manager";
+import { ensureModelLoaded, preloadModel } from "../../ai/models/model-preload";
 import { buildModelCatalog, invalidateCatalogCache } from "../../ai/models/model-catalog";
 import { clearOpenRouterCache } from "../../ai/models/openrouter-catalog";
 import {
@@ -117,6 +119,23 @@ async function streamToRenderer(
   const intent = request.intent ?? modeToIntent(request.mode);
   const resolved = await resolveModelSelection(request.model, intent);
 
+  const stage = request.mode === "plan" || request.mode === "architect" ? "composer" : "chat";
+  const cacheHit = preloadManager.getStatus().cache.entries.some(
+    (e) => e.modelId === resolved.modelId && e.stage === stage && e.status === "ready"
+  );
+  preloadManager.recordUsage(resolved.modelId, stage, cacheHit);
+  void preloadManager.onUserAction("chat.stream", {
+    selectedModel: resolved.modelId,
+    intent,
+    capability: request.mode === "plan" || request.mode === "architect" ? "planning" : "chat",
+    activeFile: request.context?.filePath,
+    openFiles: request.context?.mentions,
+  });
+
+  // Warm model in background; lazy-load if cache miss (non-blocking for UI)
+  preloadModel(resolved.modelId, { background: true, skipIfReady: true, priority: 90 });
+  void ensureModelLoaded(resolved.modelId).catch(() => undefined);
+
   const modelIdsToTry =
     request.model === "caval-auto/free"
       ? await getAutoFreeModelCandidates()
@@ -129,8 +148,13 @@ async function streamToRenderer(
     sender.send("caval:ai-stream-chunk", {
       streamId,
       type: "error",
-      error:
-        "Ollama nu rulează. Pornește Ollama (ollama serve), apoi: ollama pull qwen2.5-coder:7b",
+      error: [
+        "Ollama nu rulează.",
+        "",
+        "1. Deschide aplicația Ollama (sau rulează: ollama serve)",
+        "2. Instalează modelul: ollama pull qwen2.5-coder:7b",
+        "3. Prima generare poate dura 15–60 secunde (modelul se încarcă în RAM)",
+      ].join("\n"),
     });
     return;
   }
@@ -170,11 +194,14 @@ async function streamToRenderer(
     streamId,
     type: "error",
     error: [
-      "Niciun model local nu a răspuns.",
+      "Niciun model local free nu a răspuns.",
       "",
       errors.join("\n"),
       "",
-      "Verifică: ollama serve rulează, apoi ollama pull qwen2.5-coder:7b",
+      "Verifică:",
+      "• Ollama rulează (ollama serve sau app deschisă)",
+      "• Model instalat: ollama pull qwen2.5-coder:7b",
+      "• Prima generare poate dura până la 1–2 minute (încărcare model în RAM)",
     ].join("\n"),
   });
 }

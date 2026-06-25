@@ -1,7 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { AIComposer } from "../../ai/composer/composer";
 import { AIClient } from "../../ai/ai-client";
 import { getModelProfile } from "../../ai/model-profiles";
@@ -21,8 +23,13 @@ import { toolSandbox } from "../../ai/pipeline/tool-sandbox";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { assertShellCommandAllowed } from "./shell-security";
 import { registerGitHandlers } from "./git-handlers";
+import { registerImageHandlers } from "./image-handlers";
 import { registerModelHandlers } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
+import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
+import { registerCadHandlers } from "./cad-handlers";
+import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
+import { inferPreloadContext } from "../../ai/models/infer-context";
 import "./ipc-handlers";
 import "./terminal-handlers";
 
@@ -36,8 +43,11 @@ const contextEngine = new ContextEngineApi();
 const workspaceFor = (senderId: number): string => workspaceRoots.get(senderId) ?? process.cwd();
 
 registerGitHandlers();
+registerImageHandlers();
 registerModelHandlers();
 registerMcpHandlers(workspaceFor);
+registerPreloadHandlers(workspaceFor);
+registerCadHandlers();
 
 const subscribePipelineIpc = (sender: Electron.WebContents): (() => void) => {
   return pipelineEventBus.on((event: PipelineEvent) => {
@@ -62,12 +72,39 @@ interface CavalChatResponse {
   error?: string;
 }
 
+const installRendererContextMenu = (window: BrowserWindow): void => {
+  window.webContents.on("context-menu", (_event, params) => {
+    const template: Electron.MenuItemConstructorOptions[] = [];
+
+    if (params.editFlags.canCopy || params.selectionText) {
+      template.push({ role: "copy", label: "Copy" });
+    }
+    if (params.editFlags.canPaste) {
+      template.push({ role: "paste", label: "Paste" });
+    }
+    if (params.editFlags.canCut) {
+      template.push({ role: "cut", label: "Cut" });
+    }
+    if (template.length > 0) {
+      template.push({ type: "separator" });
+    }
+    if (params.editFlags.canSelectAll) {
+      template.push({ role: "selectAll", label: "Select All" });
+    }
+
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({ window });
+  });
+};
+
 const createWindow = (): BrowserWindow => {
   const window = new BrowserWindow({
-    width: 1440,
-    height: 960,
-    minWidth: 1024,
-    minHeight: 720,
+    width: 1600,
+    height: 1000,
+    minWidth: 900,
+    minHeight: 650,
+    resizable: true,
+    maximizable: true,
     title: "Caval Studio",
     backgroundColor: "#090B12",
     webPreferences: {
@@ -78,7 +115,17 @@ const createWindow = (): BrowserWindow => {
     }
   });
 
+  window.maximize();
   window.loadFile(path.join(__dirname, "../renderer/index.html"));
+
+  window.webContents.on("console-message", (_event, level, message, _line, sourceId) => {
+    const tag = level >= 3 ? "error" : level === 2 ? "warn" : "log";
+    console[tag === "log" ? "log" : tag](`[renderer${sourceId ? ` ${sourceId}` : ""}] ${message}`);
+  });
+
+  window.webContents.on("did-finish-load", () => {
+    console.info("[caval] Renderer loaded");
+  });
 
   if (!app.isPackaged) {
     window.webContents.openDevTools({ mode: "detach" });
@@ -87,6 +134,8 @@ const createWindow = (): BrowserWindow => {
   window.webContents.on("did-fail-load", (_event, code, description, url) => {
     console.error("[caval] Renderer failed to load:", code, description, url);
   });
+
+  installRendererContextMenu(window);
 
   return window;
 };
@@ -136,6 +185,8 @@ const openFile = async (): Promise<void> => {
   });
   workspaceRoots.set(window.webContents.id, projectPath);
   void contextEngine.indexWorkspace(projectPath).catch(() => undefined);
+  void preloadManager.onWorkspaceOpen(projectPath, projectFiles.map((f) => f.path));
+  preloadForContext(inferPreloadContext(projectPath, projectFiles.map((f) => f.path)));
 };
 
 const listFolderFiles = async (folderPath: string, limit = 80, preferredFilePath?: string): Promise<Array<{ path: string; label: string; language: string; content: string }>> => {
@@ -185,6 +236,8 @@ const openFolder = async (): Promise<void> => {
   });
   workspaceRoots.set(window.webContents.id, folderPath);
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
+  void preloadManager.onWorkspaceOpen(folderPath);
+  preloadForContext(inferPreloadContext(folderPath));
 };
 
 const sendMenuCommand = (command: string): void => {
@@ -193,11 +246,14 @@ const sendMenuCommand = (command: string): void => {
 
 const sendWorkspaceToRenderer = async (webContentsId: number, sender: Electron.WebContents, folderPath: string): Promise<void> => {
   workspaceRoots.set(webContentsId, folderPath);
+  const files = await listFolderFiles(folderPath, 240);
   sender.send("caval:folder-opened", {
     path: folderPath,
-    files: await listFolderFiles(folderPath, 240)
+    files,
   });
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
+  void preloadManager.onWorkspaceOpen(folderPath, files.map((f) => f.path));
+  preloadForContext(inferPreloadContext(folderPath, files.map((f) => f.path)));
 };
 
 const installApplicationMenu = (): void => {
@@ -213,6 +269,8 @@ const installApplicationMenu = (): void => {
         { type: "separator" },
         { label: "Save", accelerator: "CmdOrCtrl+S", click: () => sendMenuCommand("save") },
         { label: "Save As...", accelerator: "CmdOrCtrl+Shift+S", click: () => sendMenuCommand("save-as") },
+        { type: "separator" },
+        { label: "Preferences...", accelerator: "CmdOrCtrl+,", click: () => sendMenuCommand("open-settings") },
         { type: "separator" },
         { label: "Close Window", accelerator: "Alt+F4", click: () => focusedWindow()?.close() },
         { label: "Exit", click: () => app.quit() }
@@ -400,6 +458,82 @@ ipcMain.handle("caval:save-file", async (event, request: { path?: string; conten
     label: path.basename(targetPath),
     language: languageFromPath(targetPath)
   };
+});
+
+const engineeringMarkdownToHtml = (markdown: string): string => {
+  const escaped = markdown
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const body = escaped
+    .split(/\r?\n/)
+    .map((line) => {
+      if (/^## /.test(line)) return `<h2>${line.slice(3)}</h2>`;
+      if (/^# /.test(line)) return `<h1>${line.slice(2)}</h1>`;
+      if (/^### /.test(line)) return `<h3>${line.slice(4)}</h3>`;
+      if (/^[-*] /.test(line)) return `<li>${line.slice(2)}</li>`;
+      if (line.trim() === "") return "<br/>";
+      if (line.trim().startsWith("|")) {
+        const cells = line.split("|").filter((c) => c.trim()).map((c) => `<td>${c.trim()}</td>`).join("");
+        return `<tr>${cells}</tr>`;
+      }
+      return `<p>${line}</p>`;
+    })
+    .join("\n");
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font-family: Inter, Segoe UI, sans-serif; padding: 40px; color: #111; line-height: 1.6; max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    h2 { font-size: 16px; margin: 24px 0 8px; color: #0a6; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    h3 { font-size: 14px; margin: 16px 0 6px; }
+    p, li { font-size: 12px; }
+    table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    td, th { border: 1px solid #ccc; padding: 6px 8px; font-size: 11px; }
+  </style></head><body>${body}</body></html>`;
+};
+
+ipcMain.handle("caval:engineering-export-pdf", async (event, input: { content: string; defaultName?: string }) => {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const html = engineeringMarkdownToHtml(input.content);
+  const pdfWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { sandbox: true, contextIsolation: true },
+  });
+
+  try {
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    const pdfBuffer = await pdfWindow.webContents.printToPDF({
+      printBackground: true,
+      margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+    });
+
+    const saveResult = parent
+      ? await dialog.showSaveDialog(parent, {
+          title: "Export Hardware Plan PDF",
+          defaultPath: input.defaultName ?? "hardware-plan.pdf",
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        })
+      : await dialog.showSaveDialog({
+          title: "Export Hardware Plan PDF",
+          defaultPath: input.defaultName ?? "hardware-plan.pdf",
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+
+    if (saveResult.canceled || !saveResult.filePath) {
+      return { ok: false, canceled: true };
+    }
+
+    await fs.writeFile(saveResult.filePath, pdfBuffer);
+    return { ok: true, path: saveResult.filePath };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    if (!pdfWindow.isDestroyed()) pdfWindow.destroy();
+  }
 });
 
 ipcMain.on("caval:renderer-ready", (event) => {
@@ -643,6 +777,10 @@ ipcMain.handle("caval:composer-run", async (event, request: {
   runTests?: boolean;
 }): Promise<ComposerResult> => {
   const workspaceRoot = workspaceFor(event.sender.id);
+  void preloadManager.onUserAction("composer.run", {
+    workspaceRoot,
+    pipelineNode: request.mode === "plan" ? "suggestions" : "composer",
+  });
   const useSuggestions = request.mode === "plan" && !request.skipSuggestions;
   const sender = event.sender;
   const unsubscribeStep = logicFlowPipelineEmitter.subscribe((step) => {
@@ -963,8 +1101,113 @@ ipcMain.handle("caval:settings-load", (event) => ({
   settings: appSettings.get(event.sender.id) ?? {}
 }));
 
+const billingBaseUrl = (): string =>
+  process.env.BILLING_URL ?? `http://127.0.0.1:${process.env.BILLING_PORT ?? 8790}`;
+
+const getRendererSettings = (senderId: number): Record<string, string> => {
+  const settings = appSettings.get(senderId) ?? {};
+  if (!settings["caval.userId"]) {
+    settings["caval.userId"] = `caval_${randomUUID()}`;
+    appSettings.set(senderId, settings);
+  }
+  return settings;
+};
+
+ipcMain.handle("caval:billing-user-id", (event) => {
+  const settings = getRendererSettings(event.sender.id);
+  return { ok: true, userId: settings["caval.userId"] };
+});
+
+ipcMain.handle("caval:billing-entitlements", async (event) => {
+  const settings = getRendererSettings(event.sender.id);
+  const userId = settings["caval.userId"];
+  const apiKey = process.env.BILLING_API_KEY ?? process.env.BILLING_ADMIN_KEY;
+  if (!apiKey) {
+    return { ok: true, plan: "community", status: "unknown", entitlements: [] };
+  }
+  try {
+    const res = await fetch(`${billingBaseUrl()}/api/billing/entitlements/${userId}`, {
+      headers: { "x-billing-api-key": apiKey },
+    });
+    const json = (await res.json()) as {
+      ok?: boolean;
+      plan?: string;
+      status?: string;
+      entitlements?: string[];
+      expiresAt?: string;
+    };
+    return { ok: true, ...json };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle("caval:billing-checkout", async (event, input: { email: string }) => {
+  const settings = getRendererSettings(event.sender.id);
+  const userId = settings["caval.userId"];
+  const apiKey = process.env.BILLING_API_KEY ?? process.env.BILLING_ADMIN_KEY;
+  if (!apiKey) {
+    return { ok: false, error: "BILLING_API_KEY not configured on server" };
+  }
+  try {
+    const res = await fetch(`${billingBaseUrl()}/api/billing/checkout`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-billing-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        cavalId: userId,
+        email: input.email,
+        successUrl: `${billingBaseUrl()}/checkout/success`,
+        cancelUrl: `${billingBaseUrl()}/checkout/cancel`,
+      }),
+    });
+    const json = (await res.json()) as { ok?: boolean; url?: string; error?: string };
+    if (!res.ok || !json.url) {
+      return { ok: false, error: json.error ?? `Checkout failed (${res.status})` };
+    }
+    await shell.openExternal(json.url);
+    return { ok: true, url: json.url };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+const secretsFilePath = (): string => path.join(app.getPath("userData"), "caval-api-keys.bin");
+
+const readApiSecrets = (): Record<string, string> => {
+  try {
+    if (!fsSync.existsSync(secretsFilePath())) return {};
+    const raw = fsSync.readFileSync(secretsFilePath());
+    if (safeStorage.isEncryptionAvailable()) {
+      return JSON.parse(safeStorage.decryptString(raw)) as Record<string, string>;
+    }
+    return JSON.parse(raw.toString("utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+
+const writeApiSecrets = (secrets: Record<string, string>): void => {
+  const payload = JSON.stringify(secrets);
+  if (safeStorage.isEncryptionAvailable()) {
+    fsSync.writeFileSync(secretsFilePath(), safeStorage.encryptString(payload));
+  } else {
+    fsSync.writeFileSync(secretsFilePath(), payload, "utf8");
+  }
+};
+
+ipcMain.handle("caval:secrets-get", () => ({ ok: true, secrets: readApiSecrets() }));
+
+ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) => {
+  writeApiSecrets(secrets);
+  return { ok: true };
+});
+
 app.whenReady().then(() => {
   installApplicationMenu();
+  preloadCoreModels();
   createWindow();
 
   app.on("activate", () => {

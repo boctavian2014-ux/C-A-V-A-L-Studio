@@ -10,6 +10,8 @@ import { NorthProvider } from "./providers/north";
 import { OpenRouterProvider } from "./providers/openrouter";
 import { PoolsideProvider } from "./providers/poolside";
 import type { ModelCapability, ModelDescriptor, ModelProvider, ModelRequest, ModelResponse } from "./types";
+import type { AITaskDescriptor } from "./models/model-types";
+import { preloadModel } from "./models/model-preload";
 
 export interface RouterOptions {
   maxAttempts: number;
@@ -136,6 +138,26 @@ export class ModelRouter {
     return selection;
   }
 
+  /**
+   * Predict the best model for a task and preload it in the background.
+   * Non-blocking — safe to call from UI or pipeline hooks.
+   */
+  predictModelForTask(task: AITaskDescriptor | ModelRequest): ModelSelection {
+    const request: ModelRequest =
+      "prompt" in task
+        ? task
+        : {
+            prompt: "",
+            capability: task.capability,
+            intent: task.intent as ModelRequest["intent"],
+            metadata: task.preferredModel ? { preferredModel: task.preferredModel } : undefined,
+          };
+
+    const selection = this.select(request);
+    preloadModel(selection.model, { background: true, skipIfReady: true, priority: 80 });
+    return selection;
+  }
+
   async complete(request: ModelRequest): Promise<ModelResponse> {
     const candidates = this.rank(request);
     const errors: Error[] = [];
@@ -194,14 +216,52 @@ export class ModelRouter {
       }
     }
 
-    const fallbackCandidates = this.fallback.candidatesFor(request, failedModels).candidates;
-    if (fallbackCandidates.length > 0) {
+    const fallbackProfiles = this.fallback.candidatesFor(request, failedModels).candidates
+      .filter((model) => !failedModels.includes(model.id))
+      .filter((model) => !candidates.some((ranked) => ranked.model.id === model.id));
+
+    for (const model of fallbackProfiles) {
+      const provider = this.providerFor(model.provider);
+      if (!provider) {
+        continue;
+      }
+
       this.logger.fallback({
-        provider: fallbackCandidates[0].provider,
-        model: fallbackCandidates[0].id,
-        reason: `Primary candidates failed; fallback candidates available: ${fallbackCandidates.map((model) => model.id).join(", ")}`,
+        provider: model.provider,
+        model: model.id,
+        reason: "Primary candidates failed; trying fallback candidate.",
         requestId: request.metadata?.requestId
       });
+
+      for (let attempt = 0; attempt < this.retry.attempts(); attempt += 1) {
+        await this.delay(this.timeouts.backoffForAttempt(attempt));
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () => controller.abort(),
+          this.timeouts.timeoutForProvider(model.provider, request.timeoutMs ?? this.options.timeoutMs)
+        );
+
+        try {
+          return await provider.complete(request, model, { signal: controller.signal });
+        } catch (error) {
+          const normalized = error instanceof Error ? error : new Error(String(error));
+          errors.push(normalized);
+          const decision = this.retry.decide(normalized, attempt);
+          this.logger.retry({
+            provider: model.provider,
+            model: model.id,
+            reason: decision.reason,
+            requestId: request.metadata?.requestId,
+            metadata: { attempt, switchModel: decision.switchModel, switchProvider: decision.switchProvider, fallback: true }
+          });
+          if (!decision.retrySameModel) {
+            failedModels.push(model.id);
+            break;
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
     }
 
     throw new AggregateError(errors, `No Caval AI model could satisfy capability: ${request.capability}`);

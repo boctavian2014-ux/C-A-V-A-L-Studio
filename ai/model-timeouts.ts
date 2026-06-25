@@ -13,7 +13,7 @@ export const defaultTimeoutPolicy: TimeoutPolicy = {
     openrouter: 45_000,
     nvidia: 55_000,
     north: 12_000,
-    open_source: 90_000
+    open_source: 180_000
   },
   attemptBackoffMs: [0, 500, 1_500]
 };

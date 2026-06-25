@@ -2,6 +2,8 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import fs from 'node:fs/promises';
+import { applyHunkToContent } from '../shared/diff-utils';
 
 // ──────────────────────────────────────────────
 //  Git IPC Handlers — Caval IDE
@@ -124,6 +126,31 @@ function parseLog(raw: string): GitCommit[] {
   });
 }
 
+function languageFromPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  const map: Record<string, string> = {
+    '.ts': 'typescript', '.tsx': 'typescript',
+    '.js': 'javascript', '.jsx': 'javascript',
+    '.json': 'json', '.md': 'markdown',
+    '.css': 'css', '.scss': 'scss', '.html': 'html',
+    '.py': 'python', '.go': 'go', '.rs': 'rust',
+  };
+  return map[ext] ?? 'plaintext';
+}
+
+async function gitShowFile(projectPath: string, rev: string, filePath: string): Promise<string> {
+  const escaped = filePath.replace(/"/g, '\\"');
+  try {
+    const { stdout } = await execAsync(`git show ${rev}:"${escaped}"`, {
+      cwd: projectPath,
+      maxBuffer: 1024 * 1024 * 10,
+    });
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
 // ──────────────────────────────────────────────
 //  Registerare handlere IPC
 // ──────────────────────────────────────────────
@@ -200,6 +227,68 @@ export function registerGitHandlers() {
       }
 
       return raw;
+    }
+  );
+
+  // ── git:filePair ──────────────────────────
+  ipcMain.handle(
+    'git:filePair',
+    async (
+      _e,
+      projectPath: string,
+      filePath: string,
+      staged: boolean
+    ): Promise<{ original: string; modified: string; language: string }> => {
+      const language = languageFromPath(filePath);
+      const absPath = path.join(projectPath, filePath);
+
+      if (staged) {
+        const original = await gitShowFile(projectPath, 'HEAD', filePath);
+        let modified = '';
+        try {
+          const escaped = filePath.replace(/"/g, '\\"');
+          const { stdout } = await execAsync(`git show :"${escaped}"`, {
+            cwd: projectPath,
+            maxBuffer: 1024 * 1024 * 10,
+          });
+          modified = stdout;
+        } catch {
+          modified = '';
+        }
+        return { original, modified, language };
+      }
+
+      const original = await gitShowFile(projectPath, 'HEAD', filePath);
+      let modified = '';
+      try {
+        modified = await fs.readFile(absPath, 'utf8');
+      } catch {
+        modified = '';
+      }
+      return { original, modified, language };
+    }
+  );
+
+  // ── git:revertHunk ────────────────────────
+  ipcMain.handle(
+    'git:revertHunk',
+    async (
+      _e,
+      projectPath: string,
+      filePath: string,
+      hunkPatch: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const absPath = path.join(projectPath, filePath);
+        const current = await fs.readFile(absPath, 'utf8').catch(() => '');
+        const next = applyHunkToContent(current, hunkPatch, 'reverse');
+        await fs.mkdir(path.dirname(absPath), { recursive: true });
+        await fs.writeFile(absPath, next, 'utf8');
+        return { ok: true };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: message };
+      }
     }
   );
 

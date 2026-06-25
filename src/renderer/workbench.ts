@@ -1,5 +1,7 @@
 import { modelProfiles } from "../../ai/model-profiles";
 
+/** @deprecated Legacy vanilla workbench — use React WorkbenchRoot (workbench-app.tsx) instead. Not bundled in webpack. */
+
 const root = document.getElementById("root");
 
 type Panel = "explorer" | "search" | "source-control" | "run" | "extensions" | "problems" | "output" | "debug" | "terminal" | "marketplace" | "settings" | "ai-suggestions" | "code-review" | "logicflow" | "mobile-build";

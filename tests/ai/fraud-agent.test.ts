@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FraudAgent } from "../../ai/agents/fraud-agent";
+
+vi.mock("../../ai/ai-client", () => ({
+  AIClient: class {
+    complete = vi.fn().mockRejectedValue(new Error("offline — heuristic only"));
+  },
+}));
 
 describe("FraudAgent", () => {
   it("flags high amount transactions", async () => {

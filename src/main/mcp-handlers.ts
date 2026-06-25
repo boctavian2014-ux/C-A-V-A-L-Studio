@@ -35,12 +35,13 @@ export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => stri
   ipcMain.handle("caval:mcp-list", async (event) => {
     const root = getWorkspaceRoot(event.sender.id);
     const config = await loadCavalConfig(root);
-    mcpManager.loadFromConfig(config);
+    mcpManager.loadFromConfig(config, root);
     return { ok: true, servers: mcpManager.list() };
   });
 
-  ipcMain.handle("caval:mcp-start", async (_event, serverId: string) => {
-    const status = await mcpManager.start(serverId);
+  ipcMain.handle("caval:mcp-start", async (event, serverId: string) => {
+    const root = getWorkspaceRoot(event.sender.id);
+    const status = await mcpManager.start(serverId, root);
     return { ok: status.running, status };
   });
 

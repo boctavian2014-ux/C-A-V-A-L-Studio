@@ -1,0 +1,8 @@
+# Railway: do NOT run Electron (desktop app). CAD API only.
+# Prefer Docker builder (railway.toml) for OpenSCAD. This file is a Nixpacks fallback.
+
+[start]
+cmd = "npm run cad:serve"
+
+[variables]
+NODE_ENV = "production"

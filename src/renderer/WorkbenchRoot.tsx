@@ -9,14 +9,18 @@ import { AIPanel } from '../../ai/composer/AIPanel';
 import { ComposerPanel } from '../../ai/composer/ComposerPanel';
 import { useAIStore, formatWorkingModel } from '../../ai/composer/ai-store';
 import { GitPanel } from './components/git/GitPanel';
+import { GitDiffWorkbench } from './components/git/GitDiffWorkbench';
 import { MCPPanel } from './components/mcp/MCPPanel';
+import { SettingsPanel } from './components/settings/SettingsPanel';
+import { ImagePanel } from './components/image/ImagePanel';
+import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
 import { useGitStore } from './store/git-store';
 
 // ──────────────────────────────────────────────
 //  Activity Bar
 // ──────────────────────────────────────────────
 
-type ActivityTab = 'explorer' | 'search' | 'git' | 'extensions';
+type ActivityTab = 'explorer' | 'search' | 'git' | 'image' | 'engineering' | 'extensions' | 'settings';
 
 function ActivityBar({
   active,
@@ -82,7 +86,31 @@ function ActivityBar({
         </svg>
       ),
     },
+    {
+      id: 'image', title: 'Image Generator (DALL-E 3)',
+      icon: (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="3" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <path d="M21 15l-5-5L5 21" />
+        </svg>
+      ),
+    },
+    {
+      id: 'engineering', title: 'Engineering AI',
+      icon: (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="8" width="18" height="12" rx="2" />
+          <path d="M7 8V5a2 2 0 012-2h6a2 2 0 012 2v3" />
+          <circle cx="9" cy="14" r="1.2" fill="currentColor" stroke="none" />
+          <circle cx="15" cy="14" r="1.2" fill="currentColor" stroke="none" />
+          <path d="M12 8v4M10 12h4" />
+        </svg>
+      ),
+    },
   ];
+
+  const isSettingsActive = active === 'settings';
 
   return (
     <div style={{
@@ -182,16 +210,40 @@ function ActivityBar({
       {/* Bottom icons */}
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
         <button
-          title="Setări"
+          title="Setări Caval (Ctrl+,)"
+          type="button"
+          onClick={() => onChange(isSettingsActive ? 'explorer' : 'settings')}
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
-            background: 'transparent', color: 'var(--caval-text-muted)',
+            width: 32, height: 32, borderRadius: 5,
+            border: isSettingsActive ? '1px solid var(--caval-accent)' : 'none',
+            background: isSettingsActive ? 'var(--caval-accent-glow)' : 'transparent',
+            color: isSettingsActive ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
             cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.15s', position: 'relative',
+          }}
+          onMouseEnter={(e) => {
+            if (!isSettingsActive) {
+              e.currentTarget.style.background = 'var(--caval-surface-raised)';
+              e.currentTarget.style.color = 'var(--caval-text)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isSettingsActive) {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--caval-text-muted)';
+            }
           }}
         >
           <svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
           </svg>
+          {isSettingsActive && (
+            <span style={{
+              position: 'absolute', left: 0, top: 6, bottom: 6,
+              width: 2, borderRadius: '0 2px 2px 0',
+              background: 'var(--caval-accent)',
+            }} />
+          )}
         </button>
         <button
           title="Cont"
@@ -218,6 +270,38 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const { selectedModel, activeResolvedModel, modelLabels, isStreaming } = useAIStore();
   const workingModel = formatWorkingModel(selectedModel, activeResolvedModel, modelLabels);
+  const [plan, setPlan] = React.useState('community');
+  const [checkoutBusy, setCheckoutBusy] = React.useState(false);
+
+  const refreshEntitlements = React.useCallback(async () => {
+    const caval = window.caval;
+    const result = await caval?.billingEntitlements?.();
+    if (result?.ok && result.plan) setPlan(result.plan);
+  }, []);
+
+  React.useEffect(() => {
+    void refreshEntitlements();
+    const interval = window.setInterval(() => void refreshEntitlements(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [refreshEntitlements]);
+
+  const handleUpgrade = async () => {
+    const caval = window.caval;
+    if (!caval?.billingCheckout) return;
+    setCheckoutBusy(true);
+    try {
+      const email = window.prompt('Email pentru facturare Stripe:')?.trim();
+      if (!email) return;
+      const result = await caval.billingCheckout({ email });
+      if (!result.ok) {
+        window.alert(result.error ?? 'Checkout failed');
+        return;
+      }
+      window.setTimeout(() => void refreshEntitlements(), 5000);
+    } finally {
+      setCheckoutBusy(false);
+    }
+  };
 
   return (
     <div style={{
@@ -235,6 +319,30 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
         main
       </StatusItem>
       <StatusItem>✓ 0 erori &nbsp;⚠ 0</StatusItem>
+      <StatusItem title="Plan curent">
+        Plan: {plan}
+      </StatusItem>
+      {plan !== 'pro' && (
+        <button
+          type="button"
+          onClick={() => void handleUpgrade()}
+          disabled={checkoutBusy}
+          title="Upgrade la Pro via Stripe"
+          style={{
+            background: 'rgba(0,0,0,0.15)',
+            border: 'none',
+            borderRadius: 3,
+            padding: '1px 6px',
+            cursor: checkoutBusy ? 'wait' : 'pointer',
+            color: 'rgba(14,14,15,0.9)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 10,
+            fontWeight: 600,
+          }}
+        >
+          {checkoutBusy ? '...' : 'Upgrade'}
+        </button>
+      )}
 
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
         <StatusItem title={workingModel.secondary ? `via ${workingModel.secondary}` : undefined}>
@@ -278,6 +386,24 @@ function StatusItem({ children, title }: { children: React.ReactNode; title?: st
 }
 
 // ──────────────────────────────────────────────
+//  SidebarShell
+// ──────────────────────────────────────────────
+
+function SidebarShell({ children, width }: { children: React.ReactNode; width: number }) {
+  return (
+    <div style={{
+      width, flexShrink: 0,
+      background: 'var(--caval-bg)',
+      borderRight: '1px solid var(--caval-border)',
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
 //  WorkbenchRoot — layout principal
 // ──────────────────────────────────────────────
 
@@ -285,7 +411,7 @@ export function WorkbenchRoot() {
   const [activeActivity, setActiveActivity] = React.useState<ActivityTab>('explorer');
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);
   const [composerOpen, setComposerOpen] = React.useState(false);
-  const { saveTab, activeTabId } = useEditorStore();
+  const { saveTab, activeTabId, setProjectPath, refreshTree, openFile } = useEditorStore();
   const gitChangesCount = useGitStore((s) => s.files.length);
 
   const toggleAI = useCallback(() => setAiPanelOpen((v) => !v), []);
@@ -318,16 +444,76 @@ export function WorkbenchRoot() {
         e.preventDefault();
         toggleAI();
       }
+
+      // Ctrl+, → Setări (toggle)
+      if (ctrl && e.key === ',') {
+        e.preventDefault();
+        setActiveActivity((prev) => (prev === 'settings' ? 'explorer' : 'settings'));
+      }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [activeTabId, saveTab, toggleAI]);
 
+  // Electron menu + open folder/file IPC
+  useEffect(() => {
+    const caval = window.caval;
+    if (!caval) return;
+
+    caval.ready?.();
+
+    const unsubMenu = caval.onMenuCommand?.((command) => {
+      const state = useEditorStore.getState();
+      const tabId = state.activeTabId;
+      const tab = state.tabs.find((t) => t.id === tabId);
+
+      if (command === 'save' && tabId) void saveTab(tabId);
+      if (command === 'save-as' && tab) {
+        void caval.saveFile?.({ path: tab.path, content: tab.content, saveAs: true }).then((result) => {
+          if (result && !result.canceled && result.path) void openFile(result.path);
+        });
+      }
+      if (command === 'view-explorer') setActiveActivity('explorer');
+      if (command === 'view-search' || command === 'find-in-files') setActiveActivity('search');
+      if (command === 'view-source-control') setActiveActivity('git');
+      if (command === 'view-extensions') setActiveActivity('extensions');
+      if (command === 'palette') setComposerOpen(true);
+      if (command === 'open-settings') setActiveActivity('settings');
+    });
+
+    const unsubFolder = caval.onFolderOpened?.((folder) => {
+      setProjectPath(folder.path);
+      void refreshTree();
+      setActiveActivity('explorer');
+    });
+
+    const unsubFile = caval.onFileOpened?.((file) => {
+      void openFile(file.path);
+    });
+
+    return () => {
+      unsubMenu?.();
+      unsubFolder?.();
+      unsubFile?.();
+    };
+  }, [saveTab, setProjectPath, refreshTree, openFile, setComposerOpen]);
+
   return (
     <CavalThemeProvider defaultMode="dark">
       {/* CSS global pentru markdown + code blocks din AIPanel */}
       <style>{`
+        /* ── Text selectabil (chat, output) ── */
+        .caval-md,
+        .caval-md p,
+        .caval-md pre,
+        .caval-md code,
+        .caval-selectable {
+          user-select: text;
+          -webkit-user-select: text;
+          cursor: text;
+        }
+
         /* ── Markdown renderer stiluri ── */
         .caval-md { color: var(--caval-text); line-height: 1.6; }
         .caval-md p { margin: 0 0 8px; }
@@ -448,17 +634,24 @@ export function WorkbenchRoot() {
             gitChangesCount={gitChangesCount}
           />
 
-          {/* Sidebar — Explorer sau Git Panel */}
+          {/* Sidebar */}
           {activeActivity === 'explorer' && <FileTree />}
           {activeActivity === 'git' && (
+            <SidebarShell width={280}>
+              <GitPanel />
+            </SidebarShell>
+          )}
+          {activeActivity === 'search' && (
             <div style={{
               width: 280, flexShrink: 0,
               background: 'var(--caval-bg)',
               borderRight: '1px solid var(--caval-border)',
-              display: 'flex', flexDirection: 'column',
-              overflow: 'hidden',
+              padding: 12,
+              fontSize: 12,
+              color: 'var(--caval-text-muted)',
             }}>
-              <GitPanel />
+              <strong style={{ color: 'var(--caval-text)' }}>Search</strong>
+              <p style={{ marginTop: 8 }}>Find in Files — folosește Ctrl+Shift+F din meniu. Indexare contextuală disponibilă din AI panel.</p>
             </div>
           )}
           {activeActivity === 'extensions' && (
@@ -474,8 +667,20 @@ export function WorkbenchRoot() {
 
           {/* Editor + Terminal */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-            <MonacoEditor />
-            <TerminalPanel />
+            {activeActivity === 'settings' ? (
+              <SettingsPanel onClose={() => setActiveActivity('explorer')} />
+            ) : activeActivity === 'image' ? (
+              <ImagePanel />
+            ) : activeActivity === 'engineering' ? (
+              <EngineeringAIPanel />
+            ) : activeActivity === 'git' ? (
+              <GitDiffWorkbench />
+            ) : (
+              <>
+                <MonacoEditor />
+                <TerminalPanel />
+              </>
+            )}
           </div>
 
           {/* AI + Composer panels */}

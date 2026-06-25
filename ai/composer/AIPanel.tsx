@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useAIStore, getModelDisplayLabel, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
-import { ModeSwitcher } from './ModeSwitcher';
-import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { ChatModeSelect } from './ChatModeSelect';
+import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 
 // ──────────────────────────────────────────────
@@ -142,13 +142,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         background: isUser ? 'var(--caval-accent-glow)' : 'var(--caval-surface)',
         border: `1px solid ${isUser ? 'var(--caval-accent-ring)' : 'var(--caval-border)'}`,
         fontSize: 13, lineHeight: 1.6, color: 'var(--caval-text)',
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
+        cursor: 'text',
       }}>
         {message.isStreaming && !message.content ? (
           <StreamingDots />
         ) : (
           <div
+            className="caval-md"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
-            style={{ overflowWrap: 'break-word' }}
+            style={{ overflowWrap: 'break-word', userSelect: 'text', WebkitUserSelect: 'text' }}
           />
         )}
 
@@ -198,13 +202,14 @@ function StreamingDots() {
 export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onOpenComposer?: () => void }) {
   const { theme } = useCavalTheme();
   const {
-    messages, isStreaming, includeMode,
-    sendMessage, stopStreaming, clearChat, setIncludeMode, loadModelLabels,
+    messages, isStreaming,
+    sendMessage, stopStreaming, clearChat, loadModelLabels,
     threads, activeThreadId, newThread, selectThread,
+    attachedFiles, addAttachments, removeAttachment,
   } = useAIStore();
 
-  const { activeTabId, tabs } = useEditorStore();
-  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState('');
 
@@ -250,12 +255,36 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if ((!text && attachedFiles.length === 0) || isStreaming) return;
     setInput('');
-    // Reset textarea height
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    await sendMessage(text);
-  }, [input, isStreaming, sendMessage]);
+    await sendMessage(text || 'Analizează fișierele atașate.');
+  }, [input, isStreaming, sendMessage, attachedFiles.length]);
+
+  const handleAttachClick = useCallback(async () => {
+    const caval = (window as unknown as { caval?: { fs?: { pickFiles?: () => Promise<string[] | null> } } }).caval;
+    if (caval?.fs?.pickFiles) {
+      const paths = await caval.fs.pickFiles();
+      if (paths?.length) await addAttachments(paths);
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [addAttachments]);
+
+  const handleFileInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files?.length) return;
+      const paths: string[] = [];
+      for (const file of Array.from(files)) {
+        const withPath = file as File & { path?: string };
+        if (withPath.path) paths.push(withPath.path);
+      }
+      if (paths.length) await addAttachments(paths);
+      e.target.value = '';
+    },
+    [addAttachments]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -349,8 +378,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </div>
       </div>
 
-      <ModeSwitcher />
-
       {/* Thread tabs */}
       {threads.length > 1 && (
         <div style={{ display: 'flex', gap: 4, padding: '4px 10px', borderBottom: `1px solid ${theme.colors.border}`, overflowX: 'auto', flexShrink: 0 }}>
@@ -374,32 +401,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </div>
       )}
 
-      {/* ── Context mode ───────────────────── */}
-      <div style={{
-        display: 'flex', gap: 5, padding: '6px 12px',
-        borderBottom: `1px solid ${theme.colors.border}`,
-        flexShrink: 0,
-      }}>
-        {(['file', 'selection', 'project'] as const).map((mode) => (
-          <button
-            key={mode}
-            onClick={() => setIncludeMode(mode)}
-            style={{
-              padding: '2px 9px', borderRadius: 999, fontSize: 10.5, cursor: 'pointer',
-              border: '1px solid',
-              borderColor: includeMode === mode ? 'var(--caval-accent-ring)' : 'var(--caval-border)',
-              background: includeMode === mode ? 'var(--caval-accent-glow)' : 'transparent',
-              color: includeMode === mode ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-              transition: 'all 0.12s',
-            }}
-          >
-            {mode === 'file' ? `📄 ${activeTab?.name ?? 'Fișier'}` : mode === 'selection' ? '✂ Selecție' : '📁 Proiect'}
-          </button>
-        ))}
-      </div>
-
       {/* ── Messages ───────────────────────── */}
-      <div style={{
+      <div className="ai-messages-scroll caval-selectable" style={{
         flex: 1, overflowY: 'auto', padding: '10px',
         display: 'flex', flexDirection: 'column', gap: 10,
       }}>
@@ -438,22 +441,64 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               lineHeight: 1.5, outline: 'none',
             }}
           />
+          {attachedFiles.length > 0 && (
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 6,
+              padding: '0 10px 6px',
+            }}>
+              {attachedFiles.map((file) => (
+                <span
+                  key={file.id}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '2px 8px', borderRadius: 999, fontSize: 10.5,
+                    border: '1px solid var(--caval-border)',
+                    background: 'var(--caval-surface-raised)',
+                    color: 'var(--caval-text-muted)',
+                    maxWidth: '100%',
+                  }}
+                  title={file.path}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    📎 {file.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(file.id)}
+                    style={{
+                      border: 'none', background: 'none', cursor: 'pointer',
+                      color: 'var(--caval-text-muted)', fontSize: 12, lineHeight: 1, padding: 0,
+                    }}
+                    title="Elimină atașament"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => void handleFileInputChange(e)}
+          />
           <div style={{
             display: 'flex', alignItems: 'center', padding: '4px 8px 8px',
             gap: 6,
           }}>
-            {/* Attach file */}
-            <IconBtn title="Atașează fișier">
+            {/* Attach + refresh */}
+            <IconBtn title="Atașează fișier" onClick={() => void handleAttachClick()}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
                 <path d="M12.5 8.5L7 14a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54L5.5 11.5a1 1 0 01-1.42-1.42L10 4" strokeLinecap="round" />
               </svg>
             </IconBtn>
-            {/* Context proiect */}
-            <IconBtn title="Include tot proiectul în context" onClick={() => setIncludeMode('project')}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                <rect x="1" y="4" width="14" height="9" rx="1.5" />
-                <path d="M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1" strokeLinecap="round" />
-              </svg>
+            <IconBtn
+              title="Refresh modele OpenRouter"
+              onClick={() => void refreshCatalog()}
+            >
+              <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span>
             </IconBtn>
             {onOpenComposer && (
               <IconBtn title="Deschide Composer (multi-file)" onClick={onOpenComposer}>
@@ -463,19 +508,20 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               </IconBtn>
             )}
 
-            {/* Model + Send */}
+            {/* Mode + Model + Send */}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <ChatModelSelect />
+              <ChatModeSelect />
+              <ChatModelSelect catalog={catalog} loading={catalogLoading} />
               <button
                 onClick={isStreaming ? stopStreaming : handleSend}
-                disabled={!isStreaming && !input.trim()}
+                disabled={!isStreaming && !input.trim() && attachedFiles.length === 0}
                 style={{
                   padding: '5px 14px', borderRadius: 6,
                   border: 'none', cursor: input.trim() || isStreaming ? 'pointer' : 'default',
                   background: isStreaming ? 'rgba(239,68,68,0.15)' : 'var(--caval-accent)',
                   color: isStreaming ? 'var(--caval-error)' : '#0E0E0F',
                   fontSize: 12, fontWeight: 700, transition: 'all 0.12s',
-                  opacity: !isStreaming && !input.trim() ? 0.4 : 1,
+                  opacity: !isStreaming && !input.trim() && attachedFiles.length === 0 ? 0.4 : 1,
                   flexShrink: 0,
                 }}
               >

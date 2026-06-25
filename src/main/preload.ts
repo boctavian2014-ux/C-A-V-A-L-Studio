@@ -179,6 +179,13 @@ contextBridge.exposeInMainWorld("caval", {
     return () => ipcRenderer.removeListener("caval:folder-opened", listener);
   },
   saveFile: (request: CavalSaveRequest) => ipcRenderer.invoke("caval:save-file", request),
+  engineeringExportPdf: (input: { content: string; defaultName?: string }) =>
+    ipcRenderer.invoke("caval:engineering-export-pdf", input) as Promise<{
+      ok: boolean;
+      canceled?: boolean;
+      path?: string;
+      error?: string;
+    }>,
   chat: (request: CavalChatRequest) => ipcRenderer.invoke("caval:ai-chat", request),
   modelsList: () =>
     ipcRenderer.invoke("caval:models-list") as Promise<{ ok: boolean; catalog?: CavalModelCatalog }>,
@@ -286,6 +293,23 @@ contextBridge.exposeInMainWorld("caval", {
   settingsSave: (settings: Record<string, string>) =>
     ipcRenderer.invoke("caval:settings-save", settings) as Promise<{ ok: boolean }>,
   settingsLoad: () => ipcRenderer.invoke("caval:settings-load") as Promise<{ ok: boolean; settings?: Record<string, string> }>,
+  billingUserId: () =>
+    ipcRenderer.invoke("caval:billing-user-id") as Promise<{ ok: boolean; userId?: string }>,
+  billingEntitlements: () =>
+    ipcRenderer.invoke("caval:billing-entitlements") as Promise<{
+      ok: boolean;
+      plan?: string;
+      status?: string;
+      entitlements?: string[];
+      expiresAt?: string;
+      error?: string;
+    }>,
+  billingCheckout: (input: { email: string }) =>
+    ipcRenderer.invoke("caval:billing-checkout", input) as Promise<{ ok: boolean; url?: string; error?: string }>,
+  secretsGet: () =>
+    ipcRenderer.invoke("caval:secrets-get") as Promise<{ ok: boolean; secrets?: Record<string, string> }>,
+  secretsSet: (secrets: Record<string, string>) =>
+    ipcRenderer.invoke("caval:secrets-set", secrets) as Promise<{ ok: boolean }>,
   mcpList: () => ipcRenderer.invoke("caval:mcp-list") as Promise<{ ok: boolean; servers?: unknown[] }>,
   mcpStart: (serverId: string) => ipcRenderer.invoke("caval:mcp-start", serverId),
   mcpStop: (serverId: string) => ipcRenderer.invoke("caval:mcp-stop", serverId),
@@ -303,6 +327,7 @@ contextBridge.exposeInMainWorld("caval", {
   },
 
   fs: {
+    pickFiles: () => ipcRenderer.invoke("fs:pickFiles") as Promise<string[] | null>,
     openFolder: () => ipcRenderer.invoke("fs:openFolder"),
     readTree: (dirPath: string) => ipcRenderer.invoke("fs:readTree", dirPath),
     readFile: (filePath: string) => ipcRenderer.invoke("fs:readFile", filePath),
@@ -331,6 +356,17 @@ contextBridge.exposeInMainWorld("caval", {
     status: (projectPath: string) => ipcRenderer.invoke("git:status", projectPath),
     diff: (projectPath: string, filePath: string, staged: boolean) =>
       ipcRenderer.invoke("git:diff", projectPath, filePath, staged),
+    filePair: (projectPath: string, filePath: string, staged: boolean) =>
+      ipcRenderer.invoke("git:filePair", projectPath, filePath, staged) as Promise<{
+        original: string;
+        modified: string;
+        language: string;
+      }>,
+    revertHunk: (projectPath: string, filePath: string, hunkPatch: string) =>
+      ipcRenderer.invoke("git:revertHunk", projectPath, filePath, hunkPatch) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
     stage: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:stage", projectPath, filePath),
     unstage: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:unstage", projectPath, filePath),
     stageAll: (projectPath: string) => ipcRenderer.invoke("git:stageAll", projectPath),
@@ -347,9 +383,106 @@ contextBridge.exposeInMainWorld("caval", {
     stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath)
   },
 
+  image: {
+    generate: (params: {
+      prompt: string;
+      size?: "1024x1024" | "1792x1024" | "1024x1792";
+      quality?: "standard" | "hd";
+      style?: "vivid" | "natural";
+      apiKey: string;
+    }) => ipcRenderer.invoke("image:generate", params) as Promise<{
+      ok: boolean;
+      url?: string;
+      revisedPrompt?: string;
+      error?: string;
+    }>,
+    save: (imageUrl: string, projectPath: string, fileName: string) =>
+      ipcRenderer.invoke("image:save", imageUrl, projectPath, fileName) as Promise<{
+        ok: boolean;
+        savedPath?: string;
+        error?: string;
+      }>,
+    saveAs: (imageUrl: string) =>
+      ipcRenderer.invoke("image:saveAs", imageUrl) as Promise<{
+        ok: boolean;
+        savedPath?: string;
+        error?: string;
+      }>
+  },
+
+  preload: {
+    status: () =>
+      ipcRenderer.invoke("caval:preload-status") as Promise<{
+        enabled: boolean;
+        workerReady: boolean;
+        workspaceRoot: string | null;
+        inFlight: number;
+        ollamaReachable: boolean | null;
+        cache: {
+          entries: Array<{
+            modelId: string;
+            provider: string;
+            stage: string;
+            status: string;
+            priority: number;
+            hitCount: number;
+            latencyMs?: number;
+          }>;
+        };
+      }>,
+    warm: (modelId: string, stage?: string) =>
+      ipcRenderer.invoke("caval:preload-warm", { modelId, stage }) as Promise<{ ok: boolean }>,
+    invalidate: () => ipcRenderer.invoke("caval:preload-invalidate") as Promise<{ ok: boolean }>,
+    notify: (input: {
+      action: string;
+      openFiles?: string[];
+      activeFile?: string;
+      modelId?: string;
+    }) => ipcRenderer.invoke("caval:preload-notify", input) as Promise<{ ok: boolean }>,
+    subscribe: () => ipcRenderer.send("caval:preload-subscribe"),
+    unsubscribe: () => ipcRenderer.send("caval:preload-unsubscribe"),
+    onEvent: (callback: (event: { type: string; modelId?: string; stage?: string; message?: string }) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: { type: string; modelId?: string; stage?: string; message?: string }) =>
+        callback(payload);
+      ipcRenderer.on("caval:preload-event", listener);
+      return () => ipcRenderer.removeListener("caval:preload-event", listener);
+    }
+  },
+
   window: {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     maximize: () => ipcRenderer.invoke("window:maximize"),
     close: () => ipcRenderer.invoke("window:close")
+  },
+
+  cad: {
+    createJob: (input: {
+      prompt: string;
+      projectType?: string;
+      constraints?: Record<string, string | undefined>;
+      cavalId?: string;
+    }) =>
+      ipcRenderer.invoke("cad:createJob", input) as Promise<{
+        ok: boolean;
+        jobId?: string;
+        status?: string;
+        error?: string;
+      }>,
+    getJob: (jobId: string) =>
+      ipcRenderer.invoke("cad:getJob", jobId) as Promise<{
+        ok: boolean;
+        jobId?: string;
+        status?: string;
+        stlUrl?: string | null;
+        scad?: string | null;
+        error?: string | null;
+      }>,
+    downloadStl: (input: { url: string; defaultName?: string }) =>
+      ipcRenderer.invoke("cad:downloadStl", input) as Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        path?: string;
+        error?: string;
+      }>
   }
 });

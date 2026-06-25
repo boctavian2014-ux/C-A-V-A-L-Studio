@@ -11,6 +11,13 @@ import { buildContextMessages, parseMentions } from '../context-engine/context-b
 import { useEditorStore } from '../../src/renderer/store/editor-store';
 import type { CavalStreamChunk } from '../../src/main/preload';
 
+export interface ChatAttachment {
+  id: string;
+  path: string;
+  name: string;
+  content: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -59,6 +66,12 @@ interface CavalWindow {
       ok: boolean;
       resolved?: { modelId: string; provider: string; reason: string };
     }>;
+    secretsGet?: () => Promise<{ ok: boolean; secrets?: Record<string, string> }>;
+    secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
+    fs?: {
+      pickFiles?: () => Promise<string[] | null>;
+      readFile?: (filePath: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
+    };
   };
 }
 
@@ -80,6 +93,10 @@ interface AIStore {
   isStreaming: boolean;
   includeMode: IncludeMode;
   setIncludeMode: (mode: IncludeMode) => void;
+  attachedFiles: ChatAttachment[];
+  addAttachments: (paths: string[]) => Promise<void>;
+  removeAttachment: (id: string) => void;
+  clearAttachments: () => void;
   newThread: () => void;
   selectThread: (id: string) => void;
   deleteThread: (id: string) => void;
@@ -125,6 +142,22 @@ function isByokModel(id: ModelSelectionId): boolean {
   return BYOK_IDS.has(id);
 }
 
+function attachmentName(filePath: string): string {
+  const parts = filePath.replace(/\\/g, '/').split('/');
+  return parts[parts.length - 1] || filePath;
+}
+
+const getCaval = (): CavalWindow['caval'] => (window as unknown as CavalWindow).caval;
+
+const persistApiKeys = async (apiKeys: ApiKeys): Promise<void> => {
+  await getCaval()?.secretsSet?.(apiKeys as Record<string, string>);
+};
+
+const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
+  const result = await getCaval()?.secretsGet?.();
+  return (result?.secrets ?? {}) as ApiKeys;
+};
+
 let abortController: AbortController | null = null;
 let streamCleanup: (() => void) | null = null;
 
@@ -133,12 +166,13 @@ const initialThread = createThread();
 export const useAIStore = create<AIStore>()(
   persist(
     (set, get) => ({
-      selectedModel: 'caval-auto/free',
-      agentMode: 'ask',
+      selectedModel: getAgentMode('code').defaultModel,
+      agentMode: 'code',
       apiKeys: {},
       modelLabels: {},
       activeResolvedModel: null,
-      includeMode: 'file',
+      includeMode: 'project',
+      attachedFiles: [],
       activeThreadId: initialThread.id,
       threads: [initialThread],
       messages: [],
@@ -154,7 +188,49 @@ export const useAIStore = create<AIStore>()(
         void get().refreshResolvedModel();
       },
       setIncludeMode: (mode) => set({ includeMode: mode }),
-      setApiKey: (provider, key) => set((s) => ({ apiKeys: { ...s.apiKeys, [provider]: key } })),
+
+      addAttachments: async (paths) => {
+        const caval = getCaval();
+        const existing = new Set(get().attachedFiles.map((f) => f.path));
+        const added: ChatAttachment[] = [];
+
+        for (const filePath of paths) {
+          if (existing.has(filePath)) continue;
+          let content = '';
+          try {
+            const result = await caval?.fs?.readFile?.(filePath);
+            if (result?.ok && result.content != null) {
+              content = result.content;
+            }
+          } catch {
+            content = '';
+          }
+          added.push({
+            id: generateId(),
+            path: filePath,
+            name: attachmentName(filePath),
+            content,
+          });
+        }
+
+        if (added.length > 0) {
+          set((s) => ({ attachedFiles: [...s.attachedFiles, ...added] }));
+        }
+      },
+
+      removeAttachment: (id) => {
+        set((s) => ({ attachedFiles: s.attachedFiles.filter((f) => f.id !== id) }));
+      },
+
+      clearAttachments: () => set({ attachedFiles: [] }),
+
+      setApiKey: (provider, key) => {
+        set((s) => {
+          const apiKeys = { ...s.apiKeys, [provider]: key };
+          void persistApiKeys(apiKeys);
+          return { apiKeys };
+        });
+      },
 
       loadModelLabels: async () => {
         const caval = (window as unknown as CavalWindow).caval;
@@ -210,8 +286,17 @@ export const useAIStore = create<AIStore>()(
       },
 
       sendMessage: async (userText) => {
-        const { selectedModel, apiKeys, messages, includeMode, agentMode, activeThreadId, threads } = get();
+        const {
+          selectedModel,
+          apiKeys,
+          messages,
+          includeMode,
+          agentMode,
+          activeThreadId,
+          attachedFiles,
+        } = get();
         const modeDef = getAgentMode(agentMode);
+        const attachmentsSnapshot = [...attachedFiles];
 
         const userMsg: ChatMessage = {
           id: generateId(),
@@ -231,11 +316,15 @@ export const useAIStore = create<AIStore>()(
         };
 
         const nextMessages = [...messages, userMsg, assistantMsg];
-        set({ messages: nextMessages, isStreaming: true });
+        set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
 
         const editorState = useEditorStore.getState();
         const activeTab = editorState.tabs.find((t) => t.id === editorState.activeTabId) ?? null;
-        const mentions = parseMentions(userText);
+        const mentionPaths = [
+          ...parseMentions(userText),
+          ...attachmentsSnapshot.map((f) => f.name),
+        ];
+        const uniqueMentions = [...new Set(mentionPaths)];
 
         let projectContext = '';
         const caval = (window as unknown as CavalWindow).caval;
@@ -259,7 +348,8 @@ export const useAIStore = create<AIStore>()(
             projectPath: editorState.projectPath,
             includeMode,
             projectContext,
-            mentions,
+            mentions: uniqueMentions,
+            attachments: attachmentsSnapshot,
           }
         );
 
@@ -340,7 +430,12 @@ export const useAIStore = create<AIStore>()(
               filePath: activeTab?.path,
               fileContent: activeTab?.content,
               projectContext,
-              mentions,
+              mentions: uniqueMentions,
+              attachments: attachmentsSnapshot.map((f) => ({
+                path: f.path,
+                name: f.name,
+                content: f.content.slice(0, 16_000),
+              })),
             },
           },
           (chunk: CavalStreamChunk) => {
@@ -422,15 +517,22 @@ export const useAIStore = create<AIStore>()(
       partialize: (s) => ({
         selectedModel: s.selectedModel,
         agentMode: s.agentMode,
-        apiKeys: s.apiKeys,
         includeMode: s.includeMode,
         threads: s.threads,
         activeThreadId: s.activeThreadId,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+        if (state.includeMode === 'file') {
+          state.includeMode = 'project';
+        }
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
         if (thread) state.messages = thread.messages;
+        void loadApiKeysFromSecrets().then((secrets) => {
+          if (Object.keys(secrets).length > 0) {
+            useAIStore.setState({ apiKeys: secrets });
+          }
+        });
       },
     }
   )

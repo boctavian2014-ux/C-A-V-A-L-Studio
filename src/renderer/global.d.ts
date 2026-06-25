@@ -2,6 +2,7 @@ declare module "*.css";
 declare module "xterm/css/xterm.css";
 
 interface CavalFsApi {
+  pickFiles: () => Promise<string[] | null>;
   openFolder: () => Promise<string | null>;
   readTree: (dirPath: string) => Promise<import("./store/editor-store").FileNode[]>;
   readFile: (filePath: string) => Promise<{ ok: boolean; content: string; error?: string }>;
@@ -55,6 +56,15 @@ interface GitStatus {
 interface CavalGitApi {
   status: (projectPath: string) => Promise<GitStatus>;
   diff: (projectPath: string, filePath: string, staged: boolean) => Promise<string>;
+  filePair: (projectPath: string, filePath: string, staged: boolean) => Promise<{
+    original: string;
+    modified: string;
+    language: string;
+  }>;
+  revertHunk: (projectPath: string, filePath: string, hunkPatch: string) => Promise<{
+    ok: boolean;
+    error?: string;
+  }>;
   stage: (projectPath: string, filePath: string) => Promise<{ ok: boolean; error?: string }>;
   unstage: (projectPath: string, filePath: string) => Promise<{ ok: boolean; error?: string }>;
   stageAll: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
@@ -71,15 +81,124 @@ interface CavalGitApi {
   stashPop: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
+interface CavalImageApi {
+  generate: (params: {
+    prompt: string;
+    size?: "1024x1024" | "1792x1024" | "1024x1792";
+    quality?: "standard" | "hd";
+    style?: "vivid" | "natural";
+    apiKey: string;
+  }) => Promise<{ ok: boolean; url?: string; revisedPrompt?: string; error?: string }>;
+  save: (imageUrl: string, projectPath: string, fileName: string) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
+  saveAs: (imageUrl: string) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
+}
+
+interface CavalStreamChunk {
+  streamId: string;
+  type: "meta" | "delta" | "done" | "error";
+  delta?: string;
+  error?: string;
+  resolvedModel?: string;
+  reason?: string;
+  model?: string;
+  provider?: string;
+}
+
+interface CavalPreloadApi {
+  status: () => Promise<{
+    enabled: boolean;
+    workerReady: boolean;
+    workspaceRoot: string | null;
+    inFlight: number;
+    ollamaReachable: boolean | null;
+    cache: { entries: Array<{ modelId: string; status: string; stage: string; priority: number }> };
+  }>;
+  warm: (modelId: string, stage?: string) => Promise<{ ok: boolean }>;
+  invalidate: () => Promise<{ ok: boolean }>;
+  notify: (input: {
+    action: string;
+    openFiles?: string[];
+    activeFile?: string;
+    modelId?: string;
+  }) => Promise<{ ok: boolean }>;
+  subscribe: () => void;
+  unsubscribe: () => void;
+  onEvent: (callback: (event: { type: string; modelId?: string; stage?: string; message?: string }) => void) => () => void;
+}
+
+interface CavalCadApi {
+  createJob: (input: {
+    prompt: string;
+    projectType?: string;
+    constraints?: Record<string, string | undefined>;
+    cavalId?: string;
+  }) => Promise<{ ok: boolean; jobId?: string; status?: string; error?: string }>;
+  getJob: (jobId: string) => Promise<{
+    ok: boolean;
+    jobId?: string;
+    status?: string;
+    stlUrl?: string | null;
+    scad?: string | null;
+    error?: string | null;
+  }>;
+  downloadStl: (input: { url: string; defaultName?: string }) => Promise<{
+    ok: boolean;
+    canceled?: boolean;
+    path?: string;
+    error?: string;
+  }>;
+}
+
 interface CavalBridge {
   version?: string;
   productName?: string;
   ready?: () => void;
+  onMenuCommand?: (callback: (command: string) => void) => () => void;
+  onFileOpened?: (callback: (file: { path: string; label: string; language: string; content: string }) => void) => () => void;
+  onFolderOpened?: (callback: (folder: { path: string; files: Array<{ path: string; label: string; language: string; content: string }> }) => void) => () => void;
+  saveFile?: (request: { path?: string; content: string; saveAs?: boolean }) => Promise<{ canceled?: boolean; path?: string; label?: string; language?: string }>;
+  chatStream?: (
+    request: {
+      message: string;
+      model: string;
+      mode?: "ask" | "plan" | "code" | "architect" | "debug";
+      streamId: string;
+      context?: {
+        filePath?: string;
+        fileContent?: string;
+        projectContext?: string;
+        mentions?: string[];
+      };
+    },
+    onChunk: (chunk: CavalStreamChunk) => void
+  ) => () => void;
+  engineeringExportPdf?: (input: { content: string; defaultName?: string }) => Promise<{
+    ok: boolean;
+    canceled?: boolean;
+    path?: string;
+    error?: string;
+  }>;
+  billingUserId?: () => Promise<{ ok: boolean; userId?: string }>;
+  billingEntitlements?: () => Promise<{
+    ok: boolean;
+    plan?: string;
+    status?: string;
+    entitlements?: string[];
+    expiresAt?: string;
+    error?: string;
+  }>;
+  billingCheckout?: (input: { email: string }) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  secretsGet?: () => Promise<{ ok: boolean; secrets?: Record<string, string> }>;
+  secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
+  settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
+  settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean }>;
   fs: CavalFsApi;
   terminal: CavalTerminalApi;
   git: CavalGitApi;
+  image: CavalImageApi;
+  preload: CavalPreloadApi;
+  cad: CavalCadApi;
   window: CavalWindowApi;
-  [key: string]: unknown;
 }
 
 declare global {

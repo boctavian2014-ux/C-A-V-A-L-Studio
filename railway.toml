@@ -1,0 +1,11 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "engineering/cad-server/Dockerfile"
+watchPatterns = ["engineering/cad-server/**", "billing/supabase/**", "package.json", "package-lock.json"]
+
+[deploy]
+startCommand = "npm run cad:serve"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

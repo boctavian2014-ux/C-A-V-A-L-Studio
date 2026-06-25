@@ -58,20 +58,39 @@ function useTerminal(containerId: string) {
     fitRef.current  = fitAddon;
 
     const container = document.getElementById(containerId);
+    const onContextMenu = (e: MouseEvent) => {
+      const selection = term.getSelection();
+      if (!selection) return;
+      e.preventDefault();
+      void navigator.clipboard.writeText(selection);
+    };
+
     if (container) {
       term.open(container);
       fitAddon.fit();
+      container.addEventListener('contextmenu', onContextMenu);
     }
 
     // Creare sesiune PTY
-    window.caval.terminal.create(id).then(() => {
+    const caval = window.caval;
+    if (!caval?.terminal) {
+      term.writeln('\r\n\x1b[33mTerminal indisponibil — repornește aplicația.\x1b[0m');
+      return () => {
+        resizeObserver.disconnect();
+        if (container) container.removeEventListener('contextmenu', onContextMenu);
+        cleanupRef.current?.();
+        term.dispose();
+      };
+    }
+
+    caval.terminal.create(id).then(() => {
       // Trimite input utilizator → PTY
       term.onData((data) => {
-        window.caval.terminal.write(id, data);
+        void caval.terminal.write(id, data);
       });
 
       // Primește output PTY → terminal
-      cleanupRef.current = window.caval.terminal.onData(id, (data: string) => {
+      cleanupRef.current = caval.terminal.onData(id, (data: string) => {
         term.write(data);
       });
     });
@@ -81,15 +100,16 @@ function useTerminal(containerId: string) {
       fitAddon.fit();
       const dims = fitAddon.proposeDimensions();
       if (dims) {
-        window.caval.terminal.resize(id, dims.cols, dims.rows);
+        void caval.terminal.resize(id, dims.cols, dims.rows);
       }
     });
     if (container) resizeObserver.observe(container);
 
     return () => {
       resizeObserver.disconnect();
+      if (container) container.removeEventListener('contextmenu', onContextMenu);
       cleanupRef.current?.();
-      window.caval.terminal.destroy(id);
+      void caval.terminal.destroy(id);
       term.dispose();
     };
   }, [containerId]);

@@ -40,6 +40,7 @@ interface EditorStore {
   updateTabContent: (id: string, content: string) => void;
   saveTab: (id: string) => Promise<void>;
   saveViewState: (id: string, viewState: unknown) => void;
+  reloadTabForPath: (relativePath: string) => Promise<void>;
 
   // ── Sidebar ────────────────────────────────
   expandedDirs: Set<string>;
@@ -169,6 +170,24 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         t.id === id ? { ...t, viewState } : t
       ),
     }));
+  },
+
+  reloadTabForPath: async (relativePath) => {
+    const { tabs, projectPath } = get();
+    if (!projectPath) return;
+    const norm = (p: string) => p.replace(/\\/g, '/');
+    const fullPath = `${norm(projectPath)}/${norm(relativePath)}`;
+    const tab = tabs.find((t) => norm(t.path) === fullPath);
+    if (!tab) return;
+
+    const result = await window.caval.fs.readFile(tab.path);
+    if (result.ok) {
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === tab.id ? { ...t, content: result.content, isDirty: false } : t
+        ),
+      }));
+    }
   },
 
   // ── Sidebar ────────────────────────────────

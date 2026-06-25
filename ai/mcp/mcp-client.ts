@@ -2,7 +2,7 @@
 //  MCP client — minimal stdio server management
 // ──────────────────────────────────────────────
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import type { CavalConfig } from "../modes/agent-modes";
 
 export interface McpServerConfig {
@@ -22,13 +22,70 @@ export interface McpServerStatus {
   error?: string;
 }
 
-export class McpClientManager {
-  private servers = new Map<string, { config: McpServerConfig; process: ChildProcess | null; tools: string[] }>();
+const WINDOWS_SHELL_COMMANDS = new Set(["npx", "npm", "node", "pnpm", "yarn"]);
 
-  loadFromConfig(config: CavalConfig): void {
+/** Resolve spawn command for Windows (.cmd + shell) to avoid ENOENT in Electron. */
+export const resolveMcpSpawn = (
+  command: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv; cwd?: string }
+): { command: string; args: string[]; options: SpawnOptions } => {
+  const spawnOptions: SpawnOptions = {
+    env: { ...process.env, ...options.env },
+    stdio: ["pipe", "pipe", "pipe"],
+    cwd: options.cwd,
+  };
+
+  if (process.platform !== "win32") {
+    return { command, args, options: spawnOptions };
+  }
+
+  const base = pathBasename(command).toLowerCase().replace(/\.(cmd|exe|bat)$/i, "");
+  if (WINDOWS_SHELL_COMMANDS.has(base)) {
+    return {
+      command: `${base}.cmd`,
+      args,
+      options: { ...spawnOptions, shell: true },
+    };
+  }
+
+  return { command, args, options: { ...spawnOptions, shell: true } };
+};
+
+const pathBasename = (value: string): string => {
+  const normalized = value.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || value;
+};
+
+const spawnMcpProcess = (
+  command: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv; cwd?: string }
+): Promise<ChildProcess> =>
+  new Promise((resolve, reject) => {
+    const resolved = resolveMcpSpawn(command, args, options);
+    const child = spawn(resolved.command, resolved.args, resolved.options);
+
+    const fail = (error: Error): void => {
+      child.removeAllListeners();
+      reject(error);
+    };
+
+    child.once("error", fail);
+    child.once("spawn", () => {
+      child.removeListener("error", fail);
+      resolve(child);
+    });
+  });
+
+export class McpClientManager {
+  private servers = new Map<string, { config: McpServerConfig; process: ChildProcess | null; tools: string[]; cwd?: string }>();
+
+  loadFromConfig(config: CavalConfig, cwd?: string): void {
     for (const server of config.mcp?.servers ?? []) {
       if (server.enabled !== false) {
-        this.servers.set(server.id, { config: server, process: null, tools: [] });
+        this.servers.set(server.id, { config: server, process: null, tools: [], cwd });
       }
     }
   }
@@ -43,7 +100,7 @@ export class McpClientManager {
     }));
   }
 
-  async start(serverId: string): Promise<McpServerStatus> {
+  async start(serverId: string, cwd?: string): Promise<McpServerStatus> {
     const entry = this.servers.get(serverId);
     if (!entry) return { id: serverId, name: serverId, running: false, tools: [], error: "Server not found" };
 
@@ -51,11 +108,20 @@ export class McpClientManager {
       return { id: serverId, name: entry.config.name, running: true, tools: entry.tools };
     }
 
+    const workdir = cwd ?? entry.cwd;
+    if (cwd) entry.cwd = cwd;
+
     try {
-      const child = spawn(entry.config.command, entry.config.args ?? [], {
-        env: { ...process.env, ...entry.config.env },
-        stdio: ["pipe", "pipe", "pipe"],
+      const child = await spawnMcpProcess(entry.config.command, entry.config.args ?? [], {
+        env: entry.config.env,
+        cwd: workdir,
       });
+
+      child.on("error", () => {
+        entry.process = null;
+        entry.tools = [];
+      });
+
       entry.process = child;
       entry.tools = [`mcp:${serverId}:generic`];
       return { id: serverId, name: entry.config.name, running: true, tools: entry.tools };

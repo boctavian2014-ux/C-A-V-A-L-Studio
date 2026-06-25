@@ -38,7 +38,8 @@ export interface GitState {
   activeTab: GitTabId;
   selectedFile: GitFileStatus | null;
   diffContent: string;
-  isDiffStaged: boolean;     // true = diff față de HEAD, false = diff working tree
+  filePair: { original: string; modified: string; language: string } | null;
+  isDiffStaged: boolean;
   commitMessage: string;
 
   // ── History ──
@@ -47,7 +48,8 @@ export interface GitState {
   // ── Loading / Error ──
   loading: boolean;
   diffLoading: boolean;
-  opLoading: boolean;       // push/pull/commit în curs
+  filePairLoading: boolean;
+  opLoading: boolean;
   error: string | null;
   opResult: { ok: boolean; message: string } | null;
 
@@ -64,6 +66,7 @@ export interface GitState {
   stageAll:     () => Promise<void>;
   unstageAll:   () => Promise<void>;
   discard:      (filePath: string) => Promise<void>;
+  revertHunk:   (hunkPatch: string) => Promise<boolean>;
   commit:       () => Promise<void>;
   push:         () => Promise<void>;
   pull:         () => Promise<void>;
@@ -110,6 +113,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   activeTab: 'changes',
   selectedFile: null,
   diffContent: '',
+  filePair: null,
   isDiffStaged: false,
   commitMessage: '',
 
@@ -117,6 +121,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   loading: false,
   diffLoading: false,
+  filePairLoading: false,
   opLoading: false,
   error: null,
   opResult: null,
@@ -148,8 +153,13 @@ export const useGitStore = create<GitState>((set, get) => ({
       // Dacă fișierul selectat nu mai există în status, deselecționează
       const { selectedFile } = get();
       if (selectedFile) {
-        const still = status.files.find((f: GitFileStatus) => f.path === selectedFile.path);
-        if (!still) set({ selectedFile: null, diffContent: '' });
+        const still = status.files.find((f: GitFileStatus) => f.path === selectedFile.path && f.staged === selectedFile.staged);
+        if (!still) set({ selectedFile: null, diffContent: '', filePair: null });
+      }
+
+      const { selectedFile: current } = get();
+      if (!current && status.files.length > 0) {
+        void get().loadDiff(status.files[0]);
       }
     } catch (err: any) {
       set({ loading: false, error: err.message });
@@ -163,12 +173,15 @@ export const useGitStore = create<GitState>((set, get) => ({
     const projectPath = getProjectPath();
     if (!projectPath) return;
 
-    set({ selectedFile: file, diffLoading: true, isDiffStaged: file.staged });
+    set({ selectedFile: file, diffLoading: true, filePairLoading: true, isDiffStaged: file.staged, filePair: null });
     try {
-      const diff = await window.caval.git.diff(projectPath, file.path, file.staged);
-      set({ diffContent: diff, diffLoading: false });
-    } catch (err: any) {
-      set({ diffContent: '', diffLoading: false });
+      const [diff, pair] = await Promise.all([
+        window.caval.git.diff(projectPath, file.path, file.staged),
+        window.caval.git.filePair(projectPath, file.path, file.staged),
+      ]);
+      set({ diffContent: diff, filePair: pair, diffLoading: false, filePairLoading: false });
+    } catch {
+      set({ diffContent: '', filePair: null, diffLoading: false, filePairLoading: false });
     }
   },
 
@@ -210,7 +223,30 @@ export const useGitStore = create<GitState>((set, get) => ({
     const projectPath = getProjectPath();
     if (!projectPath) return;
     await window.caval.git.discard(projectPath, filePath);
+    await useEditorStore.getState().reloadTabForPath(filePath);
     await get().refresh();
+    const { selectedFile } = get();
+    if (selectedFile?.path === filePath) {
+      await get().loadDiff(selectedFile);
+    }
+  },
+
+  revertHunk: async (hunkPatch: string) => {
+    const projectPath = getProjectPath();
+    const { selectedFile } = get();
+    if (!projectPath || !selectedFile || selectedFile.staged) return false;
+
+    const result = await window.caval.git.revertHunk(projectPath, selectedFile.path, hunkPatch);
+    if (!result.ok) {
+      set({ error: result.error ?? 'Revert hunk failed' });
+      return false;
+    }
+
+    await useEditorStore.getState().reloadTabForPath(selectedFile.path);
+    await get().refresh();
+    const still = get().files.find((f) => f.path === selectedFile.path && !f.staged) ?? get().files.find((f) => f.path === selectedFile.path);
+    if (still) await get().loadDiff(still);
+    return true;
   },
 
   // ──────────────────────────────────────────

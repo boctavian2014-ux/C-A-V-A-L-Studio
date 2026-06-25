@@ -15,6 +15,7 @@ export interface ContextOptions {
   includeMode:  'file' | 'project' | 'selection';
   projectContext?: string;
   mentions?:    string[];
+  attachments?: Array<{ path: string; name: string; content: string }>;
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)
@@ -109,6 +110,19 @@ export function buildContextMessages(
     const mentionCtx = `Fișiere menționate: ${opts.mentions.join(', ')}`;
     messages.push({ role: 'user', content: mentionCtx });
     usedTokens += estimateTokens(mentionCtx);
+  }
+
+  // Fișiere atașate (upload)
+  if (opts.attachments?.length) {
+    const blocks = opts.attachments.map(
+      (file) => `Fișier atașat: \`${file.path}\`\n\`\`\`\n${file.content.slice(0, 24_000)}\n\`\`\``
+    );
+    const attachCtx = `Fișiere atașate de utilizator:\n\n${blocks.join('\n\n---\n\n')}`;
+    if (usedTokens + estimateTokens(attachCtx) < MAX_CONTEXT_TOKENS) {
+      messages.push({ role: 'user', content: attachCtx });
+      messages.push({ role: 'assistant', content: 'Am citit fișierele atașate.' });
+      usedTokens += estimateTokens(attachCtx);
+    }
   }
 
   // Istoricul conversației

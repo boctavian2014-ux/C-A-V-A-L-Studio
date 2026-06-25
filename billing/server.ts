@@ -3,26 +3,110 @@ import { billingHealthCheck } from "./health-check";
 import { handleRevenueCatWebhook } from "./revenuecat/webhook";
 import { manualBillingSync } from "./sync/manual-sync";
 import { startPeriodicBillingSync } from "./sync/periodic-sync";
+import { handleStripeWebhook } from "./stripe/webhook";
+import { createCheckoutSession } from "./stripe/checkout";
+import { requireBillingAdmin, requireBillingApiKey } from "./middleware/auth";
+import {
+  getSubscriptionByCavalId,
+  listSubscriptionsFromDb,
+} from "./supabase/repository";
 
 export const createBillingServer = () => {
   const app = express();
 
-  app.get("/health", (_request, response) => {
-    response.json(billingHealthCheck());
+  app.get("/health", async (_request, response) => {
+    response.json(await billingHealthCheck());
   });
 
   app.post(
-    "/webhooks/revenuecat",
+    "/webhooks/stripe",
     express.raw({ type: "application/json" }),
-    (request, response) => {
-      const signature = request.headers["x-revenuecat-signature"] as string | undefined;
-      const result = handleRevenueCatWebhook(request.body, signature);
+    async (request, response) => {
+      const signature = request.headers["stripe-signature"] as string | undefined;
+      const result = await handleStripeWebhook(request.body, signature);
       response.status(result.ok ? 200 : 400).json(result);
     }
   );
 
-  app.post("/api/billing/sync", async (_request, response) => {
+  if (process.env.ENABLE_REVENUECAT_WEBHOOK === "true") {
+    app.post(
+      "/webhooks/revenuecat",
+      express.raw({ type: "application/json" }),
+      (request, response) => {
+        const signature = request.headers["x-revenuecat-signature"] as string | undefined;
+        const result = handleRevenueCatWebhook(request.body, signature);
+        response.status(result.ok ? 200 : 400).json(result);
+      }
+    );
+  }
+
+  app.use(express.json());
+
+  app.post("/api/billing/checkout", requireBillingApiKey, async (request, response) => {
+    try {
+      const { cavalId, email, successUrl, cancelUrl } = request.body as {
+        cavalId?: string;
+        email?: string;
+        successUrl?: string;
+        cancelUrl?: string;
+      };
+      if (!cavalId || !email) {
+        response.status(400).json({ ok: false, error: "cavalId and email required" });
+        return;
+      }
+      const base = process.env.BILLING_PUBLIC_URL ?? "http://localhost:8790";
+      const session = await createCheckoutSession({
+        cavalId,
+        email,
+        successUrl: successUrl ?? `${base}/checkout/success`,
+        cancelUrl: cancelUrl ?? `${base}/checkout/cancel`,
+      });
+      response.json({ ok: true, ...session });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.get("/api/billing/entitlements/:userId", requireBillingApiKey, async (request, response) => {
+    try {
+      const userId = Array.isArray(request.params.userId)
+        ? request.params.userId[0]
+        : request.params.userId;
+      const sub = await getSubscriptionByCavalId(userId);
+      response.json({
+        ok: true,
+        plan: sub?.plan ?? "community",
+        status: sub?.status ?? "unknown",
+        entitlements: sub?.entitlements ?? [],
+        expiresAt: sub?.expiresAt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.get("/api/billing/subscriptions", requireBillingAdmin, async (_request, response) => {
+    try {
+      const subs = await listSubscriptionsFromDb();
+      response.json({ ok: true, subscriptions: subs });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.post("/api/billing/sync", requireBillingAdmin, async (_request, response) => {
     response.json(await manualBillingSync());
+  });
+
+  app.get("/checkout/success", (_request, response) => {
+    response.type("html").send("<h1>Plată reușită</h1><p>Poți închide această fereastră și reveni în Caval Studio.</p>");
+  });
+
+  app.get("/checkout/cancel", (_request, response) => {
+    response.type("html").send("<h1>Plată anulată</h1><p>Nu s-a efectuat nicio modificare.</p>");
   });
 
   return app;

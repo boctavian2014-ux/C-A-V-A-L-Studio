@@ -29,75 +29,6 @@ function statusLabel(s: string): string {
 }
 
 // ──────────────────────────────────────────────
-//  Diff Viewer — parsare și colorare
-// ──────────────────────────────────────────────
-
-function DiffViewer({ diff, loading }: { diff: string; loading: boolean }) {
-  if (loading) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
-        <span style={{ animation: 'caval-blink 1s infinite' }}>Se încarcă diff…</span>
-      </div>
-    );
-  }
-
-  if (!diff.trim()) {
-    return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
-        Nicio diferență de afișat.
-      </div>
-    );
-  }
-
-  const lines = diff.split('\n');
-
-  return (
-    <div style={{
-      flex: 1, overflow: 'auto', fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 11.5, lineHeight: 1.6,
-    }}
-      className="ai-messages-scroll"
-    >
-      {lines.map((line, i) => {
-        let bg = 'transparent';
-        let color = 'var(--caval-text-muted)';
-        let opacity = 1;
-
-        if (line.startsWith('+++') || line.startsWith('---')) {
-          color = 'var(--caval-text-muted)'; opacity = 0.7;
-        } else if (line.startsWith('@@')) {
-          bg = 'rgba(120, 185, 224, 0.08)'; color = '#78B9E0';
-        } else if (line.startsWith('+')) {
-          bg = 'rgba(47, 191, 113, 0.08)'; color = '#2FBF71';
-        } else if (line.startsWith('-')) {
-          bg = 'rgba(244, 112, 103, 0.08)'; color = '#F47067';
-        } else if (line.startsWith('diff ') || line.startsWith('index ')) {
-          color = 'var(--caval-text-muted)'; opacity = 0.5;
-        } else {
-          color = 'var(--caval-text)'; opacity = 0.85;
-        }
-
-        return (
-          <div
-            key={i}
-            style={{
-              background: bg,
-              color,
-              opacity,
-              padding: '0 10px',
-              whiteSpace: 'pre',
-              minHeight: '1.6em',
-            }}
-          >
-            {line || ' '}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────
 //  FileRow — un fișier în lista de changes
 // ──────────────────────────────────────────────
 
@@ -457,7 +388,6 @@ export function GitPanel() {
   const {
     isRepo, branch, upstream, ahead, behind,
     files, activeTab, selectedFile,
-    diffContent, diffLoading,
     commitMessage, loading, opLoading, opResult, error,
     showBranchPicker,
     refresh, loadDiff, stage, unstage, stageAll, unstageAll, discard,
@@ -674,10 +604,7 @@ export function GitPanel() {
       {activeTab === 'changes' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          {/* Split: file list sus, diff jos */}
-          <div style={{ flex: '0 0 auto', maxHeight: '45%', overflowY: 'auto', borderBottom: '1px solid var(--caval-border)' }}
-            className="ai-messages-scroll"
-          >
+          <div style={{ flex: 1, overflowY: 'auto' }} className="ai-messages-scroll">
             {files.length === 0 && !loading ? (
               <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
                 Nicio modificare. Working tree curat.
@@ -730,34 +657,6 @@ export function GitPanel() {
                   </>
                 )}
               </>
-            )}
-          </div>
-
-          {/* Diff viewer */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-            {selectedFile ? (
-              <>
-                {/* Diff header */}
-                <div style={{
-                  padding: '4px 10px', borderBottom: '1px solid var(--caval-border)',
-                  fontSize: 11, color: 'var(--caval-text-muted)', flexShrink: 0,
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}>
-                  <span style={{ color: statusColor(selectedFile.status), fontWeight: 600 }}>
-                    {statusLabel(selectedFile.status)}
-                  </span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {selectedFile.path}
-                  </span>
-                  <span style={{ opacity: 0.5 }}>{selectedFile.staged ? 'staged' : 'working tree'}</span>
-                </div>
-                <DiffViewer diff={diffContent} loading={diffLoading} />
-              </>
-            ) : (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--caval-text-muted)', fontSize: 11.5 }}>
-                Selectează un fișier pentru a vedea diff-ul.
-              </div>
             )}
           </div>
 

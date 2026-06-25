@@ -86,6 +86,7 @@ export abstract class HttpChatProvider implements ModelProvider {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
 
     while (true) {
       const { value, done } = await reader.read();
@@ -93,7 +94,31 @@ export abstract class HttpChatProvider implements ModelProvider {
         break;
       }
 
-      yield decoder.decode(value, { stream: true });
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) {
+          continue;
+        }
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]") {
+          continue;
+        }
+        try {
+          const json = JSON.parse(payload) as {
+            choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>;
+          };
+          const delta = json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content;
+          if (delta) {
+            yield delta;
+          }
+        } catch {
+          // ignore malformed SSE chunks
+        }
+      }
     }
   }
 

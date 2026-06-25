@@ -14,6 +14,55 @@
     "enabled": true
   },
   "mcp": {
-    "servers": []
+    "servers": [
+      {
+        "id": "filesystem",
+        "name": "Filesystem",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+        "enabled": true
+      },
+      {
+        "id": "git",
+        "name": "Git",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-git", "--repository", "."],
+        "enabled": true
+      },
+      {
+        "id": "fetch",
+        "name": "Fetch",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-fetch"],
+        "enabled": true
+      },
+      {
+        "id": "memory",
+        "name": "Memory",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-memory"],
+        "enabled": true
+      },
+      {
+        "id": "firecrawl",
+        "name": "Firecrawl",
+        "command": "npx",
+        "args": ["-y", "firecrawl-mcp"],
+        "env": {
+          "FIRECRAWL_API_KEY": ""
+        },
+        "enabled": false
+      },
+      {
+        "id": "postgres",
+        "name": "Postgres (Supabase / Neon)",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres"],
+        "env": {
+          "POSTGRES_CONNECTION_STRING": ""
+        },
+        "enabled": false
+      }
+    ]
   }
 }

@@ -6,6 +6,38 @@ import * as path from 'path';
 //  FILE SYSTEM HANDLERS
 // ──────────────────────────────────────────────
 
+/** Selectează unul sau mai multe fișiere (atașamente chat, import, etc.) */
+ipcMain.handle('fs:pickFiles', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const result = window
+    ? await dialog.showOpenDialog(window, {
+        title: 'Selectează fișiere',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          {
+            name: 'Code and text',
+            extensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html', 'py', 'go', 'rs', 'java', 'txt', 'xml', 'yaml', 'yml'],
+          },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      })
+    : await dialog.showOpenDialog({
+        title: 'Selectează fișiere',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          {
+            name: 'Code and text',
+            extensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html', 'py', 'go', 'rs', 'java', 'txt', 'xml', 'yaml', 'yml'],
+          },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+          { name: 'All files', extensions: ['*'] },
+        ],
+      });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths;
+});
+
 /** Deschide un dialog de selectare folder și returnează calea */
 ipcMain.handle('fs:openFolder', async () => {
   const result = await dialog.showOpenDialog({

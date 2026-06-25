@@ -1,6 +1,9 @@
-import { randomUUID } from "node:crypto";
 import type { ComposerPatchFile, ComposerPatchSet } from "../composer/types";
 import type { CodeReviewSession, ReviewFile, ReviewHunk, ReviewLine } from "./types";
+
+function randomUUID(): string {
+  return globalThis.crypto.randomUUID();
+}
 
 export function parsePatchToReviewFile(file: ComposerPatchFile): ReviewFile {
   const hunks = parseUnifiedDiff(file.patch);

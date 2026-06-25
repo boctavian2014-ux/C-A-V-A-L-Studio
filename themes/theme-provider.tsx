@@ -65,6 +65,9 @@ const applyVars = (theme: CavalTheme): void => {
   root.style.setProperty("--caval-text-muted", theme.colors.textMuted);
   root.style.setProperty("--caval-accent", theme.colors.accent);
   root.style.setProperty("--caval-accent-glow", `${theme.colors.accent}1F`);
+  root.style.setProperty("--caval-accent-ring", `${theme.colors.accent}40`);
+  root.style.setProperty("--caval-success", "#2FBF71");
+  root.style.setProperty("--caval-error", "#F47067");
 };
 
 export const CavalThemeProvider = ({

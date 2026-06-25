@@ -20,4 +20,16 @@ describe("parseUnifiedDiff", () => {
     expect(hunks).toHaveLength(1);
     expect(hunks[0].header).toContain("No diff content");
   });
+
+  it("parses git-style multi-line diff", () => {
+    const patch = [
+      "@@ -10,4 +10,5 @@",
+      " context",
+      "-removed",
+      "+added green",
+      "+another",
+    ].join("\n");
+    const hunks = parseUnifiedDiff(patch);
+    expect(hunks[0].lines.filter((l) => l.type === "add")).toHaveLength(2);
+  });
 });
