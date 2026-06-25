@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useEngineeringStore } from '../../store/engineering-store';
 import { CadJobPanel } from './CadJobPanel';
+import { SchematicPanel } from './SchematicPanel';
+import { useSchematicStore } from '../../../../ai/schematic/schematic-store';
 import {
   projectTypeLabel,
   emptyEngineeringSections,
@@ -160,11 +162,35 @@ export function EngineeringAIPanel() {
     generatePlan, stopGeneration, clearResult,
     exportBomCsv, exportMarkdown, exportCircuitJson, exportPdf,
     generateCadModel, stopCadPolling, downloadCadStl,
+    schematicGraph, schematicError, isSchematicGenerating, schematicExplanation,
+    generateSchematicFromCode, generateCodeFromSchematic,
+    explainSchematicSelection, analyzeSchematic,
   } = useEngineeringStore();
+
+  const setAiExplanation = useSchematicStore((s) => s.setAiExplanation);
+
+  useEffect(() => {
+    if (schematicExplanation) setAiExplanation(schematicExplanation);
+  }, [schematicExplanation, setAiExplanation]);
+
+  const selectedNodeId = useSchematicStore((s) => s.selectedNodeId);
+  const selectedEdgeId = useSchematicStore((s) => s.selectedEdgeId);
+  const setAiActive = useSchematicStore((s) => s.setAiActive);
+  const pulseEdges = useSchematicStore((s) => s.pulseEdges);
+  const clearPulse = useSchematicStore((s) => s.clearPulse);
+
+  useEffect(() => {
+    setAiActive(isSchematicGenerating);
+    if (isSchematicGenerating && schematicGraph?.edges.length) {
+      pulseEdges(schematicGraph.edges.map((e) => e.id));
+    } else {
+      clearPulse();
+    }
+  }, [isSchematicGenerating, schematicGraph, setAiActive, pulseEdges, clearPulse]);
 
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<EngineeringSectionKey | 'all'>('all');
-  const [rightTab, setRightTab] = useState<'plan' | 'cad'>('plan');
+  const [rightTab, setRightTab] = useState<'plan' | 'cad' | 'schematic'>('plan');
 
   const parsed = lastPlan?.parsed;
   const displaySections = parsed?.sections ?? emptyEngineeringSections();
@@ -396,6 +422,30 @@ export function EngineeringAIPanel() {
             {isCadGenerating ? 'Generez model 3D…' : 'Generează model 3D'}
           </button>
 
+          <button
+            type="button"
+            onClick={() => {
+              setRightTab('schematic');
+              void generateSchematicFromCode();
+            }}
+            disabled={isSchematicGenerating}
+            style={{
+              width: '100%',
+              padding: '9px 14px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: 'transparent',
+              color: 'var(--caval-text)',
+              fontWeight: 600,
+              fontSize: 12.5,
+              cursor: isSchematicGenerating ? 'not-allowed' : 'pointer',
+              opacity: isSchematicGenerating ? 0.5 : 1,
+              marginBottom: 8,
+            }}
+          >
+            {isSchematicGenerating ? 'Generez schematic…' : 'Generează schematic din cod'}
+          </button>
+
           {error && (
             <div style={{
               marginTop: 10,
@@ -422,9 +472,21 @@ export function EngineeringAIPanel() {
           }}>
             <Chip label="Plan hardware" active={rightTab === 'plan'} onClick={() => setRightTab('plan')} />
             <Chip label="Model 3D" active={rightTab === 'cad'} onClick={() => setRightTab('cad')} />
+            <Chip label="Schematic" active={rightTab === 'schematic'} onClick={() => setRightTab('schematic')} />
           </div>
 
-          {rightTab === 'cad' ? (
+          {rightTab === 'schematic' ? (
+            <SchematicPanel
+              graph={schematicGraph}
+              workspaceRoot="."
+              error={schematicError ?? error}
+              isGenerating={isSchematicGenerating}
+              onGenerateFromCode={() => void generateSchematicFromCode()}
+              onGenerateCode={() => void generateCodeFromSchematic()}
+              onExplain={() => void explainSchematicSelection(selectedNodeId ?? undefined, selectedEdgeId ?? undefined)}
+              onAnalyze={() => void analyzeSchematic()}
+            />
+          ) : rightTab === 'cad' ? (
             <CadJobPanel
               status={cadJob?.status ?? null}
               stlUrl={cadJob?.stlUrl ?? null}

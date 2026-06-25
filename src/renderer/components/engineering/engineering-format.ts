@@ -441,25 +441,51 @@ export function buildCadPrompt(input: {
   prompt: string;
   projectType: EngineeringProjectType;
   constraints: EngineeringConstraints;
+  planSections?: Partial<Record<EngineeringSectionKey, string>>;
 }): string {
-  const { prompt, projectType, constraints } = input;
+  const { prompt, projectType, constraints, planSections } = input;
   const constraintLines = [
     constraints.dimensions && `Dimensions: ${constraints.dimensions}`,
     constraints.weight && `Weight: ${constraints.weight}`,
     constraints.budget && `Budget: ${constraints.budget}`,
     constraints.voltage && `Voltage: ${constraints.voltage}`,
+    constraints.autonomy && `Autonomy: ${constraints.autonomy}`,
     constraints.skillLevel && `Skill: ${constraints.skillLevel}`,
   ].filter(Boolean);
 
+  const planLines = [
+    planSections?.requirements?.trim() &&
+      `Requirements from hardware plan:\n${planSections.requirements.trim().slice(0, 800)}`,
+    planSections?.assembly?.trim() &&
+      `Assembly context:\n${planSections.assembly.trim().slice(0, 600)}`,
+    planSections?.bom?.trim() && `BOM context:\n${planSections.bom.trim().slice(0, 500)}`,
+  ].filter(Boolean);
+
   return [
-    `Design a single 3D printable mechanical part in OpenSCAD for: ${prompt.trim()}`,
-    `Project context: ${PROJECT_TYPE_LABELS[projectType]}`,
-    constraintLines.length ? `Constraints:\n${constraintLines.join("\n")}` : "",
-    "Output requirements: millimeters, parametric variables, wall thickness 2–3mm where applicable.",
-    "Example: drone cap Ø80mm, height 25mm, M3 mounting holes at 45° on rim.",
+    `Design ONE 3D-printable OpenSCAD mechanical part matching this description:`,
+    prompt.trim(),
+    `Project: ${PROJECT_TYPE_LABELS[projectType]}`,
+    constraintLines.length ? `Constraints:\n${constraintLines.join('\n')}` : '',
+    planLines.length ? planLines.join('\n\n') : '',
+    'Use millimeters. Parametric variables at top. Include mounting features when relevant.',
+    'Do NOT output a generic cylindrical cap unless the user explicitly asked for a cap/enclosure lid.',
   ]
     .filter(Boolean)
-    .join("\n\n");
+    .join('\n\n');
+}
+
+export function buildCadPlanContext(
+  sections?: Partial<Record<EngineeringSectionKey, string>>
+): { requirements?: string; assembly?: string; bom?: string; performance?: string } | undefined {
+  if (!sections) return undefined;
+  const ctx = {
+    requirements: sections.requirements?.trim(),
+    assembly: sections.assembly?.trim(),
+    bom: sections.bom?.trim(),
+    performance: sections.performance?.trim(),
+  };
+  if (!ctx.requirements && !ctx.assembly && !ctx.bom && !ctx.performance) return undefined;
+  return ctx;
 }
 
 export function extractScadBlock(markdown: string): string | null {

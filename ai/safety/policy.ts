@@ -6,6 +6,7 @@ export interface SafetyPolicy {
   maxFileCount: number;
   maxRequestsPerMinute: number;
   blockedOperations: string[];
+  blockedPatterns: RegExp[];
 }
 
 export interface SafetyViolation {
@@ -21,12 +22,15 @@ export const defaultSafetyPolicy: SafetyPolicy = {
   blockedOperations: [
     "rm -rf",
     "del /s",
-    "format ",
     "git reset --hard",
     "git clean -fd",
     "shutdown",
     "cipher /w",
     "reg delete"
+  ],
+  blockedPatterns: [
+    /\bformat\s+[a-z]:/i,
+    /\bformat\s+\/[a-z]/i,
   ]
 };
 
@@ -50,6 +54,15 @@ export class SafetyPolicyEnforcer {
         violations.push({
           code: "dangerous_operation",
           message: `Blocked dangerous operation pattern: ${operation}`
+        });
+      }
+    }
+
+    for (const pattern of this.policy.blockedPatterns) {
+      if (pattern.test(payload)) {
+        violations.push({
+          code: "dangerous_operation",
+          message: `Blocked dangerous operation pattern: ${pattern.source}`
         });
       }
     }

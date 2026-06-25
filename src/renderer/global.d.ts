@@ -132,6 +132,13 @@ interface CavalCadApi {
     projectType?: string;
     constraints?: Record<string, string | undefined>;
     cavalId?: string;
+    planContext?: {
+      requirements?: string;
+      assembly?: string;
+      bom?: string;
+      performance?: string;
+    };
+    openRouterApiKey?: string;
   }) => Promise<{ ok: boolean; jobId?: string; status?: string; error?: string }>;
   getJob: (jobId: string) => Promise<{
     ok: boolean;
@@ -145,6 +152,43 @@ interface CavalCadApi {
     ok: boolean;
     canceled?: boolean;
     path?: string;
+    error?: string;
+  }>;
+}
+
+interface CavalSchematicApi {
+  generateFromCode: (input: {
+    workspaceRoot: string;
+    files?: string[];
+    objective?: string;
+    useSample?: boolean;
+  }) => Promise<{ ok: boolean; graph?: Record<string, unknown>; error?: string }>;
+  generateCode: (input: {
+    workspaceRoot: string;
+    graph: Record<string, unknown>;
+    delta: Record<string, unknown>;
+    skipSuggestions?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    patchSet?: { summary: string; files: Array<{ path: string; patch: string }> };
+    composerPhase?: string;
+    reviewSessionId?: string;
+    suggestionsSessionId?: string;
+    error?: string;
+  }>;
+  explain: (input: {
+    graph: Record<string, unknown>;
+    nodeId?: string;
+    edgeId?: string;
+  }) => Promise<{ ok: boolean; content?: string; error?: string }>;
+  analyze: (input: { graph: Record<string, unknown> }) => Promise<{
+    ok: boolean;
+    issues?: Array<{ id: string; severity: string; kind: string; message: string }>;
+    error?: string;
+  }>;
+  autoLayout: (input: { graph: Record<string, unknown> }) => Promise<{
+    ok: boolean;
+    graph?: Record<string, unknown>;
     error?: string;
   }>;
 }
@@ -198,6 +242,7 @@ interface CavalBridge {
   image: CavalImageApi;
   preload: CavalPreloadApi;
   cad: CavalCadApi;
+  schematic: CavalSchematicApi;
   window: CavalWindowApi;
 }
 

@@ -46,19 +46,12 @@ export async function renderScadToStl(
 
 export function fallbackScadForPrompt(prompt: string): string {
   const label = prompt.slice(0, 40).replace(/"/g, "'");
-  return `// Fallback cap — ${label}
+  // Only used when CAD_ALLOW_FALLBACK=1 — clearly marked mock
+  return `// MOCK FALLBACK — configure OPENROUTER for real CAD
+// Request: ${label}
 $fn = 64;
-outer_d = 80;
-height = 25;
-wall = 2.5;
-
-module cap() {
-  difference() {
-    cylinder(h = height, d = outer_d, center = false);
-    translate([0, 0, wall])
-      cylinder(h = height, d = outer_d - 2 * wall, center = false);
-  }
+warning() {
+  color("red") cube([10, 10, 10], center = true);
 }
-
-cap();`;
+warning();`;
 }

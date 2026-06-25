@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, Suspense } from 'react';
 import { CavalThemeProvider } from '../../themes/theme-provider';
 import { FileTree } from './components/sidebar/FileTree';
 import { TabBar } from './components/editor/TabBar';
@@ -13,8 +13,13 @@ import { GitDiffWorkbench } from './components/git/GitDiffWorkbench';
 import { MCPPanel } from './components/mcp/MCPPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { ImagePanel } from './components/image/ImagePanel';
-import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
 import { useGitStore } from './store/git-store';
+
+const EngineeringAIPanel = React.lazy(() =>
+  import('./components/engineering/EngineeringAIPanel').then((m) => ({
+    default: m.EngineeringAIPanel,
+  }))
+);
 
 // ──────────────────────────────────────────────
 //  Activity Bar
@@ -672,7 +677,19 @@ export function WorkbenchRoot() {
             ) : activeActivity === 'image' ? (
               <ImagePanel />
             ) : activeActivity === 'engineering' ? (
-              <EngineeringAIPanel />
+              <Suspense fallback={
+                <div style={{
+                  flex: 1,
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: 'var(--caval-text-muted)',
+                  background: 'var(--caval-bg)',
+                }}>
+                  Se încarcă Engineering AI…
+                </div>
+              }>
+                <EngineeringAIPanel />
+              </Suspense>
             ) : activeActivity === 'git' ? (
               <GitDiffWorkbench />
             ) : (

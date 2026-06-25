@@ -1,4 +1,5 @@
 const path = require("path");
+const webpack = require("webpack");
 
 const shared = {
   mode: process.env.NODE_ENV === "production" ? "production" : "development",
@@ -45,6 +46,11 @@ module.exports = [
     ...shared,
     name: "renderer",
     target: "electron-renderer",
+    plugins: [
+      new webpack.ProvidePlugin({
+        global: "globalThis",
+      }),
+    ],
     entry: {
       "renderer/workbench-app": "./src/renderer/workbench-app.tsx"
     }

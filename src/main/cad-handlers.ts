@@ -2,14 +2,43 @@ import { dialog, ipcMain, BrowserWindow } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const cadBaseUrl = (): string =>
-  process.env.CAD_API_URL ?? `http://127.0.0.1:${process.env.CAD_PORT ?? 8791}`;
+const DEFAULT_CAD_API_URL = "https://c-a-v-a-l-studio-production.up.railway.app";
+
+/** Ensures CAD_API_URL is a valid absolute URL (adds https:// if omitted). */
+export function normalizeCadApiUrl(raw: string): string {
+  let url = raw.trim().replace(/\/+$/, "");
+  if (!url) return url;
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url;
+}
+
+const cadBaseUrl = (): string => {
+  if (process.env.CAD_API_URL?.trim()) {
+    return normalizeCadApiUrl(process.env.CAD_API_URL);
+  }
+  if (process.env.CAD_USE_LOCAL === "1") {
+    return `http://127.0.0.1:${process.env.CAD_PORT ?? 8791}`;
+  }
+  return DEFAULT_CAD_API_URL;
+};
+
+const cadFetchHint = (): string =>
+  `CAD API (${cadBaseUrl()}). Set CAD_API_URL in .env or CAD_USE_LOCAL=1 for cad:serve.`;
 
 export interface CadCreateJobInput {
   prompt: string;
   projectType?: string;
   constraints?: Record<string, string | undefined>;
   cavalId?: string;
+  planContext?: {
+    requirements?: string;
+    assembly?: string;
+    bom?: string;
+    performance?: string;
+  };
+  openRouterApiKey?: string;
 }
 
 export interface CadJobResponse {
@@ -38,7 +67,10 @@ export const registerCadHandlers = (): void => {
       }
       return json;
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof Error ? error.message : String(error);
+      const hint =
+        message === "fetch failed" ? `${message} — cannot reach ${cadFetchHint()}` : message;
+      return { ok: false, error: hint };
     }
   });
 
@@ -52,7 +84,10 @@ export const registerCadHandlers = (): void => {
       }
       return json;
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const message = error instanceof Error ? error.message : String(error);
+      const hint =
+        message === "fetch failed" ? `${message} — cannot reach ${cadFetchHint()}` : message;
+      return { ok: false, error: hint };
     }
   });
 

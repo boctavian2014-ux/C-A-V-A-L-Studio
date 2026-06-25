@@ -2,6 +2,7 @@ import type { AIModelConfig, AIModelId, LoadedModelHandle } from "./model-types"
 import { LOG_PREFIX } from "./model-types";
 import { getModelConfig } from "./model-registry";
 import { modelCache } from "./model-cache";
+import { canPreloadHttpModel, providerApiKeyEnv } from "./provider-credentials";
 
 const OLLAMA_BASE =
   (typeof process !== "undefined" && process.env.OLLAMA_BASE_URL
@@ -26,7 +27,31 @@ export async function loadModel(config: AIModelConfig): Promise<LoadedModelHandl
     if (config.runtime === "local_ollama") {
       await warmOllamaModel(config.id);
     } else if (config.runtime === "http") {
-      await warmHttpModel(config);
+      if (!canPreloadHttpModel(config)) {
+        const envKey = providerApiKeyEnv(config.provider);
+        console.log(
+          `${LOG_PREFIX} Skip preload for ${config.id} (${envKey ?? "API key"} not configured)`
+        );
+        modelCache.delete(config.id);
+        return {
+          modelId: config.id,
+          config,
+          state: "unloaded",
+          loadedAt: startedAt,
+          ready: false,
+        };
+      }
+      const warmed = await warmHttpModel(config);
+      if (!warmed) {
+        modelCache.delete(config.id);
+        return {
+          modelId: config.id,
+          config,
+          state: "unloaded",
+          loadedAt: startedAt,
+          ready: false,
+        };
+      }
     } else {
       // local_gguf — interface only; mark ready without I/O
       console.log(`${LOG_PREFIX} Local GGUF runtime stub for ${config.id} (not implemented)`);
@@ -114,12 +139,12 @@ async function warmOllamaModel(modelId: string): Promise<void> {
   }
 }
 
-async function warmHttpModel(config: AIModelConfig): Promise<void> {
+async function warmHttpModel(config: AIModelConfig): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
 
   try {
-    await fetch(config.endpoint, {
+    const response = await fetch(config.endpoint, {
       method: "HEAD",
       signal: controller.signal,
     }).catch(() =>
@@ -128,6 +153,19 @@ async function warmHttpModel(config: AIModelConfig): Promise<void> {
         signal: controller.signal,
       })
     );
+
+    if (!response) {
+      console.log(
+        `${LOG_PREFIX} ${config.id} endpoint unreachable — warm skipped (will retry on use)`
+      );
+      return false;
+    }
+    return true;
+  } catch {
+    console.log(
+      `${LOG_PREFIX} ${config.id} warm skipped: network unreachable (will retry on use)`
+    );
+    return false;
   } finally {
     clearTimeout(timeout);
   }

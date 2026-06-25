@@ -103,11 +103,15 @@ export function CadJobPanel({
         <div style={{
           padding: '8px 14px',
           fontSize: 11.5,
-          color: '#FF8080',
+          color: /fallback|mock|MOCK|repair/i.test(error) ? '#fbbf24' : '#FF8080',
           borderBottom: '1px solid var(--caval-border)',
-          background: 'rgba(239,68,68,0.08)',
+          background: /fallback|mock|MOCK|repair/i.test(error)
+            ? 'rgba(251,191,36,0.08)'
+            : 'rgba(239,68,68,0.08)',
         }}>
-          {error}
+          {/fallback|mock|MOCK/i.test(error)
+            ? `⚠ ${error}`
+            : error}
         </div>
       )}
 

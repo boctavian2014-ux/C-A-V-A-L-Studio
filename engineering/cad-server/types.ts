@@ -9,11 +9,22 @@ export interface CadConstraints {
   skillLevel?: string;
 }
 
+/** Optional engineering plan excerpt passed to the LLM (not persisted). */
+export interface CadPlanContext {
+  requirements?: string;
+  assembly?: string;
+  bom?: string;
+  performance?: string;
+}
+
 export interface CreateCadJobInput {
   prompt: string;
   projectType?: string;
   constraints?: CadConstraints;
   cavalId?: string;
+  planContext?: CadPlanContext;
+  /** Per-request OpenRouter key from Electron (not stored in DB). */
+  openRouterApiKey?: string;
 }
 
 export interface CadJobRecord {

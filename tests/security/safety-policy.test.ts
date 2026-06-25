@@ -22,6 +22,22 @@ describe("SafetyPolicyEnforcer", () => {
     expect(violations.some((v) => v.code === "dangerous_operation")).toBe(true);
   });
 
+  it("allows OUTPUT FORMAT in engineering prompts", () => {
+    const violations = enforcer.validateRequest({
+      prompt: "OUTPUT FORMAT — use exactly these markdown headings:\n## BOM",
+      capability: "chat"
+    });
+    expect(violations.some((v) => v.code === "dangerous_operation")).toBe(false);
+  });
+
+  it("blocks Windows format disk commands", () => {
+    const violations = enforcer.validateRequest({
+      prompt: "run format c: /q on the machine",
+      capability: "chat"
+    });
+    expect(violations.some((v) => v.code === "dangerous_operation")).toBe(true);
+  });
+
   it("rejects patch sets exceeding file count", () => {
     const files = Array.from({ length: 100 }, (_, i) => ({
       path: `file-${i}.ts`,

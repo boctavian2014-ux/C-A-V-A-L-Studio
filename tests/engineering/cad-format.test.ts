@@ -20,6 +20,19 @@ describe("buildCadPrompt", () => {
     expect(text).toContain("Dronă FPV");
     expect(text).toContain("Ø80 x 25mm");
     expect(text).toContain("30g");
+    expect(text).not.toContain("drone cap Ø80mm");
+  });
+
+  it("includes plan sections when provided", () => {
+    const text = buildCadPrompt({
+      prompt: "Roata robot 100mm",
+      projectType: "robot",
+      constraints: { budget: "", dimensions: "100mm", voltage: "", autonomy: "", weight: "", skillLevel: "intermediate" },
+      planSections: { requirements: "Must support 5kg payload", assembly: "Press-fit hub" },
+    });
+    expect(text).toContain("5kg payload");
+    expect(text).toContain("Press-fit hub");
+    expect(text).toContain("Roata robot");
   });
 });
 
@@ -40,7 +53,8 @@ describe("scad-prompt helpers", () => {
   });
 
   it("validates primitives", () => {
-    expect(validateScadSource("cube(10);").ok).toBe(true);
+    const valid = `$fn=64;\nmodule part(){ cube(10); }\npart();`;
+    expect(validateScadSource(valid).ok).toBe(true);
     expect(validateScadSource("hello world").ok).toBe(false);
   });
 });

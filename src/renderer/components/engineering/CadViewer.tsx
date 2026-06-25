@@ -1,45 +1,42 @@
-import React, { Suspense, useEffect, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Center, Environment } from '@react-three/drei';
-import * as THREE from 'three';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { StlDimensions } from './cad-viewer-utils';
 
-function StlMesh({ url }: { url: string }) {
-  const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+type ViewerCanvasProps = {
+  stlUrl: string;
+  wireframe: boolean;
+  autoRotate: boolean;
+  dimensionsLabel: string | null;
+  onDimensions?: (dims: StlDimensions) => void;
+  onToggleWireframe: () => void;
+  onToggleAutoRotate: () => void;
+};
+
+export function CadViewer({ stlUrl }: { stlUrl: string | null }) {
+  const [ViewerCanvas, setViewerCanvas] = useState<React.ComponentType<ViewerCanvasProps> | null>(null);
+  const [wireframe, setWireframe] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(true);
+  const [dimensions, setDimensions] = useState<StlDimensions | null>(null);
 
   useEffect(() => {
+    if (!stlUrl) {
+      setViewerCanvas(null);
+      setDimensions(null);
+      return;
+    }
+    setDimensions(null);
     let alive = true;
-    void (async () => {
-      const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader.js');
-      const loader = new STLLoader();
-      loader.load(
-        url,
-        (geo) => {
-          if (!alive) return;
-          geo.computeVertexNormals();
-          geo.center();
-          setGeometry(geo);
-        },
-        undefined,
-        () => {
-          if (alive) setGeometry(null);
-        }
-      );
-    })();
+    void import('./CadViewerCanvas').then((mod) => {
+      if (alive) setViewerCanvas(() => mod.CadViewerCanvas);
+    });
     return () => {
       alive = false;
     };
-  }, [url]);
+  }, [stlUrl]);
 
-  if (!geometry) return null;
+  const handleDimensions = useCallback((dims: StlDimensions) => {
+    setDimensions(dims);
+  }, []);
 
-  return (
-    <mesh geometry={geometry} castShadow receiveShadow>
-      <meshStandardMaterial color="#00e0ff" metalness={0.25} roughness={0.45} />
-    </mesh>
-  );
-}
-
-export function CadViewer({ stlUrl }: { stlUrl: string | null }) {
   if (!stlUrl) {
     return (
       <div style={{
@@ -65,25 +62,32 @@ export function CadViewer({ stlUrl }: { stlUrl: string | null }) {
     );
   }
 
+  if (!ViewerCanvas) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '100%',
+        minHeight: 280,
+        display: 'grid',
+        placeItems: 'center',
+        background: '#0a0a0b',
+        color: 'var(--caval-text-muted)',
+        fontSize: 12,
+      }}>
+        Se încarcă viewer 3D…
+      </div>
+    );
+  }
+
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 280, background: '#0a0a0b' }}>
-      <Canvas
-        shadows
-        camera={{ position: [80, 60, 80], fov: 45, near: 0.1, far: 2000 }}
-        onCreated={({ gl }) => {
-          gl.setClearColor(new THREE.Color('#0a0a0b'));
-        }}
-      >
-        <ambientLight intensity={0.55} />
-        <directionalLight position={[60, 80, 40]} intensity={1.1} castShadow />
-        <Suspense fallback={null}>
-          <Center>
-            <StlMesh url={stlUrl} />
-          </Center>
-          <Environment preset="city" />
-        </Suspense>
-        <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
-      </Canvas>
-    </div>
+    <ViewerCanvas
+      stlUrl={stlUrl}
+      wireframe={wireframe}
+      autoRotate={autoRotate}
+      dimensionsLabel={dimensions?.label ?? null}
+      onDimensions={handleDimensions}
+      onToggleWireframe={() => setWireframe((v) => !v)}
+      onToggleAutoRotate={() => setAutoRotate((v) => !v)}
+    />
   );
 }

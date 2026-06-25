@@ -28,10 +28,38 @@ import { registerModelHandlers } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerCadHandlers } from "./cad-handlers";
+import { registerSchematicHandlers } from "./schematic-handlers";
 import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
 import { inferPreloadContext } from "../../ai/models/infer-context";
 import "./ipc-handlers";
 import "./terminal-handlers";
+
+const loadLocalEnvFile = (): void => {
+  const envPath = path.join(process.cwd(), ".env");
+  try {
+    if (!fsSync.existsSync(envPath)) return;
+    const content = fsSync.readFileSync(envPath, "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = value;
+    }
+  } catch {
+    // optional local overrides
+  }
+};
+
+loadLocalEnvFile();
 
 const terminals = new Map<number, ChildProcessWithoutNullStreams>();
 const workspaceRoots = new Map<number, string>();
@@ -48,6 +76,7 @@ registerModelHandlers();
 registerMcpHandlers(workspaceFor);
 registerPreloadHandlers(workspaceFor);
 registerCadHandlers();
+registerSchematicHandlers();
 
 const subscribePipelineIpc = (sender: Electron.WebContents): (() => void) => {
   return pipelineEventBus.on((event: PipelineEvent) => {
@@ -1074,10 +1103,16 @@ ipcMain.handle("caval:context-index", async (event) => {
 });
 
 ipcMain.handle("caval:context-search", async (event, input: { query: string; limit?: number }) => {
-  const root = workspaceFor(event.sender.id);
-  await contextEngine.restoreWorkspace(root);
-  const results = await contextEngine.search(input.query, input.limit ?? 20);
-  return { ok: true, results };
+  try {
+    const root = workspaceFor(event.sender.id);
+    await contextEngine.restoreWorkspace(root);
+    const results = await contextEngine.search(input.query, input.limit ?? 20);
+    return { ok: true, results };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[caval] context-search failed:", message);
+    return { ok: false, results: [], error: message };
+  }
 });
 
 const appSettings = new Map<number, Record<string, string>>();
@@ -1092,6 +1127,9 @@ ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) 
   }
   if (settings["ollama.url"]) {
     process.env.OLLAMA_BASE_URL = settings["ollama.url"];
+  }
+  if (settings["cad.apiUrl"]) {
+    process.env.CAD_API_URL = settings["cad.apiUrl"].trim();
   }
   return { ok: true };
 });
@@ -1202,11 +1240,22 @@ ipcMain.handle("caval:secrets-get", () => ({ ok: true, secrets: readApiSecrets()
 
 ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) => {
   writeApiSecrets(secrets);
+  if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
+  if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
+  if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
   return { ok: true };
 });
 
+const applyStoredSecretsToEnv = (): void => {
+  const secrets = readApiSecrets();
+  if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
+  if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
+  if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
+};
+
 app.whenReady().then(() => {
   installApplicationMenu();
+  applyStoredSecretsToEnv();
   preloadCoreModels();
   createWindow();
 

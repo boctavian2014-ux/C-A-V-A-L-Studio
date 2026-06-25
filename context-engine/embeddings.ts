@@ -24,19 +24,27 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     if (!apiKey) {
       return new DeterministicEmbeddingProvider().embed(text);
     }
-    const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ model: this.model, input: text.slice(0, 8000) }),
-    });
-    if (!res.ok) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12_000);
+      const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+        body: JSON.stringify({ model: this.model, input: text.slice(0, 8000) }),
+      });
+      clearTimeout(timeout);
+      if (!res.ok) {
+        return new DeterministicEmbeddingProvider().embed(text);
+      }
+      const json = (await res.json()) as { data?: Array<{ embedding?: number[] }> };
+      return json.data?.[0]?.embedding ?? new DeterministicEmbeddingProvider().embed(text);
+    } catch {
       return new DeterministicEmbeddingProvider().embed(text);
     }
-    const json = (await res.json()) as { data?: Array<{ embedding?: number[] }> };
-    return json.data?.[0]?.embedding ?? new DeterministicEmbeddingProvider().embed(text);
   }
 }
 

@@ -10,6 +10,8 @@ export const cadHealthCheck = async () => ({
   service: "cad",
   supabaseConfigured: isCadPersistenceConfigured(),
   openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY),
+  llmModel: process.env.CAD_LLM_MODEL ?? "openai/gpt-4o-mini",
+  allowFallback: process.env.CAD_ALLOW_FALLBACK === "1",
   checkedAt: new Date().toISOString(),
 });
 

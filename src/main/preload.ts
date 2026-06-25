@@ -461,6 +461,13 @@ contextBridge.exposeInMainWorld("caval", {
       projectType?: string;
       constraints?: Record<string, string | undefined>;
       cavalId?: string;
+      planContext?: {
+        requirements?: string;
+        assembly?: string;
+        bom?: string;
+        performance?: string;
+      };
+      openRouterApiKey?: string;
     }) =>
       ipcRenderer.invoke("cad:createJob", input) as Promise<{
         ok: boolean;
@@ -482,6 +489,56 @@ contextBridge.exposeInMainWorld("caval", {
         ok: boolean;
         canceled?: boolean;
         path?: string;
+        error?: string;
+      }>
+  },
+
+  schematic: {
+    generateFromCode: (input: {
+      workspaceRoot: string;
+      files?: string[];
+      objective?: string;
+      useSample?: boolean;
+    }) =>
+      ipcRenderer.invoke("schematic:generateFromCode", input) as Promise<{
+        ok: boolean;
+        graph?: Record<string, unknown>;
+        error?: string;
+      }>,
+    generateCode: (input: {
+      workspaceRoot: string;
+      graph: Record<string, unknown>;
+      delta: Record<string, unknown>;
+      skipSuggestions?: boolean;
+    }) =>
+      ipcRenderer.invoke("schematic:generateCode", input) as Promise<{
+        ok: boolean;
+        patchSet?: { summary: string; files: Array<{ path: string; patch: string }> };
+        composerPhase?: string;
+        reviewSessionId?: string;
+        suggestionsSessionId?: string;
+        error?: string;
+      }>,
+    explain: (input: {
+      graph: Record<string, unknown>;
+      nodeId?: string;
+      edgeId?: string;
+    }) =>
+      ipcRenderer.invoke("schematic:explain", input) as Promise<{
+        ok: boolean;
+        content?: string;
+        error?: string;
+      }>,
+    analyze: (input: { graph: Record<string, unknown> }) =>
+      ipcRenderer.invoke("schematic:analyze", input) as Promise<{
+        ok: boolean;
+        issues?: Array<{ id: string; severity: string; kind: string; message: string }>;
+        error?: string;
+      }>,
+    autoLayout: (input: { graph: Record<string, unknown> }) =>
+      ipcRenderer.invoke("schematic:autoLayout", input) as Promise<{
+        ok: boolean;
+        graph?: Record<string, unknown>;
         error?: string;
       }>
   }

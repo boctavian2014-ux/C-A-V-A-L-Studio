@@ -4,6 +4,7 @@ import type { CavalStreamChunk } from '../../main/preload';
 import {
   buildEngineeringPrompt,
   buildCadPrompt,
+  buildCadPlanContext,
   bomToCsv,
   circuitToStructuredJson,
   parseEngineeringPlan,
@@ -12,6 +13,8 @@ import {
   type EngineeringProjectType,
   type ParsedEngineeringPlan,
 } from '../components/engineering/engineering-format';
+import type { SchematicGraph } from '../../../ai/schematic/schematic-types';
+import { validateSchematicGraph } from '../../../ai/schematic/schematic-types';
 
 export type CadJobStatus = 'queued' | 'generating' | 'rendering' | 'done' | 'failed';
 
@@ -52,6 +55,10 @@ interface EngineeringStore {
   cadJob: CadJobState | null;
   isCadGenerating: boolean;
   cadHistory: CadJobRecord[];
+  schematicGraph: SchematicGraph | null;
+  schematicError: string | null;
+  isSchematicGenerating: boolean;
+  schematicExplanation: string | null;
 
   setPrompt: (v: string) => void;
   setProjectType: (v: EngineeringProjectType) => void;
@@ -66,6 +73,10 @@ interface EngineeringStore {
   generateCadModel: () => Promise<void>;
   stopCadPolling: () => void;
   downloadCadStl: () => Promise<{ ok: boolean; error?: string }>;
+  generateSchematicFromCode: () => Promise<void>;
+  generateCodeFromSchematic: () => Promise<void>;
+  explainSchematicSelection: (nodeId?: string, edgeId?: string) => Promise<void>;
+  analyzeSchematic: () => Promise<void>;
 }
 
 const DEFAULT_CONSTRAINTS: EngineeringConstraints = {
@@ -111,12 +122,21 @@ const getCaval = () => window.caval as typeof window.caval & {
     error?: string;
   }>;
   billingUserId?: () => Promise<{ ok: boolean; userId?: string }>;
+  settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
+  secretsGet?: () => Promise<{ ok: boolean; secrets?: Record<string, string> }>;
   cad?: {
     createJob: (input: {
       prompt: string;
       projectType?: string;
       constraints?: Record<string, string | undefined>;
       cavalId?: string;
+      planContext?: {
+        requirements?: string;
+        assembly?: string;
+        bom?: string;
+        performance?: string;
+      };
+      openRouterApiKey?: string;
     }) => Promise<{ ok: boolean; jobId?: string; status?: string; error?: string }>;
     getJob: (jobId: string) => Promise<{
       ok: boolean;
@@ -130,6 +150,35 @@ const getCaval = () => window.caval as typeof window.caval & {
       ok: boolean;
       canceled?: boolean;
       path?: string;
+      error?: string;
+    }>;
+  };
+  schematic?: {
+    generateFromCode: (input: {
+      workspaceRoot: string;
+      files?: string[];
+      objective?: string;
+      useSample?: boolean;
+    }) => Promise<{ ok: boolean; graph?: SchematicGraph; error?: string }>;
+    generateCode: (input: {
+      workspaceRoot: string;
+      graph: SchematicGraph;
+      delta: Record<string, unknown>;
+      skipSuggestions?: boolean;
+    }) => Promise<{
+      ok: boolean;
+      patchSet?: { summary: string; files: Array<{ path: string; patch: string }> };
+      composerPhase?: string;
+      error?: string;
+    }>;
+    explain: (input: {
+      graph: SchematicGraph;
+      nodeId?: string;
+      edgeId?: string;
+    }) => Promise<{ ok: boolean; content?: string; error?: string }>;
+    analyze: (input: { graph: SchematicGraph }) => Promise<{
+      ok: boolean;
+      issues?: Array<{ id: string; severity: string; kind: string; message: string }>;
       error?: string;
     }>;
   };
@@ -149,6 +198,10 @@ export const useEngineeringStore = create<EngineeringStore>()(
       cadJob: null,
       isCadGenerating: false,
       cadHistory: [],
+      schematicGraph: null,
+      schematicError: null,
+      isSchematicGenerating: false,
+      schematicExplanation: null,
 
       setPrompt: (v) => set({ prompt: v }),
       setProjectType: (v) => set({ projectType: v }),
@@ -301,7 +354,7 @@ export const useEngineeringStore = create<EngineeringStore>()(
       },
 
       generateCadModel: async () => {
-        const { prompt, projectType, constraints } = get();
+        const { prompt, projectType, constraints, lastPlan } = get();
         if (!prompt.trim()) {
           set({ error: 'Descrie piesa înainte de generarea modelului 3D.' });
           return;
@@ -320,9 +373,23 @@ export const useEngineeringStore = create<EngineeringStore>()(
           cadJob: null,
         });
 
-        const cadPrompt = buildCadPrompt({ prompt, projectType, constraints });
+        const planSections = lastPlan?.parsed.sections;
+        const cadPrompt = buildCadPrompt({
+          prompt,
+          projectType,
+          constraints,
+          planSections,
+        });
+        const planContext = buildCadPlanContext(planSections);
+
         const userIdResult = await caval.billingUserId?.();
         const cavalId = userIdResult?.userId;
+
+        const settingsResult = await caval.settingsLoad?.();
+        const secretsResult = await caval.secretsGet?.();
+        const openRouterApiKey =
+          settingsResult?.settings?.['openrouter.apiKey'] ||
+          secretsResult?.secrets?.OPENROUTER_API_KEY;
 
         const created = await caval.cad.createJob({
           prompt: cadPrompt,
@@ -336,6 +403,8 @@ export const useEngineeringStore = create<EngineeringStore>()(
             skillLevel: constraints.skillLevel,
           },
           cavalId,
+          planContext,
+          openRouterApiKey: openRouterApiKey || undefined,
         });
 
         if (!created.ok || !created.jobId) {
@@ -400,6 +469,9 @@ export const useEngineeringStore = create<EngineeringStore>()(
               };
               set((s) => ({
                 cadHistory: [record, ...s.cadHistory].slice(0, 10),
+                error:
+                  job.error &&
+                  (/fallback|mock|MOCK|repair/i.test(job.error) ? job.error : s.error),
               }));
             } else {
               set({ error: job.error ?? 'Generarea modelului CAD a eșuat.' });
@@ -426,6 +498,146 @@ export const useEngineeringStore = create<EngineeringStore>()(
         if (!result.ok) return { ok: false, error: result.error ?? 'Download eșuat.' };
         return { ok: true };
       },
+
+      generateSchematicFromCode: async () => {
+        const { prompt } = get();
+        const caval = getCaval();
+        if (!caval?.schematic?.generateFromCode) {
+          set({ schematicError: 'Schematic API indisponibil.' });
+          return;
+        }
+
+        set({ isSchematicGenerating: true, schematicError: null });
+        try {
+          const result = await caval.schematic.generateFromCode({
+            workspaceRoot: '.',
+            objective: prompt.trim() || 'Generate system schematic from workspace code',
+          });
+          if (!result.ok || !result.graph || !validateSchematicGraph(result.graph)) {
+            set({
+              isSchematicGenerating: false,
+              schematicError: result.error ?? 'Nu am putut genera schematicul.',
+            });
+            return;
+          }
+          set({
+            isSchematicGenerating: false,
+            schematicGraph: result.graph,
+            schematicError: null,
+          });
+        } catch (error) {
+          set({
+            isSchematicGenerating: false,
+            schematicError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+
+      generateCodeFromSchematic: async () => {
+        const { schematicGraph } = get();
+        const caval = getCaval();
+        if (!schematicGraph) {
+          set({ schematicError: 'Niciun schematic de exportat.' });
+          return;
+        }
+        if (!caval?.schematic?.generateCode) {
+          set({ schematicError: 'Schematic API indisponibil.' });
+          return;
+        }
+
+        set({ isSchematicGenerating: true, schematicError: null });
+        try {
+          const delta = {
+            addedNodes: schematicGraph.nodes,
+            removedNodeIds: [] as string[],
+            updatedNodes: [] as SchematicGraph['nodes'],
+            addedEdges: schematicGraph.edges,
+            removedEdgeIds: [] as string[],
+            updatedEdges: [] as SchematicGraph['edges'],
+          };
+
+          const result = await caval.schematic.generateCode({
+            workspaceRoot: '.',
+            graph: schematicGraph,
+            delta,
+            skipSuggestions: false,
+          });
+
+          if (!result.ok) {
+            set({
+              isSchematicGenerating: false,
+              schematicError: result.error ?? 'Generarea codului a eșuat.',
+            });
+            return;
+          }
+
+          set({
+            isSchematicGenerating: false,
+            schematicError: null,
+          });
+
+          if (result.composerPhase === 'awaiting_review' || result.composerPhase === 'awaiting_suggestions') {
+            set({
+              schematicExplanation:
+                result.composerPhase === 'awaiting_suggestions'
+                  ? 'Patch-urile sunt în AI Suggestions Before Review. Deschide Composer pentru a continua.'
+                  : 'Patch-urile sunt în Code Review Panel. Deschide Composer pentru a revizui.',
+            });
+          }
+        } catch (error) {
+          set({
+            isSchematicGenerating: false,
+            schematicError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+
+      explainSchematicSelection: async (nodeId?: string, edgeId?: string) => {
+        const { schematicGraph } = get();
+        const caval = getCaval();
+        if (!schematicGraph || !caval?.schematic?.explain) return;
+
+        set({ isSchematicGenerating: true });
+        try {
+          const result = await caval.schematic.explain({
+            graph: schematicGraph,
+            nodeId,
+            edgeId,
+          });
+          set({
+            isSchematicGenerating: false,
+            schematicExplanation: result.content ?? result.error ?? null,
+          });
+        } catch (error) {
+          set({
+            isSchematicGenerating: false,
+            schematicError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+
+      analyzeSchematic: async () => {
+        const { schematicGraph } = get();
+        const caval = getCaval();
+        if (!schematicGraph || !caval?.schematic?.analyze) return;
+
+        set({ isSchematicGenerating: true });
+        try {
+          const result = await caval.schematic.analyze({ graph: schematicGraph });
+          const summary =
+            result.issues?.map((i) => `[${i.severity}] ${i.message}`).join('\n') ??
+            'Nicio problemă detectată.';
+          set({
+            isSchematicGenerating: false,
+            schematicExplanation: summary,
+          });
+        } catch (error) {
+          set({
+            isSchematicGenerating: false,
+            schematicError: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
     }),
     {
       name: 'caval-engineering-store',
@@ -437,6 +649,7 @@ export const useEngineeringStore = create<EngineeringStore>()(
         lastPlan: s.lastPlan,
         cadHistory: s.cadHistory.slice(0, 5),
         cadJob: s.cadJob,
+        schematicGraph: s.schematicGraph,
       }),
     }
   )

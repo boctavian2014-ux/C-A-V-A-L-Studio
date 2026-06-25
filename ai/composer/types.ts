@@ -21,6 +21,12 @@ export interface ComposerRequest {
   suggestionSessionId?: string;
   reviewSessionId?: string;
   approvedAlternativeId?: string;
+  schematicContext?: {
+    graphVersion: string;
+    nodeCount: number;
+    edgeCount: number;
+    deltaSummary?: string;
+  };
 }
 
 export interface ComposerContext {

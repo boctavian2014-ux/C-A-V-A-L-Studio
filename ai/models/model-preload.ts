@@ -3,6 +3,7 @@ import { LOG_PREFIX } from "./model-types";
 import { getCoreModelConfigs, getModelConfig, getModelsForContext, LOCAL_FALLBACK_ID } from "./model-registry";
 import { modelCache } from "./model-cache";
 import { isModelLoaded, loadModel } from "./model-loader";
+import { canPreloadHttpModel, providerApiKeyEnv } from "./provider-credentials";
 
 interface QueuedPreload {
   modelId: AIModelId;
@@ -80,6 +81,14 @@ export function preloadModel(modelId: AIModelId, options: PreloadOptions = {}): 
   const config = getModelConfig(modelId);
   if (!config) {
     console.warn(`${LOG_PREFIX} Unknown model id: ${modelId}`);
+    return;
+  }
+
+  if (!canPreloadHttpModel(config)) {
+    const envKey = providerApiKeyEnv(config.provider);
+    console.log(
+      `${LOG_PREFIX} Skip ${modelId} preload (${envKey ?? "API key"} not configured)`
+    );
     return;
   }
 
