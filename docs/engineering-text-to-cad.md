@@ -70,6 +70,7 @@ Dacă vezi `libglib-2.0.so.0` / `electron`, înseamnă că Start Command e greș
 | Variabilă Railway | Obligatoriu | Note |
 |-------------------|-------------|------|
 | `OPENROUTER_API_KEY` | Recomandat | Fără ea → fallback SCAD simplu |
+| `MESHY_API_KEY` | Opțional | Mesh organic/figurine (Print 3D); poate fi trimis și din app |
 | `SUPABASE_URL` | Prod | Persistență job + STL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Prod | Upload bucket `cad-models` |
 | `CAD_PUBLIC_URL` | Opțional | Auto din `RAILWAY_PUBLIC_DOMAIN` dacă lipsește |

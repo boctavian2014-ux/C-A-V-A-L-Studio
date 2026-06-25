@@ -5,7 +5,7 @@ import {
   validateScadSource,
 } from "./scad-prompt";
 import { fallbackScadForPrompt } from "./scad-runner";
-import type { CadConstraints, CadPlanContext } from "./types";
+import type { CadConstraints, CadPlanContext, CadQuality, CadChatMessage } from "./types";
 
 export interface GenerateOpenScadResult {
   ok: boolean;
@@ -17,7 +17,12 @@ export interface GenerateOpenScadResult {
 }
 
 const DEFAULT_MODEL = process.env.CAD_LLM_MODEL ?? "openai/gpt-4o-mini";
+const HIGH_MODEL = process.env.CAD_LLM_MODEL_HIGH ?? "openai/gpt-4o";
 const MAX_ATTEMPTS = Number(process.env.CAD_LLM_MAX_ATTEMPTS ?? 3);
+
+function resolveModel(quality?: CadQuality): string {
+  return quality === "high" ? HIGH_MODEL : DEFAULT_MODEL;
+}
 
 function resolveApiKey(override?: string): string | undefined {
   const key = override?.trim() || process.env.OPENROUTER_API_KEY?.trim();
@@ -77,6 +82,9 @@ async function generateWithRetries(input: {
   projectType?: string;
   constraints?: CadConstraints;
   planContext?: CadPlanContext;
+  quality?: CadQuality;
+  conversationHistory?: CadChatMessage[];
+  previousScad?: string;
   apiKey: string;
   model: string;
 }): Promise<GenerateOpenScadResult> {
@@ -134,9 +142,12 @@ export async function generateOpenScad(input: {
   constraints?: CadConstraints;
   planContext?: CadPlanContext;
   openRouterApiKey?: string;
+  quality?: CadQuality;
+  conversationHistory?: CadChatMessage[];
+  previousScad?: string;
 }): Promise<GenerateOpenScadResult> {
   const apiKey = resolveApiKey(input.openRouterApiKey);
-  const model = DEFAULT_MODEL;
+  const model = resolveModel(input.quality);
 
   if (!apiKey) {
     if (allowFallback()) {
@@ -162,14 +173,16 @@ export async function repairOpenScad(input: {
   brokenScad: string;
   renderError: string;
   openRouterApiKey?: string;
+  quality?: CadQuality;
 }): Promise<GenerateOpenScadResult> {
   const apiKey = resolveApiKey(input.openRouterApiKey);
   if (!apiKey) {
     return { ok: false, error: "No OpenRouter API key for SCAD repair" };
   }
 
+  const model = resolveModel(input.quality);
   const { system, user } = buildScadRepairPrompt(input);
-  const result = await callOpenRouter(apiKey, DEFAULT_MODEL, system, user);
+  const result = await callOpenRouter(apiKey, model, system, user);
   if (!result.ok) {
     return { ok: false, error: result.error };
   }
@@ -179,5 +192,5 @@ export async function repairOpenScad(input: {
   if (!validation.ok) {
     return { ok: false, error: validation.reason ?? "Repaired SCAD failed validation" };
   }
-  return { ok: true, scad, model: DEFAULT_MODEL, attempts: 1 };
+  return { ok: true, scad, model, attempts: 1 };
 }

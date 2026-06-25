@@ -456,6 +456,28 @@ contextBridge.exposeInMainWorld("caval", {
   },
 
   cad: {
+    plan: (input: {
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+      latestUserText: string;
+      openRouterApiKey?: string;
+      previousMeshTaskId?: string;
+    }) =>
+      ipcRenderer.invoke("cad:plan", input) as Promise<{
+        ok: boolean;
+        plan?: {
+          action: 'clarify' | 'generate';
+          userLanguage: 'ro' | 'en';
+          intent: 'mechanical' | 'organic' | 'figurine' | 'mixed';
+          pipeline: 'openscad' | 'mesh';
+          questions?: string[];
+          assistantMessage?: string;
+          technicalPrompt: string;
+          suggestedDimensions?: string;
+          warnings?: string[];
+          quickReplies?: string[];
+        };
+        error?: string;
+      }>,
     createJob: (input: {
       prompt: string;
       projectType?: string;
@@ -464,10 +486,17 @@ contextBridge.exposeInMainWorld("caval", {
       planContext?: {
         requirements?: string;
         assembly?: string;
-        bom?: string;
+        components?: string;
         performance?: string;
       };
       openRouterApiKey?: string;
+      meshApiKey?: string;
+      quality?: 'standard' | 'high';
+      conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      previousScad?: string;
+      generationMode?: 'openscad' | 'mesh';
+      meshPrompt?: string;
+      previousMeshTaskId?: string;
     }) =>
       ipcRenderer.invoke("cad:createJob", input) as Promise<{
         ok: boolean;
@@ -483,9 +512,17 @@ contextBridge.exposeInMainWorld("caval", {
         stlUrl?: string | null;
         scad?: string | null;
         error?: string | null;
+        dimensions?: { x: number; y: number; z: number } | null;
       }>,
     downloadStl: (input: { url: string; defaultName?: string }) =>
       ipcRenderer.invoke("cad:downloadStl", input) as Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        path?: string;
+        error?: string;
+      }>,
+    downloadScad: (input: { content: string; defaultName?: string }) =>
+      ipcRenderer.invoke("cad:downloadScad", input) as Promise<{
         ok: boolean;
         canceled?: boolean;
         path?: string;

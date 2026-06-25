@@ -335,6 +335,15 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     categories: ['models'],
   },
   {
+    key: 'mesh.apiKey',
+    label: 'Meshy API Key',
+    description: 'For organic/character 3D mesh generation (Print 3D Chat).',
+    control: 'password',
+    defaultValue: '',
+    section: 'AI',
+    categories: ['models'],
+  },
+  {
     key: 'caval.cloud.apiKey',
     label: 'Caval Cloud API Key',
     description: 'Caval Cloud routing and agents.',

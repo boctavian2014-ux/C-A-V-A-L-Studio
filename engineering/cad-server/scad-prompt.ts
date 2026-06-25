@@ -1,4 +1,4 @@
-import type { CadConstraints, CadPlanContext } from "./types";
+import type { CadChatMessage, CadConstraints, CadPlanContext, CadQuality } from "./types";
 
 const PROJECT_CAD_GUIDANCE: Record<string, string> = {
   drone:
@@ -40,11 +40,42 @@ function keywordHints(prompt: string): string[] {
   return PART_KEYWORD_HINTS.filter(({ pattern }) => pattern.test(prompt)).map(({ hint }) => hint);
 }
 
+const FDM_PRINT_RULES = [
+  "FDM 3D PRINTING RULES:",
+  "- Millimeters only. $fn >= 64 for curved surfaces (128 for high quality).",
+  "- Minimum wall thickness 1.2 mm; prefer 1.6 mm for structural parts.",
+  "- No zero-thickness walls, no non-manifold gaps, single watertight solid.",
+  "- Screw holes: nominal diameter + 0.2 mm clearance for M3/M4/M5.",
+  "- Parametric variables at top (all key dimensions editable).",
+  "- Avoid extreme overhangs >45° without chamfer or support-friendly geometry.",
+  "- Flat bottom face for bed adhesion when possible.",
+];
+
+function fdmRulesForQuality(quality?: CadQuality): string[] {
+  if (quality === "high") {
+    return [
+      ...FDM_PRINT_RULES,
+      "- HIGH QUALITY: finer detail, more ribs/braces, countersunk screw pockets, fillets on stress points.",
+      "- Use $fn = 128 on visible curved surfaces.",
+    ];
+  }
+  return FDM_PRINT_RULES;
+}
+
+function formatConversationHistory(history?: CadChatMessage[]): string {
+  if (!history?.length) return "";
+  const lines = history.slice(-10).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content.trim()}`);
+  return `Conversation history:\n${lines.join("\n")}`;
+}
+
 export function buildCadLlmPrompt(input: {
   prompt: string;
   projectType?: string;
   constraints?: CadConstraints;
   planContext?: CadPlanContext;
+  quality?: CadQuality;
+  conversationHistory?: CadChatMessage[];
+  previousScad?: string;
 }): { system: string; user: string } {
   const constraints = input.constraints ?? {};
   const projectType = input.projectType ?? "custom";
@@ -62,12 +93,14 @@ export function buildCadLlmPrompt(input: {
           `Engineering requirements:\n${input.planContext.requirements.slice(0, 1200)}`,
         input.planContext.assembly &&
           `Assembly notes:\n${input.planContext.assembly.slice(0, 800)}`,
-        input.planContext.bom && `BOM excerpt:\n${input.planContext.bom.slice(0, 600)}`,
+        input.planContext.components && `Lista componente:\n${input.planContext.components.slice(0, 600)}`,
       ].filter(Boolean)
     : [];
 
   const hints = keywordHints(input.prompt);
   const projectGuide = PROJECT_CAD_GUIDANCE[projectType] ?? PROJECT_CAD_GUIDANCE.custom;
+  const isRefine = Boolean(input.previousScad?.trim());
+  const historyBlock = formatConversationHistory(input.conversationHistory);
 
   const system = [
     "You are an expert OpenSCAD mechanical CAD engineer for Caval Studio.",
@@ -79,16 +112,29 @@ export function buildCadLlmPrompt(input: {
     "CRITICAL: Model EXACTLY what the user asked for. Never substitute a generic cylindrical cap unless explicitly requested.",
     "Include mounting holes, fillets (via offset/minkowski sparingly), and wall thickness when relevant.",
     "Ensure the model is a single watertight solid suitable for 3D printing.",
-  ].join("\n");
+    ...fdmRulesForQuality(input.quality),
+    isRefine
+      ? "REFINE MODE: Modify the existing OpenSCAD below — preserve design intent and parametric structure. Do NOT restart from a unrelated primitive."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const user = [
     `Project type: ${projectType}`,
-    `Part request:\n${input.prompt}`,
+    `=== PART REQUEST (highest priority) ===`,
+    input.prompt,
+    historyBlock,
+    isRefine
+      ? `Existing OpenSCAD to modify:\n${input.previousScad!.slice(0, 8000)}`
+      : "",
     `Project CAD guidance: ${projectGuide}`,
     hints.length ? `Part-specific hints:\n${hints.join("\n")}` : "",
     constraintLines.length ? `Constraints:\n${constraintLines.join("\n")}` : "",
     planLines.length ? planLines.join("\n\n") : "",
-    "Generate complete, parametric OpenSCAD for this ONE part only.",
+    isRefine
+      ? "Apply the latest user request as modifications to the existing OpenSCAD. Return the full updated script."
+      : "Generate complete, parametric OpenSCAD for this ONE printable part only.",
   ]
     .filter(Boolean)
     .join("\n\n");

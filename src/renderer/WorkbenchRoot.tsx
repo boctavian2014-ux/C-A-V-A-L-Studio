@@ -13,6 +13,7 @@ import { GitDiffWorkbench } from './components/git/GitDiffWorkbench';
 import { MCPPanel } from './components/mcp/MCPPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { ImagePanel } from './components/image/ImagePanel';
+import { Print3DPanel } from './components/print3d/Print3DPanel';
 import { useGitStore } from './store/git-store';
 
 const EngineeringAIPanel = React.lazy(() =>
@@ -25,7 +26,7 @@ const EngineeringAIPanel = React.lazy(() =>
 //  Activity Bar
 // ──────────────────────────────────────────────
 
-type ActivityTab = 'explorer' | 'search' | 'git' | 'image' | 'engineering' | 'extensions' | 'settings';
+type ActivityTab = 'explorer' | 'search' | 'git' | 'image' | 'print3d' | 'engineering' | 'extensions' | 'settings';
 
 function ActivityBar({
   active,
@@ -98,6 +99,17 @@ function ActivityBar({
           <rect x="3" y="3" width="18" height="18" rx="3" />
           <circle cx="8.5" cy="8.5" r="1.5" />
           <path d="M21 15l-5-5L5 21" />
+        </svg>
+      ),
+    },
+    {
+      id: 'print3d', title: 'Print 3D Chat',
+      icon: (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 18h12v2H6z" />
+          <path d="M8 18V8a2 2 0 012-2h4a2 2 0 012 2v10" />
+          <path d="M9 6V4h6v2" />
+          <path d="M12 8v4M10 12h4" />
         </svg>
       ),
     },
@@ -310,11 +322,13 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
 
   return (
     <div style={{
-      height: 22, background: 'var(--caval-accent)',
+      height: 22,
+      background: 'var(--caval-surface)',
+      borderTop: '1px solid var(--caval-border)',
       display: 'flex', alignItems: 'center',
       padding: '0 10px', gap: 12,
       fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
-      color: 'rgba(14,14,15,0.85)', flexShrink: 0,
+      color: 'var(--caval-text-muted)', flexShrink: 0,
     }}>
       <StatusItem>
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -334,12 +348,12 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
           disabled={checkoutBusy}
           title="Upgrade la Pro via Stripe"
           style={{
-            background: 'rgba(0,0,0,0.15)',
-            border: 'none',
+            background: 'var(--caval-surface-raised)',
+            border: '1px solid var(--caval-border)',
             borderRadius: 3,
             padding: '1px 6px',
             cursor: checkoutBusy ? 'wait' : 'pointer',
-            color: 'rgba(14,14,15,0.9)',
+            color: 'var(--caval-text-muted)',
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: 10,
             fontWeight: 600,
@@ -364,9 +378,10 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
           onClick={onToggleAI}
           title="Toggle AI Panel (Ctrl+Shift+A)"
           style={{
-            background: aiPanelOpen ? 'rgba(0,0,0,0.2)' : 'transparent',
-            border: 'none', cursor: 'pointer',
-            color: 'rgba(14,14,15,0.85)',
+            background: aiPanelOpen ? 'var(--caval-surface-raised)' : 'transparent',
+            border: aiPanelOpen ? '1px solid var(--caval-border)' : 'none',
+            cursor: 'pointer',
+            color: 'var(--caval-text-muted)',
             fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
             display: 'flex', alignItems: 'center', gap: 4, padding: '0 4px',
             borderRadius: 3,
@@ -676,6 +691,8 @@ export function WorkbenchRoot() {
               <SettingsPanel onClose={() => setActiveActivity('explorer')} />
             ) : activeActivity === 'image' ? (
               <ImagePanel />
+            ) : activeActivity === 'print3d' ? (
+              <Print3DPanel />
             ) : activeActivity === 'engineering' ? (
               <Suspense fallback={
                 <div style={{

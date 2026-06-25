@@ -35,10 +35,37 @@ export interface CadCreateJobInput {
   planContext?: {
     requirements?: string;
     assembly?: string;
-    bom?: string;
+    components?: string;
     performance?: string;
   };
   openRouterApiKey?: string;
+  meshApiKey?: string;
+  quality?: 'standard' | 'high';
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  previousScad?: string;
+  generationMode?: 'openscad' | 'mesh';
+  meshPrompt?: string;
+  previousMeshTaskId?: string;
+}
+
+export interface CadPlanInput {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  latestUserText: string;
+  openRouterApiKey?: string;
+  previousMeshTaskId?: string;
+}
+
+export interface CadPlanResult {
+  action: 'clarify' | 'generate';
+  userLanguage: 'ro' | 'en';
+  intent: 'mechanical' | 'organic' | 'figurine' | 'mixed';
+  pipeline: 'openscad' | 'mesh';
+  questions?: string[];
+  assistantMessage?: string;
+  technicalPrompt: string;
+  suggestedDimensions?: string;
+  warnings?: string[];
+  quickReplies?: string[];
 }
 
 export interface CadJobResponse {
@@ -48,9 +75,34 @@ export interface CadJobResponse {
   stlUrl?: string | null;
   scad?: string | null;
   error?: string | null;
+  dimensions?: { x: number; y: number; z: number } | null;
+  meshTaskId?: string | null;
 }
 
 export const registerCadHandlers = (): void => {
+  ipcMain.handle("cad:plan", async (_event, input: CadPlanInput) => {
+    if (!input?.latestUserText?.trim()) {
+      return { ok: false, error: "latestUserText is required" };
+    }
+    try {
+      const res = await fetch(`${cadBaseUrl()}/cad/plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const json = (await res.json()) as { ok: boolean; plan?: CadPlanResult; error?: string };
+      if (!res.ok) {
+        return { ok: false, error: json.error ?? `CAD plan error (${res.status})` };
+      }
+      return json;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const hint =
+        message === "fetch failed" ? `${message} — cannot reach ${cadFetchHint()}` : message;
+      return { ok: false, error: hint };
+    }
+  });
+
   ipcMain.handle("cad:createJob", async (_event, input: CadCreateJobInput) => {
     if (!input?.prompt?.trim()) {
       return { ok: false, error: "prompt is required" } satisfies CadJobResponse;
@@ -116,6 +168,35 @@ export const registerCadHandlers = (): void => {
           ? saveResult.filePath
           : `${saveResult.filePath}.stl`;
         await fs.writeFile(target, buffer);
+        return { ok: true, path: path.normalize(target) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "cad:downloadScad",
+    async (event, input: { content: string; defaultName?: string }) => {
+      if (!input?.content?.trim()) return { ok: false, error: "content is required" };
+      try {
+        const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+        const saveResult = window
+          ? await dialog.showSaveDialog(window, {
+              defaultPath: input.defaultName ?? "model.scad",
+              filters: [{ name: "OpenSCAD", extensions: ["scad"] }],
+            })
+          : await dialog.showSaveDialog({
+              defaultPath: input.defaultName ?? "model.scad",
+              filters: [{ name: "OpenSCAD", extensions: ["scad"] }],
+            });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { ok: false, canceled: true };
+        }
+        const target = saveResult.filePath.endsWith(".scad")
+          ? saveResult.filePath
+          : `${saveResult.filePath}.scad`;
+        await fs.writeFile(target, input.content, "utf8");
         return { ok: true, path: path.normalize(target) };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };

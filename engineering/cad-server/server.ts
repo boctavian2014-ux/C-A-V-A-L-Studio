@@ -1,15 +1,16 @@
 import cors from "cors";
 import express from "express";
 import { getCadJob } from "./cad-repository";
-import { enqueueCadJob, getLocalStlBuffer } from "./job-processor";
+import { enqueueCadJob, getLocalStlBuffer, getLocalStlDimensions, getLocalMeshTaskId } from "./job-processor";
 import { isCadPersistenceConfigured } from "./cad-repository";
-import type { CadConstraints, CreateCadJobInput } from "./types";
-
+import { planPrint3DRequest } from "./print3d-planner";
+import type { CadConstraints, CreateCadJobInput, PlanPrint3DRequest } from "./types";
 export const cadHealthCheck = async () => ({
   ok: true,
   service: "cad",
   supabaseConfigured: isCadPersistenceConfigured(),
   openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY),
+  meshyConfigured: Boolean(process.env.MESHY_API_KEY),
   llmModel: process.env.CAD_LLM_MODEL ?? "openai/gpt-4o-mini",
   allowFallback: process.env.CAD_ALLOW_FALLBACK === "1",
   checkedAt: new Date().toISOString(),
@@ -35,8 +36,31 @@ export const createCadServer = () => {
     response.send(buffer);
   });
 
-  app.post("/cad/jobs", async (request, response) => {
+  app.post("/cad/plan", async (request, response) => {
     try {
+      const body = request.body as PlanPrint3DRequest;
+      if (!body?.latestUserText?.trim()) {
+        response.status(400).json({ ok: false, error: "latestUserText is required" });
+        return;
+      }
+      const result = await planPrint3DRequest({
+        messages: body.messages ?? [],
+        latestUserText: body.latestUserText.trim(),
+        openRouterApiKey: body.openRouterApiKey,
+        previousMeshTaskId: body.previousMeshTaskId,
+      });
+      if (!result.ok) {
+        response.status(502).json({ ok: false, error: result.error ?? "Planner failed" });
+        return;
+      }
+      response.json({ ok: true, plan: result.plan });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.post("/cad/jobs", async (request, response) => {    try {
       const body = request.body as CreateCadJobInput;
       if (!body?.prompt?.trim()) {
         response.status(400).json({ ok: false, error: "prompt is required" });
@@ -47,8 +71,16 @@ export const createCadServer = () => {
         projectType: body.projectType,
         constraints: (body.constraints ?? {}) as CadConstraints,
         cavalId: body.cavalId,
-      });
-      response.status(202).json({ ok: true, jobId, status: "queued" });
+        planContext: body.planContext,
+        openRouterApiKey: body.openRouterApiKey,
+        meshApiKey: body.meshApiKey,
+        quality: body.quality,
+        conversationHistory: body.conversationHistory,
+        previousScad: body.previousScad,
+        generationMode: body.generationMode,
+        meshPrompt: body.meshPrompt,
+        previousMeshTaskId: body.previousMeshTaskId,
+      });      response.status(202).json({ ok: true, jobId, status: "queued" });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       response.status(500).json({ ok: false, error: message });
@@ -70,6 +102,8 @@ export const createCadServer = () => {
         stlUrl: job.stlUrl,
         scad: job.generatedScad,
         error: job.errorMessage,
+        dimensions: getLocalStlDimensions(job.id) ?? null,
+        meshTaskId: getLocalMeshTaskId(job.id) ?? null,
         createdAt: job.createdAt,
         updatedAt: job.updatedAt,
       });

@@ -1,5 +1,18 @@
 export type CadJobStatus = "queued" | "generating" | "rendering" | "done" | "failed";
 
+export type CadQuality = "standard" | "high";
+
+export interface CadChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface StlDimensions {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface CadConstraints {
   budget?: string;
   dimensions?: string;
@@ -13,8 +26,17 @@ export interface CadConstraints {
 export interface CadPlanContext {
   requirements?: string;
   assembly?: string;
-  bom?: string;
+  components?: string;
   performance?: string;
+}
+
+export type CadGenerationMode = "openscad" | "mesh";
+
+export interface PlanPrint3DRequest {
+  messages: CadChatMessage[];
+  latestUserText: string;
+  openRouterApiKey?: string;
+  previousMeshTaskId?: string;
 }
 
 export interface CreateCadJobInput {
@@ -25,6 +47,14 @@ export interface CreateCadJobInput {
   planContext?: CadPlanContext;
   /** Per-request OpenRouter key from Electron (not stored in DB). */
   openRouterApiKey?: string;
+  /** Per-request Meshy key from Electron (not stored in DB). */
+  meshApiKey?: string;
+  quality?: CadQuality;
+  conversationHistory?: CadChatMessage[];
+  previousScad?: string;
+  generationMode?: CadGenerationMode;
+  meshPrompt?: string;
+  previousMeshTaskId?: string;
 }
 
 export interface CadJobRecord {
@@ -49,4 +79,6 @@ export interface CadJobPublicView {
   stlUrl?: string | null;
   scad?: string | null;
   error?: string | null;
+  dimensions?: StlDimensions | null;
+  meshTaskId?: string | null;
 }

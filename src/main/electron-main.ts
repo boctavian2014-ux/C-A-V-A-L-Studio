@@ -1131,6 +1131,9 @@ ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) 
   if (settings["cad.apiUrl"]) {
     process.env.CAD_API_URL = settings["cad.apiUrl"].trim();
   }
+  if (settings["mesh.apiKey"]) {
+    process.env.MESHY_API_KEY = settings["mesh.apiKey"];
+  }
   return { ok: true };
 });
 
@@ -1236,13 +1239,24 @@ const writeApiSecrets = (secrets: Record<string, string>): void => {
   }
 };
 
-ipcMain.handle("caval:secrets-get", () => ({ ok: true, secrets: readApiSecrets() }));
+ipcMain.handle("caval:secrets-get", () => {
+  const stored = readApiSecrets();
+  const merged: Record<string, string> = { ...stored };
+  if (process.env.OPENROUTER_API_KEY && !merged.OPENROUTER_API_KEY) {
+    merged.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+  }
+  if (process.env.MESHY_API_KEY && !merged.MESHY_API_KEY) {
+    merged.MESHY_API_KEY = process.env.MESHY_API_KEY;
+  }
+  return { ok: true, secrets: merged };
+});
 
 ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) => {
   writeApiSecrets(secrets);
   if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
   if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
   if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
+  if (secrets.MESHY_API_KEY) process.env.MESHY_API_KEY = secrets.MESHY_API_KEY;
   return { ok: true };
 });
 
@@ -1251,6 +1265,7 @@ const applyStoredSecretsToEnv = (): void => {
   if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
   if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
   if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
+  if (secrets.MESHY_API_KEY) process.env.MESHY_API_KEY = secrets.MESHY_API_KEY;
 };
 
 app.whenReady().then(() => {
