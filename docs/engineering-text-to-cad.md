@@ -60,8 +60,9 @@ Dacă vezi `libglib-2.0.so.0` / `electron`, înseamnă că Start Command e greș
    - Builder: **Dockerfile**
    - Dockerfile path: `engineering/cad-server/Dockerfile`
 3. În **Settings → Deploy**:
-   - Start Command: `npm run cad:serve` (sau lasă gol dacă folosești Dockerfile — CMD e deja setat)
-   - **Nu** folosi `npm start` (pornește Electron)
+   - Start Command: **gol** (lasă Dockerfile CMD) sau `npm start`
+   - **Nu** folosi `npm run cad:serve` din root `package.json` (pornește Electron)
+   - **Nu** folosi `npm start` din root repo (pornește Electron)
 4. `railway link` + deploy, sau push pe branch conectat
 
 ### Variabile Railway

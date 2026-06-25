@@ -2,7 +2,7 @@
 # Prefer Docker builder (railway.toml) for OpenSCAD. This file is a Nixpacks fallback.
 
 [start]
-cmd = "npm run cad:serve"
+cmd = "npm start"
 
 [variables]
 NODE_ENV = "production"
