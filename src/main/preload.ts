@@ -69,6 +69,7 @@ export interface CavalChatStreamRequest {
   temperature?: number;
   /** Override provider timeout (Engineering JSON uses 120s) */
   timeoutMs?: number;
+  scaffoldMode?: boolean;
   context?: {
     filePath?: string;
     fileContent?: string;
@@ -85,9 +86,20 @@ export type ChatActivityPhase =
   | "think"
   | "write";
 
+export type MultiAgentPhase =
+  | "memory"
+  | "integrate"
+  | "context"
+  | "orchestrator"
+  | "decompose"
+  | "subagent"
+  | "merge"
+  | "supervisor"
+  | "compose";
+
 export interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -98,10 +110,23 @@ export interface CavalStreamChunk {
   toolName?: string;
   toolStatus?: "start" | "done" | "error";
   toolDetail?: string;
+  toolWrittenPath?: string;
   phase?: ChatActivityPhase;
+  multiAgentPhase?: MultiAgentPhase;
   status?: "active" | "done";
   label?: string;
   detail?: string;
+  goal?: string;
+  approach?: string;
+  modules?: string[];
+  reasoningBrief?: { goal: string; approach: string; modules: string[] };
+  pipelineRecapMeta?: {
+    taskCount: number;
+    fastPipeline: boolean;
+    pendingIssues: string[];
+    devTools?: Record<string, unknown>;
+    supervisor?: { approved: boolean; summary: string; issues: unknown[] };
+  };
 }
 
 export interface CavalChatPrepareRequest {
@@ -259,6 +284,8 @@ contextBridge.exposeInMainWorld("caval", {
     });
     return cleanup;
   },
+  abortChatStream: (streamId: string) =>
+    ipcRenderer.invoke("caval:ai-stream-abort", streamId) as Promise<{ ok: boolean }>,
   aiComplete: (request: {
     model: string;
     intent?: string;

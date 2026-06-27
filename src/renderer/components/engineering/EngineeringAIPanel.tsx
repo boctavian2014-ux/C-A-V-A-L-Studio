@@ -16,9 +16,10 @@ import {
 import { checkModelReadiness, type ModelReadiness } from '../../../../ai/models/model-readiness';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { IconSpec, IconSchema, IconParts, IconBuild } from '../brand/CavaloIcons';
+import { CavaloAiMark } from '../brand/CavaloHorseMark';
 
 // ──────────────────────────────────────────────────────────────
-//  EngineeringAIPanel — Caval Engineering AI
+//  EngineeringAIPanel — hardware / electronică / CAD (NU chat coding)
 // ──────────────────────────────────────────────────────────────
 
 type EngTab = 'spec' | 'schema' | 'parts' | 'build';
@@ -56,6 +57,7 @@ export function EngineeringAIPanel() {
   const loadModelLabels = useAIStore((s) => s.loadModelLabels);
   const chatPrepareDraft = useAIStore((s) => s.chatPrepareDraft);
   const prepareState = useAIStore((s) => s.prepareState);
+  const handoffFromEngineering = useAIStore((s) => s.handoffFromEngineering);
   const modelLabel = getModelDisplayLabel(selectedModel, modelLabels);
 
   const { catalog, loading: catalogLoading } = useModelCatalog();
@@ -178,6 +180,14 @@ export function EngineeringAIPanel() {
     setTimeout(() => textareaRef.current?.focus(), 50);
   };
 
+  const handleSoftwareHandoff = useCallback(() => {
+    if (!project) return;
+    const result = handoffFromEngineering({ project, userPrompt: prompt });
+    if (!result.ok) {
+      setError(result.error);
+    }
+  }, [project, prompt, handoffFromEngineering]);
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
@@ -195,18 +205,16 @@ export function EngineeringAIPanel() {
             background: 'linear-gradient(135deg, #00E0FF22, #7C3AED22)',
             border: '1px solid rgba(0,224,255,0.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden',
           }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--caval-accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" />
-              <circle cx="12" cy="12" r="3.2" />
-            </svg>
+            <CavaloAiMark size={22} />
           </div>
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)' }}>
               Engineering AI
             </div>
             <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
-              Descrii · obții design, schemă, componente, fișiere
+              Hardware · schemă · BOM · CAD · firmware (nu aplicații software)
             </div>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -342,7 +350,9 @@ export function EngineeringAIPanel() {
           <div style={{
             display: 'flex', gap: 2, padding: '8px 10px 0',
             borderBottom: '1px solid var(--caval-border)', flexShrink: 0,
+            flexDirection: 'column',
           }}>
+            <div style={{ display: 'flex', gap: 2 }}>
             {([
               ['spec', 'Spec', <IconSpec key="i" size={14} />],
               ['schema', 'Schemă', <IconSchema key="i" size={14} />],
@@ -357,6 +367,31 @@ export function EngineeringAIPanel() {
                 onClick={() => setActiveTab(id)}
               />
             ))}
+            </div>
+            <button
+              type="button"
+              onClick={handleSoftwareHandoff}
+              title="Deschide Coding Chat cu tot contextul Engineering (spec, schemă, BOM, build)"
+              style={{
+                margin: '6px 0 8px',
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: 6,
+                border: '1px solid rgba(124,58,237,0.45)',
+                background: 'linear-gradient(135deg, rgba(124,58,237,0.18), rgba(0,224,255,0.1))',
+                color: 'var(--caval-text)',
+                fontWeight: 600,
+                fontSize: 11.5,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              <span aria-hidden>→</span>
+              Generează software în Coding Chat
+            </button>
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 16px' }}

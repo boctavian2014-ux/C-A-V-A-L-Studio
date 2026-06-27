@@ -1,8 +1,6 @@
 // ──────────────────────────────────────────────
 //  CAVALO — set unitar de iconițe UI
-//  Stil: SF Symbols / Apple — linie rotunjită, caldă, "human".
-//  Toate folosesc `currentColor`, deci moștenesc culoarea butonului
-//  (inclusiv starea activă / hover din WorkbenchRoot).
+//  3D PNG glossy pentru activity bar; SVG pentru Git + Engineering.
 //
 //  Folosire:
 //    import { IconExplorer, IconSearch } from '../brand/CavaloIcons';
@@ -10,11 +8,20 @@
 // ──────────────────────────────────────────────
 
 import React from 'react';
+import { Cavalo3DIcon, type Cavalo3DIconName } from './Cavalo3DIcon';
 
 type IconProps = {
   size?: number;
   strokeWidth?: number;
 };
+
+function PngIcon({ name, size = 18, label }: IconProps & { name: Cavalo3DIconName; label: string }) {
+  return (
+    <span role="img" aria-label={label} style={{ display: 'inline-flex', lineHeight: 0 }}>
+      <Cavalo3DIcon name={name} size={size} />
+    </span>
+  );
+}
 
 function Svg({
   size = 18,
@@ -41,20 +48,11 @@ function Svg({
 }
 
 export function IconExplorer(p: IconProps) {
-  return (
-    <Svg {...p} label="Explorer">
-      <path d="M3 6.5a2 2 0 012-2h3.6a2 2 0 011.5.7l1 1.1a2 2 0 001.5.7H19a2 2 0 012 2v6.8a2 2 0 01-2 2H5a2 2 0 01-2-2V6.5z" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="home" label="Explorer" />;
 }
 
 export function IconSearch(p: IconProps) {
-  return (
-    <Svg {...p} label="Căutare">
-      <circle cx="10.5" cy="10.5" r="6.5" />
-      <path d="M19 19l-3.6-3.6" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="search" label="Căutare" />;
 }
 
 export function IconGit(p: IconProps) {
@@ -69,14 +67,7 @@ export function IconGit(p: IconProps) {
 }
 
 export function IconMarketplace(p: IconProps) {
-  return (
-    <Svg {...p} label="Marketplace">
-      <rect x="4" y="4" width="7" height="7" rx="2" />
-      <rect x="13" y="4" width="7" height="7" rx="2" />
-      <rect x="4" y="13" width="7" height="7" rx="2" />
-      <path d="M16.5 13.5v6M13.5 16.5h6" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="shop" label="Marketplace" />;
 }
 
 export function IconEngineering(p: IconProps) {
@@ -90,30 +81,15 @@ export function IconEngineering(p: IconProps) {
 }
 
 export function IconSparkle(p: IconProps) {
-  return (
-    <Svg {...p} label="CAVALO AI">
-      <path d="M12 4.5c.5 3.2 1.8 4.5 5 5-3.2.5-4.5 1.8-5 5-.5-3.2-1.8-4.5-5-5 3.2-.5 4.5-1.8 5-5z" />
-      <path d="M18.5 4.5c.2 1.2.7 1.7 1.9 1.9-1.2.2-1.7.7-1.9 1.9-.2-1.2-.7-1.7-1.9-1.9 1.2-.2 1.7-.7 1.9-1.9z" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="ai" label="CAVALO AI" />;
 }
 
 export function IconSettings(p: IconProps) {
-  return (
-    <Svg {...p} label="Setări">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2.8l1.3 2.4a7.4 7.4 0 012.4 1l2.7-.5.9 2.5-2 1.9c.1.5.1 1.3 0 1.8l2 1.9-.9 2.5-2.7-.5a7.4 7.4 0 01-2.4 1L12 21.2l-1.3-2.4a7.4 7.4 0 01-2.4-1l-2.7.5-.9-2.5 2-1.9a7.6 7.6 0 010-1.8l-2-1.9.9-2.5 2.7.5a7.4 7.4 0 012.4-1L12 2.8z" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="settings" label="Setări" />;
 }
 
 export function IconAccount(p: IconProps) {
-  return (
-    <Svg {...p} label="Cont">
-      <circle cx="12" cy="8.5" r="3.5" />
-      <path d="M5.5 19.5a6.5 6.5 0 0113 0" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="profile" label="Cont" />;
 }
 
 export function IconSpec(p: IconProps) {
@@ -150,5 +126,30 @@ export function IconBuild(p: IconProps) {
     <Svg {...p} label="Build">
       <path d="M14.5 6.5a3.5 3.5 0 00-4.6 4.3l-5.4 5.4a1.6 1.6 0 102.3 2.3l5.4-5.4a3.5 3.5 0 004.3-4.6l-2.1 2.1-2-2 2.1-2.1z" />
     </Svg>
+  );
+}
+
+/** Folder line icon — file tree, toolbar (CAVALO style, not Windows). */
+export function IconFolder(p: IconProps & { open?: boolean }) {
+  const { open, size = 18, strokeWidth = 1.6 } = p;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="Folder"
+      role="img"
+    >
+      <path
+        d="M4 8.5V18a2 2 0 002 2h12a2 2 0 002-2v-7a2 2 0 00-2-2h-6.5L10 6.5H6a2 2 0 00-2 2v0z"
+        fill={open ? 'currentColor' : 'none'}
+        fillOpacity={open ? 0.12 : 0}
+      />
+    </svg>
   );
 }

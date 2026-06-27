@@ -68,5 +68,32 @@
   "cad": {
     "apiUrl": "https://c-a-v-a-l-studio-production.up.railway.app",
     "cloudOnly": true
+  },
+  "multiAgent": {
+    "enabled": true,
+    "maxTasks": 3,
+    "parallelSubAgents": 2,
+    "supervisorRetries": 1,
+    "persistArtifacts": true,
+    "skipContextLlm": true,
+    "fastPipeline": true,
+    "enableDevToolsIntegration": true,
+    "reasoningLayer": {
+      "enabled": true,
+      "showEarlyBrief": true,
+      "showFinalRecap": true
+    }
+  },
+  "fullAudit": {
+    "enabled": true,
+    "autoFix": true,
+    "cleanEngine": true,
+    "reportDir": "coverage/audit"
+  },
+  "multiModelReasoningChat": {
+    "enabled": true,
+    "defaultMode": "balanced",
+    "endOfResponseRecap": true,
+    "autoSwitch": true
   }
 }

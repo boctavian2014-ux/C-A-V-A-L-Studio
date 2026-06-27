@@ -8,6 +8,7 @@ import { useEditorStore } from './store/editor-store';
 import { AIPanel } from '../../ai/composer/AIPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { useGitStore } from './store/git-store';
+import { CAVAL_OPEN_CODING_CHAT_EVENT } from '../../ai/engineering/engineering-handoff';
 import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPanel } from './components/search/SearchPanel';
@@ -25,6 +26,11 @@ import {
 
 type ActivityTab = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
 
+/** 3D PNG icons include a rounded black tile — render larger than line SVG icons. */
+const ACTIVITY_BAR_WIDTH = 48;
+const ACTIVITY_BTN = 36;
+const ACTIVITY_ICON = 26;
+
 function ActivityBar({
   active,
   onChange,
@@ -41,17 +47,17 @@ function ActivityBar({
   const ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
     {
       id: 'explorer', title: 'Explorer (Ctrl+Shift+E)',
-      icon: <IconExplorer size={18} />,
+      icon: <IconExplorer size={ACTIVITY_ICON} />,
     },
     {
       id: 'search', title: 'Căutare (Ctrl+Shift+F)',
-      icon: <IconSearch size={18} />,
+      icon: <IconSearch size={ACTIVITY_ICON} />,
     },
     {
       id: 'git', title: 'Source Control (Ctrl+Shift+G)',
       icon: (
         <div style={{ position: 'relative' }}>
-          <IconGit size={18} />
+          <IconGit size={ACTIVITY_ICON} />
           {/* Badge număr fișiere modificate */}
           {gitChangesCount > 0 && (
             <span style={{
@@ -69,7 +75,7 @@ function ActivityBar({
     },
     {
       id: 'extensions', title: 'Extensions (Ctrl+Shift+X)',
-      icon: <IconMarketplace size={18} />,
+      icon: <IconMarketplace size={ACTIVITY_ICON} />,
     },
   ];
 
@@ -78,11 +84,11 @@ function ActivityBar({
 
   return (
     <div style={{
-      width: 40,
+      width: ACTIVITY_BAR_WIDTH,
       background: 'var(--caval-surface)',
       borderRight: '1px solid var(--caval-border)',
       display: 'flex', flexDirection: 'column',
-      alignItems: 'center', padding: '8px 0', gap: 2,
+      alignItems: 'center', padding: '10px 0', gap: 4,
       flexShrink: 0,
     }}>
       {ITEMS.map((item) => (
@@ -91,7 +97,7 @@ function ActivityBar({
           title={item.title}
           onClick={() => onChange(item.id)}
           style={{
-            width: 32, height: 32, borderRadius: 5,
+            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
             border: 'none', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: active === item.id ? 'var(--caval-accent-glow)' : 'transparent',
@@ -132,7 +138,7 @@ function ActivityBar({
         title="AI Panel Caval (Ctrl+Shift+A)"
         onClick={onToggleAI}
         style={{
-          width: 32, height: 32, borderRadius: 5,
+          width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
           border: aiPanelOpen ? '1px solid var(--caval-accent)' : 'none',
           cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -156,7 +162,7 @@ function ActivityBar({
           }
         }}
       >
-        <IconSparkle size={17} />
+        <IconSparkle size={ACTIVITY_ICON} />
         {/* Punct indicator glow când AI e activ */}
         {aiPanelOpen && (
           <span style={{
@@ -174,7 +180,7 @@ function ActivityBar({
           title="Setări Caval (Ctrl+,)"
           onClick={() => onChange('settings')}
           style={{
-            width: 32, height: 32, borderRadius: 5,
+            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
             border: isSettingsActive ? '1px solid var(--caval-accent)' : 'none',
             background: isSettingsActive ? 'var(--caval-accent-glow)' : 'transparent',
             color: isSettingsActive ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
@@ -194,7 +200,7 @@ function ActivityBar({
             }
           }}
         >
-          <IconSettings size={17} />
+          <IconSettings size={ACTIVITY_ICON} />
           {/* Indicator activ stânga */}
           {isSettingsActive && (
             <span style={{
@@ -207,9 +213,9 @@ function ActivityBar({
         <button
           title="Cont"
           style={{
-            width: 32, height: 32, borderRadius: '50%', border: 'none',
+            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: '50%', border: 'none',
             background: 'rgba(212,168,87,0.15)', color: '#D4A857',
-            cursor: 'pointer', fontSize: 12, fontWeight: 700,
+            cursor: 'pointer', fontSize: 13, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
@@ -330,6 +336,12 @@ export function WorkbenchRoot() {
   const toggleEngineering = useCallback(() => setEngineeringOpen((v) => !v), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  useEffect(() => {
+    const openCodingChat = () => setAiPanelOpen(true);
+    window.addEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
+    return () => window.removeEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
+  }, []);
 
   const handleActivityChange = useCallback((tab: ActivityTab) => {
     if (tab === activeActivity && sidebarOpen) {

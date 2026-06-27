@@ -135,6 +135,56 @@ export function coerceEngineeringPayload(obj: unknown): Record<string, unknown> 
   };
 }
 
+export function scoreEngineeringPayload(obj: unknown): number {
+  const coerced = coerceEngineeringPayload(obj);
+  const schema = coerced.schema as { nodes?: unknown[] } | undefined;
+  const nodes = Array.isArray(schema?.nodes) ? schema.nodes.length : 0;
+  const parts = Array.isArray(coerced.parts) ? coerced.parts.length : 0;
+  const build = Array.isArray(coerced.build) ? coerced.build.length : 0;
+  const hasSpec = coerced.spec && typeof coerced.spec === 'object';
+  return nodes * 100 + parts * 100 + build * 50 + (hasSpec ? 10 : 0);
+}
+
+/** Pick richest engineering JSON when model splits output across content vs reasoning. */
+export function pickBestEngineeringOutput(content: string, reasoning: string): string {
+  const c = content.trim();
+  const r = reasoning.trim();
+  const merged = [c, r].filter(Boolean).join('\n');
+
+  const candidates = [c, r, merged].filter(Boolean);
+  let bestText = c || r;
+  let bestScore = -1;
+
+  for (const cand of candidates) {
+    const parsed = parseEngineeringJson(cand);
+    if (!parsed.ok) continue;
+    try {
+      const score = scoreEngineeringPayload(JSON.parse(parsed.json));
+      if (score > bestScore) {
+        bestScore = score;
+        bestText = cand;
+      }
+    } catch {
+      /* skip */
+    }
+  }
+
+  if (bestScore >= 0) return bestText;
+
+  // No parseable JSON — prefer longer fragment that mentions required keys
+  const rank = (text: string): number => {
+    if (!text.includes('{')) return 0;
+    let s = text.length;
+    if (text.includes('"parts"')) s += 5000;
+    if (text.includes('"nodes"')) s += 4000;
+    if (text.includes('"build"')) s += 3000;
+    if (text.includes('"schema"')) s += 2000;
+    return s;
+  };
+  const ranked = candidates.sort((a, b) => rank(b) - rank(a));
+  return ranked[0] ?? bestText;
+}
+
 export function describeIncompleteProject(project: {
   schema: { nodes: unknown[] };
   parts: unknown[];

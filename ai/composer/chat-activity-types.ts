@@ -5,6 +5,34 @@ export type ChatActivityPhase =
   | 'think'
   | 'write';
 
+export type MultiAgentPhase =
+  | 'memory'
+  | 'integrate'
+  | 'context'
+  | 'orchestrator'
+  | 'decompose'
+  | 'subagent'
+  | 'merge'
+  | 'supervisor'
+  | 'compose';
+
+export const MULTI_AGENT_LABELS: Record<MultiAgentPhase, string> = {
+  memory: 'Memory',
+  integrate: 'Integrate',
+  context: 'Context',
+  orchestrator: 'Orchestrator',
+  decompose: 'Decompose',
+  subagent: 'Sub-Agents',
+  merge: 'Merge',
+  supervisor: 'Review',
+  compose: 'Compose',
+};
+
+export function formatMultiAgentStatus(phase: MultiAgentPhase, detail?: string): string {
+  const label = MULTI_AGENT_LABELS[phase] ?? phase;
+  return detail ? `${label} · ${detail}` : `${label}…`;
+}
+
 export type ChatActivityStepStatus = 'pending' | 'active' | 'done';
 
 export interface ChatActivityStep {

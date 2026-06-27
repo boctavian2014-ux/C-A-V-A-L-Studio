@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="CAVALO AI icon">
+  <defs>
+    <radialGradient id="icon-ai-bg" cx="50%" cy="28%" r="80%">
+      <stop offset="0%" stop-color="#0D2848"/>
+      <stop offset="100%" stop-color="#0E0E0F"/>
+    </radialGradient>
+    <filter id="icon-ai-glow-outer" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="26" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="icon-ai-glow-core" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="40" y="40" width="432" height="432" rx="112" fill="url(#icon-ai-bg)"/>
+  <rect x="126" y="76" width="260" height="360" rx="130" fill="none" stroke="rgba(0,224,255,0.22)" stroke-width="8"/>
+  <path d="M198 176V336" stroke="#F5F7FA" stroke-width="20" stroke-linecap="round" opacity="0.62"/>
+  <path d="M256 136V376" stroke="#00E0FF" stroke-width="24" stroke-linecap="round" filter="url(#icon-ai-glow-outer)"/>
+  <path d="M256 136V376" stroke="#7CEBFF" stroke-width="14" stroke-linecap="round" opacity="0.85" filter="url(#icon-ai-glow-core)"/>
+  <path d="M314 188V324" stroke="#F5F7FA" stroke-width="20" stroke-linecap="round" opacity="0.78"/>
+  <path d="M176 214C204 184 308 184 336 214" fill="none" stroke="#D4A857" stroke-width="12" stroke-linecap="round" opacity="0.95"/>
+</svg>

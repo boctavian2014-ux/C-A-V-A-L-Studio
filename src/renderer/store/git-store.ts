@@ -93,7 +93,7 @@ function getProjectPath(): string | null {
 // Helper: setează opResult și îl curăță după 3s
 let opResultTimer: ReturnType<typeof setTimeout> | null = null;
 
-function setOpResult(set: Function, result: { ok: boolean; message: string }) {
+function setOpResult(set: (partial: Partial<GitState>) => void, result: { ok: boolean; message: string }) {
   if (opResultTimer) clearTimeout(opResultTimer);
   set({ opResult: result, opLoading: false });
   opResultTimer = setTimeout(() => {

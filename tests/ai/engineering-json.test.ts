@@ -6,6 +6,8 @@ import {
   coerceEngineeringPayload,
   describeIncompleteProject,
   looksTruncatedBeforeParts,
+  pickBestEngineeringOutput,
+  scoreEngineeringPayload,
 } from "../../ai/engineering/engineering-json";
 
 describe("engineering-json", () => {
@@ -57,5 +59,16 @@ describe("engineering-json", () => {
   it("looksTruncatedBeforeParts detects spec without parts", () => {
     expect(looksTruncatedBeforeParts('{"spec":{"title":"X"},"schema":{')).toBe(true);
     expect(looksTruncatedBeforeParts('{"spec":{},"parts":[]}')).toBe(false);
+  });
+
+  it("pickBestEngineeringOutput prefers reasoning when content is spec-only", () => {
+    const content = '{"spec":{"title":"Senzor"}}';
+    const reasoning =
+      '{"spec":{"title":"Senzor"},"schema":{"nodes":[{"id":"n1","label":"ESP32","role":"mcu"}]},"parts":[{"name":"ESP32","qty":1}],"build":[{"name":"carcasa.stl","kind":"stl","note":"cutie"}]}';
+    const picked = pickBestEngineeringOutput(content, reasoning);
+    expect(picked).toContain('"parts"');
+    expect(scoreEngineeringPayload(JSON.parse(reasoning))).toBeGreaterThan(
+      scoreEngineeringPayload(JSON.parse(content))
+    );
   });
 });

@@ -23,11 +23,36 @@ import type { CavalStreamChunk } from '../../src/main/preload';
 import {
   type ChatActivityPhase,
   type ChatActivityStep,
+  type MultiAgentPhase,
   createInitialActivitySteps,
   markAllActivityDone,
   patchActivityStep,
+  formatMultiAgentStatus,
 } from './chat-activity-types';
 import { hashChatDraft } from './chat-prepare';
+import type { EngProject } from '../engineering/engineering-generator';
+import {
+  buildSoftwareHandoffPrompt,
+  dispatchOpenCodingChat,
+  formatEngineeringContextForCoding,
+} from '../engineering/engineering-handoff';
+import { applyScaffoldToWorkspace, parseScaffoldFiles } from './scaffold-apply';
+import { parseStreamingScaffold } from './scaffold-parser';
+import {
+  buildFashionMatchingAssistantReply,
+  fashionMatchingSeedPrompt,
+  isFashionMatchingEngineRequest,
+  seedFashionMatchingEngine,
+} from './fashion-matching-seed';
+import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
+import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/manifest';
+import { stripArenaChatNoise, formatArenaReasoning } from './chat-display';
+import {
+  buildEarlyArenaMessage,
+  buildFinalRecap,
+  type ReasoningBrief,
+} from './reasoning-brief';
+import type { PipelineRecapMeta } from './multi-agent/types';
 
 export interface ChatAttachment {
   id: string;
@@ -49,6 +74,10 @@ export interface ChatMessage {
   activitySteps?: ChatActivityStep[];
   reasoning?: string;
   reasoningExpanded?: boolean;
+  writtenFiles?: string[];
+  multiAgentStatus?: string;
+  reasoningBrief?: ReasoningBrief;
+  recap?: string;
 }
 
 export interface ChatPrepareState {
@@ -95,9 +124,11 @@ interface CavalWindow {
           mentions?: string[];
           attachments?: Array<{ path: string; name: string; content: string }>;
         };
+        scaffoldMode?: boolean;
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
+    abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
     contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<Record<string, unknown>> }>;
     workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
     workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
@@ -192,15 +223,20 @@ interface AIStore {
   clearChat: () => void;
   applyDiff: (messageId: string) => void;
   rejectDiff: (messageId: string) => void;
+
+  pendingChatDraft: string | null;
+  pendingAutoSend: boolean;
+  clearPendingChatDraft: () => void;
+  handoffFromEngineering: (input: { project: EngProject; userPrompt: string }) => { ok: true } | { ok: false; error: string };
 }
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createThread(): ChatThread {
+function createThread(title = 'Chat nou'): ChatThread {
   const id = generateId();
-  return { id, title: 'Chat nou', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+  return { id, title, messages: [], createdAt: Date.now(), updatedAt: Date.now() };
 }
 
 function detectDiff(content: string, activeTabPath: string | null): DetectedDiff | undefined {
@@ -248,6 +284,7 @@ const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
 
 let abortController: AbortController | null = null;
 let streamCleanup: (() => void) | null = null;
+let activeStreamId: string | null = null;
 let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
 
@@ -269,6 +306,8 @@ export const useAIStore = create<AIStore>()(
       isStreaming: false,
       prepareState: null,
       prepareInFlight: false,
+      pendingChatDraft: null,
+      pendingAutoSend: false,
 
       setModel: (id) => {
         set({ selectedModel: id, activeResolvedModel: null });
@@ -442,7 +481,25 @@ export const useAIStore = create<AIStore>()(
         const attachmentsSnapshot = [...attachedFiles];
 
         const editorState = useEditorStore.getState();
-        const draftHash = hashChatDraft(userText, selectedModel, editorState.projectPath);
+        let apiPrompt = userText;
+        let fashionSeeded = false;
+        let fashionSeedCount = 0;
+
+        if (isFashionMatchingEngineRequest(userText) && editorState.projectPath) {
+          const written = await seedFashionMatchingEngine(editorState.projectPath);
+          if (written.length > 0) {
+            fashionSeeded = true;
+            fashionSeedCount = written.length;
+            await editorState.refreshTree();
+            const sep = editorState.projectPath.includes('\\') ? '\\' : '/';
+            const pipelinePath = `${editorState.projectPath}${sep}fashion-matching-engine${sep}src${sep}fashion_matching${sep}pipeline.py`;
+            void editorState.openFile(pipelinePath);
+            apiPrompt = `${fashionMatchingSeedPrompt()}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
+            set({ agentMode: 'code', includeMode: 'project' });
+          }
+        }
+
+        const draftHash = hashChatDraft(apiPrompt, selectedModel, editorState.projectPath);
         const prepReady = prepareState?.ready === true && prepareState.draftHash === draftHash;
         const routeHint = prepReady ? prepareState.resolvedModelHint : undefined;
         const prepWarmReady = prepReady && prepareState?.warmContextReady === true;
@@ -450,7 +507,9 @@ export const useAIStore = create<AIStore>()(
         const userMsg: ChatMessage = {
           id: generateId(),
           role: 'user',
-          content: userText,
+          content: fashionSeeded
+            ? `${userText}\n\n✓ Scaffold creat: fashion-matching-engine/ (${fashionSeedCount} fișiere) — vezi editorul central.`
+            : userText,
           timestamp: Date.now(),
         };
 
@@ -458,10 +517,11 @@ export const useAIStore = create<AIStore>()(
         const assistantMsg: ChatMessage = {
           id: assistantMsgId,
           role: 'assistant',
-          content: '',
+          content: agentMode === 'code' ? '⚡ Full Integration pipeline…' : '',
           timestamp: Date.now(),
           model: selectedModel,
           isStreaming: true,
+          multiAgentStatus: agentMode === 'code' ? 'Memory…' : undefined,
           activitySteps: createInitialActivitySteps(prepReady, prepReady, routeHint),
         };
 
@@ -474,17 +534,17 @@ export const useAIStore = create<AIStore>()(
         if (editorState.projectPath) {
           void caval?.zlCompleteChat?.({
             workspaceRoot: editorState.projectPath,
-            objectiveDraft: userText,
+            objectiveDraft: apiPrompt,
             activeFile: editorState.tabs.find((t) => t.id === editorState.activeTabId)?.path,
             openFiles: editorState.tabs.map((t) => t.path),
           });
         }
         const mentionPaths = [
-          ...parseMentions(userText),
+          ...parseMentions(apiPrompt),
           ...attachmentsSnapshot.map((f) => f.name),
         ];
         const uniqueMentions = [...new Set(mentionPaths)];
-        const attachProject = shouldAttachProjectContext(userText, includeMode, {
+        const attachProject = shouldAttachProjectContext(apiPrompt, includeMode, {
           hasMentions: uniqueMentions.length > 0,
           hasAttachments: attachmentsSnapshot.length > 0,
         });
@@ -533,19 +593,116 @@ export const useAIStore = create<AIStore>()(
 
         let gotFirstDelta = false;
         let activeStreamBuffer = '';
+        let rawStreamBuffer = '';
         let activeTabPath: string | null = null;
+        const toolWrittenPaths: string[] = [];
+        let capturedReasoningBrief: ReasoningBrief | undefined;
+        let capturedRecapMeta: PipelineRecapMeta | undefined;
+
+        const syncLiveEditorPreview = (buffer: string) => {
+          if (agentMode !== 'code') return;
+          const live = parseStreamingScaffold(buffer);
+          if (!live?.content.trim()) return;
+          useEditorStore.getState().updateAiPreview(live.path, live.content);
+        };
+
+        const openWrittenFile = (relativePath: string) => {
+          const projectPath = useEditorStore.getState().projectPath;
+          if (!projectPath) return;
+          const sep = projectPath.includes('\\') ? '\\' : '/';
+          const abs = `${projectPath}${sep}${relativePath.replace(/\//g, sep)}`;
+          void useEditorStore.getState().openFile(abs);
+        };
 
         const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
-          const diff = detectDiff(content, tabPath ?? null);
+          const parseSource = rawStreamBuffer || content;
+          let finalContent = content;
+          if (
+            isLlmRefusal(content) &&
+            (fashionSeeded || isFashionMatchingEngineRequest(userText))
+          ) {
+            finalContent = buildFashionMatchingAssistantReply(
+              fashionSeedCount || getFashionMatchingScaffoldFiles().length
+            );
+          }
+
+          const diff = detectDiff(finalContent, tabPath ?? null);
           updateAssistant({
-            content,
+            content: finalContent,
             isStreaming: false,
             diff,
             reasoningExpanded: false,
             ...extra,
           });
           set({ isStreaming: false });
+
+          const projectPath = useEditorStore.getState().projectPath;
+          if (agentMode !== 'code' || !projectPath || diff) return;
+
+          void (async () => {
+            let writtenFiles = fashionSeeded
+              ? getFashionMatchingScaffoldFiles().map((f) => f.path)
+              : [...toolWrittenPaths];
+            const parsed = parseScaffoldFiles(parseSource);
+            if (parsed.length > 0) {
+              writtenFiles = [
+                ...writtenFiles,
+                ...(await applyScaffoldToWorkspace(projectPath, parsed)),
+              ];
+            }
+            writtenFiles = [...new Set(writtenFiles)];
+            await useEditorStore.getState().refreshTree();
+            if (writtenFiles.length === 0) {
+              useEditorStore.getState().closeAiPreview();
+              updateAssistant({
+                error: 'Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.',
+              });
+              return;
+            }
+            useEditorStore.getState().closeAiPreview();
+            openWrittenFile(writtenFiles[writtenFiles.length - 1]!);
+            const recapPatch: Partial<ChatMessage> = { writtenFiles };
+            if (agentMode === 'code' && capturedReasoningBrief) {
+              const recap = buildFinalRecap({
+                brief: capturedReasoningBrief,
+                writtenFiles,
+                taskCount: capturedRecapMeta?.taskCount ?? 0,
+                supervisor: capturedRecapMeta?.supervisor,
+                pendingIssues: capturedRecapMeta?.pendingIssues,
+                devTools: capturedRecapMeta?.devTools,
+                fastPipeline: capturedRecapMeta?.fastPipeline,
+              });
+              recapPatch.recap = recap;
+              recapPatch.content = formatArenaReasoning(capturedReasoningBrief, recap, false);
+            }
+            updateAssistant(recapPatch);
+          })();
         };
+
+        if (isFashionMatchingEngineRequest(userText) && !editorState.projectPath) {
+          finish(
+            'Deschide un folder de proiect (**File → Open Folder**) apoi retrimite promptul. Fără folder nu pot crea `fashion-matching-engine/`.',
+            { error: 'projectPath lipsă' }
+          );
+          return;
+        }
+
+        if (agentMode === 'code' && !editorState.projectPath && !fashionSeeded) {
+          finish(
+            'Deschide un folder (**File → Open Folder**) — fără proiect deschis nu pot crea fișiere.',
+            { error: 'projectPath lipsă' }
+          );
+          return;
+        }
+
+        if (fashionSeeded) {
+          useEditorStore.getState().closeAiPreview();
+          finish(buildFashionMatchingAssistantReply(fashionSeedCount), {
+            activitySteps: markAllActivityDone(createInitialActivitySteps()),
+            writtenFiles: getFashionMatchingScaffoldFiles().map((f) => f.path),
+          });
+          return;
+        }
 
         const handleStreamChunk = (chunk: CavalStreamChunk) => {
           if (chunk.type === 'reasoning' && chunk.reasoningDelta) {
@@ -555,10 +712,42 @@ export const useAIStore = create<AIStore>()(
             updateActivity('think', 'active');
           } else if (chunk.type === 'status' && chunk.phase && chunk.status) {
             updateActivity(chunk.phase, chunk.status, chunk.detail);
+          } else if (chunk.type === 'multiagent' && chunk.multiAgentPhase) {
+            const label = formatMultiAgentStatus(
+              chunk.multiAgentPhase as MultiAgentPhase,
+              chunk.detail
+            );
+            updateAssistant({ multiAgentStatus: label });
+            if (agentMode === 'code' && !gotFirstDelta) {
+              const content = capturedReasoningBrief
+                ? formatArenaReasoning(capturedReasoningBrief, undefined, true)
+                : stripArenaChatNoise(rawStreamBuffer) || label;
+              updateAssistant({ content });
+            }
+          } else if (chunk.type === 'reasoning-brief') {
+            capturedReasoningBrief = {
+              goal: chunk.goal ?? chunk.reasoningBrief?.goal ?? '',
+              approach: chunk.approach ?? chunk.reasoningBrief?.approach ?? '',
+              modules: chunk.modules ?? chunk.reasoningBrief?.modules ?? [],
+            };
+            updateAssistant({
+              reasoningBrief: capturedReasoningBrief,
+              content: buildEarlyArenaMessage(capturedReasoningBrief),
+            });
           }
           if (chunk.type === 'meta' && chunk.resolvedModel) {
             updateAssistant({ resolvedModel: chunk.resolvedModel });
             set({ activeResolvedModel: chunk.resolvedModel });
+          }
+          if (chunk.type === 'tool' && chunk.toolName === 'write_file' && chunk.toolStatus === 'done') {
+            const relPath =
+              chunk.toolWrittenPath ??
+              chunk.toolDetail?.match(/"path"\s*:\s*"([^"]+)"/)?.[1];
+            if (relPath) {
+              toolWrittenPaths.push(relPath);
+              openWrittenFile(relPath);
+              void useEditorStore.getState().refreshTree();
+            }
           }
           if (chunk.type === 'delta' && chunk.delta) {
             if (!gotFirstDelta) {
@@ -566,8 +755,17 @@ export const useAIStore = create<AIStore>()(
               updateActivity('think', 'done');
               updateActivity('write', 'active');
             }
-            activeStreamBuffer += chunk.delta;
-            updateAssistant({ content: activeStreamBuffer });
+            rawStreamBuffer += chunk.delta;
+            activeStreamBuffer = rawStreamBuffer;
+            syncLiveEditorPreview(rawStreamBuffer);
+            updateAssistant({
+              content:
+                agentMode === 'code'
+                  ? capturedReasoningBrief
+                    ? formatArenaReasoning(capturedReasoningBrief, undefined, true, true)
+                    : stripArenaChatNoise(rawStreamBuffer) || '⚡ Scriu cod în editor…'
+                  : rawStreamBuffer,
+            });
           }
           if (chunk.type === 'error') {
             finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error }, activeTabPath);
@@ -577,13 +775,28 @@ export const useAIStore = create<AIStore>()(
           if (chunk.type === 'done') {
             const resolved = chunk.model ?? get().messages.find((m) => m.id === assistantMsgId)?.resolvedModel;
             if (resolved) set({ activeResolvedModel: resolved });
+            if (chunk.reasoningBrief) capturedReasoningBrief = chunk.reasoningBrief;
+            if (chunk.pipelineRecapMeta) {
+              capturedRecapMeta = chunk.pipelineRecapMeta as PipelineRecapMeta;
+            }
             const finalSteps = markAllActivityDone(
               get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
                 createInitialActivitySteps()
             );
+            const streamContent =
+              agentMode === 'code' && capturedReasoningBrief
+                ? formatArenaReasoning(capturedReasoningBrief, undefined, false, true)
+                : rawStreamBuffer ||
+                  activeStreamBuffer ||
+                  get().messages.find((m) => m.id === assistantMsgId)?.content ||
+                  '';
             finish(
-              activeStreamBuffer || get().messages.find((m) => m.id === assistantMsgId)?.content || '',
-              { resolvedModel: resolved, activitySteps: finalSteps },
+              streamContent,
+              {
+                resolvedModel: resolved,
+                activitySteps: finalSteps,
+                reasoningBrief: capturedReasoningBrief,
+              },
               activeTabPath
             );
             streamCleanup?.();
@@ -597,17 +810,20 @@ export const useAIStore = create<AIStore>()(
             filePath?: string;
             fileContent?: string;
             projectContext?: string;
-          }
+          },
+          scaffoldMode: boolean
         ) => {
           const streamId = generateId();
+          activeStreamId = streamId;
           abortController = new AbortController();
           activeStreamBuffer = '';
+          rawStreamBuffer = '';
           gotFirstDelta = false;
           activeTabPath = streamContext.filePath ?? null;
 
           streamCleanup = caval?.chatStream?.(
             {
-              message: userText,
+              message: apiPrompt,
               model: selectedModel,
               mode: agentMode === 'ask' ? 'ask' : agentMode,
               streamId,
@@ -627,6 +843,7 @@ export const useAIStore = create<AIStore>()(
                   content: f.content.slice(0, 16_000),
                 })),
               },
+              scaffoldMode,
             },
             handleStreamChunk
           ) ?? null;
@@ -646,12 +863,23 @@ export const useAIStore = create<AIStore>()(
           uniqueMentions.length === 0 &&
           attachmentsSnapshot.length === 0;
 
+        const scaffoldMode =
+          agentMode === 'code' &&
+          (fashionSeeded ||
+            attachmentsSnapshot.some((f) => f.path.startsWith('engineering://')) ||
+            /\bSCAFFOLD\b/i.test(apiPrompt));
+
+        if (agentMode === 'code' && editorState.projectPath) {
+          useEditorStore.getState().showAiPreview('generating.ts', '// AI scrie cod…\n');
+        }
+
         if (isFastChat) {
           const contextMessages = buildFastChatMessages(
-            userText,
-            messages.map((m) => ({ role: m.role, content: m.content }))
+            apiPrompt,
+            messages.map((m) => ({ role: m.role, content: m.content })),
+            agentMode
           );
-          startIpcStream(contextMessages, {});
+          startIpcStream(contextMessages, {}, scaffoldMode);
           return;
         }
 
@@ -674,8 +902,8 @@ export const useAIStore = create<AIStore>()(
           if (!prepWarmReady && caval?.contextSearch) {
             try {
               const searchQuery =
-                userText.trim().length > 3
-                  ? userText
+                apiPrompt.trim().length > 3
+                  ? apiPrompt
                   : [activeTab?.path, editorState.projectPath].filter(Boolean).join(' ');
               const search = await caval.contextSearch({ query: searchQuery, limit: 6 });
               if (search.ok && search.results?.length) {
@@ -696,7 +924,7 @@ export const useAIStore = create<AIStore>()(
             : [];
 
         const contextMessages: AIMessage[] = buildContextMessages(
-          userText,
+          apiPrompt,
           messages.map((m) => ({ role: m.role, content: m.content })),
           {
             activeTab,
@@ -708,6 +936,7 @@ export const useAIStore = create<AIStore>()(
             mentions: uniqueMentions,
             mentionFiles,
             attachments: attachmentsSnapshot,
+            agentMode,
           }
         );
 
@@ -715,7 +944,7 @@ export const useAIStore = create<AIStore>()(
           let provider;
           try {
             assertRendererChatAllowed({
-              prompt: userText,
+              prompt: apiPrompt,
               workspaceRoot: editorState.projectPath,
               capability: agentMode === 'architect' ? 'planning' : 'chat',
               intent: agentMode === 'debug' ? 'debug' : 'kilocode',
@@ -750,6 +979,7 @@ export const useAIStore = create<AIStore>()(
                   updateActivity('write', 'active');
                 }
                 fullContent += delta;
+                syncLiveEditorPreview(fullContent);
                 if (done) {
                   const finalSteps = markAllActivityDone(
                     get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
@@ -774,13 +1004,19 @@ export const useAIStore = create<AIStore>()(
           filePath: attachProject ? activeTab?.path : undefined,
           fileContent: attachProject ? activeTab?.content : undefined,
           projectContext,
-        });
+        }, scaffoldMode);
       },
 
       stopStreaming: () => {
+        const sid = activeStreamId;
         abortController?.abort();
+        if (sid) {
+          void getCaval()?.abortChatStream?.(sid);
+        }
         streamCleanup?.();
         streamCleanup = null;
+        activeStreamId = null;
+        useEditorStore.getState().closeAiPreview();
         set((s) => ({
           isStreaming: false,
           messages: s.messages.map((m) =>
@@ -834,6 +1070,48 @@ export const useAIStore = create<AIStore>()(
             m.id === messageId && m.diff ? { ...m, diff: { ...m.diff, applied: false } } : m
           ),
         }));
+      },
+
+      clearPendingChatDraft: () => set({ pendingChatDraft: null }),
+
+      handoffFromEngineering: ({ project, userPrompt }) => {
+        const projectPath = useEditorStore.getState().projectPath;
+        if (!projectPath) {
+          return {
+            ok: false as const,
+            error: 'Deschide un folder de proiect (File → Open Folder) înainte de a genera software.',
+          };
+        }
+
+        const title = project.spec.title.trim().slice(0, 48) || 'Software din Engineering';
+        const contextMarkdown = formatEngineeringContextForCoding(project, userPrompt);
+        const suggestedPrompt = buildSoftwareHandoffPrompt(project);
+        const thread = createThread(title);
+
+        get().clearPrepareState();
+
+        set({
+          agentMode: 'code',
+          selectedModel: getAgentMode('code').defaultModel,
+          includeMode: 'project',
+          activeThreadId: thread.id,
+          threads: [thread, ...get().threads],
+          messages: [],
+          attachedFiles: [
+            {
+              id: generateId(),
+              path: 'engineering://context',
+              name: `Engineering — ${project.spec.title.slice(0, 40)}`,
+              content: contextMarkdown,
+            },
+          ],
+          pendingChatDraft: suggestedPrompt,
+          pendingAutoSend: true,
+          prepareState: null,
+        });
+
+        dispatchOpenCodingChat();
+        return { ok: true as const };
       },
     }),
     {

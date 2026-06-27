@@ -1,28 +1,42 @@
 // ──────────────────────────────────────────────
-//  CAVALO — emblema brand (PNG oficial, clar la orice dimensiune)
+//  CAVALO — emblema brand (neon horse, fundal transparent)
 // ──────────────────────────────────────────────
 
 import React from 'react';
-import cavaloIconUrl from '../../assets/cavalo-icon.png';
+import { Cavalo3DIcon } from './Cavalo3DIcon';
 import cavaloSplashUrl from '../../../../assets/cavalo-splash.png';
 import cavaloNeonHorseUrl from '../../../../assets/cavalo-neon-horse.png';
 
+const NEON_LOGO_STYLE: React.CSSProperties = {
+  display: 'block',
+  objectFit: 'contain',
+  flexShrink: 0,
+  background: 'transparent',
+  filter: [
+    'drop-shadow(0 10px 28px rgba(0, 170, 255, 0.72))',
+    'drop-shadow(0 4px 14px rgba(0, 210, 255, 0.55))',
+    'drop-shadow(0 0 12px rgba(0, 200, 255, 0.45))',
+  ].join(' '),
+};
+
+/** Logo oficial CAVALO — cal neon, fundal transparent. */
 export function CavaloHorseMark({ size = 48 }: { size?: number }) {
   return (
     <img
-      src={cavaloIconUrl}
+      src={cavaloNeonHorseUrl}
       width={size}
       height={size}
       alt=""
       aria-hidden="true"
       draggable={false}
-      style={{
-        display: 'block',
-        objectFit: 'contain',
-        flexShrink: 0,
-      }}
+      style={NEON_LOGO_STYLE}
     />
   );
+}
+
+/** AI panel mark — 3D icon with cyan glow. */
+export function CavaloAiMark({ size = 48 }: { size?: number }) {
+  return <Cavalo3DIcon name="ai" size={size} glow />;
 }
 
 export function CavaloSplashMark({ size = 48 }: { size?: number }) {
@@ -43,27 +57,13 @@ export function CavaloSplashMark({ size = 48 }: { size?: number }) {
   );
 }
 
+/** @deprecated Use CavaloHorseMark — same asset. */
 export function CavaloNeonMark({ size = 48 }: { size?: number }) {
-  return (
-    <img
-      src={cavaloNeonHorseUrl}
-      width={size}
-      height={size}
-      alt=""
-      aria-hidden="true"
-      draggable={false}
-      style={{
-        display: 'block',
-        objectFit: 'contain',
-        flexShrink: 0,
-        filter: 'drop-shadow(0 0 12px rgba(0, 200, 255, 0.65))',
-      }}
-    />
-  );
+  return <CavaloHorseMark size={size} />;
 }
 
 const NEON_FRAME_STYLE: React.CSSProperties = {
-  background: '#030305',
+  background: 'transparent',
   border: '2px solid rgba(0, 224, 255, 0.92)',
   boxShadow: [
     '0 0 4px rgba(0, 224, 255, 1)',
@@ -96,7 +96,7 @@ export function CavaloNeonFrame({
         borderRadius,
       }}
     >
-      <CavaloNeonMark size={inner} />
+      <CavaloHorseMark size={inner} />
     </div>
   );
 }

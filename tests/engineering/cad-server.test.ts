@@ -21,6 +21,8 @@ vi.mock("../../engineering/cad-server/scad-runner", () => ({
     stlBuffer: Buffer.from("solid test\nendsolid test\n"),
   })),
   fallbackScadForPrompt: vi.fn(() => "cube(5);"),
+  isOpenScadInstalled: vi.fn(async () => true),
+  OPENSCAD_INSTALL_HINT_RO: "OpenSCAD mock",
 }));
 
 describe("cad server", () => {

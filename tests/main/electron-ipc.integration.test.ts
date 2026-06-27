@@ -6,7 +6,7 @@ const harness = createIpcHarness();
 
 const aiMocks = vi.hoisted(() => ({
   stream: vi.fn().mockImplementation(async function* () {
-    yield "integration-test-response";
+    yield { kind: "content" as const, text: "integration-test-response" };
   }),
   complete: vi.fn().mockResolvedValue({
     content: "integration-test-response",
@@ -77,7 +77,7 @@ describe("Electron main IPC integration", () => {
     vi.resetModules();
     aiMocks.stream.mockClear();
     aiMocks.stream.mockImplementation(async function* () {
-      yield "integration-test-response";
+      yield { kind: "content" as const, text: "integration-test-response" };
     });
     vi.stubGlobal(
       "fetch",

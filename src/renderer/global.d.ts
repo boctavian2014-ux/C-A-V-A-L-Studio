@@ -122,7 +122,7 @@ type ChatActivityPhase =
 
 interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -133,10 +133,23 @@ interface CavalStreamChunk {
   toolName?: string;
   toolStatus?: "start" | "done" | "error";
   toolDetail?: string;
+  toolWrittenPath?: string;
   phase?: ChatActivityPhase;
+  multiAgentPhase?: "memory" | "integrate" | "context" | "orchestrator" | "decompose" | "subagent" | "merge" | "supervisor" | "compose";
   status?: "active" | "done";
   label?: string;
   detail?: string;
+  goal?: string;
+  approach?: string;
+  modules?: string[];
+  reasoningBrief?: { goal: string; approach: string; modules: string[] };
+  pipelineRecapMeta?: {
+    taskCount: number;
+    fastPipeline: boolean;
+    pendingIssues: string[];
+    devTools?: Record<string, unknown>;
+    supervisor?: { approved: boolean; summary: string; issues: unknown[] };
+  };
 }
 
 interface CavalChatPrepareResult {
@@ -323,12 +336,14 @@ interface CavalBridge {
       message: string;
       model: string;
       mode?: "ask" | "plan" | "code" | "architect" | "debug";
+      intent?: string;
       streamId: string;
       workspaceRoot?: string;
       messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
       jsonMode?: boolean;
       maxTokens?: number;
       temperature?: number;
+      timeoutMs?: number;
       context?: {
         filePath?: string;
         fileContent?: string;
@@ -339,6 +354,7 @@ interface CavalBridge {
     },
     onChunk: (chunk: CavalStreamChunk) => void
   ) => () => void;
+  abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
   aiComplete?: (request: {
     model: string;
     intent?: string;

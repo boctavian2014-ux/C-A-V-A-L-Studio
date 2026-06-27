@@ -19,6 +19,9 @@ import type { RoutingIntent, ModelRequest } from '../types';
 import type { ToolRegistry } from '../tools/tool-registry';
 import { runCompletionWithTools } from './tool-agent-loop';
 import type { ChatActivityPhase } from '../composer/chat-activity-types';
+import { pickBestEngineeringOutput } from '../engineering/engineering-json';
+import { REASONING_CHAT_ADDON } from '../prompts/reasoning-layer';
+import { MULTI_MODEL_RECAP_ADDON } from '../prompts/multi-model-reasoning-chat';
 
 const aiClient = new AIClient();
 
@@ -59,7 +62,12 @@ export interface CompletionStreamCallbacks {
   onMeta?: (resolvedModel: string, reason: string) => void;
   onDelta?: (delta: string) => void;
   onReasoning?: (delta: string) => void;
-  onToolCall?: (toolName: string, status: 'start' | 'done' | 'error', detail?: string) => void;
+  onToolCall?: (
+    toolName: string,
+    status: 'start' | 'done' | 'error',
+    detail?: string,
+    writtenPath?: string
+  ) => void;
   onStatus?: (phase: ChatActivityPhase, status: 'active' | 'done', detail?: string) => void;
 }
 
@@ -225,7 +233,7 @@ export async function executeModelCompletion(
 ): Promise<CompleteModelTextResult> {
   const requestId = input.requestId ?? `complete-${Date.now()}`;
   const intent = input.intent ?? 'kilocode';
-  const isChat = (input.capability ?? 'chat') === 'chat';
+  const isChat = (input.capability ?? 'chat') === 'chat' || input.capability === 'code';
 
   if (isByokModel(input.model)) {
     if (!input.apiKeys) {
@@ -286,42 +294,70 @@ export async function executeModelCompletion(
 
   const modelIdsToTry = isChat
     ? [resolved.modelId]
-    : (await getModelsToTry(input.model, resolved.modelId, intent)).slice(0, 2);
+    : (await getModelsToTry(input.model, resolved.modelId, intent)).slice(
+        0,
+        input.jsonMode ? 3 : 2
+      );
   const errors: string[] = [];
 
   for (const modelId of modelIdsToTry) {
-    if (!isChat) {
+    if (isChat) {
+      callbacks.onMeta?.(modelId, resolved.reason);
+    } else {
       callbacks.onMeta?.(modelId, `Încerc model: ${modelId}`);
     }
 
     try {
       const modelRequest = buildModelRequest(input, modelId, requestId);
 
-      if (input.useTools !== false && input.toolRegistry) {
-        const toolResult = await runCompletionWithTools({
-          aiClient,
-          registry: input.toolRegistry,
-          baseRequest: modelRequest,
-          initialMessages: input.messages,
-          modelId,
-          callbacks,
-        });
+      if (input.useTools !== false && input.toolRegistry && input.capability !== 'code') {
+        try {
+          const toolResult = await runCompletionWithTools({
+            aiClient,
+            registry: input.toolRegistry,
+            baseRequest: modelRequest,
+            initialMessages: input.messages,
+            modelId,
+            callbacks,
+          });
 
-        if (!toolResult.ok) {
+          if (toolResult.ok) {
+            const profile = getModelProfile(modelId);
+            return {
+              ok: true,
+              text: toolResult.text,
+              resolvedModel: modelId,
+              provider: profile?.provider ?? 'open_source',
+            };
+          }
+
           errors.push(`${modelId}: ${toolResult.error}`);
-          continue;
+        } catch (err) {
+          errors.push(`${modelId}: ${err instanceof Error ? err.message : String(err)}`);
         }
-
-        const profile = getModelProfile(modelId);
-        return {
-          ok: true,
-          text: toolResult.text,
-          resolvedModel: modelId,
-          provider: profile?.provider ?? 'open_source',
-        };
+        // Fall through: stream without tools (code blocks)
       }
 
+      const streamMessages =
+        input.capability === 'code'
+          ? input.messages.map((m) =>
+              m.role === 'system'
+                ? {
+                    ...m,
+                    content: `${m.content}\n\nEMIT NOW (Balanced Mode): output every file as fenced blocks \`\`\`lang:relative/path\`\`\` with FULL runnable source. Include README.md, docs/, tests, CI/CD when relevant.${REASONING_CHAT_ADDON} No list_dir-only.`,
+                  }
+                : m
+            )
+          : input.messages.map((m) =>
+              m.role === 'system'
+                ? { ...m, content: `${m.content}${MULTI_MODEL_RECAP_ADDON}` }
+                : m
+            );
+
+      const streamRequest = { ...modelRequest, messages: streamMessages };
+
       let full = '';
+      let reasoningFull = '';
       let gotFirstContent = false;
       let gotReasoning = false;
 
@@ -330,8 +366,9 @@ export async function executeModelCompletion(
         callbacks.onStatus?.('think', 'active');
       }
 
-      for await (const chunk of aiClient.stream(modelRequest)) {
+      for await (const chunk of aiClient.stream(streamRequest)) {
         if (chunk.kind === 'reasoning') {
+          reasoningFull += chunk.text;
           if (!gotReasoning && isChat) {
             gotReasoning = true;
             callbacks.onStatus?.('think', 'active');
@@ -354,9 +391,12 @@ export async function executeModelCompletion(
       }
 
       const profile = getModelProfile(modelId);
+      const text = input.jsonMode
+        ? pickBestEngineeringOutput(full, reasoningFull)
+        : full;
       return {
         ok: true,
-        text: full,
+        text,
         resolvedModel: modelId,
         provider: profile?.provider ?? 'open_source',
       };

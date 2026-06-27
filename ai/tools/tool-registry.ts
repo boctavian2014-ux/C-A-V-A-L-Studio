@@ -85,8 +85,15 @@ export class ToolRegistry {
     switch (call.name) {
       case "read_file":
         return this.readFile(String(call.arguments.path ?? ""));
-      case "write_file":
-        return this.writeFile(String(call.arguments.path ?? ""), String(call.arguments.content ?? ""));
+      case "write_file": {
+        const filePath = String(
+          call.arguments.path ?? call.arguments.file_path ?? call.arguments.filePath ?? ""
+        );
+        const content = String(
+          call.arguments.content ?? call.arguments.body ?? call.arguments.code ?? call.arguments.text ?? ""
+        );
+        return this.writeFile(filePath, content);
+      }
       case "list_dir":
         return this.listDir(String(call.arguments.path ?? "."));
       case "search_codebase":
@@ -114,6 +121,15 @@ export class ToolRegistry {
   }
 
   private async writeFile(filePath: string, content: string): Promise<ToolResult> {
+    if (!filePath.trim()) {
+      return { ok: false, error: "write_file requires path (relative to workspace root)." };
+    }
+    if (!content.trim()) {
+      return {
+        ok: false,
+        error: "write_file requires non-empty content — provide the full source file, not a placeholder.",
+      };
+    }
     try {
       const full = this.resolvePath(filePath);
       await fs.mkdir(path.dirname(full), { recursive: true });

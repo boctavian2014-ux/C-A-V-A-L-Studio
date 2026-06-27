@@ -6,7 +6,9 @@ import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import type { ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { completeViaChatStream } from './engineering-stream';
-import { parseEngineeringJson, coerceEngineeringPayload, describeIncompleteProject, looksTruncatedBeforeParts } from './engineering-json';
+import { parseEngineeringJson, coerceEngineeringPayload, describeIncompleteProject, looksTruncatedBeforeParts, pickBestEngineeringOutput, scoreEngineeringPayload } from './engineering-json';
+import { getAutoBalancedModelCandidates } from '../models/auto-router';
+import { isAutoTier } from '../models/model-catalog';
 
 export interface SpecData {
   title: string;
@@ -61,6 +63,8 @@ export interface GenerateResult {
   raw?: string;
   resolvedModel?: string;
 }
+
+const ENGINEERING_INTENT = 'deep_thinking' as const;
 
 const SYSTEM_PROMPT = `Ești Caval Engineering AI, un copilot de inginerie hardware/electronică.
 Userul descrie liber un obiect sau sistem. Tu generezi designul tehnic complet, axat pe COMPONENTE ELECTRONICE reale.
@@ -118,7 +122,18 @@ const JSON_RETRY_USER_SUFFIX =
   '\n\nIMPORTANT: Răspunsul tău trebuie să fie UN SINGUR obiect JSON valid (fără markdown, fără text înainte/după).';
 
 const INCOMPLETE_RETRY_SUFFIX =
-  '\n\nIMPORTANT: Răspuns incomplet. Include obligatoriu schema.nodes (min 3, cu un mcu) și parts (min 3 componente reale RO). build[].content max 120 caractere.';
+  '\n\nIMPORTANT: Răspuns incomplet. Returnează JSON COMPLET cu schema.nodes (min 3, un mcu), parts (min 3 componente RO), build (min 1 stl + 1 firmware). build[].content max 120 caractere.';
+
+const INCOMPLETE_RETRY_WITH_PARTIAL = (partialJson: string) =>
+  `\n\nRăspunsul anterior era incomplet. Completează și returnează UN SINGUR JSON valid cu toate secțiunile:\n${partialJson.slice(0, 1200)}`;
+
+function isProjectComplete(project: EngProject): boolean {
+  return (
+    project.schema.nodes.length >= 1 &&
+    project.parts.length >= 1 &&
+    project.build.length >= 1
+  );
+}
 
 function normalizeProject(obj: any): EngProject {
   const coerced = coerceEngineeringPayload(obj);
@@ -129,8 +144,8 @@ function normalizeProject(obj: any): EngProject {
     return Number.isFinite(n) ? n : d;
   };
 
-  const spec = coerced?.spec ?? {};
-  const schema = coerced?.schema ?? {};
+  const spec = (coerced?.spec ?? {}) as Record<string, unknown>;
+  const schema = (coerced?.schema ?? {}) as Record<string, unknown>;
 
   const validRoles = ['mcu', 'sensor', 'power', 'actuator', 'io'];
   const validKinds = ['stl', 'firmware', 'wiring', 'doc'];
@@ -179,10 +194,6 @@ function normalizeProject(obj: any): EngProject {
   };
 }
 
-function isProjectComplete(project: EngProject): boolean {
-  return project.schema.nodes.length > 0 && project.parts.length > 0;
-}
-
 type CavalAiComplete = (input: {
   model: string;
   intent?: string;
@@ -207,21 +218,27 @@ async function runEngineeringCompletion(params: {
   signal?: AbortSignal;
   retryStrictJson?: boolean;
   retryIncomplete?: boolean;
+  partialJson?: string;
 }): Promise<
   | { ok: true; text: string; resolvedModel?: string }
   | { ok: false; error: string }
 > {
-  const userContent = params.retryIncomplete
-    ? `${params.prompt.trim()}${INCOMPLETE_RETRY_SUFFIX}`
-    : params.retryStrictJson
-      ? `${params.prompt.trim()}${JSON_RETRY_USER_SUFFIX}`
-      : params.prompt.trim();
+  const userContent = params.partialJson
+    ? `${params.prompt.trim()}${INCOMPLETE_RETRY_WITH_PARTIAL(params.partialJson)}`
+    : params.retryIncomplete
+      ? `${params.prompt.trim()}${INCOMPLETE_RETRY_SUFFIX}`
+      : params.retryStrictJson
+        ? `${params.prompt.trim()}${JSON_RETRY_USER_SUFFIX}`
+        : params.prompt.trim();
 
   const messages = [
     { role: 'system' as const, content: SYSTEM_PROMPT },
     { role: 'user' as const, content: userContent },
   ];
 
+  const caval = (window as unknown as { caval?: { aiComplete?: CavalAiComplete } }).caval;
+
+  // Stream first — merges reasoning + content (models often put JSON in reasoning).
   const streamResult = await completeViaChatStream({
     model: params.modelId,
     messages,
@@ -231,30 +248,30 @@ async function runEngineeringCompletion(params: {
 
   if (streamResult.ok) return streamResult;
 
-  const caval = (window as unknown as { caval?: { aiComplete?: CavalAiComplete } }).caval;
-  if (!caval?.aiComplete) {
-    return streamResult;
+  if (caval?.aiComplete) {
+    const completeResult = await caval.aiComplete({
+      model: params.modelId,
+      intent: ENGINEERING_INTENT,
+      capability: 'planning',
+      workspaceRoot: params.workspaceRoot ?? undefined,
+      apiKeys: params.apiKeys,
+      jsonMode: true,
+      maxTokens: 8192,
+      temperature: 0.15,
+      timeoutMs: 120_000,
+      messages,
+    });
+
+    if (completeResult.ok) {
+      return {
+        ok: true,
+        text: pickBestEngineeringOutput(completeResult.text, ''),
+        resolvedModel: completeResult.resolvedModel,
+      };
+    }
   }
 
-  const completeResult = await caval.aiComplete({
-    model: params.modelId,
-    intent: 'planning',
-    capability: 'planning',
-    workspaceRoot: params.workspaceRoot ?? undefined,
-    apiKeys: params.apiKeys,
-    jsonMode: true,
-    maxTokens: 8192,
-    temperature: 0.15,
-    timeoutMs: 120_000,
-    messages,
-  });
-
-  if (!completeResult.ok) return completeResult;
-  return {
-    ok: true,
-    text: completeResult.text,
-    resolvedModel: completeResult.resolvedModel,
-  };
+  return streamResult;
 }
 
 export async function generateEngineering(params: {
@@ -334,25 +351,62 @@ export async function generateEngineering(params: {
     let project = normalizeProject(JSON.parse(parsedJson.json));
 
     if (!isProjectComplete(project)) {
-      const retryResult = await runEngineeringCompletion({
-        prompt,
-        modelId,
-        apiKeys,
-        workspaceRoot,
-        signal,
-        retryIncomplete: true,
-      });
+      for (let attempt = 0; attempt < 2 && !isProjectComplete(project); attempt++) {
+        const retryResult = await runEngineeringCompletion({
+          prompt,
+          modelId,
+          apiKeys,
+          workspaceRoot,
+          signal,
+          retryIncomplete: attempt === 0,
+          partialJson: attempt === 1 ? parsedJson.json : undefined,
+        });
 
-      if (signal?.aborted) {
-        return { ok: false, error: 'Generare anulată.' };
-      }
+        if (signal?.aborted) {
+          return { ok: false, error: 'Generare anulată.' };
+        }
 
-      if (retryResult.ok) {
+        if (!retryResult.ok) break;
+
         const retryParsed = parseEngineeringJson(retryResult.text);
         if (retryParsed.ok) {
           project = normalizeProject(JSON.parse(retryParsed.json));
+          parsedJson = retryParsed;
           result = retryResult;
         }
+      }
+    }
+
+    if (!isProjectComplete(project) && isAutoTier(modelId)) {
+      const tried = new Set<string>();
+      if (result.resolvedModel) tried.add(result.resolvedModel);
+      const fallbacks = getAutoBalancedModelCandidates(ENGINEERING_INTENT).filter(
+        (id) => !tried.has(id) && id !== 'stepfun-step-3-7-flash'
+      );
+      for (const fallbackModel of fallbacks.slice(0, 2)) {
+        const fbResult = await runEngineeringCompletion({
+          prompt,
+          modelId: fallbackModel,
+          apiKeys,
+          workspaceRoot,
+          signal,
+          retryIncomplete: true,
+        });
+        if (signal?.aborted) {
+          return { ok: false, error: 'Generare anulată.' };
+        }
+        if (!fbResult.ok) continue;
+        const fbParsed = parseEngineeringJson(fbResult.text);
+        if (!fbParsed.ok) continue;
+        const fbProject = normalizeProject(JSON.parse(fbParsed.json));
+        const prevScore = scoreEngineeringPayload(JSON.parse(parsedJson.json));
+        const fbScore = scoreEngineeringPayload(JSON.parse(fbParsed.json));
+        if (isProjectComplete(fbProject) || fbScore > prevScore) {
+          project = fbProject;
+          parsedJson = fbParsed;
+          result = fbResult;
+        }
+        if (isProjectComplete(project)) break;
       }
     }
 
@@ -360,7 +414,9 @@ export async function generateEngineering(params: {
       const missing = describeIncompleteProject(project);
       const hint = looksTruncatedBeforeParts(result.text)
         ? ' Răspuns probabil trunchiat — încearcă Auto Frontier.'
-        : '';
+        : isAutoTier(modelId)
+          ? ' Încearcă Auto Frontier pentru proiecte complexe.'
+          : '';
       return {
         ok: false,
         error: `Răspuns incomplet de la model (lipsește: ${missing}).${hint}`,

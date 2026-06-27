@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import Editor, { useMonaco, type OnMount, type OnChange } from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
 import { useEditorStore } from '../../store/editor-store';
+import { useAIStore } from '../../../../ai/composer/ai-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
+import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -121,6 +123,17 @@ export function MonacoEditor() {
   } = useEditorStore();
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
+  const isStreaming = useAIStore((s) => s.isStreaming);
+  const isAiLive = Boolean(activeTab?.isAiPreview);
+
+  // Scroll la final când AI scrie live în preview
+  useEffect(() => {
+    if (!isAiLive || !editorRef.current) return;
+    const model = editorRef.current.getModel();
+    if (!model) return;
+    const lastLine = model.getLineCount();
+    editorRef.current.revealLine(lastLine);
+  }, [activeTab?.content, isAiLive]);
 
   // ── Înregistrează tema când Monaco e gata ──
   useEffect(() => {
@@ -235,17 +248,15 @@ export function MonacoEditor() {
     return (
       <div style={{
         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#0D1117', flexDirection: 'column', gap: 12,
+        background: '#0D1117', flexDirection: 'column', gap: 16,
         color: theme.colors.textMuted, userSelect: 'none',
       }}>
-        <svg width="48" height="48" viewBox="0 0 26 26" fill="none">
-          <polygon points="13,2 24,8 24,18 13,24 2,18 2,8"
-            stroke="#00E0FF" strokeWidth="1.2" fill="rgba(0,224,255,0.06)" />
-          <path d="M8 13 L11 16 L18 10"
-            stroke="#00E0FF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <CavaloHorseMark size={88} />
         <div style={{ fontSize: 13, textAlign: 'center', lineHeight: 1.6 }}>
-          <div style={{ color: '#F5F7FA', fontWeight: 600, marginBottom: 4 }}>Caval IDE</div>
+          <div style={{
+            color: '#F5F7FA', fontWeight: 800, marginBottom: 6,
+            fontFamily: "'Sora', sans-serif", letterSpacing: '0.12em', fontSize: 14,
+          }}>CAVALO</div>
           Deschide un fișier din sidebar
           <br />
           sau apasă <kbd style={{
@@ -260,6 +271,30 @@ export function MonacoEditor() {
 
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {isAiLive && (
+        <div style={{
+          padding: '6px 16px',
+          borderBottom: `1px solid rgba(0,224,255,0.25)`,
+          background: 'linear-gradient(90deg, rgba(0,224,255,0.12), rgba(124,58,237,0.08))',
+          fontSize: 11.5,
+          color: '#00E0FF',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontFamily: "'Inter', sans-serif",
+        }}>
+          <span style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: isStreaming ? '#00E0FF' : '#2FBF71',
+            boxShadow: isStreaming ? '0 0 8px #00E0FF' : 'none',
+            animation: isStreaming ? 'pulseTech 1.2s ease-in-out infinite' : 'none',
+          }} />
+          {isStreaming ? 'AI scrie cod live' : 'Previzualizare generare AI'}
+          <span style={{ color: 'var(--caval-text-muted)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5 }}>
+            {activeTab.path.replace(/^preview:\/\//, '')}
+          </span>
+        </div>
+      )}
       {/* Breadcrumb */}
       <div style={{
         padding: '4px 16px', borderBottom: `1px solid ${theme.colors.border}`,
@@ -267,9 +302,9 @@ export function MonacoEditor() {
         fontFamily: "'JetBrains Mono', monospace",
         color: theme.colors.textMuted, display: 'flex', alignItems: 'center', gap: 4,
       }}>
-        {activeTab.path
+        {(isAiLive ? activeTab.path.replace(/^preview:\/\//, '').split('/') : activeTab.path
           .replace(/\\/g, '/')
-          .split('/')
+          .split('/'))
           .map((part, i, arr) => (
             <React.Fragment key={i}>
               {i > 0 && <span style={{ opacity: 0.4 }}>/</span>}
@@ -278,7 +313,7 @@ export function MonacoEditor() {
               </span>
             </React.Fragment>
           ))}
-        {activeTab.isDirty && (
+        {activeTab.isDirty && !isAiLive && (
           <span style={{
             marginLeft: 6, width: 6, height: 6, borderRadius: '50%',
             background: '#F59E0B', display: 'inline-block',
@@ -292,7 +327,10 @@ export function MonacoEditor() {
         language={activeTab.language}
         value={activeTab.content}
         theme="caval-dark"
-        options={EDITOR_OPTIONS}
+        options={{
+          ...EDITOR_OPTIONS,
+          readOnly: isAiLive && isStreaming,
+        }}
         onMount={handleMount}
         onChange={handleChange}
         loading={

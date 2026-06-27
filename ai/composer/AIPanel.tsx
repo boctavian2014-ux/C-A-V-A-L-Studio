@@ -6,8 +6,16 @@ import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
+import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
+import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning } from './chat-display';
+
+const ARENA_INPUT_ROWS = 4;
+const ARENA_LINE_HEIGHT = 1.5;
+const ARENA_FONT_SIZE = 13;
+const ARENA_INPUT_HEIGHT =
+  ARENA_INPUT_ROWS * ARENA_FONT_SIZE * ARENA_LINE_HEIGHT + 14;
 
 // ──────────────────────────────────────────────
 //  Markdown renderer minimal (fără dependențe externe)
@@ -114,9 +122,55 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 //  Bubble mesaj
 // ──────────────────────────────────────────────
 
+function ArenaReasoningPanel({ message }: { message: ChatMessage }) {
+  const isStreaming = Boolean(message.isStreaming);
+  const text = formatArenaReasoning(
+    message.reasoningBrief,
+    message.recap,
+    isStreaming,
+    isStreaming && Boolean(message.multiAgentStatus?.toLowerCase().includes('compose'))
+  );
+
+  if (message.recap) {
+    return <CompactArenaStatus text={text} />;
+  }
+
+  if (isStreaming) {
+    if (message.reasoningBrief) {
+      return (
+        <CompactArenaStatus
+          text={
+            text ||
+            formatArenaReasoning(message.reasoningBrief, undefined, true) ||
+            'Full Integration pipeline…'
+          }
+        />
+      );
+    }
+    return (
+      <CompactArenaStatus
+        text={message.multiAgentStatus || text || 'Full Integration pipeline…'}
+      />
+    );
+  }
+
+  return (
+    <CompactArenaStatus
+      text={
+        text ||
+        formatChatPanelSummary(summarizeForChatPanel(message.content)) ||
+        (message.writtenFiles?.length
+          ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
+          : '')
+      }
+    />
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
-  const { modelLabels } = useAIStore();
+  const { modelLabels, agentMode } = useAIStore();
+  const arenaMode = agentMode === 'code';
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
   const resolvedLabel = message.resolvedModel
     ? getModelDisplayLabel(message.resolvedModel, modelLabels)
@@ -124,7 +178,21 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const modelLabel =
     resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
-      : resolvedLabel ?? selectionLabel ?? 'Caval AI';
+      : resolvedLabel ?? selectionLabel ?? 'Cavallo Arena';
+
+  const displayText = arenaMode
+    ? message.reasoningBrief || message.recap
+      ? formatArenaReasoning(message.reasoningBrief, message.recap, Boolean(message.isStreaming))
+      : formatChatPanelSummary(
+          summarizeForChatPanel(message.content),
+          Boolean(message.isStreaming && !isUser)
+        )
+    : message.content;
+
+  const arenaStatusText =
+    arenaMode && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
+      ? message.multiAgentStatus
+      : displayText;
 
   return (
     <div style={{
@@ -151,14 +219,28 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         WebkitUserSelect: 'text',
         cursor: 'text',
       }}>
-        {message.reasoning && (
+        {message.reasoning && !arenaMode && (
           <ChatReasoningBlock
             reasoning={message.reasoning}
             isStreaming={Boolean(message.isStreaming && !message.content)}
             defaultExpanded={message.reasoningExpanded ?? true}
           />
         )}
-        {message.isStreaming && message.activitySteps?.length ? (
+        {!isUser && arenaMode ? (
+          message.isStreaming || message.reasoningBrief || message.recap ? (
+            <ArenaReasoningPanel message={message} />
+          ) : (
+            <>
+              <CompactArenaStatus text={arenaStatusText || (message.writtenFiles?.length ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.` : '')} />
+              {message.writtenFiles && message.writtenFiles.length > 0 ? (
+                <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--caval-success)' }}>
+                  {message.writtenFiles.slice(0, 3).join(', ')}
+                  {message.writtenFiles.length > 3 ? '…' : ''}
+                </div>
+              ) : null}
+            </>
+          )
+        ) : message.isStreaming && message.activitySteps?.length ? (
           <>
             <ChatActivityTimeline
               steps={message.activitySteps}
@@ -185,6 +267,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <DiffBlock message={message} />
         )}
 
+        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && (
+          <div style={{
+            marginTop: 10, padding: '8px 12px', borderRadius: 6,
+            background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
+            fontSize: 11.5, color: 'var(--caval-success)',
+          }}>
+            ✓ {message.writtenFiles.length} fișier(e) create în workspace: {message.writtenFiles.slice(0, 4).join(', ')}
+            {message.writtenFiles.length > 4 ? '…' : ''}
+          </div>
+        )}
+
         {/* Eroare */}
         {message.error && (
           <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 5, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 11.5, color: 'var(--caval-error)' }}>
@@ -192,6 +285,22 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function CompactArenaStatus({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        lineHeight: 1.45,
+        color: 'var(--caval-text-muted)',
+        maxHeight: '5.8em',
+        overflow: 'hidden',
+      }}
+    >
+      {text}
     </div>
   );
 }
@@ -267,7 +376,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     threads, activeThreadId, newThread, selectThread,
     attachedFiles, addAttachments, removeAttachment,
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
-    selectedModel,
+    selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
@@ -325,6 +434,20 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     void loadModelLabels();
   }, [loadModelLabels]);
 
+  useEffect(() => {
+    if (!pendingChatDraft) return;
+    const draft = pendingChatDraft;
+    const autoSend = pendingAutoSend;
+    setInput(draft);
+    clearPendingChatDraft();
+    if (autoSend) {
+      useAIStore.setState({ pendingAutoSend: false });
+      void sendMessage(draft);
+      return;
+    }
+    setTimeout(() => textareaRef.current?.focus(), 80);
+  }, [pendingChatDraft, pendingAutoSend, clearPendingChatDraft, sendMessage]);
+
   // Zero-Latency Fusion: warm cache + model preload when panel opens
   useEffect(() => {
     if (!projectPath) return;
@@ -366,7 +489,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     const text = input.trim();
     if ((!text && attachedFiles.length === 0) || isStreaming) return;
     setInput('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
     await sendMessage(text || 'Analizează fișierele atașate.');
   }, [input, isStreaming, sendMessage, attachedFiles.length]);
 
@@ -404,12 +526,10 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    // Auto-resize textarea
-    e.target.style.height = 'auto';
-    e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
   };
 
   const QUICK_PROMPTS = [
+    { label: 'Fashion Match', text: 'AI Product Matching Engine (Fashion) — enterprise matching barcode OCR image NFC' },
     { label: 'Explică', text: 'Explică ce face acest cod' },
     { label: 'Refactor', text: 'Refactorizează pentru claritate' },
     { label: 'Teste', text: 'Scrie teste unitare pentru acest fișier' },
@@ -440,9 +560,23 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       {/* ── Header ─────────────────────────── */}
       <div style={{
         padding: '8px 14px', borderBottom: `1px solid ${theme.colors.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexShrink: 0,
       }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <CavaloAiMark size={22} />
+          <div>
+            <span style={{
+              fontSize: 11.5, fontWeight: 600, color: 'var(--caval-text)',
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>
+              Coding Arena
+            </span>
+            <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', lineHeight: 1.2 }}>
+              Full SDE · Reasoning · cod în editor
+            </div>
+          </div>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {messages.length > 0 && (
           <button
@@ -522,7 +656,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           onQuickPrompt={handleQuickPrompt}
         />
         <div style={{
-          background: 'var(--caval-surface)', border: '1px solid var(--caval-border)',
+          background: 'var(--caval-surface)', border: '2px solid var(--caval-border)',
           borderRadius: 10, overflow: 'hidden',
           transition: 'border-color 0.15s',
         }}
@@ -534,13 +668,15 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder="Scrie mesajul… (@file, Enter = trimite)"
+            placeholder="Prompt Coding Arena (Enter = trimite, Shift+Enter = linie nouă)"
             disabled={isStreaming}
+            rows={ARENA_INPUT_ROWS}
             style={{
               width: '100%', border: 'none', background: 'transparent',
-              padding: '10px 12px 4px', fontSize: 13, color: 'var(--caval-text)',
-              fontFamily: "'Inter', sans-serif", resize: 'none', minHeight: 52,
-              lineHeight: 1.5, outline: 'none',
+              padding: '10px 12px 4px', fontSize: ARENA_FONT_SIZE, color: 'var(--caval-text)',
+              fontFamily: "'Inter', sans-serif", resize: 'none',
+              height: ARENA_INPUT_HEIGHT, maxHeight: ARENA_INPUT_HEIGHT,
+              lineHeight: ARENA_LINE_HEIGHT, outline: 'none', overflow: 'auto',
             }}
           />
           {attachedFiles.length > 0 && (
@@ -562,7 +698,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                   title={file.path}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    📎 {file.name}
+                    {file.path.startsWith('engineering://') ? '📐' : '📎'} {file.name}
                   </span>
                   <button
                     type="button"

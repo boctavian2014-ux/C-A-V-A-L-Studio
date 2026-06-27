@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Fashion Match",
+    "slug": "fashion-matching-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.fashionmatch.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Această aplicație necesită acces la cameră pentru scanarea produselor.",
+        "NSPhotoLibraryUsageDescription": "Această aplicație necesită acces la galerie pentru selectarea imaginilor.",
+        "NFCReaderUsageDescription": "Această aplicație necesită NFC pentru citirea tag-urilor de produse."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111"
+      },
+      "package": "ai.fashionmatch.app",
+      "permissions": ["CAMERA", "NFC", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-image-picker",
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcLib": "react-native-nfc-manager"
+        }
+      ]
+    ]
+  }
+}

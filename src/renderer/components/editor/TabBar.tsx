@@ -64,7 +64,7 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
       onClick={() => setActiveTab(tab.id)}
       onMouseDown={handleMiddleClick}
       onDoubleClick={handleDoubleClick}
-      title={`${tab.path}${tab.isDirty ? ' · Nesalvat' : ''}`}
+      title={`${tab.isAiPreview ? 'Generare AI live · ' : ''}${tab.path}${tab.isDirty ? ' · Nesalvat' : ''}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 6,
         padding: '0 12px', height: '100%',
@@ -76,6 +76,10 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
         transition: 'background 0.12s, color 0.12s',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 12,
+        ...(tab.isAiPreview && isActive ? {
+          boxShadow: 'inset 0 -2px 0 #00E0FF',
+          color: '#00E0FF',
+        } : {}),
       }}
       onMouseEnter={(e) => {
         if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';

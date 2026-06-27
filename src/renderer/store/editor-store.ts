@@ -12,6 +12,7 @@ export interface EditorTab {
   language: string;
   isDirty: boolean;    // modificat nesalvat
   viewState?: unknown; // Monaco editor view state (cursor, scroll)
+  isAiPreview?: boolean; // tab live generat de AI (nu e pe disk încă)
 }
 
 export interface FileNode {
@@ -41,6 +42,9 @@ interface EditorStore {
   saveTab: (id: string) => Promise<void>;
   saveViewState: (id: string, viewState: unknown) => void;
   reloadTabForPath: (relativePath: string) => Promise<void>;
+  showAiPreview: (relativePath: string, content: string) => void;
+  updateAiPreview: (relativePath: string, content: string) => void;
+  closeAiPreview: () => void;
 
   // ── Sidebar ────────────────────────────────
   expandedDirs: Set<string>;
@@ -65,6 +69,8 @@ function detectLanguage(filename: string): string {
   };
   return map[ext] ?? 'plaintext';
 }
+
+export const AI_PREVIEW_TAB_ID = 'caval-ai-live-preview';
 
 // ──────────────────────────────────────────────
 //  Store
@@ -91,11 +97,11 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   openFile: async (filePath) => {
     const { tabs } = get();
+    const withoutPreview = tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID);
 
-    // Dacă e deja deschis, activează-l
-    const existing = tabs.find((t) => t.path === filePath);
+    const existing = withoutPreview.find((t) => t.path === filePath);
     if (existing) {
-      set({ activeTabId: existing.id });
+      set({ tabs: withoutPreview, activeTabId: existing.id });
       return;
     }
 
@@ -115,10 +121,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       isDirty: false,
     };
 
-    set((state) => ({
-      tabs: [...state.tabs, tab],
+    set({
+      tabs: [...withoutPreview, tab],
       activeTabId: filePath,
-    }));
+    });
   },
 
   closeTab: (id) => {
@@ -152,7 +158,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   saveTab: async (id) => {
     const tab = get().tabs.find((t) => t.id === id);
-    if (!tab) return;
+    if (!tab || tab.isAiPreview) return;
 
     const result = await window.caval.fs.writeFile(tab.path, tab.content);
     if (result.ok) {
@@ -188,6 +194,70 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ),
       }));
     }
+  },
+
+  showAiPreview: (relativePath, content) => {
+    const name = relativePath.split(/[/\\]/).pop() ?? 'generating';
+    const previewTab: EditorTab = {
+      id: AI_PREVIEW_TAB_ID,
+      name: `✨ ${name}`,
+      path: `preview://${relativePath}`,
+      content,
+      language: detectLanguage(name),
+      isDirty: false,
+      isAiPreview: true,
+    };
+    set((state) => ({
+      tabs: [...state.tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID), previewTab],
+      activeTabId: AI_PREVIEW_TAB_ID,
+    }));
+  },
+
+  updateAiPreview: (relativePath, content) => {
+    const name = relativePath.split(/[/\\]/).pop() ?? 'generating';
+    set((state) => {
+      const existing = state.tabs.find((t) => t.id === AI_PREVIEW_TAB_ID);
+      if (!existing) {
+        const previewTab: EditorTab = {
+          id: AI_PREVIEW_TAB_ID,
+          name: `✨ ${name}`,
+          path: `preview://${relativePath}`,
+          content,
+          language: detectLanguage(name),
+          isDirty: false,
+          isAiPreview: true,
+        };
+        return {
+          tabs: [...state.tabs, previewTab],
+          activeTabId: AI_PREVIEW_TAB_ID,
+        };
+      }
+      return {
+        tabs: state.tabs.map((t) =>
+          t.id === AI_PREVIEW_TAB_ID
+            ? {
+                ...t,
+                content,
+                name: `✨ ${name}`,
+                path: `preview://${relativePath}`,
+                language: detectLanguage(name),
+              }
+            : t
+        ),
+        activeTabId: AI_PREVIEW_TAB_ID,
+      };
+    });
+  },
+
+  closeAiPreview: () => {
+    set((state) => {
+      const tabs = state.tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID);
+      const activeTabId =
+        state.activeTabId === AI_PREVIEW_TAB_ID
+          ? (tabs[tabs.length - 1]?.id ?? null)
+          : state.activeTabId;
+      return { tabs, activeTabId };
+    });
   },
 
   // ── Sidebar ────────────────────────────────

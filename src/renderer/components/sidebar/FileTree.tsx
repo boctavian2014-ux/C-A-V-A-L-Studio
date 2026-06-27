@@ -2,6 +2,8 @@ import React, { useCallback, useState } from 'react';
 import { useEditorStore, type FileNode } from '../../store/editor-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
+import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
+import { IconFolder } from '../brand/CavaloIcons';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -31,16 +33,11 @@ function FileIcon({ ext }: { ext?: string }) {
 }
 
 function DirIcon({ name, open }: { name: string; open: boolean }) {
-  const color = DIR_COLORS[name] ?? '#8A95A6';
+  const color = DIR_COLORS[name] ?? (open ? '#00E0FF' : '#8A95A6');
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill={open ? color : 'none'} style={{ flexShrink: 0 }}>
-      <path
-        d="M1.5 4A1.5 1.5 0 013 2.5h4l1.5 1.5H13A1.5 1.5 0 0114.5 5.5v7A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V4z"
-        stroke={color}
-        strokeWidth="1.2"
-        fill={open ? `${color}22` : 'none'}
-      />
-    </svg>
+    <span style={{ color, display: 'inline-flex', flexShrink: 0 }}>
+      <IconFolder size={14} strokeWidth={1.5} open={open} />
+    </span>
   );
 }
 
@@ -261,10 +258,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
         </span>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <IconBtn title="Deschide folder" onClick={handleOpenFolder}>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path d="M1.5 4A1.5 1.5 0 013 2.5h4l1.5 1.5H13A1.5 1.5 0 0114.5 5.5v7A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V4z"
-                stroke="currentColor" strokeWidth="1.3" />
-            </svg>
+            <Cavalo3DIcon name="home" size={18} />
           </IconBtn>
           <IconBtn title="Reîmprospătează" onClick={refreshTree}>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
@@ -285,7 +279,9 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
             padding: '24px 16px', textAlign: 'center',
             color: theme.colors.textMuted, fontSize: 12, lineHeight: 1.6,
           }}>
-            <div style={{ fontSize: 24, marginBottom: 8 }}>📂</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+              <Cavalo3DIcon name="home" size={44} />
+            </div>
             <div>Deschide un folder</div>
             <div>pentru a începe</div>
             <button

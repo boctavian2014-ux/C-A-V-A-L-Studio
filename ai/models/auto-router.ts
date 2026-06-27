@@ -94,9 +94,13 @@ export async function getAutoFreeModelCandidates(): Promise<string[]> {
 /** Lista ordonată de fallback pentru Auto Balanced (cloud, non-premium) */
 export function getAutoBalancedModelCandidates(intent: RoutingIntent = "kilocode"): string[] {
   const router = new ModelRouter();
+  const capability =
+    intent === "planning" || intent === "deep_thinking" || intent === "reasoning"
+      ? "planning"
+      : "chat";
   const ranked = router.rank({
     prompt: "",
-    capability: "chat",
+    capability,
     intent,
     metadata: { userTier: "pro" },
   });
@@ -140,23 +144,35 @@ export async function resolveAutoModel(
   }
 
   if (tier === "caval-auto/balanced" && hasOpenRouterKey()) {
-    return {
-      selectionId: tier,
-      modelId: FAST_CHAT_MODEL_ID,
-      provider: "openrouter",
-      reason: "Auto Balanced: StepFun Flash (latency)",
-    };
+    const isHeavyIntent =
+      intent === "planning" || intent === "deep_thinking" || intent === "reasoning";
+    if (!isHeavyIntent) {
+      return {
+        selectionId: tier,
+        modelId: FAST_CHAT_MODEL_ID,
+        provider: "openrouter",
+        reason: "Auto Balanced: StepFun Flash (latency)",
+      };
+    }
   }
 
-  const capability = tier === "caval-auto/frontier" ? "reasoning" : "chat";
+  const isHeavyIntent =
+    intent === "planning" || intent === "deep_thinking" || intent === "reasoning";
+
+  const capability: "chat" | "reasoning" | "planning" =
+    tier === "caval-auto/frontier" || intent === "deep_thinking"
+      ? "reasoning"
+      : isHeavyIntent
+        ? "planning"
+        : "chat";
   const routingIntent: RoutingIntent =
-    tier === "caval-auto/frontier"
+    tier === "caval-auto/frontier" || intent === "deep_thinking"
       ? "deep_thinking"
       : intent;
 
   const ranked = router.rank({
     prompt: "",
-    capability: capability as "chat" | "reasoning",
+    capability: capability as "chat" | "reasoning" | "planning",
     intent: routingIntent,
     metadata: { userTier: tier === "caval-auto/balanced" ? "pro" : "enterprise" },
   });

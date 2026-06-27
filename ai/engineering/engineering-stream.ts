@@ -1,18 +1,9 @@
 import type { CavalStreamChunk } from '../../src/main/preload';
 import type { ModelSelectionId } from '../models/model-catalog';
+import { pickBestEngineeringOutput } from './engineering-json';
 
 function generateStreamId(): string {
   return `eng-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-/** Prefer channel that contains JSON; StepFun may emit JSON in reasoning vs content. */
-function combineModelOutput(content: string, reasoning: string): string {
-  const c = content.trim();
-  const r = reasoning.trim();
-  if (c.includes('{')) return c;
-  if (r.includes('{')) return r;
-  if (c && r) return `${c}\n${r}`;
-  return c || r;
 }
 
 export async function completeViaChatStream(params: {
@@ -31,6 +22,7 @@ export async function completeViaChatStream(params: {
           message: string;
           model: string;
           mode?: string;
+          intent?: import('../types').RoutingIntent;
           streamId: string;
           workspaceRoot?: string;
           jsonMode?: boolean;
@@ -90,6 +82,7 @@ export async function completeViaChatStream(params: {
         mode: 'architect',
         streamId,
         workspaceRoot: params.workspaceRoot ?? undefined,
+        intent: 'deep_thinking',
         messages: params.messages,
         jsonMode: true,
         maxTokens: 8192,
@@ -114,7 +107,7 @@ export async function completeViaChatStream(params: {
           finish({ ok: false, error: chunk.error ?? 'Eroare necunoscută' });
         }
         if (chunk.type === 'done') {
-          const text = combineModelOutput(buffer, reasoningBuffer);
+          const text = pickBestEngineeringOutput(buffer, reasoningBuffer);
           finish({
             ok: true,
             text,

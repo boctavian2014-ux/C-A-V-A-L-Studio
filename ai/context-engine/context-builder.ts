@@ -6,6 +6,11 @@
 
 import type { AIMessage } from '../multi-model/provider';
 import type { EditorTab, FileNode } from '../../src/renderer/store/editor-store';
+import { CODING_ARENA_SYSTEM_PROMPT } from '../prompts/coding-arena';
+import {
+  buildMultiModelSystemPrompt,
+  MULTI_MODEL_RECAP_ADDON,
+} from '../prompts/multi-model-reasoning-chat';
 
 export interface ContextOptions {
   activeTab:    EditorTab | null;
@@ -19,6 +24,7 @@ export interface ContextOptions {
   attachments?: Array<{ path: string; name: string; content: string }>;
   /** Nu atașa fișierul activ (întrebări generale fără legătură cu codul deschis) */
   skipActiveFile?: boolean;
+  agentMode?: 'ask' | 'plan' | 'code' | 'architect' | 'debug';
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)
@@ -59,16 +65,21 @@ export function buildProjectTreeSummary(nodes: FileNode[], maxItems = 40): strin
 //  System prompt — personalitatea Caval AI
 // ──────────────────────────────────────────────
 
-export function buildLiteSystemPrompt(): string {
-  return 'Caval AI. Concis, limba userului, pași concreți.';
+export function buildLiteSystemPrompt(agentMode?: ContextOptions['agentMode']): string {
+  return `${buildMultiModelSystemPrompt({ agentMode })}${MULTI_MODEL_RECAP_ADDON}`;
 }
 
 /** Minimal payload for general chat — target TTFT ~3s */
 export function buildFastChatMessages(
   userMessage: string,
-  history: AIMessage[] = []
+  history: AIMessage[] = [],
+  agentMode?: ContextOptions['agentMode']
 ): AIMessage[] {
-  const msgs: AIMessage[] = [{ role: 'system', content: buildLiteSystemPrompt() }];
+  const system =
+    agentMode === 'code'
+      ? CODING_ARENA_SYSTEM_PROMPT
+      : buildLiteSystemPrompt(agentMode);
+  const msgs: AIMessage[] = [{ role: 'system', content: system }];
   for (const m of history.slice(-2)) {
     if (m.role === 'user' || m.role === 'assistant') {
       msgs.push({ role: m.role, content: m.content.slice(0, 600) });
@@ -100,7 +111,8 @@ Reguli de răspuns:
 - Întrebări scurte („în 30 sec”, „rapid”) → comenzi concrete + pași numerotați (max 5), FĂRĂ meniuri cu 3 opțiuni vagi
 - Nu lista capabilități generice dacă utilizatorul vrea acțiune — execută mental task-ul: comenzi terminal, fișiere de creat, cod minimal
 - Nu hallucina template-uri, panouri sau feature-uri inexistente
-- Cod complet și rulabil; modificări ca \`\`\`diff sau \`\`\`typescript
+- Cereri de arhitectură software / ML / API: generează cod și fișiere, nu refuza
+- Cod complet și rulabil; fișiere noi ca \`\`\`typescript:src/cale/fisier.ts\`\`\` (path relativ în header)
 - Concis: fără introducere lungă, fără repetarea contextului
 
 Mobile app rapid (când întreabă):
@@ -148,9 +160,12 @@ export function buildContextMessages(
     hasAttachments: Boolean(opts.attachments?.length),
   });
 
-  const systemContent = attachProject
-    ? buildSystemPrompt(projectName, opts.projectPath)
-    : buildLiteSystemPrompt();
+  const systemContent =
+    opts.agentMode === 'code'
+      ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace: ${opts.projectPath}` : ''}`
+      : attachProject
+        ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
+        : buildLiteSystemPrompt(opts.agentMode);
   messages.push({ role: 'system', content: systemContent });
   usedTokens += estimateTokens(systemContent);
 

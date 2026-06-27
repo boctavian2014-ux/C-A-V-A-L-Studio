@@ -3,12 +3,17 @@ import { getModelProfile } from "../model-profiles";
 import type { ToolRegistry } from "../tools/tool-registry";
 import type { ChatMessage, ModelRequest } from "../types";
 
-const MAX_TOOL_STEPS = 8;
+const MAX_TOOL_STEPS = 16;
 
 export interface ToolLoopCallbacks {
   onMeta?: (resolvedModel: string, reason: string) => void;
   onDelta?: (delta: string) => void;
-  onToolCall?: (toolName: string, status: "start" | "done" | "error", detail?: string) => void;
+  onToolCall?: (
+    toolName: string,
+    status: "start" | "done" | "error",
+    detail?: string,
+    writtenPath?: string
+  ) => void;
 }
 
 function toChatMessages(
@@ -33,7 +38,10 @@ export async function runCompletionWithTools(input: {
   initialMessages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
   modelId: string;
   callbacks?: ToolLoopCallbacks;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; text: string; writtenPaths: string[] }
+  | { ok: false; error: string; writtenPaths?: string[] }
+> {
   const { aiClient, registry, baseRequest, initialMessages, modelId, callbacks } = input;
   const profile = getModelProfile(modelId);
   const tools = registry.listTools();
@@ -45,10 +53,11 @@ export async function runCompletionWithTools(input: {
       full += chunk.text;
       callbacks?.onDelta?.(chunk.text);
     }
-    return { ok: true, text: full };
+    return { ok: true, text: full, writtenPaths: [] };
   }
 
   const messages: ChatMessage[] = toChatMessages(initialMessages);
+  const writtenPaths: string[] = [];
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
     const response = await aiClient.complete({
@@ -59,9 +68,19 @@ export async function runCompletionWithTools(input: {
     });
 
     if (!response.toolCalls?.length) {
-      const text = response.content ?? "";
+      let text = response.content ?? "";
+      if (!text.trim() && writtenPaths.length > 0) {
+        text = `✓ ${writtenPaths.length} fișier(e) create: ${writtenPaths.slice(-5).join(", ")}`;
+      }
+      if (writtenPaths.length === 0) {
+        return {
+          ok: false,
+          error: "Tool loop ended without write_file — retrying with code stream.",
+          writtenPaths,
+        };
+      }
       if (text) callbacks?.onDelta?.(text);
-      return { ok: true, text };
+      return { ok: true, text, writtenPaths };
     }
 
     messages.push({
@@ -88,7 +107,23 @@ export async function runCompletionWithTools(input: {
         ? stringifyToolOutput(result.output)
         : `Error: ${result.error ?? "unknown"}`;
 
-      callbacks?.onToolCall?.(call.name, result.ok ? "done" : "error", toolContent.slice(0, 200));
+      const writtenPath =
+        call.name === "write_file" && result.ok
+          ? String(
+              (result.output as { path?: string } | undefined)?.path ??
+                call.arguments.path ??
+                call.arguments.file_path ??
+                ""
+            )
+          : undefined;
+      if (writtenPath) writtenPaths.push(writtenPath);
+
+      callbacks?.onToolCall?.(
+        call.name,
+        result.ok ? "done" : "error",
+        toolContent.slice(0, 400),
+        writtenPath || undefined
+      );
 
       messages.push({
         role: "tool",
@@ -98,7 +133,17 @@ export async function runCompletionWithTools(input: {
     }
   }
 
-  return { ok: false, error: "Limită de apeluri tool atinsă (max 8)." };
+  if (writtenPaths.length > 0) {
+    const text = `✓ ${writtenPaths.length} fișier(e) create: ${writtenPaths.slice(-5).join(", ")}`;
+    callbacks?.onDelta?.(text);
+    return { ok: true, text, writtenPaths };
+  }
+
+  return {
+    ok: false,
+    error: `Limită de apeluri tool atinsă (max ${MAX_TOOL_STEPS}) — retrying with code stream.`,
+    writtenPaths,
+  };
 }
 
 export function formatToolCallNotice(
