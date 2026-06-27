@@ -10,6 +10,7 @@ COPY engineering/cad-server/package.json engineering/cad-server/package-lock.jso
 RUN npm ci --omit=dev
 
 COPY engineering/cad-server ./engineering/cad-server
+# Supabase admin client only — cad-server must not import from ai/ (not copied)
 COPY billing/supabase/client.ts ./billing/supabase/client.ts
 
 ENV NODE_ENV=production
