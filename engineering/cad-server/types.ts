@@ -1,6 +1,16 @@
-export type CadJobStatus = "queued" | "generating" | "rendering" | "done" | "failed";
+/** Canonical CAD server types — single source of truth for job lifecycle. */
+
+export type CadJobStatus =
+  | "queued"
+  | "generating"
+  | "rendering"
+  | "done"
+  | "failed"
+  | "cancelled";
 
 export type CadQuality = "standard" | "high";
+
+export type CadGenerationMode = "openscad" | "mesh";
 
 export interface CadChatMessage {
   role: "user" | "assistant";
@@ -22,7 +32,7 @@ export interface CadConstraints {
   skillLevel?: string;
 }
 
-/** Optional engineering plan excerpt passed to the LLM (not persisted). */
+/** Engineering plan excerpt passed to the LLM (not persisted verbatim). */
 export interface CadPlanContext {
   requirements?: string;
   assembly?: string;
@@ -30,7 +40,11 @@ export interface CadPlanContext {
   performance?: string;
 }
 
-export type CadGenerationMode = "openscad" | "mesh";
+export interface CadAttachment {
+  path: string;
+  name: string;
+  content: string;
+}
 
 export interface PlanPrint3DRequest {
   messages: CadChatMessage[];
@@ -45,9 +59,9 @@ export interface CreateCadJobInput {
   constraints?: CadConstraints;
   cavalId?: string;
   planContext?: CadPlanContext;
-  /** Per-request OpenRouter key from Electron (not stored in DB). */
+  /** Per-request OpenRouter key from Electron (never stored). */
   openRouterApiKey?: string;
-  /** Per-request Meshy key from Electron (not stored in DB). */
+  /** Per-request Meshy key from Electron (never stored). */
   meshApiKey?: string;
   quality?: CadQuality;
   conversationHistory?: CadChatMessage[];
@@ -55,21 +69,52 @@ export interface CreateCadJobInput {
   generationMode?: CadGenerationMode;
   meshPrompt?: string;
   previousMeshTaskId?: string;
+  attachments?: CadAttachment[];
 }
 
-export interface CadJobRecord {
+/** Persisted CAD job record. */
+export interface CadJob {
   id: string;
+  userId: string | null;
   cavalId: string | null;
   prompt: string;
   projectType: string | null;
   constraints: CadConstraints;
+  generationMode: CadGenerationMode;
   generatedScad: string | null;
   status: CadJobStatus;
   errorMessage: string | null;
   stlPath: string | null;
-  stlUrl: string | null;
+  meshTaskId: string | null;
   createdAt: string;
   updatedAt: string;
+  expiresAt: string | null;
+}
+
+/** @deprecated Use CadJob — kept for internal migration. */
+export type CadJobRecord = CadJob;
+
+export interface CadJobResult {
+  ok: boolean;
+  jobId: string;
+  status: CadJobStatus;
+  stlSignedUrl: string | null;
+  scad: string | null;
+  dimensions: StlDimensions | null;
+  meshTaskId: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CadJobLogLevel = "info" | "warn" | "error";
+
+export interface CadJobLogEntry {
+  at: string;
+  level: CadJobLogLevel;
+  event: string;
+  message?: string;
+  meta?: Record<string, unknown>;
 }
 
 export interface CadJobPublicView {
@@ -81,4 +126,20 @@ export interface CadJobPublicView {
   error?: string | null;
   dimensions?: StlDimensions | null;
   meshTaskId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CadAuthContext {
+  cavalId: string;
+  userId: string | null;
+  isService: boolean;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      cadAuth?: CadAuthContext;
+    }
+  }
 }

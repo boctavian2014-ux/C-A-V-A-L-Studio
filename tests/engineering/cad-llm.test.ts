@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { buildCadLlmPrompt } from "../../engineering/cad-server/scad-prompt";
 
 describe("buildCadLlmPrompt", () => {
-  it("adds wheel hints for roata prompt", () => {
+  it("includes wheel hints for roata prompt", () => {
     const { user } = buildCadLlmPrompt({
       prompt: "Roata drone 150mm cu hub M5",
       projectType: "drone",
@@ -52,6 +52,17 @@ describe("buildCadLlmPrompt", () => {
     });
     expect(user).toContain("Conversation history");
     expect(user).toContain("Wheel 150mm");
+  });
+
+  it("adds IoT sensor hints for air quality OLED prompt", () => {
+    const { user } = buildCadLlmPrompt({
+      prompt:
+        "Senzor de calitate a aerului cu ecran OLED și alertă pe WiFi — enclosure 80x55x35mm with OLED window and vent slots",
+      projectType: "iot",
+    });
+    expect(user).toMatch(/OLED|DISPLAY WINDOW/i);
+    expect(user).toMatch(/VENTILATION|AIR QUALITY/i);
+    expect(user).toMatch(/antenna|WiFi|buzzer/i);
   });
 });
 

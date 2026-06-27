@@ -1,4 +1,5 @@
 import type { CadChatMessage } from "./types";
+import { adjustPlanPipeline } from "./cad-capabilities";
 
 export type Print3DPlannerAction = "clarify" | "generate";
 export type Print3DUserLanguage = "ro" | "en";
@@ -22,6 +23,7 @@ export interface PlanPrint3DInput {
   messages: CadChatMessage[];
   latestUserText: string;
   openRouterApiKey?: string;
+  meshApiKey?: string;
   previousMeshTaskId?: string;
 }
 
@@ -50,7 +52,9 @@ Rules:
 - action=clarify ONLY when critical info is missing: size/dimensions, object type (bust vs full figure vs part type), detail level, or ambiguous intent. Do NOT clarify if conversation history already answers these.
 - action=generate when enough context exists (including from prior messages).
 - pipeline=openscad for mechanical/parametric parts (brackets, gears, wheels, enclosures, mounts).
-- pipeline=mesh for organic shapes, characters, figurines, sculptures, animals, faces.
+- pipeline=mesh for furniture (dulap, cabinet, wardrobe), decorative objects, figurines, sculptures, animals, faces, and any free-form shape the user describes in plain language (like "draw a cabinet").
+- For IoT/sensor enclosures (air quality, OLED display, WiFi alert): pipeline=openscad. technicalPrompt MUST list every physical feature: OLED window mm, vent slot pattern, buzzer hole, PCB standoffs, antenna clearance. Never describe only "a box".
+- pipeline=mesh when the user wants a visual/organic result rather than exact drill patterns.
 - For trademarked characters (Mickey Mouse, etc.): warn in warnings, use generic description in technicalPrompt (e.g. "cartoon mouse with round ears"), never reproduce exact IP.
 - technicalPrompt must always be English with explicit mm dimensions when known or reasonable defaults stated.
 - quickReplies: 2-4 short clickable answers when clarifying (e.g. "Bust 80mm", "Full figure 120mm").
@@ -195,7 +199,10 @@ export async function planPrint3DRequest(
     if (!result.ok) return { ok: false, error: result.error };
 
     const plan = parsePlannerResponse(result.content!);
-    if (plan) return { ok: true, plan };
+    if (plan) {
+      const adjusted = await adjustPlanPipeline(plan, input.meshApiKey);
+      return { ok: true, plan: adjusted };
+    }
     lastError = "Planner returned unparseable JSON";
   }
 

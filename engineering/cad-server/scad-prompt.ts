@@ -2,11 +2,11 @@ import type { CadChatMessage, CadConstraints, CadPlanContext, CadQuality } from 
 
 const PROJECT_CAD_GUIDANCE: Record<string, string> = {
   drone:
-    "Drone parts: motor mounts, prop guards, landing gear, battery trays, camera mounts, antenna holders. For propellers use rotate_extrude blade profile or twisted extrude — NOT a plain hollow cylinder unless user asked for a cap.",
+    "Drone parts: motor mounts, prop guards, landing gear, battery trays, camera mounts, antenna holders, frame plates, arms. For propellers use rotate_extrude blade profile or twisted extrude — NOT a plain hollow cylinder unless user asked for a cap. NEVER output a hollow rectangular cabinet/wardrobe/box when user asked for a drone — model a frame plate, arm, or mount instead.",
   robot:
     "Robot parts: wheels (hub + tire profile via rotate_extrude), chassis plates, encoder mounts, LiDAR brackets, gear holders. Wheels need hub bore, tire outer diameter, and tread.",
   iot:
-    "IoT parts: sensor enclosures with cable glands, PCB standoffs, battery holders, wall-mount brackets. Include snap-fit or screw bosses.",
+    "IoT/sensor enclosures: MUST include feature-specific cutouts from the request (OLED window, vent slots, buzzer hole, USB port, antenna clearance). PCB standoffs M2.5, wall thickness 2 mm, two-part base+lid. NEVER output a featureless rectangular box when user mentioned display, sensor, WiFi, or alert.",
   cnc:
     "CNC parts: spindle mounts, limit-switch brackets, cable chains, control panel bezels, extrusion adapters.",
   custom:
@@ -27,12 +27,28 @@ const PART_KEYWORD_HINTS: Array<{ pattern: RegExp; hint: string }> = [
     hint: "Design a GEAR: use rotate_extrude tooth profile or simplified involute approximation with tooth count, module/pitch, bore.",
   },
   {
+    pattern: /\b(suport telefon|phone stand|phone holder|incarcare wireless|wireless charging)\b/i,
+    hint: "Design a PHONE STAND/HOLDER: angled phone slot, stable base, cable channel, optional Qi coil recess and ESP32/PCB bay — NOT a generic empty box.",
+  },
+  {
     pattern: /\b(bracket|suport|mount|prindere)\b/i,
     hint: "Design a BRACKET: L or U shape with mounting holes, ribbing, screw countersinks.",
   },
   {
     pattern: /\b(enclosure|carcase|capac|cutie|case)\b/i,
     hint: "Design an ENCLOSURE: box with wall thickness, lid lip, standoffs, ventilation slots if needed.",
+  },
+  {
+    pattern: /\b(oled|ecran|display|0\.96)\b/i,
+    hint: "Include OLED DISPLAY WINDOW: rectangular cutout ~27.3×27.3 mm on front face with 2 mm bezel recess — visible opening, not solid plastic.",
+  },
+  {
+    pattern: /\b(senzor.*aer|calitate.*aer|air quality|pm2\.?5|pms5003|sgp30|voc)\b/i,
+    hint: "AIR QUALITY SENSOR ENCLOSURE: side ventilation grille (slots or perforations) for airflow to sensor module — NOT sealed walls.",
+  },
+  {
+    pattern: /\b(wifi|esp32|wireless|alert|alertă|buzzer)\b/i,
+    hint: "IoT ALERT DEVICE: thin antenna wall or cutout for ESP32 WiFi; buzzer hole Ø12 mm; optional LED hole Ø5 mm.",
   },
 ];
 
