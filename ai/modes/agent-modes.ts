@@ -22,7 +22,7 @@ export const AGENT_MODES: AgentMode[] = [
     label: "Ask",
     shortLabel: "Ask",
     intent: "fallback",
-    defaultModel: "caval-auto/free",
+    defaultModel: "caval-auto/balanced",
     description: "Întrebări rapide, explicații, fără modificări de cod",
   },
   {
@@ -78,9 +78,9 @@ export interface CavalConfig {
 
 export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
   models: {
-    default: "caval-auto/free",
+    default: "caval-auto/balanced",
     perMode: {
-      ask: "caval-auto/free",
+      ask: "caval-auto/balanced",
       code: "caval-auto/balanced",
       architect: "caval-auto/frontier",
       debug: "caval-auto/balanced",

@@ -11,6 +11,20 @@ import {
   listSubscriptionsFromDb,
 } from "./supabase/repository";
 
+function isAllowedRedirectUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const allowedOrigins = new Set<string>([
+      new URL(process.env.BILLING_PUBLIC_URL ?? "http://localhost:8790").origin,
+      "http://localhost:8790",
+      "https://caval.studio",
+    ]);
+    return allowedOrigins.has(parsed.origin);
+  } catch {
+    return false;
+  }
+}
+
 export const createBillingServer = () => {
   const app = express();
 
@@ -55,11 +69,17 @@ export const createBillingServer = () => {
         return;
       }
       const base = process.env.BILLING_PUBLIC_URL ?? "http://localhost:8790";
+      const success = successUrl ?? `${base}/checkout/success`;
+      const cancel = cancelUrl ?? `${base}/checkout/cancel`;
+      if (!isAllowedRedirectUrl(success) || !isAllowedRedirectUrl(cancel)) {
+        response.status(400).json({ ok: false, error: "Invalid redirect URL" });
+        return;
+      }
       const session = await createCheckoutSession({
         cavalId,
         email,
-        successUrl: successUrl ?? `${base}/checkout/success`,
-        cancelUrl: cancelUrl ?? `${base}/checkout/cancel`,
+        successUrl: success,
+        cancelUrl: cancel,
       });
       response.json({ ok: true, ...session });
     } catch (error) {

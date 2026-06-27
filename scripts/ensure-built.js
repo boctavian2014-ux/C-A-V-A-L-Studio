@@ -34,14 +34,19 @@ function newestSourceMtime() {
   return newest;
 }
 
-function bundleMtime() {
-  if (!fs.existsSync(mainEntry) || !fs.existsSync(rendererBundle)) return 0;
-  return Math.min(fs.statSync(mainEntry).mtimeMs, fs.statSync(rendererBundle).mtimeMs);
+function bundleMtime(file) {
+  if (!fs.existsSync(file)) return 0;
+  return fs.statSync(file).mtimeMs;
 }
 
+const mainMtime = bundleMtime(mainEntry);
+const rendererMtime = bundleMtime(rendererBundle);
+
 const needsBuild =
-  bundleMtime() === 0 ||
-  newestSourceMtime() > bundleMtime() ||
+  mainMtime === 0 ||
+  rendererMtime === 0 ||
+  newestSourceMtime() > mainMtime ||
+  newestSourceMtime() > rendererMtime ||
   !fs.existsSync(rendererHtml) ||
   !fs.existsSync(rendererCss);
 

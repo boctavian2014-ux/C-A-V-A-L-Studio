@@ -33,7 +33,7 @@ describe("scad-runner", () => {
       expect(result.ok).toBe(true);
     } else {
       expect(result.ok).toBe(false);
-      expect(result.error).toMatch(/not installed|ENOENT/i);
+      expect(result.error).toMatch(/OpenSCAD nu e instalat|not installed|ENOENT/i);
     }
   });
 });

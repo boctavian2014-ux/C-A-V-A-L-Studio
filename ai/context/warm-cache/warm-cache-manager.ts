@@ -24,8 +24,18 @@ export class WarmCacheManager {
 
   warmAtStartup(workspaceRoot: string): void {
     this.workspaceRoot = workspaceRoot;
-    console.log(`${WARM_CACHE_LOG_PREFIX} startup warm ${workspaceRoot}`);
-    void this.loader.warmWorkspace(workspaceRoot).catch((error) => this.logError(error));
+    console.log(`${WARM_CACHE_LOG_PREFIX} startup warm ${workspaceRoot} (deferred)`);
+    void this.loader
+      .warm({
+        workspaceRoot,
+        reason: "startup",
+        files: [],
+      })
+      .catch((error) => this.logError(error));
+  }
+
+  configureWorkspace(workspaceRoot: string): void {
+    this.workspaceRoot = workspaceRoot;
   }
 
   onProjectChange(workspaceRoot: string): void {

@@ -13,9 +13,13 @@ const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string
   { key: 'google', label: 'Google', placeholder: 'AIza...', hint: 'Gemini 2.5 Pro, Gemini Flash' },
 ];
 
+const OPENROUTER_SETTING = 'openrouter.apiKey';
+
 export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
   const { apiKeys, setApiKey } = useAIStore();
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [openRouterDraft, setOpenRouterDraft] = useState('');
+  const [openRouterSaved, setOpenRouterSaved] = useState(false);
 
   useEffect(() => {
     const initial: Record<string, string> = {};
@@ -23,6 +27,11 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
       initial[key] = apiKeys[key] ?? '';
     }
     setDraft(initial);
+    void window.caval.settingsLoad?.().then((res) => {
+      const key = res?.settings?.[OPENROUTER_SETTING] ?? '';
+      setOpenRouterDraft(key);
+      setOpenRouterSaved(Boolean(key.trim()));
+    });
   }, [apiKeys]);
 
   useEffect(() => {
@@ -37,10 +46,22 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
     setApiKey(key, draft[key] ?? '');
   };
 
-  const handleSaveAll = () => {
+  const saveOpenRouter = async (value: string) => {
+    const trimmed = value.trim();
+    const settingsRes = await window.caval.settingsLoad?.();
+    const settings = { ...(settingsRes?.settings ?? {}), [OPENROUTER_SETTING]: trimmed };
+    await window.caval.settingsSave?.(settings);
+    if (trimmed) {
+      await window.caval.secretsSet?.({ OPENROUTER_API_KEY: trimmed });
+    }
+    setOpenRouterSaved(Boolean(trimmed));
+  };
+
+  const handleSaveAll = async () => {
     for (const { key } of KEY_FIELDS) {
       setApiKey(key, draft[key] ?? '');
     }
+    await saveOpenRouter(openRouterDraft);
     onClose();
   };
 
@@ -82,7 +103,7 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
         >
           <div style={{ flex: 1 }}>
             <div id="api-keys-title" style={{ fontSize: 14, fontWeight: 700, color: 'var(--caval-text)' }}>
-              API Keys (BYOK)
+              API Keys
             </div>
             <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', marginTop: 2 }}>
               Cheile tale rămân local, în aplicație
@@ -109,6 +130,39 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
         </div>
 
         <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--caval-text)' }}>OpenRouter</label>
+              {openRouterSaved && (
+                <span style={{ fontSize: 10, color: 'var(--caval-success)', fontWeight: 600 }}>salvat</span>
+              )}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', marginBottom: 4 }}>
+              Modele Free / Paid / Coding din dropdown (o singură cheie sk-or-…)
+            </div>
+            <input
+              type="password"
+              value={openRouterDraft}
+              placeholder="sk-or-..."
+              onChange={(e) => setOpenRouterDraft(e.target.value)}
+              onBlur={() => void saveOpenRouter(openRouterDraft)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void saveOpenRouter(openRouterDraft);
+              }}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '8px 10px',
+                borderRadius: 6,
+                border: '1px solid var(--caval-border)',
+                background: 'var(--caval-bg)',
+                color: 'var(--caval-text)',
+                fontSize: 12,
+                fontFamily: 'JetBrains Mono, monospace',
+              }}
+            />
+          </div>
+
           {KEY_FIELDS.map(({ key, label, placeholder, hint }) => {
             const value = draft[key] ?? '';
             const isSet = Boolean(apiKeys[key]);
@@ -175,7 +229,7 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
           </button>
           <button
             type="button"
-            onClick={handleSaveAll}
+            onClick={() => void handleSaveAll()}
             style={{
               padding: '7px 16px',
               borderRadius: 6,

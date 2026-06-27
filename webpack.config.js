@@ -5,7 +5,10 @@ const shared = {
   mode: process.env.NODE_ENV === "production" ? "production" : "development",
   devtool: "source-map",
   resolve: {
-    extensions: [".ts", ".tsx", ".js", ".json"]
+    extensions: [".ts", ".tsx", ".js", ".json"],
+    extensionAlias: {
+      ".js": [".ts", ".tsx", ".js"]
+    }
   },
   module: {
     rules: [
@@ -17,6 +20,13 @@ const shared = {
       {
         test: /\.css$/,
         use: ["style-loader", "css-loader"]
+      },
+      {
+        test: /\.(png|jpe?g|gif|webp|svg)$/i,
+        type: "asset/resource",
+        generator: {
+          filename: "renderer/assets/[name][hash][ext]"
+        }
       }
     ]
   },

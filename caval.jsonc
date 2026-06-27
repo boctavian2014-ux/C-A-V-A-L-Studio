@@ -1,9 +1,9 @@
 {
   // Caval Studio config — echivalent kilo.jsonc
   "models": {
-    "default": "caval-auto/free",
+    "default": "caval-auto/balanced",
     "perMode": {
-      "ask": "caval-auto/free",
+      "ask": "caval-auto/balanced",
       "code": "caval-auto/balanced",
       "architect": "caval-auto/frontier",
       "debug": "caval-auto/balanced"
@@ -64,5 +64,9 @@
         "enabled": false
       }
     ]
+  },
+  "cad": {
+    "apiUrl": "https://c-a-v-a-l-studio-production.up.railway.app",
+    "cloudOnly": true
   }
 }

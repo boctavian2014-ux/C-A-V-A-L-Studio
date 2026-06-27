@@ -1,4 +1,4 @@
-import type { ModelDescriptor, ModelProvider, ModelRequest, ModelResponse, ProviderRequestOptions } from "../types";
+import type { ModelDescriptor, ModelProvider, ModelRequest, ModelResponse, ModelStreamChunk, ProviderRequestOptions } from "../types";
 import { getProviderProfiles } from "../model-profiles";
 
 function ollamaBaseUrl(endpoint: string): string {
@@ -52,7 +52,7 @@ export class FallbackOpenSourceProvider implements ModelProvider {
     };
   }
 
-  async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<string> {
+  async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamChunk> {
     const url = `${ollamaBaseUrl(model.endpoint)}/api/chat`;
     let response: Response;
     try {
@@ -103,7 +103,7 @@ export class FallbackOpenSourceProvider implements ModelProvider {
         try {
           const json = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
           const delta = json.message?.content ?? "";
-          if (delta) yield delta;
+          if (delta) yield { kind: "content", text: delta };
         } catch {
           /* skip malformed line */
         }

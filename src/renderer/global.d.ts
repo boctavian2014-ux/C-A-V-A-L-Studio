@@ -1,4 +1,8 @@
 declare module "*.css";
+declare module "*.png" {
+  const src: string;
+  export default src;
+}
 declare module "xterm/css/xterm.css";
 
 interface CavalFsApi {
@@ -81,27 +85,76 @@ interface CavalGitApi {
   stashPop: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
-interface CavalImageApi {
-  generate: (params: {
-    prompt: string;
-    size?: "1024x1024" | "1792x1024" | "1024x1792";
-    quality?: "standard" | "hd";
-    style?: "vivid" | "natural";
-    apiKey: string;
-  }) => Promise<{ ok: boolean; url?: string; revisedPrompt?: string; error?: string }>;
-  save: (imageUrl: string, projectPath: string, fileName: string) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
-  saveAs: (imageUrl: string) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
+interface EngFileInput {
+  name: string;
+  content: string;
 }
+
+interface EngPartInput {
+  name: string;
+  qty: number;
+  unitPrice: number;
+  currency: string;
+  shop: string;
+  shopUrl: string;
+  substitute?: string;
+}
+
+interface EngSaveResult {
+  ok: boolean;
+  savedPath?: string;
+  savedPaths?: string[];
+  error?: string;
+}
+
+interface CavalEngineeringApi {
+  saveFile: (projectPath: string, file: EngFileInput) => Promise<EngSaveResult>;
+  saveAll: (projectPath: string, files: EngFileInput[]) => Promise<EngSaveResult>;
+  exportCart: (parts: EngPartInput[], projectPath: string | null) => Promise<EngSaveResult>;
+  openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+}
+type ChatActivityPhase =
+  | "prepare"
+  | "route"
+  | "connect"
+  | "think"
+  | "write";
 
 interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning";
   delta?: string;
+  reasoningDelta?: string;
   error?: string;
   resolvedModel?: string;
   reason?: string;
   model?: string;
   provider?: string;
+  toolName?: string;
+  toolStatus?: "start" | "done" | "error";
+  toolDetail?: string;
+  phase?: ChatActivityPhase;
+  status?: "active" | "done";
+  label?: string;
+  detail?: string;
+}
+
+interface CavalChatPrepareResult {
+  ok: boolean;
+  draftHash: string;
+  warmContextReady: boolean;
+  resolvedModelHint?: string;
+  tokenId?: string;
+  error?: string;
+}
+
+interface McpServerStatus {
+  id: string;
+  name: string;
+  running: boolean;
+  tools: string[];
+  toolDetails?: Array<{ serverId: string; name: string; description: string }>;
+  error?: string;
 }
 
 interface CavalPreloadApi {
@@ -127,10 +180,21 @@ interface CavalPreloadApi {
 }
 
 interface CavalCadApi {
+  isCloudOnly?: () => Promise<{ ok: boolean; cloudOnly?: boolean; defaultUrl?: string }>;
+  health?: () => Promise<{
+    ok: boolean;
+    url?: string;
+    cloudOnly?: boolean;
+    openscadInstalled?: boolean;
+    openRouterConfigured?: boolean;
+    meshyConfigured?: boolean;
+    error?: string;
+  }>;
   plan: (input: {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     latestUserText: string;
     openRouterApiKey?: string;
+    meshApiKey?: string;
     previousMeshTaskId?: string;
   }) => Promise<{
     ok: boolean;
@@ -168,7 +232,7 @@ interface CavalCadApi {
     meshPrompt?: string;
     previousMeshTaskId?: string;
   }) => Promise<{ ok: boolean; jobId?: string; status?: string; error?: string }>;
-  getJob: (jobId: string) => Promise<{
+  getJob: (input: { jobId: string; cavalId?: string }) => Promise<{
     ok: boolean;
     jobId?: string;
     status?: string;
@@ -177,6 +241,18 @@ interface CavalCadApi {
     error?: string | null;
     dimensions?: { x: number; y: number; z: number } | null;
     meshTaskId?: string | null;
+  }>;
+  cancelJob: (input: { jobId: string; cavalId?: string }) => Promise<{
+    ok: boolean;
+    jobId?: string;
+    status?: string;
+    error?: string;
+  }>;
+  getJobLogs: (input: { jobId: string; cavalId?: string }) => Promise<{
+    ok: boolean;
+    jobId?: string;
+    logs?: Array<{ at: string; level: string; event: string; message?: string }>;
+    error?: string;
   }>;
   downloadStl: (input: { url: string; defaultName?: string }) => Promise<{
     ok: boolean;
@@ -190,6 +266,7 @@ interface CavalCadApi {
     path?: string;
     error?: string;
   }>;
+  installOpenScad?: () => Promise<{ ok: boolean; installed?: boolean; error?: string }>;
 }
 
 interface CavalSchematicApi {
@@ -237,27 +314,47 @@ interface CavalBridge {
   onFileOpened?: (callback: (file: { path: string; label: string; language: string; content: string }) => void) => () => void;
   onFolderOpened?: (callback: (folder: { path: string; files: Array<{ path: string; label: string; language: string; content: string }> }) => void) => () => void;
   saveFile?: (request: { path?: string; content: string; saveAs?: boolean }) => Promise<{ canceled?: boolean; path?: string; label?: string; language?: string }>;
+  resolveModel?: (input: { model: string; intent?: string }) => Promise<{
+    ok: boolean;
+    resolved?: { modelId: string; provider: string; reason: string };
+  }>;
   chatStream?: (
     request: {
       message: string;
       model: string;
       mode?: "ask" | "plan" | "code" | "architect" | "debug";
       streamId: string;
+      workspaceRoot?: string;
+      messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+      jsonMode?: boolean;
+      maxTokens?: number;
+      temperature?: number;
       context?: {
         filePath?: string;
         fileContent?: string;
         projectContext?: string;
         mentions?: string[];
+        attachments?: Array<{ path: string; name: string; content: string }>;
       };
     },
     onChunk: (chunk: CavalStreamChunk) => void
   ) => () => void;
-  engineeringExportPdf?: (input: { content: string; defaultName?: string }) => Promise<{
-    ok: boolean;
-    canceled?: boolean;
-    path?: string;
-    error?: string;
-  }>;
+  aiComplete?: (request: {
+    model: string;
+    intent?: string;
+    capability?: string;
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    workspaceRoot?: string;
+    requestId?: string;
+    apiKeys?: Record<string, string>;
+    jsonMode?: boolean;
+    maxTokens?: number;
+    temperature?: number;
+  }) => Promise<
+    | { ok: true; text: string; resolvedModel: string; provider: string }
+    | { ok: false; error: string }
+  >;
+  engineering: CavalEngineeringApi;
   billingUserId?: () => Promise<{ ok: boolean; userId?: string }>;
   billingEntitlements?: () => Promise<{
     ok: boolean;
@@ -272,10 +369,48 @@ interface CavalBridge {
   secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean }>;
+  contextIndex?: () => Promise<{ ok: boolean; documentCount?: number; error?: string }>;
+  contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: unknown[]; error?: string }>;
+  workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
+  workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+  zlPrepare?: (signals: {
+    workspaceRoot: string;
+    objectiveDraft?: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => Promise<{ ok: boolean; tokenId?: string }>;
+  zlCancel?: (tokenId: string) => Promise<{ ok: boolean }>;
+  zlPanelOpen?: (input: {
+    workspaceRoot?: string;
+    objectiveDraft?: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => Promise<{ ok: boolean; tokenId?: string }>;
+  zlSnapshot?: (input?: { workspaceRoot?: string; objectiveDraft?: string }) => Promise<{ ok: boolean; snapshot?: unknown }>;
+  zlCompleteChat?: (signals: {
+    workspaceRoot: string;
+    objectiveDraft?: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => Promise<{
+    ok: boolean;
+    prep?: { warmContext: string; modelBundle?: { warmedModels: string[] } };
+  }>;
+  chatPrepare?: (input: {
+    workspaceRoot: string;
+    objectiveDraft: string;
+    model: string;
+    draftHash: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => Promise<CavalChatPrepareResult>;
+  mcpList?: () => Promise<{ ok: boolean; servers?: McpServerStatus[] }>;
+  mcpStart?: (serverId: string) => Promise<{ ok: boolean; status?: McpServerStatus }>;
+  mcpStop?: (serverId: string) => Promise<{ ok: boolean }>;
+  toolExecute?: (input: { name: string; arguments: Record<string, unknown> }) => Promise<{ ok: boolean; output?: unknown; error?: string }>;
   fs: CavalFsApi;
   terminal: CavalTerminalApi;
   git: CavalGitApi;
-  image: CavalImageApi;
   preload: CavalPreloadApi;
   cad: CavalCadApi;
   schematic: CavalSchematicApi;

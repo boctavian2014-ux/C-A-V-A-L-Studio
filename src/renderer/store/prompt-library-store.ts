@@ -23,7 +23,7 @@ export interface PromptStyle {
   category: StyleCategory;
   prefix: string;                 // adăugat ÎNAINTE de subiect
   suffix: string;                 // adăugat DUPĂ subiect
-  // Parametri DALL-E override (opțional — dacă nu sunt setați, se folosesc defaults din ImagePanel)
+  // Parametri override (opțional — folosiți de eventuale module de generare)
   overrideSize?: '1024x1024' | '1792x1024' | '1024x1792';
   overrideQuality?: 'standard' | 'hd';
   overrideStyle?: 'vivid' | 'natural';

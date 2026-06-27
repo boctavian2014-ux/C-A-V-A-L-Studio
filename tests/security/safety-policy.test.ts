@@ -24,7 +24,7 @@ describe("SafetyPolicyEnforcer", () => {
 
   it("allows OUTPUT FORMAT in engineering prompts", () => {
     const violations = enforcer.validateRequest({
-      prompt: "OUTPUT FORMAT — use exactly these markdown headings:\n## BOM",
+      prompt: "OUTPUT FORMAT — use exactly these markdown headings:\n## Lista componente",
       capability: "chat"
     });
     expect(violations.some((v) => v.code === "dangerous_operation")).toBe(false);

@@ -15,7 +15,10 @@ export interface ContextOptions {
   includeMode:  'file' | 'project' | 'selection';
   projectContext?: string;
   mentions?:    string[];
+  mentionFiles?: Array<{ path: string; name: string; content: string }>;
   attachments?: Array<{ path: string; name: string; content: string }>;
+  /** Nu atașa fișierul activ (întrebări generale fără legătură cu codul deschis) */
+  skipActiveFile?: boolean;
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)
@@ -31,27 +34,104 @@ export function parseMentions(text: string): string[] {
   return matches.map((m) => m.slice(1));
 }
 
+/** Rezumat compact al structurii proiectului pentru context fallback */
+export function buildProjectTreeSummary(nodes: FileNode[], maxItems = 40): string {
+  const lines: string[] = [];
+
+  const walk = (items: FileNode[], depth = 0): void => {
+    for (const node of items) {
+      if (lines.length >= maxItems) return;
+      const indent = '  '.repeat(depth);
+      const icon = node.type === 'directory' ? '📁' : '📄';
+      lines.push(`${indent}${icon} ${node.name}`);
+      if (node.children?.length) walk(node.children, depth + 1);
+    }
+  };
+
+  walk(nodes);
+  if (lines.length >= maxItems) {
+    lines.push('...(structură trunchiată)');
+  }
+  return lines.join('\n');
+}
+
 // ──────────────────────────────────────────────
 //  System prompt — personalitatea Caval AI
 // ──────────────────────────────────────────────
 
-export function buildSystemPrompt(projectName: string | null): string {
-  return `Ești Caval AI, asistentul de cod integrat în Caval IDE.
-Proiect curent: ${projectName ?? 'necunoscut'}
-Stack: TypeScript, React, Electron, Node.js
+export function buildLiteSystemPrompt(): string {
+  return 'Caval AI. Concis, limba userului, pași concreți.';
+}
 
-Reguli:
-- Răspunzi în limba utilizatorului (română sau engleză)
-- Când propui modificări de cod, folosești blocuri \`\`\`diff sau \`\`\`typescript
-- Dacă modificarea afectează mai multe fișiere, le listezi explicit
-- Ești concis și direct — nu repeți informații din context
-- Când generezi cod, îl faci complet și rulabil, nu cu placeholder-uri
-- La întrebări despre arhitectură sau design, oferi opțiuni cu trade-offs`;
+/** Minimal payload for general chat — target TTFT ~3s */
+export function buildFastChatMessages(
+  userMessage: string,
+  history: AIMessage[] = []
+): AIMessage[] {
+  const msgs: AIMessage[] = [{ role: 'system', content: buildLiteSystemPrompt() }];
+  for (const m of history.slice(-2)) {
+    if (m.role === 'user' || m.role === 'assistant') {
+      msgs.push({ role: m.role, content: m.content.slice(0, 600) });
+    }
+  }
+  msgs.push({ role: 'user', content: userMessage });
+  return msgs;
+}
+
+export function buildSystemPrompt(projectName: string | null, projectPath?: string | null): string {
+  const pathLine = projectPath ? `\nCale proiect: ${projectPath}` : '';
+  return `Ești Caval AI, asistentul de cod integrat în Caval IDE (CAVALO).
+Proiect curent: ${projectName ?? 'necunoscut'}${pathLine}
+Stack principal IDE: TypeScript, React, Electron, Node.js
+
+Ce există REAL în Caval (nu inventa alte funcții):
+- Chat + editare cod în workspace-ul deschis
+- Git (GitPanel), terminal, MCP opțional
+- Mobile: suport Expo/EAS (detectare app.json, build Android/iOS via \`mobile/mobile-build-service.ts\`) — NU există wizard React Native / Flutter / Ionic integrat
+- Engineering/CAD separat de chat-ul obișnuit
+
+Context automat:
+- Primești fișierul activ din editor și structura proiectului.
+- „acest cod” = fișierul activ din mesaj.
+- Nu cere cod deja furnizat.
+
+Reguli de răspuns:
+- Limba utilizatorului (română sau engleză)
+- Întrebări scurte („în 30 sec”, „rapid”) → comenzi concrete + pași numerotați (max 5), FĂRĂ meniuri cu 3 opțiuni vagi
+- Nu lista capabilități generice dacă utilizatorul vrea acțiune — execută mental task-ul: comenzi terminal, fișiere de creat, cod minimal
+- Nu hallucina template-uri, panouri sau feature-uri inexistente
+- Cod complet și rulabil; modificări ca \`\`\`diff sau \`\`\`typescript
+- Concis: fără introducere lungă, fără repetarea contextului
+
+Mobile app rapid (când întreabă):
+1. \`npx create-expo-app@latest NumeleApp --template blank\`
+2. \`cd NumeleApp && npx expo start\`
+3. Pentru build store: cont Expo + \`npx eas build --platform android|ios\` (după \`eas.json\`)`;
 }
 
 // ──────────────────────────────────────────────
 //  Construiește mesajele trimise la AI
 // ──────────────────────────────────────────────
+
+/** Întrebări generale (mobile app, cum fac X) — fără index / arbore proiect */
+export function shouldAttachProjectContext(
+  userMessage: string,
+  includeMode: ContextOptions['includeMode'],
+  opts?: { hasMentions?: boolean; hasAttachments?: boolean }
+): boolean {
+  if (includeMode !== 'project') return false;
+  if (opts?.hasMentions || opts?.hasAttachments) return true;
+  if (parseMentions(userMessage).length > 0) return true;
+
+  const t = userMessage.trim();
+  if (t.length < 200) {
+    const codeHints =
+      /\b(bug|fix|refactor|funcție|function|class|import|fișier|file|cod|code|eroare|error|test|component|hook|api|diff|commit)\b/i;
+    const pathHints = /[@/\\]|\.(ts|tsx|js|jsx|py|go|rs)\b/i;
+    if (!codeHints.test(t) && !pathHints.test(t)) return false;
+  }
+  return true;
+}
 
 export function buildContextMessages(
   userMessage: string,
@@ -63,80 +143,76 @@ export function buildContextMessages(
 
   const projectName = opts.projectPath?.split(/[/\\]/).pop() ?? null;
 
-  // System prompt
-  const systemContent = buildSystemPrompt(projectName);
+  const attachProject = shouldAttachProjectContext(userMessage, opts.includeMode, {
+    hasMentions: Boolean(opts.mentions?.length),
+    hasAttachments: Boolean(opts.attachments?.length),
+  });
+
+  const systemContent = attachProject
+    ? buildSystemPrompt(projectName, opts.projectPath)
+    : buildLiteSystemPrompt();
   messages.push({ role: 'system', content: systemContent });
   usedTokens += estimateTokens(systemContent);
 
-  // Context fișier activ
-  if (opts.activeTab && opts.includeMode !== 'selection') {
-    const fileCtx = buildFileContext(opts.activeTab, opts.selection);
-    const fileTokens = estimateTokens(fileCtx);
+  const contextParts: string[] = [];
 
-    if (usedTokens + fileTokens < MAX_CONTEXT_TOKENS) {
-      // Injectăm ca primul mesaj user (context tehnic, nu conversație)
-      messages.push({
-        role: 'user',
-        content: fileCtx,
-      });
-      messages.push({
-        role: 'assistant',
-        content: 'Am înregistrat contextul fișierului. Ce vrei să fac?',
-      });
-      usedTokens += fileTokens;
+  if (attachProject) {
+    if (opts.projectContext) {
+      contextParts.push(`Fragmente relevante:\n${opts.projectContext}`);
+    } else if (opts.fileTree.length > 0) {
+      contextParts.push(`Structura proiectului:\n${buildProjectTreeSummary(opts.fileTree)}`);
     }
   }
 
-  // Selecție specifică
-  if (opts.selection && opts.includeMode === 'selection') {
-    const selCtx = `Selecție din editor:\n\`\`\`${opts.activeTab?.language ?? ''}\n${opts.selection}\n\`\`\``;
+  if (opts.mentionFiles?.length) {
+    const blocks = opts.mentionFiles.map(
+      (file) => `Fișier @${file.name} (\`${file.path}\`):\n\`\`\`\n${file.content.slice(0, 8_000)}\n\`\`\``
+    );
+    contextParts.push(`Fișiere menționate:\n${blocks.join('\n\n---\n\n')}`);
+  } else if (opts.mentions?.length) {
+    contextParts.push(`Fișiere menționate: ${opts.mentions.join(', ')}`);
+  }
+
+  if (opts.attachments?.length) {
+    const blocks = opts.attachments.map(
+      (file) => `Atașament \`${file.path}\`:\n\`\`\`\n${file.content.slice(0, 24_000)}\n\`\`\``
+    );
+    contextParts.push(`Fișiere atașate:\n${blocks.join('\n\n---\n\n')}`);
+  }
+
+  if (contextParts.length > 0) {
+    const block = contextParts.join('\n\n---\n\n');
+    if (usedTokens + estimateTokens(block) < MAX_CONTEXT_TOKENS) {
+      messages.push({ role: 'user', content: `Context proiect (automat):\n${block}` });
+      usedTokens += estimateTokens(block);
+    }
+  }
+
+  if (opts.selection && opts.includeMode === 'selection' && opts.activeTab) {
+    const selCtx = `Selecție din \`${opts.activeTab.path}\`:\n\`\`\`${opts.activeTab.language ?? ''}\n${opts.selection}\n\`\`\``;
     messages.push({ role: 'user', content: selCtx });
-    messages.push({ role: 'assistant', content: 'Am văzut selecția. Ce vrei să fac cu ea?' });
     usedTokens += estimateTokens(selCtx);
   }
 
-  // Context proiect (semantic search)
-  if (opts.projectContext && opts.includeMode === 'project') {
-    const ctx = `Context relevant din proiect:\n${opts.projectContext}`;
-    if (usedTokens + estimateTokens(ctx) < MAX_CONTEXT_TOKENS) {
-      messages.push({ role: 'user', content: ctx });
-      messages.push({ role: 'assistant', content: 'Am analizat contextul proiectului.' });
-      usedTokens += estimateTokens(ctx);
-    }
-  }
-
-  // @mentions
-  if (opts.mentions?.length) {
-    const mentionCtx = `Fișiere menționate: ${opts.mentions.join(', ')}`;
-    messages.push({ role: 'user', content: mentionCtx });
-    usedTokens += estimateTokens(mentionCtx);
-  }
-
-  // Fișiere atașate (upload)
-  if (opts.attachments?.length) {
-    const blocks = opts.attachments.map(
-      (file) => `Fișier atașat: \`${file.path}\`\n\`\`\`\n${file.content.slice(0, 24_000)}\n\`\`\``
-    );
-    const attachCtx = `Fișiere atașate de utilizator:\n\n${blocks.join('\n\n---\n\n')}`;
-    if (usedTokens + estimateTokens(attachCtx) < MAX_CONTEXT_TOKENS) {
-      messages.push({ role: 'user', content: attachCtx });
-      messages.push({ role: 'assistant', content: 'Am citit fișierele atașate.' });
-      usedTokens += estimateTokens(attachCtx);
-    }
-  }
-
-  // Istoricul conversației
   const historyToAdd: AIMessage[] = [];
-  for (let i = history.length - 1; i >= 0; i--) {
-    const tokens = estimateTokens(history[i].content);
-    if (usedTokens + tokens > MAX_CONTEXT_TOKENS - 4000) break; // rezervă 4k pentru răspuns
-    historyToAdd.unshift(history[i]);
+  const historyLimit = attachProject ? 8 : 4;
+  const recentHistory = history.slice(-historyLimit);
+  for (let i = recentHistory.length - 1; i >= 0; i--) {
+    const tokens = estimateTokens(recentHistory[i].content);
+    if (usedTokens + tokens > MAX_CONTEXT_TOKENS - 4000) break;
+    historyToAdd.unshift(recentHistory[i]);
     usedTokens += tokens;
   }
   messages.push(...historyToAdd);
 
-  // Mesajul curent al utilizatorului
-  messages.push({ role: 'user', content: userMessage });
+  const finalUserMessage = buildFinalUserMessage(
+    userMessage,
+    opts.activeTab,
+    opts.includeMode,
+    opts.selection,
+    opts.skipActiveFile
+  );
+  messages.push({ role: 'user', content: finalUserMessage });
 
   return messages;
 }
@@ -145,24 +221,83 @@ export function buildContextMessages(
 //  Helper: formatează contextul unui fișier
 // ──────────────────────────────────────────────
 
-function buildFileContext(tab: EditorTab, selection?: string): string {
-  const lines = tab.content.split('\n');
-  const totalLines = lines.length;
+function truncateFileContent(content: string, maxLines = 120): string {
+  const lines = content.split('\n');
+  if (lines.length <= maxLines) return content;
+  const head = lines.slice(0, 150).join('\n');
+  const tail = lines.slice(-100).join('\n');
+  return `${head}\n\n// ... (${lines.length - 250} linii omise) ...\n\n${tail}`;
+}
 
-  let content = tab.content;
-
-  // Dacă fișierul e foarte mare, trimitem doar primele + ultimele linii
-  if (totalLines > 400) {
-    const head = lines.slice(0, 150).join('\n');
-    const tail = lines.slice(-100).join('\n');
-    content = `${head}\n\n// ... (${totalLines - 250} linii omise) ...\n\n${tail}`;
+/** Mesajul final include întotdeauna fișierul activ — modele mici (Ollama) citesc ultimul user msg */
+export function buildFinalUserMessage(
+  userMessage: string,
+  activeTab: EditorTab | null,
+  includeMode: ContextOptions['includeMode'],
+  selection?: string,
+  skipActiveFile?: boolean
+): string {
+  if (includeMode === 'selection' && selection) {
+    return userMessage;
+  }
+  if (skipActiveFile || !activeTab?.content?.trim()) {
+    return userMessage;
   }
 
-  let ctx = `Fișier activ: \`${tab.path}\`\n\`\`\`${tab.language}\n${content}\n\`\`\``;
+  const content = truncateFileContent(activeTab.content);
+  let block = `Cod din fișierul activ \`${activeTab.path}\`:\n\`\`\`${activeTab.language}\n${content}\n\`\`\``;
+  if (selection?.trim()) {
+    block += `\n\nSelecție curentă:\n\`\`\`${activeTab.language}\n${selection}\n\`\`\``;
+  }
+  return `${userMessage}\n\n---\n${block}`;
+}
 
-  if (selection) {
-    ctx += `\n\nSelecție curentă (liniile selectate):\n\`\`\`${tab.language}\n${selection}\n\`\`\``;
+/** Normalizează rezultatele context-search IPC (chunk wrapper sau flat) */
+export function formatContextSearchResults(
+  results: Array<Record<string, unknown>>
+): string {
+  return results
+    .map((r) => {
+      const chunk = r.chunk as { path?: string; text?: string } | undefined;
+      const path = chunk?.path ?? (r.path as string | undefined) ?? 'unknown';
+      const text =
+        chunk?.text ??
+        (r.snippet as string | undefined) ??
+        (r.content as string | undefined) ??
+        '';
+      return `File: ${path}\n${text}`;
+    })
+    .join('\n\n---\n\n');
+}
+
+/** Rezolvă @mentions la conținut fișier (max 6 fișiere) */
+export async function resolveMentionFiles(
+  mentions: string[],
+  projectPath: string | null,
+  readFile: (path: string) => Promise<{ ok: boolean; content?: string }>
+): Promise<Array<{ path: string; name: string; content: string }>> {
+  if (!projectPath || mentions.length === 0) return [];
+
+  const sep = projectPath.includes('\\') ? '\\' : '/';
+  const resolved: Array<{ path: string; name: string; content: string }> = [];
+
+  for (const mention of mentions.slice(0, 6)) {
+    const candidates = [
+      mention,
+      `${projectPath}${sep}${mention.replace(/\//g, sep)}`,
+    ];
+    for (const candidate of candidates) {
+      const res = await readFile(candidate);
+      if (res.ok && res.content) {
+        resolved.push({
+          path: candidate,
+          name: mention,
+          content: res.content.slice(0, 8_000),
+        });
+        break;
+      }
+    }
   }
 
-  return ctx;
+  return resolved;
 }

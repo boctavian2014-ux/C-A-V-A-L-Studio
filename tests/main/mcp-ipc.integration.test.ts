@@ -11,9 +11,10 @@ const harness = createIpcHarness();
 const mcpMocks = vi.hoisted(() => ({
   loadFromConfig: vi.fn(),
   list: vi.fn().mockReturnValue([
-    { id: "fetch", name: "MCP Fetch", running: false, transport: "stdio" },
+    { id: "fetch", name: "MCP Fetch", running: false, tools: [], toolDetails: [] },
   ]),
-  start: vi.fn().mockResolvedValue({ serverId: "fetch", running: true }),
+  getToolDefinitions: vi.fn().mockReturnValue([]),
+  start: vi.fn().mockResolvedValue({ id: "fetch", name: "MCP Fetch", running: true, tools: [], toolDetails: [] }),
   stop: vi.fn(),
   callTool: vi.fn().mockResolvedValue({ ok: true, output: { body: "mock-response" } }),
 }));

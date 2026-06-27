@@ -1,8 +1,20 @@
-import { dialog, ipcMain, BrowserWindow } from "electron";
+import { dialog, ipcMain, BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  applyCadCloudEnvDefaults,
+  DEFAULT_CAD_CLOUD_URL,
+  isCadCloudOnly,
+} from "./cad-config";
+import { ensureCadLocalServer, localCadUrl } from "./cad-local-server";
+import { tryInstallOpenScad } from "../../engineering/cad-server/openscad-install";
 
-const DEFAULT_CAD_API_URL = "https://c-a-v-a-l-studio-production.up.railway.app";
+let resolvedBaseUrl: string | null = null;
+
+/** Clear cached URL so the next request re-resolves. */
+export function resetCadBaseUrlCache(): void {
+  resolvedBaseUrl = null;
+}
 
 /** Ensures CAD_API_URL is a valid absolute URL (adds https:// if omitted). */
 export function normalizeCadApiUrl(raw: string): string {
@@ -14,18 +26,86 @@ export function normalizeCadApiUrl(raw: string): string {
   return url;
 }
 
-const cadBaseUrl = (): string => {
-  if (process.env.CAD_API_URL?.trim()) {
-    return normalizeCadApiUrl(process.env.CAD_API_URL);
+async function probeHealth(baseUrl: string, timeoutMs = 1_200): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
   }
-  if (process.env.CAD_USE_LOCAL === "1") {
-    return `http://127.0.0.1:${process.env.CAD_PORT ?? 8791}`;
+}
+
+/** Cloud-only (default Electron) or explicit CAD_API_URL; local only when CAD_CLOUD_ONLY=0. */
+export async function resolveCadBaseUrl(): Promise<string> {
+  applyCadCloudEnvDefaults();
+
+  if (resolvedBaseUrl && (await probeHealth(resolvedBaseUrl, 1_500))) {
+    return resolvedBaseUrl;
   }
-  return DEFAULT_CAD_API_URL;
+
+  const explicit = process.env.CAD_API_URL?.trim();
+  if (explicit) {
+    resolvedBaseUrl = normalizeCadApiUrl(explicit);
+    return resolvedBaseUrl;
+  }
+
+  if (isCadCloudOnly()) {
+    resolvedBaseUrl = normalizeCadApiUrl(DEFAULT_CAD_CLOUD_URL);
+    return resolvedBaseUrl;
+  }
+
+  const local = localCadUrl();
+  await ensureCadLocalServer();
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await probeHealth(local, 2_500)) {
+      resolvedBaseUrl = local;
+      process.env.CAD_API_URL = local;
+      process.env.CAD_USE_LOCAL = "1";
+      return local;
+    }
+    if (attempt < 2) {
+      await new Promise((r) => setTimeout(r, 800));
+      await ensureCadLocalServer();
+    }
+  }
+
+  resolvedBaseUrl = local;
+  return local;
+}
+
+const cadFetchHint = (base: string): string =>
+  isCadCloudOnly()
+    ? `Server CAD cloud (${base}). Verifică URL-ul în Setări → CAD Cloud.`
+    : `CAD API (${base}). Setează cad.apiUrl sau rulează: npm run cad:serve`;
+
+const cadAuthHeaders = (cavalId?: string): Record<string, string> => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const apiKey = process.env.CAD_API_KEY?.trim();
+  if (apiKey) headers["x-cad-api-key"] = apiKey;
+  if (cavalId?.trim()) headers["x-caval-user-id"] = cavalId.trim();
+  return headers;
 };
 
-const cadFetchHint = (): string =>
-  `CAD API (${cadBaseUrl()}). Set CAD_API_URL in .env or CAD_USE_LOCAL=1 for cad:serve.`;
+const resolveCavalId = (inputCavalId?: string): string => inputCavalId?.trim() || "anonymous";
+
+const cadFetchJson = async <T>(
+  pathSuffix: string,
+  init: RequestInit & { cavalId?: string } = {}
+): Promise<{ ok: boolean; status: number; json: T }> => {
+  const { cavalId, ...fetchInit } = init;
+  const headers = {
+    ...cadAuthHeaders(cavalId),
+    ...(fetchInit.headers as Record<string, string> | undefined),
+  };
+  const base = await resolveCadBaseUrl();
+  const res = await fetch(`${base}${pathSuffix}`, { ...fetchInit, headers });
+  const json = (await res.json()) as T;
+  return { ok: res.ok, status: res.status, json };
+};
 
 export interface CadCreateJobInput {
   prompt: string;
@@ -40,26 +120,29 @@ export interface CadCreateJobInput {
   };
   openRouterApiKey?: string;
   meshApiKey?: string;
-  quality?: 'standard' | 'high';
-  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  quality?: "standard" | "high";
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   previousScad?: string;
-  generationMode?: 'openscad' | 'mesh';
+  generationMode?: "openscad" | "mesh";
   meshPrompt?: string;
   previousMeshTaskId?: string;
+  attachments?: Array<{ path: string; name: string; content: string }>;
 }
 
 export interface CadPlanInput {
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
   latestUserText: string;
   openRouterApiKey?: string;
+  meshApiKey?: string;
   previousMeshTaskId?: string;
+  cavalId?: string;
 }
 
 export interface CadPlanResult {
-  action: 'clarify' | 'generate';
-  userLanguage: 'ro' | 'en';
-  intent: 'mechanical' | 'organic' | 'figurine' | 'mixed';
-  pipeline: 'openscad' | 'mesh';
+  action: "clarify" | "generate";
+  userLanguage: "ro" | "en";
+  intent: "mechanical" | "organic" | "figurine" | "mixed";
+  pipeline: "openscad" | "mesh";
   questions?: string[];
   assistantMessage?: string;
   technicalPrompt: string;
@@ -77,71 +160,154 @@ export interface CadJobResponse {
   error?: string | null;
   dimensions?: { x: number; y: number; z: number } | null;
   meshTaskId?: string | null;
+  logs?: Array<{ at: string; level: string; event: string; message?: string }>;
 }
 
+const mapFetchError = async (error: unknown): Promise<{ ok: false; error: string }> => {
+  const message = error instanceof Error ? error.message : String(error);
+  const base = await resolveCadBaseUrl();
+  const hint =
+    message === "fetch failed"
+      ? `${message} — nu pot accesa ${cadFetchHint(base)}`
+      : message;
+  return { ok: false, error: hint };
+};
+
 export const registerCadHandlers = (): void => {
-  ipcMain.handle("cad:plan", async (_event, input: CadPlanInput) => {
+  ipcMain.handle("cad:isCloudOnly", () => ({
+    ok: true,
+    cloudOnly: isCadCloudOnly(),
+    defaultUrl: DEFAULT_CAD_CLOUD_URL,
+  }));
+
+  ipcMain.handle("cad:plan", async (_event: IpcMainInvokeEvent, input: CadPlanInput) => {
     if (!input?.latestUserText?.trim()) {
       return { ok: false, error: "latestUserText is required" };
     }
     try {
-      const res = await fetch(`${cadBaseUrl()}/cad/plan`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const json = (await res.json()) as { ok: boolean; plan?: CadPlanResult; error?: string };
-      if (!res.ok) {
-        return { ok: false, error: json.error ?? `CAD plan error (${res.status})` };
+      const { ok, status, json } = await cadFetchJson<{ ok: boolean; plan?: CadPlanResult; error?: string }>(
+        "/cad/plan",
+        {
+          method: "POST",
+          cavalId: resolveCavalId(input.cavalId),
+          body: JSON.stringify(input),
+        }
+      );
+      if (!ok) {
+        return { ok: false, error: json.error ?? `CAD plan error (${status})` };
       }
       return json;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const hint =
-        message === "fetch failed" ? `${message} — cannot reach ${cadFetchHint()}` : message;
-      return { ok: false, error: hint };
+      return await mapFetchError(error);
     }
   });
 
-  ipcMain.handle("cad:createJob", async (_event, input: CadCreateJobInput) => {
+  ipcMain.handle("cad:health", async () => {
+    try {
+      const base = await resolveCadBaseUrl();
+      const ok = await probeHealth(base, 5_000);
+      if (!ok) {
+        return {
+          ok: false,
+          url: base,
+          cloudOnly: isCadCloudOnly(),
+          error: "Server CAD cloud offline — verifică URL în Setări → CAD Cloud.",
+        };
+      }
+      const res = await fetch(`${base.replace(/\/+$/, "")}/health`);
+      const body = (await res.json()) as Record<string, unknown>;
+      return { ok: true, url: base, cloudOnly: isCadCloudOnly(), ...body };
+    } catch (error) {
+      return {
+        ok: false,
+        url: await resolveCadBaseUrl(),
+        cloudOnly: isCadCloudOnly(),
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("cad:createJob", async (_event: IpcMainInvokeEvent, input: CadCreateJobInput) => {
     if (!input?.prompt?.trim()) {
       return { ok: false, error: "prompt is required" } satisfies CadJobResponse;
     }
     try {
-      const res = await fetch(`${cadBaseUrl()}/cad/jobs`, {
+      const cavalId = resolveCavalId(input.cavalId);
+      const { ok, status, json } = await cadFetchJson<CadJobResponse>("/cad/jobs", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(input),
+        cavalId,
+        body: JSON.stringify({ ...input, cavalId }),
       });
-      const json = (await res.json()) as CadJobResponse;
-      if (!res.ok) {
-        return { ok: false, error: json.error ?? `CAD API error (${res.status})` };
+      if (!ok) {
+        return { ok: false, error: json.error ?? `CAD API error (${status})` };
       }
       return json;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const hint =
-        message === "fetch failed" ? `${message} — cannot reach ${cadFetchHint()}` : message;
-      return { ok: false, error: hint };
+      return await mapFetchError(error);
     }
   });
 
-  ipcMain.handle("cad:getJob", async (_event, jobId: string) => {
-    if (!jobId) return { ok: false, error: "jobId is required" } satisfies CadJobResponse;
-    try {
-      const res = await fetch(`${cadBaseUrl()}/cad/jobs/${encodeURIComponent(jobId)}`);
-      const json = (await res.json()) as CadJobResponse;
-      if (!res.ok) {
-        return { ok: false, error: json.error ?? `CAD API error (${res.status})` };
+  ipcMain.handle(
+    "cad:getJob",
+    async (_event: IpcMainInvokeEvent, input: string | { jobId: string; cavalId?: string }) => {
+      const jobId = typeof input === "string" ? input : input?.jobId;
+      const cavalId = typeof input === "string" ? undefined : input?.cavalId;
+      if (!jobId) return { ok: false, error: "jobId is required" } satisfies CadJobResponse;
+      try {
+        const { ok, status, json } = await cadFetchJson<CadJobResponse>(
+          `/cad/jobs/${encodeURIComponent(jobId)}`,
+          { method: "GET", cavalId: resolveCavalId(cavalId) }
+        );
+        if (!ok) {
+          return { ok: false, error: json.error ?? `CAD API error (${status})` };
+        }
+        return json;
+      } catch (error) {
+        return await mapFetchError(error);
       }
-      return json;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const hint =
-        message === "fetch failed" ? `${message} — cannot reach ${cadFetchHint()}` : message;
-      return { ok: false, error: hint };
     }
-  });
+  );
+
+  ipcMain.handle(
+    "cad:cancelJob",
+    async (_event: IpcMainInvokeEvent, input: { jobId: string; cavalId?: string }) => {
+      if (!input?.jobId) return { ok: false, error: "jobId is required" };
+      try {
+        const { ok, status, json } = await cadFetchJson<CadJobResponse>(
+          `/cad/jobs/${encodeURIComponent(input.jobId)}`,
+          {
+            method: "DELETE",
+            cavalId: resolveCavalId(input.cavalId),
+          }
+        );
+        if (!ok) {
+          return { ok: false, error: json.error ?? `CAD cancel error (${status})` };
+        }
+        return json;
+      } catch (error) {
+        return await mapFetchError(error);
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "cad:getJobLogs",
+    async (_event: IpcMainInvokeEvent, input: { jobId: string; cavalId?: string }) => {
+      if (!input?.jobId) return { ok: false, error: "jobId is required" };
+      try {
+        const { ok, status, json } = await cadFetchJson<CadJobResponse>(
+          `/cad/jobs/${encodeURIComponent(input.jobId)}/logs`,
+          { method: "GET", cavalId: resolveCavalId(input.cavalId) }
+        );
+        if (!ok) {
+          return { ok: false, error: json.error ?? `CAD logs error (${status})` };
+        }
+        return json;
+      } catch (error) {
+        return await mapFetchError(error);
+      }
+    }
+  );
 
   ipcMain.handle(
     "cad:downloadStl",
@@ -203,4 +369,29 @@ export const registerCadHandlers = (): void => {
       }
     }
   );
+
+  ipcMain.handle("cad:installOpenScad", async () => {
+    if (isCadCloudOnly()) {
+      return {
+        ok: false,
+        installed: false,
+        error: "OpenSCAD rulează pe serverul cloud — nu e nevoie de instalare locală.",
+      };
+    }
+    try {
+      const result = await tryInstallOpenScad();
+      resetCadBaseUrlCache();
+      return {
+        ok: result.ok,
+        installed: result.ok,
+        error: result.error,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        installed: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
 };

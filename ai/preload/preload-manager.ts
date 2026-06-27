@@ -13,6 +13,7 @@ import { preloadEventBus, type PreloadSignals, type PreloadStage, type PreloadTa
 import { preloadPredictor } from "./preload-predictor";
 import { createDefaultStrategies, mergeTargets } from "./preload-strategy";
 import type { WorkerRequest, WorkerResponse } from "./preload-worker";
+import { zeroLatencyFusion } from "../composer/zero-latency/zl-fusion";
 
 export interface PreloadStatus {
   enabled: boolean;
@@ -76,6 +77,7 @@ export class PreloadManager {
   }
 
   async onWorkspaceOpen(workspaceRoot: string, openFiles: string[] = []): Promise<void> {
+    zeroLatencyFusion.onWorkspaceOpen(workspaceRoot, openFiles);
     this.workspaceRoot = workspaceRoot;
     this.cache.configure(workspaceRoot);
     await this.cache.restore();
@@ -456,7 +458,7 @@ export class PreloadManager {
 
   private async warmContextIndex(workspaceRoot: string): Promise<void> {
     try {
-      const { ContextEngineApi } = await import("../../context-engine/api");
+      const { ContextEngineApi } = await import("../../context-engine/api.js");
       const engine = new ContextEngineApi();
       void engine.indexWorkspace(workspaceRoot).catch(() => undefined);
     } catch {

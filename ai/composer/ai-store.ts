@@ -6,10 +6,28 @@ import {
   type ApiKeys,
 } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
+import { isByokModel, hasOpenRouterKey } from '../models/model-readiness';
 import { getAgentMode, type AgentModeId } from '../modes/agent-modes';
-import { buildContextMessages, parseMentions } from '../context-engine/context-builder';
+import {
+  buildContextMessages,
+  buildFastChatMessages,
+  parseMentions,
+  formatContextSearchResults,
+  resolveMentionFiles,
+  shouldAttachProjectContext,
+} from '../context-engine/context-builder';
+import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { applyUnifiedDiff } from '../../src/shared/diff-utils';
 import type { CavalStreamChunk } from '../../src/main/preload';
+import {
+  type ChatActivityPhase,
+  type ChatActivityStep,
+  createInitialActivitySteps,
+  markAllActivityDone,
+  patchActivityStep,
+} from './chat-activity-types';
+import { hashChatDraft } from './chat-prepare';
 
 export interface ChatAttachment {
   id: string;
@@ -28,10 +46,22 @@ export interface ChatMessage {
   isStreaming?: boolean;
   error?: string;
   diff?: DetectedDiff;
+  activitySteps?: ChatActivityStep[];
+  reasoning?: string;
+  reasoningExpanded?: boolean;
+}
+
+export interface ChatPrepareState {
+  draftHash: string;
+  ready: boolean;
+  resolvedModelHint?: string;
+  warmContextReady: boolean;
+  updatedAt: number;
 }
 
 export interface DetectedDiff {
   filePath: string;
+  patch: string;
   original: string;
   modified: string;
   language: string;
@@ -56,11 +86,58 @@ interface CavalWindow {
         model: string;
         mode?: string;
         streamId: string;
-        context?: Record<string, unknown>;
+        workspaceRoot?: string;
+        messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+        context?: {
+          filePath?: string;
+          fileContent?: string;
+          projectContext?: string;
+          mentions?: string[];
+          attachments?: Array<{ path: string; name: string; content: string }>;
+        };
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
-    contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<{ path?: string; content?: string; snippet?: string }> }>;
+    contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<Record<string, unknown>> }>;
+    workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+    workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+    zlPrepare?: (signals: {
+      workspaceRoot: string;
+      objectiveDraft?: string;
+      activeFile?: string;
+      openFiles?: string[];
+    }) => Promise<{ ok: boolean; tokenId?: string }>;
+    zlCancel?: (tokenId: string) => Promise<{ ok: boolean }>;
+    zlPanelOpen?: (input: {
+      workspaceRoot?: string;
+      objectiveDraft?: string;
+      activeFile?: string;
+      openFiles?: string[];
+    }) => Promise<{ ok: boolean; tokenId?: string }>;
+    chatPrepare?: (input: {
+      workspaceRoot: string;
+      objectiveDraft: string;
+      model: string;
+      draftHash: string;
+      activeFile?: string;
+      openFiles?: string[];
+    }) => Promise<{
+      ok: boolean;
+      draftHash: string;
+      warmContextReady: boolean;
+      resolvedModelHint?: string;
+      tokenId?: string;
+    }>;
+    zlCompleteChat?: (signals: {
+      workspaceRoot: string;
+      objectiveDraft?: string;
+      activeFile?: string;
+      openFiles?: string[];
+    }) => Promise<{
+      ok: boolean;
+      prep?: { warmContext: string };
+    }>;
+    settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
     modelsList?: () => Promise<{ catalog?: { all: Array<{ id: string; label: string; color: string }> } }>;
     resolveModel?: (input: { model: string; intent?: string }) => Promise<{
       ok: boolean;
@@ -91,6 +168,8 @@ interface AIStore {
   threads: ChatThread[];
   messages: ChatMessage[];
   isStreaming: boolean;
+  prepareState: ChatPrepareState | null;
+  prepareInFlight: boolean;
   includeMode: IncludeMode;
   setIncludeMode: (mode: IncludeMode) => void;
   attachedFiles: ChatAttachment[];
@@ -102,6 +181,13 @@ interface AIStore {
   deleteThread: (id: string) => void;
 
   sendMessage: (userText: string) => Promise<void>;
+  chatPrepareDraft: (input: {
+    text: string;
+    projectPath: string | null;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => Promise<void>;
+  clearPrepareState: () => void;
   stopStreaming: () => void;
   clearChat: () => void;
   applyDiff: (messageId: string) => void;
@@ -118,28 +204,30 @@ function createThread(): ChatThread {
 }
 
 function detectDiff(content: string, activeTabPath: string | null): DetectedDiff | undefined {
-  const diffMatch = content.match(/```diff\n([\s\S]+?)```/);
-  if (!diffMatch || !activeTabPath) return undefined;
-  const diffText = diffMatch[1];
-  const removedLines = diffText.split('\n').filter((l) => l.startsWith('-')).map((l) => l.slice(1)).join('\n');
-  const addedLines = diffText.split('\n').filter((l) => l.startsWith('+')).map((l) => l.slice(1)).join('\n');
-  if (!addedLines) return undefined;
+  const diffMatch = content.match(/```(?:diff)?\s*\n([\s\S]*?)```/);
+  if (!diffMatch) return undefined;
+  const patch = diffMatch[1].trim();
+  if (!patch.includes('@@')) return undefined;
+
+  const pathMatch =
+    /^--- a\/(.+)$/m.exec(patch) ??
+    /^--- (.+)$/m.exec(patch);
+  const filePath = pathMatch?.[1]?.trim() ?? activeTabPath;
+  if (!filePath) return undefined;
+
+  const removedLines = patch.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---')).map((l) => l.slice(1));
+  const addedLines = patch.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1));
+  if (addedLines.length === 0 && removedLines.length === 0) return undefined;
+
+  const tab = useEditorStore.getState().tabs.find((t) => t.path === filePath);
   return {
-    filePath: activeTabPath,
-    original: removedLines,
-    modified: addedLines,
-    language: 'typescript',
+    filePath,
+    patch,
+    original: removedLines.join('\n'),
+    modified: addedLines.join('\n'),
+    language: tab?.language ?? 'typescript',
     applied: false,
   };
-}
-
-const BYOK_IDS = new Set([
-  'claude-opus-4', 'claude-sonnet-4', 'gpt-4o', 'gpt-4o-mini',
-  'gemini-2.5-pro', 'gemini-2.5-flash', 'ollama-local',
-]);
-
-function isByokModel(id: ModelSelectionId): boolean {
-  return BYOK_IDS.has(id);
 }
 
 function attachmentName(filePath: string): string {
@@ -160,6 +248,8 @@ const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
 
 let abortController: AbortController | null = null;
 let streamCleanup: (() => void) | null = null;
+let prepareTokenId: string | null = null;
+let prepareRequestId = 0;
 
 const initialThread = createThread();
 
@@ -171,12 +261,14 @@ export const useAIStore = create<AIStore>()(
       apiKeys: {},
       modelLabels: {},
       activeResolvedModel: null,
-      includeMode: 'project',
+      includeMode: 'file',
       attachedFiles: [],
       activeThreadId: initialThread.id,
       threads: [initialThread],
       messages: [],
       isStreaming: false,
+      prepareState: null,
+      prepareInFlight: false,
 
       setModel: (id) => {
         set({ selectedModel: id, activeResolvedModel: null });
@@ -285,6 +377,56 @@ export const useAIStore = create<AIStore>()(
         });
       },
 
+      clearPrepareState: () => {
+        if (prepareTokenId) {
+          void getCaval()?.zlCancel?.(prepareTokenId);
+          prepareTokenId = null;
+        }
+        set({ prepareState: null, prepareInFlight: false });
+      },
+
+      chatPrepareDraft: async ({ text, projectPath, activeFile, openFiles }) => {
+        const trimmed = text.trim();
+        if (!trimmed || !projectPath) {
+          get().clearPrepareState();
+          return;
+        }
+
+        const { selectedModel } = get();
+        const draftHash = hashChatDraft(trimmed, selectedModel, projectPath);
+        const requestId = ++prepareRequestId;
+
+        set({ prepareInFlight: true, prepareState: { draftHash, ready: false, warmContextReady: false, updatedAt: Date.now() } });
+
+        const caval = getCaval();
+        const result = await caval?.chatPrepare?.({
+          workspaceRoot: projectPath,
+          objectiveDraft: trimmed,
+          model: selectedModel,
+          draftHash,
+          activeFile,
+          openFiles,
+        });
+
+        if (requestId !== prepareRequestId) return;
+
+        if (result?.ok) {
+          prepareTokenId = result.tokenId ?? null;
+          set({
+            prepareInFlight: false,
+            prepareState: {
+              draftHash: result.draftHash,
+              ready: true,
+              resolvedModelHint: result.resolvedModelHint,
+              warmContextReady: result.warmContextReady,
+              updatedAt: Date.now(),
+            },
+          });
+        } else {
+          set({ prepareInFlight: false });
+        }
+      },
+
       sendMessage: async (userText) => {
         const {
           selectedModel,
@@ -294,9 +436,16 @@ export const useAIStore = create<AIStore>()(
           agentMode,
           activeThreadId,
           attachedFiles,
+          prepareState,
         } = get();
         const modeDef = getAgentMode(agentMode);
         const attachmentsSnapshot = [...attachedFiles];
+
+        const editorState = useEditorStore.getState();
+        const draftHash = hashChatDraft(userText, selectedModel, editorState.projectPath);
+        const prepReady = prepareState?.ready === true && prepareState.draftHash === draftHash;
+        const routeHint = prepReady ? prepareState.resolvedModelHint : undefined;
+        const prepWarmReady = prepReady && prepareState?.warmContextReady === true;
 
         const userMsg: ChatMessage = {
           id: generateId(),
@@ -313,45 +462,32 @@ export const useAIStore = create<AIStore>()(
           timestamp: Date.now(),
           model: selectedModel,
           isStreaming: true,
+          activitySteps: createInitialActivitySteps(prepReady, prepReady, routeHint),
         };
 
         const nextMessages = [...messages, userMsg, assistantMsg];
-        set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
+        set({ messages: nextMessages, isStreaming: true, attachedFiles: [], prepareState: null });
+        prepareTokenId = null;
 
-        const editorState = useEditorStore.getState();
-        const activeTab = editorState.tabs.find((t) => t.id === editorState.activeTabId) ?? null;
+        const caval = (window as unknown as CavalWindow).caval;
+
+        if (editorState.projectPath) {
+          void caval?.zlCompleteChat?.({
+            workspaceRoot: editorState.projectPath,
+            objectiveDraft: userText,
+            activeFile: editorState.tabs.find((t) => t.id === editorState.activeTabId)?.path,
+            openFiles: editorState.tabs.map((t) => t.path),
+          });
+        }
         const mentionPaths = [
           ...parseMentions(userText),
           ...attachmentsSnapshot.map((f) => f.name),
         ];
         const uniqueMentions = [...new Set(mentionPaths)];
-
-        let projectContext = '';
-        const caval = (window as unknown as CavalWindow).caval;
-        if (includeMode === 'project' && caval?.contextSearch) {
-          try {
-            const search = await caval.contextSearch({ query: userText, limit: 8 });
-            if (search.ok && search.results?.length) {
-              projectContext = search.results
-                .map((r) => `File: ${r.path ?? 'unknown'}\n${r.snippet ?? r.content ?? ''}`)
-                .join('\n\n---\n\n');
-            }
-          } catch { /* ignore */ }
-        }
-
-        const contextMessages: AIMessage[] = buildContextMessages(
-          userText,
-          messages.map((m) => ({ role: m.role, content: m.content })),
-          {
-            activeTab,
-            fileTree: editorState.fileTree,
-            projectPath: editorState.projectPath,
-            includeMode,
-            projectContext,
-            mentions: uniqueMentions,
-            attachments: attachmentsSnapshot,
-          }
-        );
+        const attachProject = shouldAttachProjectContext(userText, includeMode, {
+          hasMentions: uniqueMentions.length > 0,
+          hasAttachments: attachmentsSnapshot.length > 0,
+        });
 
         const updateAssistant = (patch: Partial<ChatMessage>) => {
           set((s) => {
@@ -374,35 +510,252 @@ export const useAIStore = create<AIStore>()(
           });
         };
 
-        const finish = (content: string, extra?: Partial<ChatMessage>) => {
-          const diff = detectDiff(content, activeTab?.path ?? null);
-          updateAssistant({ content, isStreaming: false, diff, ...extra });
+        const updateActivity = (
+          phase: ChatActivityPhase,
+          status: 'active' | 'done',
+          detail?: string
+        ) => {
+          set((s) => {
+            const msg = s.messages.find((m) => m.id === assistantMsgId);
+            if (!msg?.activitySteps) return {};
+            const current = msg.activitySteps.find((step) => step.id === phase);
+            if (current?.status === 'done' && status === 'active') return {};
+            const activitySteps = patchActivityStep(msg.activitySteps, phase, status, detail);
+            const updated = s.messages.map((m) =>
+              m.id === assistantMsgId ? { ...m, activitySteps } : m
+            );
+            const updatedThreads = s.threads.map((t) =>
+              t.id === activeThreadId ? { ...t, messages: updated, updatedAt: Date.now() } : t
+            );
+            return { messages: updated, threads: updatedThreads };
+          });
+        };
+
+        let gotFirstDelta = false;
+        let activeStreamBuffer = '';
+        let activeTabPath: string | null = null;
+
+        const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
+          const diff = detectDiff(content, tabPath ?? null);
+          updateAssistant({
+            content,
+            isStreaming: false,
+            diff,
+            reasoningExpanded: false,
+            ...extra,
+          });
           set({ isStreaming: false });
         };
+
+        const handleStreamChunk = (chunk: CavalStreamChunk) => {
+          if (chunk.type === 'reasoning' && chunk.reasoningDelta) {
+            const prev =
+              get().messages.find((m) => m.id === assistantMsgId)?.reasoning ?? '';
+            updateAssistant({ reasoning: prev + chunk.reasoningDelta, reasoningExpanded: true });
+            updateActivity('think', 'active');
+          } else if (chunk.type === 'status' && chunk.phase && chunk.status) {
+            updateActivity(chunk.phase, chunk.status, chunk.detail);
+          }
+          if (chunk.type === 'meta' && chunk.resolvedModel) {
+            updateAssistant({ resolvedModel: chunk.resolvedModel });
+            set({ activeResolvedModel: chunk.resolvedModel });
+          }
+          if (chunk.type === 'delta' && chunk.delta) {
+            if (!gotFirstDelta) {
+              gotFirstDelta = true;
+              updateActivity('think', 'done');
+              updateActivity('write', 'active');
+            }
+            activeStreamBuffer += chunk.delta;
+            updateAssistant({ content: activeStreamBuffer });
+          }
+          if (chunk.type === 'error') {
+            finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error }, activeTabPath);
+            streamCleanup?.();
+            streamCleanup = null;
+          }
+          if (chunk.type === 'done') {
+            const resolved = chunk.model ?? get().messages.find((m) => m.id === assistantMsgId)?.resolvedModel;
+            if (resolved) set({ activeResolvedModel: resolved });
+            const finalSteps = markAllActivityDone(
+              get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
+                createInitialActivitySteps()
+            );
+            finish(
+              activeStreamBuffer || get().messages.find((m) => m.id === assistantMsgId)?.content || '',
+              { resolvedModel: resolved, activitySteps: finalSteps },
+              activeTabPath
+            );
+            streamCleanup?.();
+            streamCleanup = null;
+          }
+        };
+
+        const startIpcStream = (
+          contextMessages: AIMessage[],
+          streamContext: {
+            filePath?: string;
+            fileContent?: string;
+            projectContext?: string;
+          }
+        ) => {
+          const streamId = generateId();
+          abortController = new AbortController();
+          activeStreamBuffer = '';
+          gotFirstDelta = false;
+          activeTabPath = streamContext.filePath ?? null;
+
+          streamCleanup = caval?.chatStream?.(
+            {
+              message: userText,
+              model: selectedModel,
+              mode: agentMode === 'ask' ? 'ask' : agentMode,
+              streamId,
+              workspaceRoot: editorState.projectPath ?? undefined,
+              messages: contextMessages.map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
+              context: {
+                filePath: streamContext.filePath,
+                fileContent: streamContext.fileContent,
+                projectContext: streamContext.projectContext,
+                mentions: uniqueMentions,
+                attachments: attachmentsSnapshot.map((f) => ({
+                  path: f.path,
+                  name: f.name,
+                  content: f.content.slice(0, 16_000),
+                })),
+              },
+            },
+            handleStreamChunk
+          ) ?? null;
+
+          if (!streamCleanup) {
+            finish('IPC streaming indisponibil. Repornește aplicația.', undefined, streamContext.filePath);
+          }
+        };
+
+        if (editorState.projectPath) {
+          void caval?.workspaceSync?.(editorState.projectPath);
+        }
+
+        const isFastChat =
+          !attachProject &&
+          !isByokModel(selectedModel) &&
+          uniqueMentions.length === 0 &&
+          attachmentsSnapshot.length === 0;
+
+        if (isFastChat) {
+          const contextMessages = buildFastChatMessages(
+            userText,
+            messages.map((m) => ({ role: m.role, content: m.content }))
+          );
+          startIpcStream(contextMessages, {});
+          return;
+        }
+
+        let activeTab = editorState.tabs.find((t) => t.id === editorState.activeTabId) ?? null;
+
+        if (activeTab?.path && activeTab.isDirty && caval?.fs?.readFile) {
+          try {
+            const fresh = await caval.fs.readFile(activeTab.path);
+            if (fresh.ok && fresh.content != null) {
+              activeTab = { ...activeTab, content: fresh.content };
+            }
+          } catch { /* ignore */ }
+        }
+
+        let projectContext = '';
+        if (attachProject) {
+          if (!prepReady) {
+            updateActivity('prepare', 'active');
+          }
+          if (!prepWarmReady && caval?.contextSearch) {
+            try {
+              const searchQuery =
+                userText.trim().length > 3
+                  ? userText
+                  : [activeTab?.path, editorState.projectPath].filter(Boolean).join(' ');
+              const search = await caval.contextSearch({ query: searchQuery, limit: 6 });
+              if (search.ok && search.results?.length) {
+                projectContext = formatContextSearchResults(search.results);
+              }
+            } catch { /* ignore */ }
+          }
+          updateActivity('prepare', 'done');
+        }
+
+        const mentionFiles =
+          uniqueMentions.length > 0 && caval?.fs?.readFile
+            ? await resolveMentionFiles(
+                uniqueMentions,
+                editorState.projectPath,
+                (p) => caval.fs!.readFile!(p)
+              )
+            : [];
+
+        const contextMessages: AIMessage[] = buildContextMessages(
+          userText,
+          messages.map((m) => ({ role: m.role, content: m.content })),
+          {
+            activeTab,
+            fileTree: attachProject ? editorState.fileTree : [],
+            projectPath: editorState.projectPath,
+            includeMode: attachProject ? includeMode : 'file',
+            skipActiveFile: !attachProject,
+            projectContext,
+            mentions: uniqueMentions,
+            mentionFiles,
+            attachments: attachmentsSnapshot,
+          }
+        );
 
         if (isByokModel(selectedModel)) {
           let provider;
           try {
+            assertRendererChatAllowed({
+              prompt: userText,
+              workspaceRoot: editorState.projectPath,
+              capability: agentMode === 'architect' ? 'planning' : 'chat',
+              intent: agentMode === 'debug' ? 'debug' : 'kilocode',
+            });
             provider = createProvider(selectedModel as never, apiKeys);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            finish(`Eroare: ${msg}`, { error: msg });
+            finish(`Eroare: ${msg}`, { error: msg }, activeTab?.path);
             return;
           }
 
+          updateActivity('route', 'active');
+          updateActivity('route', 'done', selectedModel);
+          updateActivity('connect', 'active');
+          updateActivity('connect', 'done');
+          updateActivity('think', 'active');
+
           abortController = new AbortController();
           let fullContent = '';
+          let byokFirstDelta = false;
           try {
             await provider.streamChat(
               contextMessages,
               ({ delta, done, error }) => {
                 if (error) {
-                  finish(`Eroare API: ${error}`, { error });
+                  finish(`Eroare API: ${error}`, { error }, activeTab?.path);
                   return;
+                }
+                if (!byokFirstDelta && delta) {
+                  byokFirstDelta = true;
+                  updateActivity('think', 'done');
+                  updateActivity('write', 'active');
                 }
                 fullContent += delta;
                 if (done) {
-                  finish(fullContent, { resolvedModel: selectedModel });
+                  const finalSteps = markAllActivityDone(
+                    get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
+                      createInitialActivitySteps()
+                  );
+                  finish(fullContent, { resolvedModel: selectedModel, activitySteps: finalSteps }, activeTab?.path);
                   set({ activeResolvedModel: selectedModel });
                 }
                 else updateAssistant({ content: fullContent });
@@ -411,61 +764,17 @@ export const useAIStore = create<AIStore>()(
             );
           } catch (err: unknown) {
             if (err instanceof Error && err.name !== 'AbortError') {
-              finish(`Eroare de rețea: ${err.message}`, { error: err.message });
+              finish(`Eroare de rețea: ${err.message}`, { error: err.message }, activeTab?.path);
             }
           }
           return;
         }
 
-        const streamId = generateId();
-        abortController = new AbortController();
-
-        streamCleanup = caval?.chatStream?.(
-          {
-            message: userText,
-            model: selectedModel,
-            mode: agentMode === 'ask' ? 'ask' : agentMode,
-            streamId,
-            context: {
-              filePath: activeTab?.path,
-              fileContent: activeTab?.content,
-              projectContext,
-              mentions: uniqueMentions,
-              attachments: attachmentsSnapshot.map((f) => ({
-                path: f.path,
-                name: f.name,
-                content: f.content.slice(0, 16_000),
-              })),
-            },
-          },
-          (chunk: CavalStreamChunk) => {
-            if (chunk.type === 'meta' && chunk.resolvedModel) {
-              updateAssistant({ resolvedModel: chunk.resolvedModel });
-              set({ activeResolvedModel: chunk.resolvedModel });
-            }
-            if (chunk.type === 'delta' && chunk.delta) {
-              const current = get().messages.find((m) => m.id === assistantMsgId);
-              updateAssistant({ content: (current?.content ?? '') + chunk.delta });
-            }
-            if (chunk.type === 'error') {
-              finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error });
-              streamCleanup?.();
-              streamCleanup = null;
-            }
-            if (chunk.type === 'done') {
-              const current = get().messages.find((m) => m.id === assistantMsgId);
-              const resolved = chunk.model ?? current?.resolvedModel;
-              if (resolved) set({ activeResolvedModel: resolved });
-              finish(current?.content ?? '', { resolvedModel: resolved });
-              streamCleanup?.();
-              streamCleanup = null;
-            }
-          }
-        ) ?? null;
-
-        if (!streamCleanup) {
-          finish('IPC streaming indisponibil. Repornește aplicația.');
-        }
+        startIpcStream(contextMessages, {
+          filePath: attachProject ? activeTab?.path : undefined,
+          fileContent: attachProject ? activeTab?.content : undefined,
+          projectContext,
+        });
       },
 
       stopStreaming: () => {
@@ -489,14 +798,29 @@ export const useAIStore = create<AIStore>()(
         });
       },
 
-      applyDiff: (messageId) => {
+      applyDiff: async (messageId) => {
         const msg = get().messages.find((m) => m.id === messageId);
         if (!msg?.diff || msg.diff.applied) return;
-        const { tabs, updateTabContent } = useEditorStore.getState();
-        const tab = tabs.find((t) => t.path === msg.diff!.filePath);
+        const { tabs, updateTabContent, openFile } = useEditorStore.getState();
+        let tab = tabs.find((t) => t.path === msg.diff!.filePath);
+        if (!tab) {
+          await openFile(msg.diff.filePath);
+          tab = useEditorStore.getState().tabs.find((t) => t.path === msg.diff!.filePath);
+        }
         if (!tab) return;
-        const newContent = tab.content.replace(msg.diff.original, msg.diff.modified);
+
+        const newContent = applyUnifiedDiff(tab.content, msg.diff.patch);
         updateTabContent(tab.id, newContent);
+
+        const writeResult = await window.caval?.fs?.writeFile?.(tab.path, newContent);
+        if (writeResult && !writeResult.ok) {
+          console.error('[ai-store] applyDiff write failed:', writeResult.error);
+        } else if (writeResult?.ok) {
+          useEditorStore.setState((s) => ({
+            tabs: s.tabs.map((t) => (t.id === tab!.id ? { ...t, isDirty: false } : t)),
+          }));
+        }
+
         set((s) => ({
           messages: s.messages.map((m) =>
             m.id === messageId && m.diff ? { ...m, diff: { ...m.diff, applied: true } } : m
@@ -523,8 +847,12 @@ export const useAIStore = create<AIStore>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        if (state.includeMode === 'file') {
-          state.includeMode = 'project';
+        if (state.selectedModel === 'caval-auto/free') {
+          void getCaval()?.secretsGet?.().then((res) => {
+            if (hasOpenRouterKey(undefined, res?.secrets)) {
+              useAIStore.setState({ selectedModel: 'caval-auto/balanced' });
+            }
+          });
         }
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
         if (thread) state.messages = thread.messages;

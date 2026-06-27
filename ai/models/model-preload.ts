@@ -63,8 +63,10 @@ export function preloadCoreModels(): void {
   for (const config of configs) {
     preloadModel(config.id, { priority: config.priority, background: true });
   }
-  // Always warm local fallback for offline / free tier
-  preloadModel(LOCAL_FALLBACK_ID, { priority: 40, background: true });
+  // Warm Ollama only when cloud keys are absent — avoids RAM/CPU fight with OpenRouter
+  if (!process.env.OPENROUTER_API_KEY?.trim()) {
+    preloadModel(LOCAL_FALLBACK_ID, { priority: 40, background: true });
+  }
 }
 
 /** Contextual preload when a project is opened. */

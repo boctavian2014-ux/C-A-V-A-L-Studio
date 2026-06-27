@@ -7,7 +7,11 @@ import { modelProfiles, getModelProfile, type ModelProfile } from "../model-prof
 import type { RoutingIntent } from "../types";
 import type { AutoTierId, ModelSelectionId } from "./model-catalog";
 import { isAutoTier } from "./model-catalog";
+import { getOllamaBaseUrl, isOllamaReachable } from "./ollama-client";
 
+import { hasOpenRouterKey } from "./model-readiness";
+
+export { isOllamaReachable } from "./ollama-client";
 export interface ResolvedModel {
   selectionId: ModelSelectionId;
   modelId: string;
@@ -15,7 +19,7 @@ export interface ResolvedModel {
   reason: string;
 }
 
-const OLLAMA_TAGS_URL = process.env.OLLAMA_BASE_URL?.replace(/\/api\/chat$/, "") ?? "http://localhost:11434";
+const OLLAMA_TAGS_URL = getOllamaBaseUrl();
 
 let installedOllamaModels: string[] | null = null;
 let ollamaFetchedAt = 0;
@@ -77,18 +81,31 @@ function rankLocalFree(installed: string[]): ModelProfile[] {
 
 /** Lista ordonată de încercat pentru Auto Free (cu fallback) */
 export async function getAutoFreeModelCandidates(): Promise<string[]> {
+  if (hasOpenRouterKey()) {
+    return [
+      "stepfun-step-3-7-flash",
+      ...getAutoBalancedModelCandidates().filter((id) => id !== "stepfun-step-3-7-flash"),
+    ];
+  }
   const installed = await getInstalledOllamaModels();
   return rankLocalFree(installed).map((p) => p.id);
 }
 
-export async function isOllamaReachable(): Promise<boolean> {
-  try {
-    const res = await fetch(`${OLLAMA_TAGS_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    return res.ok;
-  } catch {
-    return false;
-  }
+/** Lista ordonată de fallback pentru Auto Balanced (cloud, non-premium) */
+export function getAutoBalancedModelCandidates(intent: RoutingIntent = "kilocode"): string[] {
+  const router = new ModelRouter();
+  const ranked = router.rank({
+    prompt: "",
+    capability: "chat",
+    intent,
+    metadata: { userTier: "pro" },
+  });
+  return ranked
+    .filter((r) => r.model.costEstimate !== "premium" && r.model.costEstimate !== "local")
+    .map((r) => r.model.id);
 }
+
+export const FAST_CHAT_MODEL_ID = "stepfun-step-3-7-flash";
 
 export async function resolveAutoModel(
   tier: AutoTierId,
@@ -97,6 +114,14 @@ export async function resolveAutoModel(
   const router = new ModelRouter();
 
   if (tier === "caval-auto/free") {
+    if (hasOpenRouterKey()) {
+      return {
+        selectionId: tier,
+        modelId: "stepfun-step-3-7-flash",
+        provider: "openrouter",
+        reason: "Auto Free: OpenRouter activ — StepFun Flash (rapid, cloud)",
+      };
+    }
     const installed = await getInstalledOllamaModels();
     const ranked = rankLocalFree(installed);
     const [best] = ranked;
@@ -111,6 +136,15 @@ export async function resolveAutoModel(
         : installed.length > 0
           ? `Auto Free: ${modelId} (instalat local)`
           : `Auto Free: ${modelId} (fallback — rulează ollama pull ${modelId})`,
+    };
+  }
+
+  if (tier === "caval-auto/balanced" && hasOpenRouterKey()) {
+    return {
+      selectionId: tier,
+      modelId: FAST_CHAT_MODEL_ID,
+      provider: "openrouter",
+      reason: "Auto Balanced: StepFun Flash (latency)",
     };
   }
 
@@ -152,6 +186,24 @@ export async function resolveAutoModel(
 }
 
 export async function resolveModelSelection(
+  selectionId: ModelSelectionId,
+  intent: RoutingIntent = "kilocode"
+): Promise<ResolvedModel> {
+  const cacheKey = `${selectionId}:${intent}`;
+  const now = Date.now();
+  if (resolveCache && resolveCache.key === cacheKey && now - resolveCache.at < RESOLVE_CACHE_MS) {
+    return resolveCache.value;
+  }
+
+  const result = await resolveModelSelectionUncached(selectionId, intent);
+  resolveCache = { key: cacheKey, at: now, value: result };
+  return result;
+}
+
+const RESOLVE_CACHE_MS = 60_000;
+let resolveCache: { key: string; at: number; value: ResolvedModel } | null = null;
+
+async function resolveModelSelectionUncached(
   selectionId: ModelSelectionId,
   intent: RoutingIntent = "kilocode"
 ): Promise<ResolvedModel> {

@@ -1,6 +1,6 @@
 import { ModelRouter } from "./model-router";
 import { SafetyGuard } from "./safety/guard";
-import type { ModelRequest, ModelResponse } from "./types";
+import type { ModelRequest, ModelResponse, ModelStreamChunk } from "./types";
 
 export class AIClient {
   constructor(
@@ -13,7 +13,7 @@ export class AIClient {
     return this.router.complete(request);
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<string> {
+  async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
     this.safety.assertRequestAllowed({ ...request, stream: true });
     yield* this.router.stream({ ...request, stream: true });
   }

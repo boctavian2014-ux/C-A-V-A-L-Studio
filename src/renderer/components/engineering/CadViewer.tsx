@@ -25,7 +25,7 @@ export function CadViewer({ stlUrl }: { stlUrl: string | null }) {
     }
     setDimensions(null);
     let alive = true;
-    void import('./CadViewerCanvas').then((mod) => {
+    void import('./CadViewerCanvas.js').then((mod) => {
       if (alive) setViewerCanvas(() => mod.CadViewerCanvas);
     });
     return () => {
@@ -54,8 +54,9 @@ export function CadViewer({ stlUrl }: { stlUrl: string | null }) {
           <div style={{ fontWeight: 600, color: 'var(--caval-text)', marginBottom: 6 }}>
             Niciun model 3D
           </div>
-          <div style={{ maxWidth: 320, lineHeight: 1.5 }}>
-            Descrie piesa (ex: capac drone Ø80mm) și apasă „Generează model 3D”.
+          <div style={{ maxWidth: 340, lineHeight: 1.5 }}>
+            Flux: plan hardware → schematic → o piesă concretă (ex: cadru 5 inch, suport motor).
+            Nu genera „dronă completă” ca un singur STL.
           </div>
         </div>
       </div>

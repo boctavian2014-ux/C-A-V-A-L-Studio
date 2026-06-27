@@ -81,7 +81,7 @@ export function buildCodingEntries(free: CatalogEntry[], paid: CatalogEntry[]): 
 export function getChatModelGroups(catalog: ModelCatalogSnapshot): ChatModelGroups {
   const codingIds = new Set(catalog.coding.map((e) => e.id));
   return {
-    auto: catalog.auto.filter((e) => e.id === "caval-auto/free"),
+    auto: catalog.auto,
     free: sortFeaturedFree(catalog.free),
     paid: sortFeaturedPaid(catalog.paid, codingIds),
     coding: catalog.coding,

@@ -26,6 +26,12 @@ export class ZLModelPreloader {
       warmedModels: models,
     });
   }
+
+  /** Models pre-warmed for this workspace/objective (Zero-Latency Fusion API). */
+  getModelBundle(workspaceRoot: string, objectiveDraft = ""): string[] {
+    const cached = this.cache.get(workspaceRoot, objectiveDraft);
+    return cached?.warmedModels ?? [];
+  }
 }
 
 export const zlModelPreloader = new ZLModelPreloader();

@@ -22,10 +22,10 @@ describe("cad memory store", () => {
 
     const updated = updateMemoryCadJob(job.id, {
       status: "done",
-      stlUrl: "https://example.com/model.stl",
+      stlPath: "caval_test/job.stl",
       generatedScad: "cube(1);",
     });
     expect(updated?.status).toBe("done");
-    expect(getMemoryCadJob(job.id)?.stlUrl).toBe("https://example.com/model.stl");
+    expect(getMemoryCadJob(job.id)?.stlPath).toBe("caval_test/job.stl");
   });
 });

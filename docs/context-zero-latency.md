@@ -141,3 +141,62 @@ sequenceDiagram
   WK-->>WC: warmed context
   WC-->>ZL: RAM cache ready
 ```
+
+## Zero-Latency Fusion (production wiring)
+
+All modules are orchestrated by `ai/composer/zero-latency/zl-fusion.ts` and exposed via IPC (`caval:zl-*`).
+
+```mermaid
+flowchart TB
+  subgraph lifecycle [Workspace lifecycle]
+    Open[Folder open] --> PM[PreloadManager]
+    Open --> ZLF[ZeroLatencyFusion]
+    ZLF --> WC[WarmCacheManager]
+    ZLF --> ZLC[ZeroLatencyComposer.prepare]
+    WC --> PCL[ParallelContextLoader]
+    PCL --> WK[Worker threads]
+    WK --> WCS[WarmCacheStore]
+  end
+
+  subgraph typing [User typing / panel open]
+    AIPanel --> zlPanelOpen[caval:zl-panel-open]
+    Input --> zlPrepare[caval:zl-prepare debounced]
+    zlPanelOpen --> ZLC
+    zlPrepare --> ZLC
+    ZLC --> Preplan[ZLPreplanner]
+    ZLC --> ModelPL[ZLModelPreloader]
+  end
+
+  subgraph enter [Enter / chat stream]
+    Send[ai-store sendMessage] --> ChatIPC[caval:ai-chat-stream]
+    ChatIPC --> Enrich[enrichChatWithZeroLatency]
+    Enrich --> Complete[completeForChat]
+    Complete --> WCS
+    Complete --> ZCache[ZeroLatencyCache]
+    Enrich --> MR[Model Router + SafetyGuard]
+  end
+```
+
+### Lifecycle hooks
+
+| Event | Handler |
+|-------|---------|
+| Workspace open | `preloadManager.onWorkspaceOpen` → `zeroLatencyFusion.onWorkspaceOpen` |
+| File open / change | `warmCacheManager.onFileOpen/onFileChange` + `zlPrepare` |
+| AI Panel open | `caval:zl-panel-open` |
+| User typing | `caval:zl-prepare` (400ms debounce in AIPanel) |
+| Enter / chat | `enrichChatWithZeroLatency` in `model-handlers.ts` |
+| Composer run | `zeroLatencyFusion.prepare` before `AIComposer.run` |
+
+### Cache invalidation
+
+- **File change**: `warmCacheLoader.invalidate(path)` then partial re-warm
+- **Project change**: `warmCacheManager.onProjectChange` + `zeroLatencyCache.clearWorkspace`
+- **Content hash**: warm cache skips unchanged files via `contentHash` comparison
+
+### Why responses feel instant
+
+1. Context is pre-loaded in worker threads before Enter
+2. Models are warmed by `ZLModelPreloader` + `PreloadManager` in parallel
+3. Partial plans exist in `ZeroLatencyCache` before the full request
+4. Chat stream injects warm context instead of rebuilding from scratch

@@ -1,32 +1,37 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAIStore, getModelDisplayLabel, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
 import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
+import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { ChatActivityTimeline } from './ChatActivityTimeline';
+import { ChatReasoningBlock } from './ChatReasoningBlock';
+import { hashChatDraft } from './chat-prepare';
 
 // ──────────────────────────────────────────────
 //  Markdown renderer minimal (fără dependențe externe)
 // ──────────────────────────────────────────────
 
 function renderMarkdown(text: string): string {
-  return text
-    // Blocuri de cod
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-      `<div class="code-block"><div class="code-lang">${lang || 'code'}</div><pre><code>${escHtml(code.trimEnd())}</code></pre></div>`
-    )
-    // Cod inline
-    .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-    // Bold
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // Paragrafe
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/^/, '<p>')
-    .replace(/$/, '</p>');
+  const codeBlocks: string[] = [];
+  let src = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(
+      `<div class="code-block"><div class="code-lang">${escHtml(lang || 'code')}</div><pre><code>${escHtml(code.trimEnd())}</code></pre></div>`
+    );
+    return `\uE000CB${idx}\uE001`;
+  });
+  src = escHtml(src);
+  src = src.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  src = src.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  src = src.replace(/\n\n/g, '</p><p>').replace(/^/, '<p>').replace(/$/, '</p>');
+  src = src.replace(/\uE000CB(\d+)\uE001/g, (_, i) => codeBlocks[Number(i)] ?? '');
+  return src;
 }
 
 function escHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ──────────────────────────────────────────────
@@ -146,8 +151,27 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         WebkitUserSelect: 'text',
         cursor: 'text',
       }}>
-        {message.isStreaming && !message.content ? (
+        {message.reasoning && (
+          <ChatReasoningBlock
+            reasoning={message.reasoning}
+            isStreaming={Boolean(message.isStreaming && !message.content)}
+            defaultExpanded={message.reasoningExpanded ?? true}
+          />
+        )}
+        {message.isStreaming && message.activitySteps?.length ? (
+          <>
+            <ChatActivityTimeline
+              steps={message.activitySteps}
+              collapsed={Boolean(message.content)}
+            />
+            {message.content ? (
+              <StreamingText content={message.content} />
+            ) : null}
+          </>
+        ) : message.isStreaming && !message.content ? (
           <StreamingDots />
+        ) : message.isStreaming ? (
+          <StreamingText content={message.content} />
         ) : (
           <div
             className="caval-md"
@@ -174,21 +198,57 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
 function StreamingDots() {
   return (
-    <div style={{ display: 'flex', gap: 4, padding: '2px 0' }}>
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: 'var(--caval-accent)',
-            animation: `dot-bounce 1.2s ${i * 0.2}s ease-in-out infinite`,
-          }}
-        />
-      ))}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: 'var(--caval-accent)',
+              animation: `dot-bounce 1.2s ${i * 0.2}s ease-in-out infinite`,
+            }}
+          />
+        ))}
+      </div>
+      <span style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>Scriu…</span>
       <style>{`
         @keyframes dot-bounce {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
           40% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function StreamingText({ content }: { content: string }) {
+  return (
+    <div
+      style={{
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'break-word',
+        userSelect: 'text',
+        WebkitUserSelect: 'text',
+        fontFamily: 'inherit',
+      }}
+    >
+      {content}
+      <span
+        style={{
+          display: 'inline-block',
+          width: 2,
+          height: '1em',
+          marginLeft: 2,
+          verticalAlign: 'text-bottom',
+          background: 'var(--caval-accent)',
+          animation: 'cursor-blink 0.9s step-end infinite',
+        }}
+      />
+      <style>{`
+        @keyframes cursor-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
         }
       `}</style>
     </div>
@@ -206,6 +266,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     sendMessage, stopStreaming, clearChat, loadModelLabels,
     threads, activeThreadId, newThread, selectThread,
     attachedFiles, addAttachments, removeAttachment,
+    prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
+    selectedModel,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
@@ -243,10 +305,57 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   }, []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prepareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const projectPath = useEditorStore((s) => s.projectPath);
+  const tabs = useEditorStore((s) => s.tabs);
+  const activeTabId = useEditorStore((s) => s.activeTabId);
+
+  const inputDraftHash = useMemo(
+    () => (input.trim() ? hashChatDraft(input, selectedModel, projectPath) : null),
+    [input, selectedModel, projectPath]
+  );
+
+  const isPrepareReady = Boolean(
+    inputDraftHash &&
+    prepareState?.ready &&
+    prepareState.draftHash === inputDraftHash
+  );
 
   useEffect(() => {
     void loadModelLabels();
   }, [loadModelLabels]);
+
+  // Zero-Latency Fusion: warm cache + model preload when panel opens
+  useEffect(() => {
+    if (!projectPath) return;
+    const activeTab = tabs.find((t) => t.id === activeTabId);
+    void window.caval?.zlPanelOpen?.({
+      workspaceRoot: projectPath,
+      activeFile: activeTab?.path,
+      openFiles: tabs.map((t) => t.path),
+    });
+  }, [projectPath, tabs, activeTabId]);
+
+  // Zero-Latency: prepare while user types (350ms debounce)
+  useEffect(() => {
+    if (!input.trim()) {
+      clearPrepareState();
+      return;
+    }
+    if (prepareTimer.current) clearTimeout(prepareTimer.current);
+    prepareTimer.current = setTimeout(() => {
+      const activeTab = tabs.find((t) => t.id === activeTabId);
+      void chatPrepareDraft({
+        text: input,
+        projectPath,
+        activeFile: activeTab?.path,
+        openFiles: tabs.map((t) => t.path),
+      });
+    }, 350);
+    return () => {
+      if (prepareTimer.current) clearTimeout(prepareTimer.current);
+    };
+  }, [input, projectPath, tabs, activeTabId, chatPrepareDraft, clearPrepareState]);
 
   // Auto-scroll la ultimul mesaj
   useEffect(() => {
@@ -307,6 +416,11 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     { label: 'Bug?', text: 'Există bug-uri în acest cod?' },
   ];
 
+  const handleQuickPrompt = useCallback((text: string) => {
+    setInput(text);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  }, []);
+
   return (
     <div style={{
       width: panelWidth,
@@ -325,24 +439,11 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
       {/* ── Header ─────────────────────────── */}
       <div style={{
-        padding: '10px 14px', borderBottom: `1px solid ${theme.colors.border}`,
-        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 14px', borderBottom: `1px solid ${theme.colors.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
         flexShrink: 0,
       }}>
-        {/* Logo AI */}
-        <div style={{
-          width: 24, height: 24, borderRadius: 6,
-          background: 'var(--caval-accent-glow)', border: '1px solid var(--caval-accent-ring)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        }}>
-          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="var(--caval-accent)" strokeWidth="1.5">
-            <circle cx="6" cy="6" r="4.5" />
-            <path d="M3.5 6h5M6 3.5v5" strokeLinecap="round" />
-          </svg>
-        </div>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Caval AI</span>
-
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {messages.length > 0 && (
           <button
             onClick={clearChat}
@@ -403,22 +504,23 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
       {/* ── Messages ───────────────────────── */}
       <div className="ai-messages-scroll caval-selectable" style={{
-        flex: 1, overflowY: 'auto', padding: '10px',
+        flex: 1, overflowY: 'auto', padding: messages.length === 0 ? 0 : '10px',
         display: 'flex', flexDirection: 'column', gap: 10,
       }}>
-        {messages.length === 0 ? (
-          <EmptyState quickPrompts={QUICK_PROMPTS} onSelect={(t) => setInput(t)} />
-        ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
-        )}
-        <div ref={messagesEndRef} />
+        {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
+        {messages.length > 0 && <div ref={messagesEndRef} />}
       </div>
 
       {/* ── Input ──────────────────────────── */}
       <div style={{
         padding: '10px', borderTop: `1px solid ${theme.colors.border}`,
         flexShrink: 0,
+        display: 'flex', flexDirection: 'column', gap: 8,
       }}>
+        <ChatModeSelect
+          quickPrompts={QUICK_PROMPTS}
+          onQuickPrompt={handleQuickPrompt}
+        />
         <div style={{
           background: 'var(--caval-surface)', border: '1px solid var(--caval-border)',
           borderRadius: 10, overflow: 'hidden',
@@ -432,7 +534,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder="Întreabă Caval AI... (@file, Enter = trimite)"
+            placeholder="Scrie mesajul… (@file, Enter = trimite)"
             disabled={isStreaming}
             style={{
               width: '100%', border: 'none', background: 'transparent',
@@ -508,9 +610,33 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               </IconBtn>
             )}
 
-            {/* Mode + Model + Send */}
+            {(isPrepareReady || (prepareInFlight && input.trim())) && !isStreaming && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 10.5,
+                  color: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-text-muted)',
+                  marginLeft: 2,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-accent)',
+                    opacity: isPrepareReady ? 1 : 0.7,
+                    animation: isPrepareReady ? 'none' : 'dot-bounce 1.2s ease-in-out infinite',
+                  }}
+                />
+                {isPrepareReady ? 'Pregătit' : 'Pregătesc…'}
+              </span>
+            )}
+
+            {/* Model + Send */}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <ChatModeSelect />
               <ChatModelSelect catalog={catalog} loading={catalogLoading} />
               <button
                 onClick={isStreaming ? stopStreaming : handleSend}
@@ -530,56 +656,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Empty state cu quick prompts
-// ──────────────────────────────────────────────
-
-function EmptyState({ quickPrompts, onSelect }: {
-  quickPrompts: { label: string; text: string }[];
-  onSelect: (text: string) => void;
-}) {
-  return (
-    <div style={{ padding: '16px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 28, marginBottom: 8 }}>
-          <svg width="36" height="36" viewBox="0 0 26 26" fill="none" style={{ margin: '0 auto', display: 'block' }}>
-            <polygon points="13,2 24,8 24,18 13,24 2,18 2,8" stroke="var(--caval-accent)" strokeWidth="1.2" fill="rgba(0,224,255,0.06)" />
-            <path d="M8 13 L11 16 L18 10" stroke="var(--caval-accent)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--caval-text)' }}>Caval AI</div>
-        <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginTop: 4, lineHeight: 1.5 }}>
-          Înțelege întregul tău proiect.<br/>Pune o întrebare sau alege un prompt rapid.
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
-        {quickPrompts.map((p) => (
-          <button
-            key={p.label}
-            onClick={() => onSelect(p.text)}
-            style={{
-              padding: '5px 12px', borderRadius: 999, fontSize: 11.5,
-              border: '1px solid var(--caval-border)', background: 'var(--caval-surface)',
-              color: 'var(--caval-text)', cursor: 'pointer', transition: 'all 0.12s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--caval-accent)';
-              e.currentTarget.style.color = 'var(--caval-accent)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--caval-border)';
-              e.currentTarget.style.color = 'var(--caval-text)';
-            }}
-          >
-            {p.label}
-          </button>
-        ))}
       </div>
     </div>
   );

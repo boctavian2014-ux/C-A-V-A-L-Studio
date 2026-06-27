@@ -1,11 +1,13 @@
 appId: com.caval.studio
-productName: Caval Studio
+productName: CAVALO
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 directories:
   output: release/${channel}
   buildResources: installer/assets
 files:
   - dist/**
+  - assets/**
+  - build-icons/**
   - package.json
   - branding/**
   - installer/assets/**
@@ -28,7 +30,7 @@ protocols:
     schemes:
       - caval
 win:
-  icon: installer/assets/icons/win/icon.ico
+  icon: build-icons/icon.ico
   target:
     - target: nsis
       arch:
@@ -46,9 +48,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Caval Studio
+  shortcutName: CAVALO
 mac:
-  icon: installer/assets/icons/mac/icon.icns
+  icon: build-icons/icon.icns
   category: public.app-category.developer-tools
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -69,7 +71,7 @@ dmg:
 pkg:
   scripts: installer/assets/pkg-scripts
 linux:
-  icon: installer/assets/icons/linux
+  icon: build-icons/icon.png
   category: Development
   target:
     - target: deb

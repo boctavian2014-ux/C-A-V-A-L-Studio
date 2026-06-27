@@ -8,6 +8,7 @@ import {
 } from '../../store/settings-store';
 import { PromptLibraryPanel } from './PromptLibraryPanel';
 import { useEditorStore } from '../../store/editor-store';
+import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 
 // ──────────────────────────────────────────────
 //  SettingsPanel — Caval IDE
@@ -19,18 +20,6 @@ import { useEditorStore } from '../../store/editor-store';
 // ── Navigare ──────────────────────────────────
 
 const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode; badge?: string }[] = [
-  {
-    id: 'image-generator',
-    label: 'Image Generator',
-    badge: 'DALL-E 3',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="3" y="3" width="18" height="18" rx="3" />
-        <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none" />
-        <path d="M21 15l-5-5L5 21" strokeLinecap="round" />
-      </svg>
-    ),
-  },
   {
     id: 'asset-manager',
     label: 'Asset Manager',
@@ -62,6 +51,17 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode; ba
         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" />
         <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
         <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    id: 'cad-cloud',
+    label: 'CAD Cloud 3D',
+    badge: 'STL',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinejoin="round" />
+        <path d="M2 17l10 5 10-5M2 12l10 5 10-5" strokeLinejoin="round" />
       </svg>
     ),
   },
@@ -270,74 +270,6 @@ function NumberInput({
       onFocus={(e) => { e.target.style.borderColor = 'rgba(0,224,255,0.4)'; }}
       onBlur={(e) => { e.target.style.borderColor = 'var(--caval-border)'; }}
     />
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Secțiune: Image Generator
-// ──────────────────────────────────────────────
-
-function SectionImageGenerator() {
-  const { app, updateApp } = useSettingsStore();
-
-  return (
-    <>
-      <Section title="Provider AI">
-        <Row label="Provider implicit" desc="Folosit în AI Panel și Image Generator">
-          <Select
-            value={app.aiProvider}
-            onChange={(v) => updateApp({ aiProvider: v })}
-            options={[
-              { value: 'openai',    label: 'OpenAI (GPT-4o + DALL-E 3)' },
-              { value: 'anthropic', label: 'Anthropic (Claude)' },
-              { value: 'google',    label: 'Google (Gemini)' },
-              { value: 'ollama',    label: 'Ollama (Local)' },
-            ]}
-          />
-        </Row>
-      </Section>
-
-      <Section title="DALL-E 3 — Defaults">
-        <InfoBox>
-          Setările implicite sunt aplicate la fiecare generare nouă. Poți schimba
-          parametrii individual din panoul de generare.
-        </InfoBox>
-        <Row
-          label="Calitate implicită"
-          desc="Standard = $0.04/img · HD = $0.08/img"
-        >
-          <Select
-            value={'standard'}
-            onChange={() => {}}
-            options={[
-              { value: 'standard', label: 'Standard' },
-              { value: 'hd',       label: 'HD' },
-            ]}
-          />
-        </Row>
-        <Row label="Stil implicit" desc="Vivid = dramatic · Natural = realist">
-          <Select
-            value={'vivid'}
-            onChange={() => {}}
-            options={[
-              { value: 'vivid',   label: 'Vivid' },
-              { value: 'natural', label: 'Natural' },
-            ]}
-          />
-        </Row>
-        <Row label="Dimensiune implicită">
-          <Select
-            value={'1024x1024'}
-            onChange={() => {}}
-            options={[
-              { value: '1024x1024', label: '1024×1024 (1:1)' },
-              { value: '1792x1024', label: '1792×1024 (16:9)' },
-              { value: '1024x1792', label: '1024×1792 (9:16)' },
-            ]}
-          />
-        </Row>
-      </Section>
-    </>
   );
 }
 
@@ -842,6 +774,137 @@ function SectionExport() {
 }
 
 // ──────────────────────────────────────────────
+//  Secțiune: CAD Cloud 3D
+// ──────────────────────────────────────────────
+
+function SectionCadCloud() {
+  const [apiUrl, setApiUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [meshKey, setMeshKey] = useState('');
+  const [healthMsg, setHealthMsg] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [cloudOnly, setCloudOnly] = useState(true);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await window.caval.settingsLoad?.();
+      const s = res?.settings ?? {};
+      setApiUrl(s['cad.apiUrl'] ?? '');
+      setApiKey(s['cad.apiKey'] ?? '');
+      setMeshKey(s['mesh.apiKey'] ?? '');
+      const mode = await window.caval.cad?.isCloudOnly?.();
+      if (mode?.cloudOnly !== undefined) setCloudOnly(mode.cloudOnly);
+    })();
+  }, []);
+
+  const saveSettings = async () => {
+    const res = await window.caval.settingsLoad?.();
+    const prev = res?.settings ?? {};
+    await window.caval.settingsSave?.({
+      ...prev,
+      'cad.apiUrl': apiUrl.trim(),
+      'cad.apiKey': apiKey.trim(),
+      'mesh.apiKey': meshKey.trim(),
+    });
+  };
+
+  const testConnection = async () => {
+    setTesting(true);
+    setHealthMsg(null);
+    await saveSettings();
+    const health = await window.caval.cad?.health?.();
+    setTesting(false);
+    if (!health) {
+      setHealthMsg('CAD API indisponibil în aplicație.');
+      return;
+    }
+    if (!health.ok) {
+      setHealthMsg(health.error ?? `Offline: ${health.url ?? '?'}`);
+      return;
+    }
+    const parts = [
+      `Conectat: ${health.url}`,
+      health.openscadInstalled ? 'OpenSCAD ✓' : 'OpenSCAD ✗',
+      health.openRouterConfigured ? 'OpenRouter ✓' : 'OpenRouter ✗',
+      health.meshyConfigured ? 'Meshy ✓' : 'Meshy —',
+    ];
+    setHealthMsg(parts.join(' · '));
+  };
+
+  return (
+    <div>
+      <Section title="Server CAD cloud (Railway)">
+        <p style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.5, margin: '0 0 10px' }}>
+          Generarea STL 3D rulează pe serverul cloud — OpenSCAD în Docker pe Railway.
+          {cloudOnly ? ' Mod cloud-only activ.' : ''}
+        </p>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>URL API CAD</div>
+          <Input
+            value={apiUrl}
+            onChange={setApiUrl}
+            placeholder="https://xxx.up.railway.app"
+            mono
+          />
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Cheie API CAD (opțional)</div>
+          <Input
+            value={apiKey}
+            onChange={setApiKey}
+            placeholder="CAD_API_KEY de pe Railway"
+            type="password"
+            mono
+          />
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Cheie Meshy (opțional)</div>
+          <Input
+            value={meshKey}
+            onChange={setMeshKey}
+            placeholder="mesh.apiKey — obiecte organice"
+            type="password"
+            mono
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => void saveSettings()}
+            style={{
+              flex: 1, padding: '8px 0', borderRadius: 6, border: '1px solid var(--caval-border)',
+              background: 'transparent', color: 'var(--caval-text)', fontSize: 12, cursor: 'pointer',
+            }}
+          >
+            Salvează
+          </button>
+          <button
+            type="button"
+            onClick={() => void testConnection()}
+            disabled={testing || !apiUrl.trim()}
+            style={{
+              flex: 1, padding: '8px 0', borderRadius: 6, border: 'none',
+              background: 'var(--caval-accent)', color: '#0E0E0F',
+              fontSize: 12, fontWeight: 600, cursor: testing ? 'wait' : 'pointer',
+            }}
+          >
+            {testing ? 'Testez…' : 'Testează conexiunea'}
+          </button>
+        </div>
+        {healthMsg && (
+          <div style={{
+            marginTop: 10, fontSize: 11, lineHeight: 1.45,
+            color: healthMsg.startsWith('Conectat') ? '#2FBF71' : '#ff7070',
+          }}>
+            {healthMsg}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
 //  Secțiune: Safety & Credits
 // ──────────────────────────────────────────────
 
@@ -1109,18 +1172,16 @@ function SectionAbout() {
         textAlign: 'center',
       }}>
         <div style={{
-          width: 52, height: 52, borderRadius: 12,
-          background: 'linear-gradient(135deg, rgba(0,224,255,0.2), rgba(212,168,87,0.15))',
-          border: '1px solid rgba(0,224,255,0.25)',
+          width: 64, height: 64, borderRadius: 16,
+          background: 'radial-gradient(circle at 35% 30%, rgba(0,224,255,0.12), rgba(0,0,0,0))',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 22, fontWeight: 900, color: 'var(--caval-accent)',
-          fontFamily: "'Sora', sans-serif",
+          filter: 'drop-shadow(0 0 6px rgba(0,224,255,0.45))',
         }}>
-          C
+          <CavaloHorseMark size={52} />
         </div>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', fontFamily: "'Sora', sans-serif" }}>
-            Caval Studio
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', fontFamily: "'Sora', sans-serif", letterSpacing: '0.06em' }}>
+            CAVALO
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginTop: 2 }}>
             Version 0.1.0 · Build 2026.06
@@ -1183,9 +1244,9 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
 
   const renderContent = () => {
     switch (activeSection) {
-      case 'image-generator': return <SectionImageGenerator />;
       case 'asset-manager':   return <SectionAssetManager />;
       case 'context-bridge':  return <SectionContextBridge />;
+      case 'cad-cloud':       return <SectionCadCloud />;
       case 'export':          return <SectionExport />;
       case 'safety':          return <SectionSafety />;
       case 'editor':          return <SectionEditor />;

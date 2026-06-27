@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  bomToCsv,
+  componentsToCsv,
   buildEngineeringPrompt,
-  extractBomRows,
+  extractComponentRows,
   parseEngineeringPlan,
   planToMarkdown,
   SECTION_ORDER,
@@ -25,6 +25,7 @@ describe("engineering-format", () => {
 
     expect(prompt).toContain("Engineering AI");
     expect(prompt).toContain("## REQUIREMENTS");
+    expect(prompt).toContain("## BOM");
     expect(prompt).toContain("## PERFORMANCE");
     expect(prompt).toContain("## UPGRADES");
     expect(prompt).toContain("Dronă FPV 5 inch");
@@ -74,7 +75,7 @@ describe("engineering-format", () => {
     const md = [
       "## REQUIREMENTS",
       "Needs 4S power.",
-      "## BOM",
+      "## Lista componente",
       "| Name | Part/Code | Qty | Role | Notes |",
       "| --- | --- | --- | --- | --- |",
       "| FC | MATEKF405 | 1 | Control | FPV |",
@@ -91,24 +92,60 @@ describe("engineering-format", () => {
     expect(parsed.sections.circuit).toContain("Power -> ESC");
     expect(parsed.sections.performance).toContain("Thrust-to-weight");
     expect(parsed.sections.upgrades).toContain("HDZero");
-    expect(parsed.bomRows).toHaveLength(1);
-    expect(parsed.bomRows[0]?.name).toBe("FC");
+    expect(parsed.componentRows).toHaveLength(1);
+    expect(parsed.componentRows[0]?.name).toBe("FC");
   });
 
-  it("exports BOM to CSV", () => {
-    const rows = extractBomRows(
+  it("still parses legacy ## BOM headings into component rows", () => {
+    const md = [
+      "## BOM",
+      "| Name | Part/Code | Qty | Role | Notes |",
+      "| --- | --- | --- | --- | --- |",
+      "| ESC | BLHeli32 | 4 | Drive | 35A |",
+    ].join("\n");
+
+    const parsed = parseEngineeringPlan(md);
+    expect(parsed.sections.bom).toContain("BLHeli32");
+    expect(parsed.componentRows).toHaveLength(1);
+    expect(parsed.componentRows[0]?.name).toBe("ESC");
+  });
+
+  it("exports component list to CSV", () => {
+    const rows = extractComponentRows(
       "| Name | Part/Code | Qty | Role | Notes |\n| FC | X | 1 | Control | |"
     );
-    const csv = bomToCsv(rows);
+    const csv = componentsToCsv(rows);
     expect(csv).toContain("Name,Part/Code,Qty,Role,Notes");
     expect(csv).toContain('"FC"');
+  });
+
+  it("prioritizes user request over generic templates", () => {
+    const prompt = buildEngineeringPrompt({
+      prompt: "Roata 150mm cu hub M5 pentru robot",
+      projectType: "drone",
+      constraints: {
+        budget: "",
+        dimensions: "150mm",
+        voltage: "",
+        autonomy: "",
+        weight: "",
+        skillLevel: "beginner",
+      },
+    });
+
+    const requestIdx = prompt.indexOf("=== USER REQUEST");
+    const rulesIdx = prompt.indexOf("RULES:");
+    expect(rulesIdx).toBeGreaterThan(-1);
+    expect(requestIdx).toBeGreaterThan(rulesIdx);
+    expect(prompt).toContain("Roata 150mm cu hub M5 pentru robot");
+    expect(prompt).toContain("do NOT replace it with the reference build");
   });
 
   it("rebuilds markdown export with all 8 sections in order", () => {
     const md = [
       "## REQUIREMENTS",
       "Test req",
-      "## BOM",
+      "## Lista componente",
       "Item list",
       "## CIRCUIT",
       "Wiring",
@@ -129,6 +166,7 @@ describe("engineering-format", () => {
 
     expect(exported).toContain("# Test Plan");
     expect(exported).toContain("## REQUIREMENTS");
+    expect(exported).toContain("## Lista componente");
     expect(exported).toContain("## UPGRADES");
 
     const reqIdx = exported.indexOf("## REQUIREMENTS");

@@ -2,7 +2,8 @@
   "name": "caval-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Caval Studio - IDE romanesc premium cu AI frontier, Context Engine si Romania Layer.",
+  "productName": "CAVALO",
+  "description": "CAVALO — IDE romanesc premium cu AI frontier, Context Engine si Romania Layer.",
   "main": "dist/main/electron-main.js",
   "type": "commonjs",
   "engines": {
@@ -13,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "build:css": "postcss styles/pulse-tech.css -o dist/renderer/pulse-tech.css",
     "build": "npm run clean && webpack --mode production && npm run build:css && node scripts/copy-renderer-static.js",
-    "build:dev": "webpack --mode development && npm run build:css && node scripts/copy-renderer-static.js",
+    "build:dev": "node scripts/prune-renderer-bundle.js && webpack --mode development && npm run build:css && node scripts/copy-renderer-static.js",
     "dist": "electron-builder --config installer/config/electron-builder.yml",
     "dist:all": "tsx installer/scripts/build-all.ts",
     "dist:win": "tsx installer/scripts/build-windows.ts",
@@ -26,8 +27,7 @@
     "cicd:publish-release": "tsx .cicd/scripts/publish-release.ts",
     "cicd:publish-marketplace": "tsx .cicd/scripts/publish-marketplace.ts",
     "dev": "webpack --mode development --watch",
-    "prestart": "node scripts/ensure-built.js",
-    "start": "electron .",
+    "start": "node scripts/ensure-built.js && electron .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -46,8 +46,20 @@
     "romania",
     "vscode-fork"
   ],
-  "author": "Caval Studio",
+  "author": "CAVALO",
   "license": "UNLICENSED",
+  "build": {
+    "productName": "CAVALO",
+    "mac": {
+      "icon": "build-icons/icon.icns"
+    },
+    "win": {
+      "icon": "build-icons/icon.ico"
+    },
+    "linux": {
+      "icon": "build-icons/icon.png"
+    }
+  },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/dagre": "^0.7.54",
@@ -78,6 +90,7 @@
     "webpack-cli": "^7.0.3"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",
     "@react-three/drei": "^10.0.0",
     "@react-three/fiber": "^9.1.2",
@@ -97,6 +110,7 @@
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
     "xterm-addon-web-links": "^0.9.0",
+    "zod": "^4.4.3",
     "zustand": "^5.0.14"
   }
 }

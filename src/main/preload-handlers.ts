@@ -2,6 +2,7 @@ import { ipcMain, type WebContents } from "electron";
 
 import { preloadEventBus, type PreloadEvent } from "../../ai/preload/preload-events";
 import { preloadManager, type PreloadStatus } from "../../ai/preload/preload-manager";
+import { zeroLatencyFusion } from "../../ai/composer/zero-latency/zl-fusion";
 import type { PreloadStage } from "../../ai/preload/preload-events";
 import type { RoutingIntent, ModelCapability } from "../../ai/types";
 
@@ -62,6 +63,10 @@ export function registerPreloadHandlers(getWorkspaceRoot: (senderId: number) => 
         activeFile: input.activeFile,
         selectedModel: input.modelId,
       });
+
+      if (input.action === "files.changed" && input.activeFile) {
+        zeroLatencyFusion.onFileOpen(input.activeFile, undefined, root);
+      }
 
       return { ok: true };
     }

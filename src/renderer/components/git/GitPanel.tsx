@@ -1,6 +1,7 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useGitStore, type GitFileStatus, type GitCommit } from '../../store/git-store';
 import { useEditorStore } from '../../store/editor-store';
+import { GitDiffPanel } from './GitDiffPanel';
 
 // ──────────────────────────────────────────────
 //  Culori status fișier
@@ -604,7 +605,7 @@ export function GitPanel() {
       {activeTab === 'changes' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          <div style={{ flex: 1, overflowY: 'auto' }} className="ai-messages-scroll">
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }} className="ai-messages-scroll">
             {files.length === 0 && !loading ? (
               <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
                 Nicio modificare. Working tree curat.
@@ -659,6 +660,8 @@ export function GitPanel() {
               </>
             )}
           </div>
+
+          <GitDiffPanel />
 
           {/* ── Commit box ──────────────────── */}
           <div style={{

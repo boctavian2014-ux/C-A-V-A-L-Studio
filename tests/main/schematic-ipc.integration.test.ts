@@ -1,35 +1,56 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createIpcHarness } from "./ipc-harness";
 
+const harness = createIpcHarness();
+
 vi.mock("electron", () => ({
-  ipcMain: { handle: vi.fn(), on: vi.fn() },
-  dialog: {},
-  BrowserWindow: {},
+  ipcMain: harness.ipcMain,
 }));
 
 describe("schematic IPC", () => {
   beforeEach(() => {
+    harness.reset();
     vi.resetModules();
   });
 
   it("registers schematic handlers and returns sample graph", async () => {
-    const { ipcMain } = await import("electron");
-    const harness = createIpcHarness();
-    (ipcMain.handle as ReturnType<typeof vi.fn>).mockImplementation(
-      (channel: string, handler: (...args: unknown[]) => unknown) => {
-        harness.handlers.set(channel, handler as never);
-      }
-    );
-
     const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers");
-    registerSchematicHandlers();
+    registerSchematicHandlers(() => "/mock/workspace");
 
     const result = await harness.invoke<{ ok: boolean; graph?: { nodes: unknown[] } }>(
       "schematic:generateFromCode",
-      { workspaceRoot: ".", useSample: true }
+      { useSample: true }
     );
 
     expect(result.ok).toBe(true);
     expect(result.graph?.nodes?.length).toBeGreaterThan(0);
+  });
+
+  it("resolves workspace from sender when omitted", async () => {
+    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers");
+    registerSchematicHandlers((id) =>
+      id === harness.sender.id ? "/sender/workspace" : process.cwd()
+    );
+
+    const result = await harness.invoke<{
+      ok: boolean;
+      graph?: { source?: { workspaceRoot?: string } };
+    }>("schematic:generateFromCode", { useSample: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.graph?.source?.workspaceRoot).toBe("/sender/workspace");
+  });
+
+  it("ignores workspaceRoot '.' and uses sender workspace", async () => {
+    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers");
+    registerSchematicHandlers(() => "/resolved/from/sender");
+
+    const result = await harness.invoke<{
+      ok: boolean;
+      graph?: { source?: { workspaceRoot?: string } };
+    }>("schematic:generateFromCode", { useSample: true, workspaceRoot: "." });
+
+    expect(result.ok).toBe(true);
+    expect(result.graph?.source?.workspaceRoot).toBe("/resolved/from/sender");
   });
 });

@@ -107,6 +107,77 @@ function graphFromSymbols(
   return autoLayoutGraph(graph);
 }
 
+export interface HardwarePlanContext {
+  requirements?: string;
+  components?: string;
+  circuit?: string;
+  assembly?: string;
+}
+
+export function graphFromHardwarePlan(input: {
+  workspaceRoot: string;
+  projectType?: string;
+  objective?: string;
+  planContext?: HardwarePlanContext;
+}): SchematicGraph {
+  const graph = createEmptyGraph(input.workspaceRoot);
+  const projectType = input.projectType ?? 'custom';
+
+  if (projectType === 'drone') {
+    const nodeDefs: Array<{ id: string; type: SchematicNode['type']; title: string; desc: string }> = [
+      { id: 'hw-battery', type: 'data_structure', title: 'Battery 4S', desc: 'LiPo power source' },
+      { id: 'hw-esc', type: 'module', title: '4-in-1 ESC', desc: 'Motor drivers + PDB' },
+      { id: 'hw-fc', type: 'module', title: 'Flight Controller', desc: 'Gyro, PID, UART' },
+      { id: 'hw-motors', type: 'module', title: 'Motors 2207', desc: '4x brushless motors' },
+      { id: 'hw-vtx', type: 'module', title: 'VTX', desc: 'Video transmitter' },
+      { id: 'hw-cam', type: 'module', title: 'FPV Camera', desc: 'Analog/HD camera' },
+      { id: 'hw-rx', type: 'module', title: 'Receiver ELRS', desc: 'RC link' },
+      { id: 'hw-frame', type: 'module', title: 'Frame 5"', desc: 'Carbon frame + arms' },
+    ];
+    graph.nodes = nodeDefs.map((n, i) =>
+      createNode({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        description: n.desc,
+        position: { x: (i % 4) * 220, y: Math.floor(i / 4) * 120 },
+        metadata: { zoomLevel: 'module', aiNotes: 'FPV drone block' },
+      })
+    );
+    graph.edges = [
+      { id: 'e-bat-esc', source: 'hw-battery', target: 'hw-esc', type: 'data_flow', direction: 'forward', weight: 2, glow: true, tooltip: 'power' },
+      { id: 'e-esc-mot', source: 'hw-esc', target: 'hw-motors', type: 'data_flow', direction: 'forward', weight: 2, glow: false, tooltip: 'motor power' },
+      { id: 'e-fc-esc', source: 'hw-fc', target: 'hw-esc', type: 'call', direction: 'forward', weight: 1.5, glow: false, tooltip: 'DShot/PWM' },
+      { id: 'e-fc-rx', source: 'hw-rx', target: 'hw-fc', type: 'data_flow', direction: 'forward', weight: 1.5, glow: false, tooltip: 'CRSF' },
+      { id: 'e-fc-vtx', source: 'hw-fc', target: 'hw-vtx', type: 'call', direction: 'forward', weight: 1, glow: false, tooltip: 'SmartAudio' },
+      { id: 'e-cam-vtx', source: 'hw-cam', target: 'hw-vtx', type: 'data_flow', direction: 'forward', weight: 1.5, glow: false, tooltip: 'video' },
+      { id: 'e-frame-all', source: 'hw-frame', target: 'hw-fc', type: 'dependency', direction: 'forward', weight: 1, glow: false, tooltip: 'mechanical mount' },
+    ];
+    graph.source.files = [];
+    return autoLayoutGraph(graph);
+  }
+
+  const summary = [
+    input.objective,
+    input.planContext?.requirements?.slice(0, 200),
+    input.planContext?.components?.slice(0, 200),
+  ]
+    .filter(Boolean)
+    .join(' — ');
+
+  graph.nodes = [
+    createNode({
+      id: 'hw-plan',
+      type: 'module',
+      title: 'Hardware Plan',
+      description: summary || 'Generated from engineering plan',
+      position: { x: 0, y: 0 },
+      metadata: { zoomLevel: 'module' },
+    }),
+  ];
+  return autoLayoutGraph(graph);
+}
+
 export class SchematicAI {
   constructor(
     private readonly ai = new AIClient(),
@@ -117,8 +188,57 @@ export class SchematicAI {
     workspaceRoot: string;
     files?: string[];
     objective?: string;
+    projectType?: string;
+    planContext?: HardwarePlanContext;
   }): Promise<{ ok: boolean; graph?: SchematicGraph; error?: string }> {
     const objective = input.objective ?? "Generate system schematic from workspace code";
+    const hasPlan =
+      Boolean(input.planContext?.requirements?.trim()) ||
+      Boolean(input.planContext?.circuit?.trim()) ||
+      Boolean(input.planContext?.components?.trim());
+
+    if (hasPlan || input.projectType === 'drone' || input.projectType === 'robot') {
+      try {
+        const system = [loadPrompt("schematic-system.md"), loadPrompt("schematic-transform.md")]
+          .filter(Boolean)
+          .join("\n\n");
+
+        const response = await this.ai.complete({
+          capability: "reasoning",
+          intent: "codebase",
+          system,
+          prompt: [
+            objective,
+            `Project type: ${input.projectType ?? 'custom'}`,
+            `Hardware plan requirements:\n${input.planContext?.requirements?.slice(0, 800) ?? ''}`,
+            `Components:\n${input.planContext?.components?.slice(0, 600) ?? ''}`,
+            `Circuit:\n${input.planContext?.circuit?.slice(0, 600) ?? ''}`,
+            `Assembly:\n${input.planContext?.assembly?.slice(0, 400) ?? ''}`,
+            'Return JSON SchematicGraph with version "caval-schematic-v1". Use hardware blocks (Battery, ESC, FC, Motors, etc.) for drones.',
+          ].join("\n"),
+          metadata: { workspaceRoot: input.workspaceRoot },
+        });
+
+        const parsed = extractJson<SchematicGraph>(response.content);
+        if (parsed && validateSchematicGraph(parsed) && parsed.nodes.length > 0) {
+          parsed.source = { workspaceRoot: input.workspaceRoot, files: input.files ?? [] };
+          return { ok: true, graph: autoLayoutGraph(parsed) };
+        }
+      } catch {
+        // fall through to template
+      }
+
+      const fromPlan = graphFromHardwarePlan({
+        workspaceRoot: input.workspaceRoot,
+        projectType: input.projectType,
+        objective,
+        planContext: input.planContext,
+      });
+      if (fromPlan.nodes.length > 0) {
+        return { ok: true, graph: fromPlan };
+      }
+    }
+
     try {
       const context = await this.contextExpander.expand(objective, input.workspaceRoot);
       const files = input.files?.length ? input.files : context.relevantFiles;
@@ -158,7 +278,17 @@ export class SchematicAI {
           line: s.line,
         }))
       );
-      return { ok: true, graph: fallback };
+      if (fallback.nodes.length > 0) {
+        return { ok: true, graph: fallback };
+      }
+
+      const fromPlan = graphFromHardwarePlan({
+        workspaceRoot: input.workspaceRoot,
+        projectType: input.projectType,
+        objective,
+        planContext: input.planContext,
+      });
+      return { ok: true, graph: fromPlan.nodes.length > 0 ? fromPlan : fallback };
     } catch (error) {
       return {
         ok: false,

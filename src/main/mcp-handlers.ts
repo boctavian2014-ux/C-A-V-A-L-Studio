@@ -1,24 +1,16 @@
 import { ipcMain } from "electron";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { mcpManager } from "../../ai/mcp/mcp-client";
 import { DEFAULT_CAVAL_CONFIG, type CavalConfig } from "../../ai/modes/agent-modes";
-import { ToolRegistry } from "../../ai/tools/tool-registry";
-import { ContextEngineApi } from "../../context-engine/api";
+import {
+  ensureMcpServersReady,
+  getOrCreateToolRegistry,
+  syncRegistryMcpTools,
+} from "../../ai/tools/tool-runtime";
 import { AIClient } from "../../ai/ai-client";
+import fs from "node:fs/promises";
+import path from "node:path";
 
-const contextEngine = new ContextEngineApi();
-const toolRegistries = new Map<number, ToolRegistry>();
-
-function getToolRegistry(senderId: number, workspaceRoot: string): ToolRegistry {
-  let registry = toolRegistries.get(senderId);
-  if (!registry) {
-    registry = new ToolRegistry(workspaceRoot, contextEngine);
-    registry.setMcpInvoker((serverId, toolName, args) => mcpManager.callTool(serverId, toolName, args));
-    toolRegistries.set(senderId, registry);
-  }
-  return registry;
-}
+const autocompleteClient = new AIClient();
 
 async function loadCavalConfig(workspaceRoot: string): Promise<CavalConfig> {
   try {
@@ -36,25 +28,31 @@ export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => stri
     const root = getWorkspaceRoot(event.sender.id);
     const config = await loadCavalConfig(root);
     mcpManager.loadFromConfig(config, root);
+    syncRegistryMcpTools(getOrCreateToolRegistry(event.sender.id, root));
     return { ok: true, servers: mcpManager.list() };
   });
 
   ipcMain.handle("caval:mcp-start", async (event, serverId: string) => {
     const root = getWorkspaceRoot(event.sender.id);
     const status = await mcpManager.start(serverId, root);
+    syncRegistryMcpTools(getOrCreateToolRegistry(event.sender.id, root));
     return { ok: status.running, status };
   });
 
-  ipcMain.handle("caval:mcp-stop", async (_event, serverId: string) => {
+  ipcMain.handle("caval:mcp-stop", async (event, serverId: string) => {
     mcpManager.stop(serverId);
+    syncRegistryMcpTools(getOrCreateToolRegistry(event.sender.id, getWorkspaceRoot(event.sender.id)));
     return { ok: true };
   });
 
   ipcMain.handle("caval:tool-execute", async (event, input: { name: string; arguments: Record<string, unknown> }) => {
     const root = getWorkspaceRoot(event.sender.id);
-    const registry = getToolRegistry(event.sender.id, root);
-    const result = await registry.execute({ name: input.name, arguments: input.arguments });
-    return result;
+    const WRITE_TOOLS = new Set(["write_file"]);
+    if (WRITE_TOOLS.has(input.name) && input.arguments.confirm !== true) {
+      return { ok: false, error: "write_file requires confirm: true" };
+    }
+    const registry = getOrCreateToolRegistry(event.sender.id, root);
+    return registry.execute({ name: input.name, arguments: input.arguments });
   });
 
   ipcMain.handle("caval:autocomplete", async (event, input: { prefix: string; filePath: string; language: string }) => {
@@ -65,8 +63,7 @@ export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => stri
       return { ok: true, suggestion: "" };
     }
     try {
-      const client = new AIClient();
-      const response = await client.complete({
+      const response = await autocompleteClient.complete({
         prompt: `Complete the following ${input.language} code. Return ONLY the completion text, no explanation.\n\n${input.prefix}`,
         capability: "autocomplete",
         intent: "autocomplete",
@@ -79,3 +76,5 @@ export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => stri
     }
   });
 }
+
+export { ensureMcpServersReady, getOrCreateToolRegistry };

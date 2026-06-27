@@ -30,6 +30,12 @@ export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   name?: string;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
 }
 
 export interface ToolDefinition {
@@ -57,6 +63,7 @@ export interface ModelRequest {
     preferredModel?: string;
     resolvedModel?: string;
     selectionId?: string;
+    responseFormat?: "json_object";
   };
 }
 
@@ -90,15 +97,23 @@ export interface ModelDescriptor {
   supportsToolCalling: boolean;
   preferredIntents: RoutingIntent[];
   endpoint: string;
+  /** Provider API slug when it differs from internal id (e.g. OpenRouter stepfun/step-3.7-flash) */
+  providerModelId?: string;
 }
 
 export interface ProviderRequestOptions {
   signal?: AbortSignal;
 }
 
+/** Streaming event from model providers (content or reasoning tokens). */
+export interface ModelStreamChunk {
+  kind: "content" | "reasoning";
+  text: string;
+}
+
 export interface ModelProvider {
   name: string;
   models(): ModelDescriptor[];
   complete(request: ModelRequest, model: ModelDescriptor, options?: ProviderRequestOptions): Promise<ModelResponse>;
-  stream?(request: ModelRequest, model: ModelDescriptor, options?: ProviderRequestOptions): AsyncIterable<string>;
+  stream?(request: ModelRequest, model: ModelDescriptor, options?: ProviderRequestOptions): AsyncIterable<ModelStreamChunk>;
 }

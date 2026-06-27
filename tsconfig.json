@@ -44,5 +44,5 @@
     "themes/**/*.tsx",
     "types/**/*.d.ts"
   ],
-  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"]
+  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts", "src/renderer/components/image/**"]
 }

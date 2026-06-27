@@ -8,9 +8,7 @@ create policy "users_select_own"
   on public.users for select
   using (auth.uid()::text = id::text or auth.jwt() ->> 'caval_id' = caval_id);
 
-create policy "users_update_own"
-  on public.users for update
-  using (auth.uid()::text = id::text or auth.jwt() ->> 'caval_id' = caval_id);
+-- users UPDATE removed: plan must not be client-writable (see 005_users_plan_rls_fix.sql).
 
 create policy "subscriptions_select_own"
   on public.subscriptions for select

@@ -1,12 +1,14 @@
+import { resolveProviderModelId } from "../models/provider-model-id";
+import { extractReasoningFromDelta } from "./stream-reasoning";
 import type {
   ChatMessage,
   ModelDescriptor,
   ModelProvider,
   ModelRequest,
   ModelResponse,
+  ModelStreamChunk,
   ProviderRequestOptions
 } from "../types";
-
 export interface HttpProviderConfig {
   name: string;
   apiKeyEnv: string;
@@ -72,7 +74,7 @@ export abstract class HttpChatProvider implements ModelProvider {
     };
   }
 
-  async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<string> {
+  async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamChunk> {
     const response = await fetch(model.endpoint, {
       method: "POST",
       headers: this.headers(),
@@ -109,11 +111,21 @@ export abstract class HttpChatProvider implements ModelProvider {
         }
         try {
           const json = JSON.parse(payload) as {
-            choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>;
+            choices?: Array<{
+              delta?: Record<string, unknown>;
+              message?: { content?: string };
+            }>;
           };
-          const delta = json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content;
-          if (delta) {
-            yield delta;
+          const deltaObj = json.choices?.[0]?.delta;
+          const reasoning = extractReasoningFromDelta(deltaObj);
+          if (reasoning) {
+            yield { kind: "reasoning", text: reasoning };
+          }
+          const content =
+            (typeof deltaObj?.content === "string" ? deltaObj.content : undefined) ??
+            json.choices?.[0]?.message?.content;
+          if (content) {
+            yield { kind: "content", text: content };
           }
         } catch {
           // ignore malformed SSE chunks
@@ -123,21 +135,25 @@ export abstract class HttpChatProvider implements ModelProvider {
   }
 
   protected payload(request: ModelRequest, model: ModelDescriptor, stream: boolean): Record<string, unknown> {
-    return {
-      model: model.id,
-      messages: this.messages(request),
+    const payload: Record<string, unknown> = {
+      model: resolveProviderModelId(model),
+      messages: this.serializeMessages(this.messages(request)),
       stream,
       temperature: request.temperature ?? 0.2,
-      max_tokens: request.maxTokens,
+      max_tokens: request.maxTokens ?? 2048,
       tools: request.tools?.map((tool) => ({
         type: "function",
         function: {
           name: tool.name,
           description: tool.description,
-          parameters: tool.parameters
-        }
-      }))
+          parameters: tool.parameters,
+        },
+      })),
     };
+    if (request.metadata?.responseFormat === "json_object") {
+      payload.response_format = { type: "json_object" };
+    }
+    return payload;
   }
 
   private messages(request: ModelRequest): ChatMessage[] {
@@ -149,6 +165,19 @@ export abstract class HttpChatProvider implements ModelProvider {
       ...(request.system ? [{ role: "system" as const, content: request.system }] : []),
       { role: "user" as const, content: request.prompt }
     ];
+  }
+
+  protected serializeMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+    return messages.map((message) => {
+      const payload: Record<string, unknown> = {
+        role: message.role,
+        content: message.content || null,
+      };
+      if (message.name) payload.name = message.name;
+      if (message.tool_call_id) payload.tool_call_id = message.tool_call_id;
+      if (message.tool_calls) payload.tool_calls = message.tool_calls;
+      return payload;
+    });
   }
 
   private headers(): Record<string, string> {

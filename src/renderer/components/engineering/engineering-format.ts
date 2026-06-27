@@ -43,6 +43,8 @@ export interface ParsedEngineeringPlan {
   rawMarkdown: string;
   sections: Record<EngineeringSectionKey, string>;
   bomRows: BomRow[];
+  /** @deprecated use bomRows */
+  componentRows: BomRow[];
 }
 
 const SECTION_ALIASES: Record<EngineeringSectionKey, RegExp[]> = {
@@ -114,6 +116,7 @@ function buildMasterPromptRules(): string {
     '- ALWAYS assume the user wants best engineering practices.',
     '- If user asks for a specific part → integrate it into the design.',
     '- If user gives no details → generate a full standard reference build for this project type.',
+    '- If the user describes a specific object, honor it and do NOT replace it with the reference build template.',
     '- For each major BOM item: include 1 recommended, 1 cheaper, 1 high-performance alternative.',
     '- Warn about battery polarity, high current, mains voltage, and ESD where relevant.',
     '- Use metric units unless user specifies otherwise.',
@@ -270,6 +273,18 @@ function buildTypeSpecificInstructions(projectType: EngineeringProjectType): str
   ].join('\n');
 }
 
+
+/** Infer hardware project type from user prompt when UI type is custom. */
+export function inferProjectType(prompt: string): EngineeringProjectType {
+  const text = prompt.trim();
+  if (/\b(dron[aă]|fpv|quad|copter|multirotor|elice|propeller)\b/i.test(text)) return "drone";
+  if (/\b(cadru|frame plate|bottom plate|motor mount|landing gear)\b/i.test(text)) return "drone";
+  if (/\b(robot|robotic[aă]|mobil|chassis|encoder|lidarr?)\b/i.test(text)) return "robot";
+  if (/\b(iot|sensor|wifi|lora|esp32|nod)\b/i.test(text)) return "iot";
+  if (/\b(cnc|grbl|spindle|stepper|limit switch)\b/i.test(text)) return "cnc";
+  return "custom";
+}
+
 export function buildEngineeringPrompt(input: {
   prompt: string;
   projectType: EngineeringProjectType;
@@ -294,7 +309,7 @@ export function buildEngineeringPrompt(input: {
     '',
     constraintLines.length ? `USER CONSTRAINTS:\n${constraintLines.map((l) => `- ${l}`).join('\n')}` : '',
     '',
-    'USER PROJECT IDEA:',
+    '=== USER REQUEST ===',
     prompt.trim() || DEFAULT_BUILDS[projectType],
   ].join('\n');
 }
@@ -336,10 +351,13 @@ export function parseEngineeringPlan(rawMarkdown: string): ParsedEngineeringPlan
     sections[key] = buffers[key].join('\n').trim();
   }
 
+  const bomRows = extractBomRows(sections.bom || rawMarkdown);
+
   return {
     rawMarkdown,
     sections,
-    bomRows: extractBomRows(sections.bom || rawMarkdown),
+    bomRows,
+    componentRows: bomRows,
   };
 }
 
@@ -494,3 +512,9 @@ export function extractScadBlock(markdown: string): string | null {
   const source = match[1].trim();
   return source || null;
 }
+
+/** @deprecated use extractBomRows */
+export const extractComponentRows = extractBomRows;
+
+/** @deprecated use bomToCsv */
+export const componentsToCsv = bomToCsv;

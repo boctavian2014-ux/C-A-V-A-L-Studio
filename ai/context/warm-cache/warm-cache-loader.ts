@@ -52,7 +52,7 @@ export class WarmCacheLoader {
     return this.store.snapshot();
   }
 
-  async warmWorkspace(workspaceRoot: string, limit = 80): Promise<WarmCacheSnapshot> {
+  async warmWorkspace(workspaceRoot: string, limit = 20): Promise<WarmCacheSnapshot> {
     void this.contextEngine.restoreWorkspace(workspaceRoot).catch(() => undefined);
     const files = await this.walk(workspaceRoot, limit);
     return this.warm({ workspaceRoot, files: files.map((file) => ({ path: file })), reason: "startup" });

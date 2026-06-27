@@ -23,13 +23,17 @@ import { toolSandbox } from "../../ai/pipeline/tool-sandbox";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { assertShellCommandAllowed } from "./shell-security";
 import { registerGitHandlers } from "./git-handlers";
-import { registerImageHandlers } from "./image-handlers";
+import { registerEngineeringHandlers } from "./engineering-handlers";
 import { registerModelHandlers } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
+import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers } from "./cad-handlers";
+import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
+import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
 import { registerSchematicHandlers } from "./schematic-handlers";
 import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
+import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { inferPreloadContext } from "../../ai/models/infer-context";
 import "./ipc-handlers";
 import "./terminal-handlers";
@@ -71,12 +75,13 @@ const contextEngine = new ContextEngineApi();
 const workspaceFor = (senderId: number): string => workspaceRoots.get(senderId) ?? process.cwd();
 
 registerGitHandlers();
-registerImageHandlers();
-registerModelHandlers();
+registerEngineeringHandlers(workspaceFor);
+registerModelHandlers(workspaceFor);
 registerMcpHandlers(workspaceFor);
 registerPreloadHandlers(workspaceFor);
+registerZLHandlers(workspaceFor);
 registerCadHandlers();
-registerSchematicHandlers();
+registerSchematicHandlers(workspaceFor);
 
 const subscribePipelineIpc = (sender: Electron.WebContents): (() => void) => {
   return pipelineEventBus.on((event: PipelineEvent) => {
@@ -127,6 +132,7 @@ const installRendererContextMenu = (window: BrowserWindow): void => {
 };
 
 const createWindow = (): BrowserWindow => {
+  const iconPath = path.join(__dirname, "../../build-icons/icon.png");
   const window = new BrowserWindow({
     width: 1600,
     height: 1000,
@@ -134,7 +140,8 @@ const createWindow = (): BrowserWindow => {
     minHeight: 650,
     resizable: true,
     maximizable: true,
-    title: "Caval Studio",
+    title: "CAVALO",
+    ...(fsSync.existsSync(iconPath) ? { icon: iconPath } : {}),
     backgroundColor: "#090B12",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -145,12 +152,25 @@ const createWindow = (): BrowserWindow => {
   });
 
   window.maximize();
-  window.loadFile(path.join(__dirname, "../renderer/index.html"));
 
   window.webContents.on("console-message", (_event, level, message, _line, sourceId) => {
     const tag = level >= 3 ? "error" : level === 2 ? "warn" : "log";
     console[tag === "log" ? "log" : tag](`[renderer${sourceId ? ` ${sourceId}` : ""}] ${message}`);
   });
+
+  if (!app.isPackaged) {
+    window.webContents.openDevTools({ mode: "detach" });
+  }
+
+  const loadRenderer = () => {
+    window.loadFile(path.join(__dirname, "../renderer/index.html"));
+  };
+
+  if (!app.isPackaged) {
+    void window.webContents.session.clearCache().then(loadRenderer);
+  } else {
+    loadRenderer();
+  }
 
   window.webContents.on("did-finish-load", () => {
     console.info("[caval] Renderer loaded");
@@ -367,6 +387,7 @@ const installApplicationMenu = (): void => {
           ]
         },
         { type: "separator" },
+        { label: "Primary Side Bar", accelerator: "CmdOrCtrl+B", click: () => sendMenuCommand("toggle-sidebar") },
         { label: "Explorer", accelerator: "CmdOrCtrl+Shift+E", click: () => sendMenuCommand("view-explorer") },
         { label: "Search", accelerator: "CmdOrCtrl+Shift+F", click: () => sendMenuCommand("view-search") },
         { label: "Source Control", click: () => sendMenuCommand("view-source-control") },
@@ -487,82 +508,6 @@ ipcMain.handle("caval:save-file", async (event, request: { path?: string; conten
     label: path.basename(targetPath),
     language: languageFromPath(targetPath)
   };
-});
-
-const engineeringMarkdownToHtml = (markdown: string): string => {
-  const escaped = markdown
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  const body = escaped
-    .split(/\r?\n/)
-    .map((line) => {
-      if (/^## /.test(line)) return `<h2>${line.slice(3)}</h2>`;
-      if (/^# /.test(line)) return `<h1>${line.slice(2)}</h1>`;
-      if (/^### /.test(line)) return `<h3>${line.slice(4)}</h3>`;
-      if (/^[-*] /.test(line)) return `<li>${line.slice(2)}</li>`;
-      if (line.trim() === "") return "<br/>";
-      if (line.trim().startsWith("|")) {
-        const cells = line.split("|").filter((c) => c.trim()).map((c) => `<td>${c.trim()}</td>`).join("");
-        return `<tr>${cells}</tr>`;
-      }
-      return `<p>${line}</p>`;
-    })
-    .join("\n");
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    body { font-family: Inter, Segoe UI, sans-serif; padding: 40px; color: #111; line-height: 1.6; max-width: 900px; margin: 0 auto; }
-    h1 { font-size: 22px; margin: 0 0 16px; }
-    h2 { font-size: 16px; margin: 24px 0 8px; color: #0a6; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-    h3 { font-size: 14px; margin: 16px 0 6px; }
-    p, li { font-size: 12px; }
-    table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-    td, th { border: 1px solid #ccc; padding: 6px 8px; font-size: 11px; }
-  </style></head><body>${body}</body></html>`;
-};
-
-ipcMain.handle("caval:engineering-export-pdf", async (event, input: { content: string; defaultName?: string }) => {
-  const parent = BrowserWindow.fromWebContents(event.sender);
-  const html = engineeringMarkdownToHtml(input.content);
-  const pdfWindow = new BrowserWindow({
-    show: false,
-    webPreferences: { sandbox: true, contextIsolation: true },
-  });
-
-  try {
-    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    const pdfBuffer = await pdfWindow.webContents.printToPDF({
-      printBackground: true,
-      margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
-    });
-
-    const saveResult = parent
-      ? await dialog.showSaveDialog(parent, {
-          title: "Export Hardware Plan PDF",
-          defaultPath: input.defaultName ?? "hardware-plan.pdf",
-          filters: [{ name: "PDF", extensions: ["pdf"] }],
-        })
-      : await dialog.showSaveDialog({
-          title: "Export Hardware Plan PDF",
-          defaultPath: input.defaultName ?? "hardware-plan.pdf",
-          filters: [{ name: "PDF", extensions: ["pdf"] }],
-        });
-
-    if (saveResult.canceled || !saveResult.filePath) {
-      return { ok: false, canceled: true };
-    }
-
-    await fs.writeFile(saveResult.filePath, pdfBuffer);
-    return { ok: true, path: saveResult.filePath };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    if (!pdfWindow.isDestroyed()) pdfWindow.destroy();
-  }
 });
 
 ipcMain.on("caval:renderer-ready", (event) => {
@@ -806,6 +751,10 @@ ipcMain.handle("caval:composer-run", async (event, request: {
   runTests?: boolean;
 }): Promise<ComposerResult> => {
   const workspaceRoot = workspaceFor(event.sender.id);
+  zeroLatencyFusion.prepare({
+    workspaceRoot,
+    objectiveDraft: request.objective,
+  });
   void preloadManager.onUserAction("composer.run", {
     workspaceRoot,
     pipelineNode: request.mode === "plan" ? "suggestions" : "composer",
@@ -1102,6 +1051,27 @@ ipcMain.handle("caval:context-index", async (event) => {
   return { ok: true, documentCount: documents.length };
 });
 
+ipcMain.handle("caval:workspace-open", async (event, folderPath: string) => {
+  if (!folderPath || typeof folderPath !== "string") {
+    return { ok: false, error: "Invalid folder path" };
+  }
+  const current = workspaceRoots.get(event.sender.id);
+  if (current === folderPath) {
+    workspaceRoots.set(event.sender.id, folderPath);
+    return { ok: true, path: folderPath, cached: true };
+  }
+  await sendWorkspaceToRenderer(event.sender.id, event.sender, folderPath);
+  return { ok: true, path: folderPath };
+});
+
+/** Lightweight root sync — no re-index, no warm cache storm (used on chat send). */
+ipcMain.handle("caval:workspace-sync", (event, folderPath: string) => {
+  if (folderPath && typeof folderPath === "string") {
+    workspaceRoots.set(event.sender.id, folderPath);
+  }
+  return { ok: true, path: folderPath };
+});
+
 ipcMain.handle("caval:context-search", async (event, input: { query: string; limit?: number }) => {
   try {
     const root = workspaceFor(event.sender.id);
@@ -1131,16 +1101,29 @@ ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) 
   if (settings["cad.apiUrl"]) {
     process.env.CAD_API_URL = settings["cad.apiUrl"].trim();
   }
+  if (settings["cad.apiKey"]) {
+    process.env.CAD_API_KEY = settings["cad.apiKey"].trim();
+  }
   if (settings["mesh.apiKey"]) {
     process.env.MESHY_API_KEY = settings["mesh.apiKey"];
   }
   return { ok: true };
 });
 
-ipcMain.handle("caval:settings-load", (event) => ({
-  ok: true,
-  settings: appSettings.get(event.sender.id) ?? {}
-}));
+ipcMain.handle("caval:settings-load", (event) => {
+  const stored = appSettings.get(event.sender.id) ?? {};
+  const secrets = readApiSecrets();
+  const settings = { ...stored };
+  if (secrets.OPENROUTER_API_KEY && !settings["openrouter.apiKey"]) {
+    settings["openrouter.apiKey"] = secrets.OPENROUTER_API_KEY;
+  }
+  applyCadCloudEnvDefaults();
+  if (!settings["cad.apiUrl"] && process.env.CAD_API_URL) {
+    settings["cad.apiUrl"] = process.env.CAD_API_URL;
+  }
+  appSettings.set(event.sender.id, settings);
+  return { ok: true, settings };
+});
 
 const billingBaseUrl = (): string =>
   process.env.BILLING_URL ?? `http://127.0.0.1:${process.env.BILLING_PORT ?? 8790}`;
@@ -1269,9 +1252,19 @@ const applyStoredSecretsToEnv = (): void => {
 };
 
 app.whenReady().then(() => {
+  app.setName("CAVALO");
   installApplicationMenu();
   applyStoredSecretsToEnv();
+  applyCadCloudEnvDefaults();
+  warmOpenRouterConnection(true);
   preloadCoreModels();
+  if (!isCadCloudOnly()) {
+    void ensureCadLocalServer().catch((err) => {
+      console.warn("[cad] auto-start skipped:", err instanceof Error ? err.message : err);
+    });
+  } else {
+    console.info("[cad] cloud-only mode — CAD API:", process.env.CAD_API_URL);
+  }
   createWindow();
 
   app.on("activate", () => {
@@ -1287,6 +1280,7 @@ app.on("window-all-closed", () => {
       terminal.kill();
     }
   }
+  stopCadLocalServer();
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -3,6 +3,8 @@ import Editor, { useMonaco, type OnMount, type OnChange } from '@monaco-editor/r
 import type * as MonacoType from 'monaco-editor';
 import { useEditorStore } from '../../store/editor-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
+import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
+import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -223,8 +225,13 @@ export function MonacoEditor() {
     }
   }, [activeTabId, updateTabContent]);
 
+  const cadStlUrl = useEngineeringCadStore((s) => s.stlUrl);
+
   // ── Ecran gol când nu e niciun tab deschis ──
   if (!activeTab) {
+    if (cadStlUrl) {
+      return <EngineeringCadPreview />;
+    }
     return (
       <div style={{
         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',

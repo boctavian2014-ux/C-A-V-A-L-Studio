@@ -1,9 +1,5 @@
-// ──────────────────────────────────────────────
-//  MCP client — minimal stdio server management
-// ──────────────────────────────────────────────
-
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import type { CavalConfig } from "../modes/agent-modes";
+import type { ToolDefinition } from "../tools/tool-registry";
+import { mcpToolId } from "./mcp-tool-names";
 
 export interface McpServerConfig {
   id: string;
@@ -14,78 +10,131 @@ export interface McpServerConfig {
   enabled?: boolean;
 }
 
+export interface McpToolInfo {
+  serverId: string;
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
 export interface McpServerStatus {
   id: string;
   name: string;
   running: boolean;
   tools: string[];
+  toolDetails: McpToolInfo[];
   error?: string;
 }
 
 const WINDOWS_SHELL_COMMANDS = new Set(["npx", "npm", "node", "pnpm", "yarn"]);
 
-/** Resolve spawn command for Windows (.cmd + shell) to avoid ENOENT in Electron. */
 export const resolveMcpSpawn = (
   command: string,
   args: string[],
   options: { env?: NodeJS.ProcessEnv; cwd?: string }
-): { command: string; args: string[]; options: SpawnOptions } => {
-  const spawnOptions: SpawnOptions = {
-    env: { ...process.env, ...options.env },
-    stdio: ["pipe", "pipe", "pipe"],
-    cwd: options.cwd,
+): { command: string; args: string[]; env: NodeJS.ProcessEnv; cwd?: string } => {
+  const env = { ...process.env, ...options.env };
+  if (process.platform !== "win32") {
+    return { command, args, env, cwd: options.cwd };
+  }
+
+  const base = command.replace(/\\/g, "/").split("/").pop()?.toLowerCase().replace(/\.(cmd|exe|bat)$/i, "") ?? command;
+  if (WINDOWS_SHELL_COMMANDS.has(base)) {
+    return { command: `${base}.cmd`, args, env, cwd: options.cwd };
+  }
+  return { command, args, env, cwd: options.cwd };
+};
+
+interface ServerEntry {
+  config: McpServerConfig;
+  client: unknown;
+  transport: unknown;
+  tools: McpToolInfo[];
+  cwd?: string;
+  error?: string;
+  stderrTail: string;
+}
+
+function toolDefinitionsFromMcp(serverId: string, tools: McpToolInfo[]): ToolDefinition[] {
+  return tools.map((tool) => ({
+    name: mcpToolId(serverId, tool.name),
+    description: tool.description || `MCP tool ${tool.name} (${serverId})`,
+    parameters: tool.inputSchema,
+  }));
+}
+
+function extractCallToolOutput(result: unknown): { ok: boolean; output?: unknown; error?: string } {
+  if (!result || typeof result !== "object") {
+    return { ok: true, output: result };
+  }
+
+  const payload = result as {
+    content?: Array<{ type: string; text?: string }>;
+    structuredContent?: Record<string, unknown>;
+    isError?: boolean;
+    toolResult?: unknown;
   };
 
-  if (process.platform !== "win32") {
-    return { command, args, options: spawnOptions };
+  if ("toolResult" in payload && payload.toolResult !== undefined) {
+    return { ok: true, output: payload.toolResult };
   }
 
-  const base = pathBasename(command).toLowerCase().replace(/\.(cmd|exe|bat)$/i, "");
-  if (WINDOWS_SHELL_COMMANDS.has(base)) {
-    return {
-      command: `${base}.cmd`,
-      args,
-      options: { ...spawnOptions, shell: true },
-    };
+  if (payload.isError) {
+    const text = payload.content
+      ?.filter((c) => c.type === "text")
+      .map((c) => c.text ?? "")
+      .join("\n");
+    return { ok: false, error: text || "MCP tool returned an error" };
   }
 
-  return { command, args, options: { ...spawnOptions, shell: true } };
-};
+  if (payload.structuredContent) {
+    return { ok: true, output: payload.structuredContent };
+  }
 
-const pathBasename = (value: string): string => {
-  const normalized = value.replace(/\\/g, "/");
-  const parts = normalized.split("/");
-  return parts[parts.length - 1] || value;
-};
-
-const spawnMcpProcess = (
-  command: string,
-  args: string[],
-  options: { env?: NodeJS.ProcessEnv; cwd?: string }
-): Promise<ChildProcess> =>
-  new Promise((resolve, reject) => {
-    const resolved = resolveMcpSpawn(command, args, options);
-    const child = spawn(resolved.command, resolved.args, resolved.options);
-
-    const fail = (error: Error): void => {
-      child.removeAllListeners();
-      reject(error);
-    };
-
-    child.once("error", fail);
-    child.once("spawn", () => {
-      child.removeListener("error", fail);
-      resolve(child);
-    });
-  });
+  const text = payload.content
+    ?.filter((c) => c.type === "text")
+    .map((c) => c.text ?? "")
+    .join("\n");
+  if (text) return { ok: true, output: text };
+  if (payload.content?.length) return { ok: true, output: payload.content };
+  return { ok: true, output: null };
+}
 
 export class McpClientManager {
-  private servers = new Map<string, { config: McpServerConfig; process: ChildProcess | null; tools: string[]; cwd?: string }>();
+  private servers = new Map<string, ServerEntry>();
 
-  loadFromConfig(config: CavalConfig, cwd?: string): void {
+  loadFromConfig(
+    config: { mcp?: { servers?: McpServerConfig[] } },
+    cwd?: string
+  ): void {
+    const enabledIds = new Set(
+      (config.mcp?.servers ?? [])
+        .filter((s) => s.enabled !== false)
+        .map((s) => s.id)
+    );
+
+    for (const id of [...this.servers.keys()]) {
+      if (!enabledIds.has(id)) {
+        this.stop(id);
+        this.servers.delete(id);
+      }
+    }
+
     for (const server of config.mcp?.servers ?? []) {
-      if (server.enabled !== false) {
-        this.servers.set(server.id, { config: server, process: null, tools: [], cwd });
+      if (server.enabled === false) continue;
+      const existing = this.servers.get(server.id);
+      if (existing) {
+        existing.config = server;
+        if (cwd) existing.cwd = cwd;
+      } else {
+        this.servers.set(server.id, {
+          config: server,
+          client: null,
+          transport: null,
+          tools: [],
+          cwd,
+          stderrTail: "",
+        });
       }
     }
   }
@@ -94,62 +143,156 @@ export class McpClientManager {
     return [...this.servers.entries()].map(([id, entry]) => ({
       id,
       name: entry.config.name,
-      running: entry.process !== null && !entry.process.killed,
-      tools: entry.tools,
-      error: undefined,
+      running: entry.client !== null,
+      tools: entry.tools.map((t) => mcpToolId(id, t.name)),
+      toolDetails: entry.tools.map((t) => ({ ...t, serverId: id })),
+      error: entry.error,
     }));
+  }
+
+  getToolDefinitions(): ToolDefinition[] {
+    const defs: ToolDefinition[] = [];
+    for (const [serverId, entry] of this.servers) {
+      if (!entry.client) continue;
+      defs.push(...toolDefinitionsFromMcp(serverId, entry.tools));
+    }
+    return defs;
+  }
+
+  hasRunningServers(): boolean {
+    return [...this.servers.values()].some((e) => e.client !== null);
   }
 
   async start(serverId: string, cwd?: string): Promise<McpServerStatus> {
     const entry = this.servers.get(serverId);
-    if (!entry) return { id: serverId, name: serverId, running: false, tools: [], error: "Server not found" };
+    if (!entry) {
+      return {
+        id: serverId,
+        name: serverId,
+        running: false,
+        tools: [],
+        toolDetails: [],
+        error: "Server not found in caval.jsonc",
+      };
+    }
 
-    if (entry.process && !entry.process.killed) {
-      return { id: serverId, name: entry.config.name, running: true, tools: entry.tools };
+    if (entry.client) {
+      return this.statusForEntry(serverId, entry);
     }
 
     const workdir = cwd ?? entry.cwd;
     if (cwd) entry.cwd = cwd;
+    entry.error = undefined;
+    entry.stderrTail = "";
 
     try {
-      const child = await spawnMcpProcess(entry.config.command, entry.config.args ?? [], {
+      const spawn = resolveMcpSpawn(entry.config.command, entry.config.args ?? [], {
         env: entry.config.env,
         cwd: workdir,
       });
 
-      child.on("error", () => {
-        entry.process = null;
-        entry.tools = [];
+      const [{ Client }, { StdioClientTransport }] = await Promise.all([
+        import("@modelcontextprotocol/sdk/client"),
+        import("@modelcontextprotocol/sdk/client/stdio.js"),
+      ]);
+
+      const transport = new StdioClientTransport({
+        command: spawn.command,
+        args: spawn.args,
+        env: spawn.env as Record<string, string>,
+        cwd: spawn.cwd,
+        stderr: "pipe",
       });
 
-      entry.process = child;
-      entry.tools = [`mcp:${serverId}:generic`];
-      return { id: serverId, name: entry.config.name, running: true, tools: entry.tools };
+      const stderrStream = (transport as { stderr?: NodeJS.ReadableStream | null }).stderr;
+      if (stderrStream && "on" in stderrStream) {
+        stderrStream.on("data", (chunk: Buffer | string) => {
+          entry.stderrTail = `${entry.stderrTail}${chunk.toString()}`.slice(-4000);
+        });
+      }
+
+      const client = new Client({ name: "caval-studio", version: "0.1.0" });
+      await client.connect(transport);
+
+      const listed = await client.listTools();
+      entry.tools = (listed.tools ?? []).map((tool) => ({
+        serverId,
+        name: tool.name,
+        description: tool.description ?? "",
+        inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {
+          type: "object",
+          properties: {},
+        },
+      }));
+
+      entry.client = client;
+      entry.transport = transport;
+
+      (transport as { onclose?: () => void }).onclose = () => {
+        entry.client = null;
+        entry.transport = null;
+        entry.tools = [];
+      };
+
+      return this.statusForEntry(serverId, entry);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      entry.error = entry.stderrTail ? `${message}\n${entry.stderrTail}` : message;
+      entry.client = null;
+      entry.transport = null;
+      entry.tools = [];
       return {
         id: serverId,
         name: entry.config.name,
         running: false,
         tools: [],
-        error: error instanceof Error ? error.message : String(error),
+        toolDetails: [],
+        error: entry.error,
       };
     }
   }
 
   stop(serverId: string): void {
     const entry = this.servers.get(serverId);
-    if (entry?.process && !entry.process.killed) {
-      entry.process.kill();
-      entry.process = null;
+    if (!entry) return;
+
+    void (entry.transport as { close?: () => Promise<void> } | null)?.close?.().catch(() => undefined);
+    entry.client = null;
+    entry.transport = null;
+    entry.tools = [];
+  }
+
+  async callTool(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>
+  ): Promise<{ ok: boolean; output?: unknown; error?: string }> {
+    const entry = this.servers.get(serverId);
+    if (!entry?.client) {
+      return { ok: false, error: "MCP server not running" };
+    }
+
+    try {
+      const client = entry.client as {
+        callTool: (params: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>;
+      };
+      const result = await client.callTool({ name: toolName, arguments: args });
+      return extractCallToolOutput(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message };
     }
   }
 
-  async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<{ ok: boolean; output?: unknown; error?: string }> {
-    const entry = this.servers.get(serverId);
-    if (!entry?.process || entry.process.killed) {
-      return { ok: false, error: "MCP server not running" };
-    }
-    return { ok: true, output: { serverId, toolName, args, note: "MCP tool bridge placeholder" } };
+  private statusForEntry(serverId: string, entry: ServerEntry): McpServerStatus {
+    return {
+      id: serverId,
+      name: entry.config.name,
+      running: entry.client !== null,
+      tools: entry.tools.map((t) => mcpToolId(serverId, t.name)),
+      toolDetails: entry.tools.map((t) => ({ ...t, serverId })),
+      error: entry.error,
+    };
   }
 }
 

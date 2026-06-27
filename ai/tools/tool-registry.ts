@@ -54,6 +54,7 @@ type McpToolInvoker = (serverId: string, toolName: string, args: Record<string, 
 
 export class ToolRegistry {
   private mcpInvoker: McpToolInvoker | null = null;
+  private mcpToolDefinitions: ToolDefinition[] = [];
 
   constructor(
     private readonly workspaceRoot: string,
@@ -64,15 +65,21 @@ export class ToolRegistry {
     this.mcpInvoker = invoker;
   }
 
+  setMcpToolDefinitions(definitions: ToolDefinition[]): void {
+    this.mcpToolDefinitions = definitions;
+  }
+
   listTools(): ToolDefinition[] {
-    return [...BUILTIN_TOOLS];
+    return [...BUILTIN_TOOLS, ...this.mcpToolDefinitions];
   }
 
   async execute(call: ToolCall): Promise<ToolResult> {
     if (call.name.startsWith("mcp:")) {
       if (!this.mcpInvoker) return { ok: false, error: "MCP not configured" };
-      const [, serverId, toolName] = call.name.split(":");
-      return this.mcpInvoker(serverId, toolName, call.arguments);
+      const parsed = call.name.match(/^mcp:([^:]+):(.+)$/);
+      if (!parsed) return { ok: false, error: `Invalid MCP tool name: ${call.name}` };
+      const [, serverId, toolName] = parsed;
+      return this.mcpInvoker(serverId!, toolName!, call.arguments);
     }
 
     switch (call.name) {

@@ -124,9 +124,9 @@ export interface SettingsState {
 export type SettingsSection =
   | 'app'
   | 'editor'
-  | 'image-generator'
   | 'asset-manager'
   | 'context-bridge'
+  | 'cad-cloud'
   | 'safety'
   | 'export'
   | 'shortcuts'
@@ -179,7 +179,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoSaveDelay: 1000,
       },
 
-      activeSection: 'image-generator',
+      activeSection: 'editor',
       sessionGenerations: 0,
 
       // ── Actions ──

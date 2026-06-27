@@ -28,16 +28,6 @@ export const handleRevenueCatWebhook = (
     return { ok: true, record };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    try {
-      const fallback = JSON.parse(typeof rawBody === "string" ? rawBody : rawBody.toString("utf8")) as {
-        event?: RevenueCatWebhookEvent;
-      };
-      if (fallback.event) {
-        webhookRetryQueue.enqueue("revenuecat.webhook", mapRevenueCatEvent(fallback.event));
-      }
-    } catch {
-      // ignore parse errors on retry enqueue
-    }
     return { ok: false, error: message };
   }
 };

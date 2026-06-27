@@ -10,14 +10,23 @@ Pipeline complet pentru generarea de modele 3D din limbaj natural în Caval Stud
 4. **Supabase** persistă metadata (`cad_generations`) și STL în bucket `cad-models`
 5. **CadViewer** (Three.js) afișează modelul în tab-ul „Model 3D”
 
-## Pornire locală
+## Pornire locală (doar dev — `CAD_CLOUD_ONLY=0`)
 
 ```bash
 # Terminal 1 — serviciu CAD (port 8791)
-npm run cad:serve
+CAD_CLOUD_ONLY=0 npm run cad:serve
 
 # Terminal 2 — aplicația
-npm run start
+CAD_CLOUD_ONLY=0 npm run start
+```
+
+**Producție (implicit):** aplicația Electron folosește **doar cloud** — setează `cad.apiUrl` în Setări → CAD Cloud 3D sau în `caval.jsonc`:
+
+```json
+"cad": {
+  "apiUrl": "https://xxx.up.railway.app",
+  "cloudOnly": true
+}
 ```
 
 ## Variabile de mediu

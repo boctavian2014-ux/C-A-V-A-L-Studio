@@ -8,6 +8,23 @@ const aiMocks = vi.hoisted(() => ({
   stream: vi.fn().mockImplementation(async function* () {
     yield "integration-test-response";
   }),
+  complete: vi.fn().mockResolvedValue({
+    content: "integration-test-response",
+    model: "qwen2.5-coder:7b",
+    provider: "test",
+  }),
+}));
+
+vi.mock("../../ai/tools/tool-runtime", () => ({
+  ensureMcpServersReady: vi.fn().mockResolvedValue(undefined),
+  getOrCreateToolRegistry: vi.fn().mockReturnValue({
+    listTools: () => [],
+    execute: vi.fn(),
+    setMcpInvoker: vi.fn(),
+    setMcpToolDefinitions: vi.fn(),
+  }),
+  syncRegistryMcpTools: vi.fn(),
+  listAvailableTools: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock("electron", () => ({
@@ -17,6 +34,7 @@ vi.mock("electron", () => ({
 vi.mock("../../ai/ai-client", () => ({
   AIClient: class {
     stream = aiMocks.stream;
+    complete = aiMocks.complete;
   },
 }));
 

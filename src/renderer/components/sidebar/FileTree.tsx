@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useEditorStore, type FileNode } from '../../store/editor-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
+import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -215,7 +216,7 @@ function TreeNode({
 //  FileTree — componenta principală
 // ──────────────────────────────────────────────
 
-export function FileTree() {
+export function FileTree({ onClose }: { onClose?: () => void }) {
   const { fileTree, projectPath, setProjectPath, setFileTree, refreshTree } = useEditorStore();
   const { theme } = useCavalTheme();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -226,6 +227,7 @@ export function FileTree() {
     setProjectPath(folderPath);
     const tree = await window.caval.fs.readTree(folderPath);
     setFileTree(tree);
+    await window.caval.workspaceOpen?.(folderPath);
   };
 
   const handleContextMenu = (e: React.MouseEvent, node: FileNode) => {
@@ -257,7 +259,7 @@ export function FileTree() {
         }}>
           {projectName}
         </span>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <IconBtn title="Deschide folder" onClick={handleOpenFolder}>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M1.5 4A1.5 1.5 0 013 2.5h4l1.5 1.5H13A1.5 1.5 0 0114.5 5.5v7A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V4z"
@@ -270,6 +272,7 @@ export function FileTree() {
               <path d="M3 5l2-3-2-0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
           </IconBtn>
+          {onClose && <SidebarCloseButton onClick={onClose} />}
         </div>
       </div>
 

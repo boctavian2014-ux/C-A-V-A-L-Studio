@@ -61,23 +61,65 @@ export interface CavalChatStreamRequest {
   model: string;
   mode?: "ask" | "plan" | "code" | "architect" | "debug";
   streamId: string;
+  workspaceRoot?: string;
+  messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  /** Force OpenRouter json_object — Engineering AI */
+  jsonMode?: boolean;
+  maxTokens?: number;
+  temperature?: number;
+  /** Override provider timeout (Engineering JSON uses 120s) */
+  timeoutMs?: number;
   context?: {
     filePath?: string;
     fileContent?: string;
     projectContext?: string;
     mentions?: string[];
+    attachments?: Array<{ path: string; name: string; content: string }>;
   };
 }
 
+export type ChatActivityPhase =
+  | "prepare"
+  | "route"
+  | "connect"
+  | "think"
+  | "write";
+
 export interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning";
   delta?: string;
+  reasoningDelta?: string;
   error?: string;
   resolvedModel?: string;
   reason?: string;
   model?: string;
   provider?: string;
+  toolName?: string;
+  toolStatus?: "start" | "done" | "error";
+  toolDetail?: string;
+  phase?: ChatActivityPhase;
+  status?: "active" | "done";
+  label?: string;
+  detail?: string;
+}
+
+export interface CavalChatPrepareRequest {
+  workspaceRoot: string;
+  objectiveDraft: string;
+  model: string;
+  draftHash: string;
+  activeFile?: string;
+  openFiles?: string[];
+}
+
+export interface CavalChatPrepareResult {
+  ok: boolean;
+  draftHash: string;
+  warmContextReady: boolean;
+  resolvedModelHint?: string;
+  tokenId?: string;
+  error?: string;
 }
 
 export interface CavalComposerResult {
@@ -179,13 +221,26 @@ contextBridge.exposeInMainWorld("caval", {
     return () => ipcRenderer.removeListener("caval:folder-opened", listener);
   },
   saveFile: (request: CavalSaveRequest) => ipcRenderer.invoke("caval:save-file", request),
-  engineeringExportPdf: (input: { content: string; defaultName?: string }) =>
-    ipcRenderer.invoke("caval:engineering-export-pdf", input) as Promise<{
-      ok: boolean;
-      canceled?: boolean;
-      path?: string;
-      error?: string;
-    }>,
+  engineering: {
+    saveFile: (projectPath: string, file: { name: string; content: string }) =>
+      ipcRenderer.invoke("engineering:saveFile", projectPath, file),
+    saveAll: (projectPath: string, files: { name: string; content: string }[]) =>
+      ipcRenderer.invoke("engineering:saveAll", projectPath, files),
+    exportCart: (
+      parts: {
+        name: string;
+        qty: number;
+        unitPrice: number;
+        currency: string;
+        shop: string;
+        shopUrl: string;
+        substitute?: string;
+      }[],
+      projectPath: string | null
+    ) => ipcRenderer.invoke("engineering:exportCart", parts, projectPath),
+    openExternal: (url: string) =>
+      ipcRenderer.invoke("engineering:openExternal", url),
+  },
   chat: (request: CavalChatRequest) => ipcRenderer.invoke("caval:ai-chat", request),
   modelsList: () =>
     ipcRenderer.invoke("caval:models-list") as Promise<{ ok: boolean; catalog?: CavalModelCatalog }>,
@@ -204,6 +259,24 @@ contextBridge.exposeInMainWorld("caval", {
     });
     return cleanup;
   },
+  aiComplete: (request: {
+    model: string;
+    intent?: string;
+    capability?: string;
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    workspaceRoot?: string;
+    requestId?: string;
+    apiKeys?: Record<string, string>;
+    jsonMode?: boolean;
+    maxTokens?: number;
+    temperature?: number;
+    /** Override provider timeout (Engineering JSON uses 120s) */
+    timeoutMs?: number;
+  }) =>
+    ipcRenderer.invoke("caval:ai-complete", request) as Promise<
+      | { ok: true; text: string; resolvedModel: string; provider: string }
+      | { ok: false; error: string }
+    >,
   resolveModel: (input: { model: string; intent?: string }) =>
     ipcRenderer.invoke("caval:resolve-model", input) as Promise<{
       ok: boolean;
@@ -290,6 +363,37 @@ contextBridge.exposeInMainWorld("caval", {
   contextIndex: () => ipcRenderer.invoke("caval:context-index") as Promise<{ ok: boolean; documentCount?: number }>,
   contextSearch: (input: { query: string; limit?: number }) =>
     ipcRenderer.invoke("caval:context-search", input) as Promise<{ ok: boolean; results?: unknown[] }>,
+  workspaceOpen: (folderPath: string) =>
+    ipcRenderer.invoke("caval:workspace-open", folderPath) as Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>,
+  workspaceSync: (folderPath: string) =>
+    ipcRenderer.invoke("caval:workspace-sync", folderPath) as Promise<{ ok: boolean; path?: string }>,
+  zlPrepare: (signals: {
+    workspaceRoot: string;
+    objectiveDraft?: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => ipcRenderer.invoke("caval:zl-prepare", signals) as Promise<{ ok: boolean; tokenId?: string }>,
+  zlCancel: (tokenId: string) => ipcRenderer.invoke("caval:zl-cancel", tokenId) as Promise<{ ok: boolean }>,
+  zlPanelOpen: (input: {
+    workspaceRoot?: string;
+    objectiveDraft?: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) => ipcRenderer.invoke("caval:zl-panel-open", input) as Promise<{ ok: boolean; tokenId?: string }>,
+  zlSnapshot: (input?: { workspaceRoot?: string; objectiveDraft?: string }) =>
+    ipcRenderer.invoke("caval:zl-snapshot", input) as Promise<{ ok: boolean; snapshot?: unknown }>,
+  zlCompleteChat: (signals: {
+    workspaceRoot: string;
+    objectiveDraft?: string;
+    activeFile?: string;
+    openFiles?: string[];
+  }) =>
+    ipcRenderer.invoke("caval:zl-complete-chat", signals) as Promise<{
+      ok: boolean;
+      prep?: { warmContext: string; modelBundle?: { warmedModels: string[] } };
+    }>,
+  chatPrepare: (input: CavalChatPrepareRequest) =>
+    ipcRenderer.invoke("caval:chat-prepare", input) as Promise<CavalChatPrepareResult>,
   settingsSave: (settings: Record<string, string>) =>
     ipcRenderer.invoke("caval:settings-save", settings) as Promise<{ ok: boolean }>,
   settingsLoad: () => ipcRenderer.invoke("caval:settings-load") as Promise<{ ok: boolean; settings?: Record<string, string> }>,
@@ -383,32 +487,6 @@ contextBridge.exposeInMainWorld("caval", {
     stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath)
   },
 
-  image: {
-    generate: (params: {
-      prompt: string;
-      size?: "1024x1024" | "1792x1024" | "1024x1792";
-      quality?: "standard" | "hd";
-      style?: "vivid" | "natural";
-      apiKey: string;
-    }) => ipcRenderer.invoke("image:generate", params) as Promise<{
-      ok: boolean;
-      url?: string;
-      revisedPrompt?: string;
-      error?: string;
-    }>,
-    save: (imageUrl: string, projectPath: string, fileName: string) =>
-      ipcRenderer.invoke("image:save", imageUrl, projectPath, fileName) as Promise<{
-        ok: boolean;
-        savedPath?: string;
-        error?: string;
-      }>,
-    saveAs: (imageUrl: string) =>
-      ipcRenderer.invoke("image:saveAs", imageUrl) as Promise<{
-        ok: boolean;
-        savedPath?: string;
-        error?: string;
-      }>
-  },
 
   preload: {
     status: () =>
@@ -456,10 +534,27 @@ contextBridge.exposeInMainWorld("caval", {
   },
 
   cad: {
+    isCloudOnly: () =>
+      ipcRenderer.invoke("cad:isCloudOnly") as Promise<{
+        ok: boolean;
+        cloudOnly?: boolean;
+        defaultUrl?: string;
+      }>,
+    health: () =>
+      ipcRenderer.invoke("cad:health") as Promise<{
+        ok: boolean;
+        url?: string;
+        cloudOnly?: boolean;
+        openscadInstalled?: boolean;
+        openRouterConfigured?: boolean;
+        meshyConfigured?: boolean;
+        error?: string;
+      }>,
     plan: (input: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       latestUserText: string;
       openRouterApiKey?: string;
+      meshApiKey?: string;
       previousMeshTaskId?: string;
     }) =>
       ipcRenderer.invoke("cad:plan", input) as Promise<{
@@ -504,8 +599,8 @@ contextBridge.exposeInMainWorld("caval", {
         status?: string;
         error?: string;
       }>,
-    getJob: (jobId: string) =>
-      ipcRenderer.invoke("cad:getJob", jobId) as Promise<{
+    getJob: (input: { jobId: string; cavalId?: string }) =>
+      ipcRenderer.invoke("cad:getJob", input) as Promise<{
         ok: boolean;
         jobId?: string;
         status?: string;
@@ -513,6 +608,21 @@ contextBridge.exposeInMainWorld("caval", {
         scad?: string | null;
         error?: string | null;
         dimensions?: { x: number; y: number; z: number } | null;
+        meshTaskId?: string | null;
+      }>,
+    cancelJob: (input: { jobId: string; cavalId?: string }) =>
+      ipcRenderer.invoke("cad:cancelJob", input) as Promise<{
+        ok: boolean;
+        jobId?: string;
+        status?: string;
+        error?: string;
+      }>,
+    getJobLogs: (input: { jobId: string; cavalId?: string }) =>
+      ipcRenderer.invoke("cad:getJobLogs", input) as Promise<{
+        ok: boolean;
+        jobId?: string;
+        logs?: Array<{ at: string; level: string; event: string; message?: string }>;
+        error?: string;
       }>,
     downloadStl: (input: { url: string; defaultName?: string }) =>
       ipcRenderer.invoke("cad:downloadStl", input) as Promise<{
@@ -527,7 +637,13 @@ contextBridge.exposeInMainWorld("caval", {
         canceled?: boolean;
         path?: string;
         error?: string;
-      }>
+      }>,
+    installOpenScad: () =>
+      ipcRenderer.invoke("cad:installOpenScad") as Promise<{
+        ok: boolean;
+        installed?: boolean;
+        error?: string;
+      }>,
   },
 
   schematic: {

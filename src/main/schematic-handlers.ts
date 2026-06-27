@@ -5,26 +5,24 @@ import {
   submitSchematicPatches,
 } from "../../ai/schematic/schematic-composer-bridge";
 import { schematicAI, createSampleGraph } from "../../ai/schematic/schematic-ai";
+import type { HardwarePlanContext } from "../../ai/schematic/schematic-ai";
 import type {
   SchematicGraph,
   SchematicGraphDelta,
 } from "../../ai/schematic/schematic-types";
 import { computeGraphDelta } from "../../ai/schematic/schematic-types";
 
-function resolveWorkspaceRoot(root: string): string {
-  if (!root || root === ".") return process.cwd();
-  return root;
-}
-
 export interface SchematicGenerateFromCodeInput {
-  workspaceRoot: string;
+  workspaceRoot?: string;
   files?: string[];
   objective?: string;
   useSample?: boolean;
+  projectType?: string;
+  planContext?: HardwarePlanContext;
 }
 
 export interface SchematicGenerateCodeInput {
-  workspaceRoot: string;
+  workspaceRoot?: string;
   graph: SchematicGraph;
   delta: SchematicGraphDelta;
   skipSuggestions?: boolean;
@@ -36,37 +34,44 @@ export interface SchematicExplainInput {
   edgeId?: string;
 }
 
-export const registerSchematicHandlers = (): void => {
+export const registerSchematicHandlers = (
+  getWorkspaceRoot: (senderId: number) => string
+): void => {
+  const resolveRoot = (senderId: number, inputRoot?: string): string => {
+    if (inputRoot && inputRoot !== ".") return inputRoot;
+    return getWorkspaceRoot(senderId);
+  };
+
   ipcMain.handle(
     "schematic:generateFromCode",
-    async (_event, input: SchematicGenerateFromCodeInput) => {
-      if (!input?.workspaceRoot) {
-        return { ok: false, error: "workspaceRoot is required" };
-      }
-      if (input.useSample) {
-        return { ok: true, graph: createSampleGraph(resolveWorkspaceRoot(input.workspaceRoot)) };
+    async (event, input: SchematicGenerateFromCodeInput) => {
+      const workspaceRoot = resolveRoot(event.sender.id, input?.workspaceRoot);
+      if (input?.useSample) {
+        return { ok: true, graph: createSampleGraph(workspaceRoot) };
       }
       return schematicAI.generateFromCode({
         ...input,
-        workspaceRoot: resolveWorkspaceRoot(input.workspaceRoot),
+        workspaceRoot,
       });
     }
   );
 
-  ipcMain.handle("schematic:generateCode", async (_event, input: SchematicGenerateCodeInput) => {
-    if (!input?.workspaceRoot || !input.graph) {
-      return { ok: false, error: "workspaceRoot and graph are required" };
+  ipcMain.handle("schematic:generateCode", async (event, input: SchematicGenerateCodeInput) => {
+    if (!input?.graph) {
+      return { ok: false, error: "graph is required" };
     }
+
+    const workspaceRoot = resolveRoot(event.sender.id, input.workspaceRoot);
 
     const gen = await schematicAI.generateCodeFromGraph({
       ...input,
-      workspaceRoot: resolveWorkspaceRoot(input.workspaceRoot),
+      workspaceRoot,
     });
     if (!gen.ok || !gen.patchSet) {
       return { ok: false, error: gen.error ?? "Failed to generate patches" };
     }
 
-    const pipeline = await submitSchematicPatches(resolveWorkspaceRoot(input.workspaceRoot), gen.patchSet, {
+    const pipeline = await submitSchematicPatches(workspaceRoot, gen.patchSet, {
       skipSuggestions: input.skipSuggestions ?? false,
       objective: buildSchematicComposerObjective(input.delta, input.graph),
     });
@@ -108,18 +113,19 @@ export const registerSchematicHandlers = (): void => {
   ipcMain.handle(
     "schematic:submitPatches",
     async (
-      _event,
+      event,
       input: {
-        workspaceRoot: string;
+        workspaceRoot?: string;
         patchSet: ComposerPatchSet;
         skipSuggestions?: boolean;
         objective?: string;
       }
     ) => {
-      if (!input?.workspaceRoot || !input.patchSet) {
-        return { ok: false, error: "workspaceRoot and patchSet required" };
+      if (!input?.patchSet) {
+        return { ok: false, error: "patchSet required" };
       }
-      const result = await submitSchematicPatches(resolveWorkspaceRoot(input.workspaceRoot), input.patchSet, {
+      const workspaceRoot = resolveRoot(event.sender.id, input.workspaceRoot);
+      const result = await submitSchematicPatches(workspaceRoot, input.patchSet, {
         skipSuggestions: input.skipSuggestions,
         objective: input.objective,
       });

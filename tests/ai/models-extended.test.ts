@@ -76,6 +76,7 @@ describe("ModelCache", () => {
 
 describe("model-loader", () => {
   it("marks http models ready after warm probe", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
@@ -89,5 +90,6 @@ describe("model-loader", () => {
     expect(handle.state).toBe("ready");
 
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 });

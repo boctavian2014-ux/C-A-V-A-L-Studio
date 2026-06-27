@@ -9,7 +9,7 @@ import { NvidiaProvider } from "./providers/nvidia";
 import { NorthProvider } from "./providers/north";
 import { OpenRouterProvider } from "./providers/openrouter";
 import { PoolsideProvider } from "./providers/poolside";
-import type { ModelCapability, ModelDescriptor, ModelProvider, ModelRequest, ModelResponse } from "./types";
+import type { ModelCapability, ModelDescriptor, ModelProvider, ModelRequest, ModelResponse, ModelStreamChunk } from "./types";
 import type { AITaskDescriptor } from "./models/model-types";
 import { preloadModel } from "./models/model-preload";
 
@@ -267,7 +267,7 @@ export class ModelRouter {
     throw new AggregateError(errors, `No Caval AI model could satisfy capability: ${request.capability}`);
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<string> {
+  async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
     const candidates = this.rank({ ...request, stream: true }).filter(({ model }) => model.supportsStreaming);
     const errors: Error[] = [];
 
@@ -309,7 +309,9 @@ export class ModelRouter {
     if (errors.length > 0) {
       try {
         const response = await this.complete({ ...request, stream: false });
-        yield response.content;
+        if (response.content) {
+          yield { kind: "content", text: response.content };
+        }
         return;
       } catch (completeError) {
         errors.push(completeError instanceof Error ? completeError : new Error(String(completeError)));
