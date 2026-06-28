@@ -53,6 +53,9 @@ describe("Zero-Latency Fusion", () => {
         objective: "fix bug",
         confidence: 0.8,
         createdAt: Date.now(),
+        planId: 'draft_test',
+        status: 'draft',
+        source: 'stub',
         plan: {
           objective: "fix bug",
           steps: [{ id: "s1", title: "Inspect", rationale: "Read files", files: [], symbols: [], risk: "low" }],

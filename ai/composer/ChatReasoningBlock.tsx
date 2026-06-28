@@ -78,19 +78,7 @@ export function ChatReasoningBlock({
           }}
         >
           {reasoning}
-          {isStreaming && (
-            <span
-              style={{
-                display: 'inline-block',
-                width: 2,
-                height: '1em',
-                marginLeft: 2,
-                verticalAlign: 'text-bottom',
-                background: 'var(--caval-accent)',
-                animation: 'cursor-blink 0.9s step-end infinite',
-              }}
-            />
-          )}
+          {isStreaming && <span className="caval-stream-cursor" aria-hidden="true" />}
         </div>
       )}
     </div>

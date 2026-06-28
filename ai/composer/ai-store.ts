@@ -88,6 +88,7 @@ export interface ChatPrepareState {
   ready: boolean;
   resolvedModelHint?: string;
   warmContextReady: boolean;
+  partialPlanPreview?: string;
   updatedAt: number;
 }
 
@@ -160,6 +161,7 @@ interface CavalWindow {
       draftHash: string;
       warmContextReady: boolean;
       resolvedModelHint?: string;
+      partialPlanPreview?: string;
       tokenId?: string;
     }>;
     zlCompleteChat?: (signals: {
@@ -167,9 +169,18 @@ interface CavalWindow {
       objectiveDraft?: string;
       activeFile?: string;
       openFiles?: string[];
+      selectedModel?: string;
     }) => Promise<{
       ok: boolean;
-      prep?: { warmContext: string };
+      prep?: {
+        warmContext: string;
+        partialPlan?: {
+          planId: string;
+          objective: string;
+          confidence: number;
+          plan: { steps: Array<{ title: string }> };
+        };
+      };
     }>;
     settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
     modelsList?: () => Promise<{ catalog?: { all: Array<{ id: string; label: string; color: string }> } }>;
@@ -461,6 +472,7 @@ export const useAIStore = create<AIStore>()(
               ready: true,
               resolvedModelHint: result.resolvedModelHint,
               warmContextReady: result.warmContextReady,
+              partialPlanPreview: result.partialPlanPreview,
               updatedAt: Date.now(),
             },
           });
@@ -533,19 +545,10 @@ export const useAIStore = create<AIStore>()(
         };
 
         const nextMessages = [...messages, userMsg, assistantMsg];
-        set({ messages: nextMessages, isStreaming: true, attachedFiles: [], prepareState: null });
-        prepareTokenId = null;
+        set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
 
         const caval = (window as unknown as CavalWindow).caval;
 
-        if (editorState.projectPath) {
-          void caval?.zlCompleteChat?.({
-            workspaceRoot: editorState.projectPath,
-            objectiveDraft: apiPrompt,
-            activeFile: editorState.tabs.find((t) => t.id === editorState.activeTabId)?.path,
-            openFiles: editorState.tabs.map((t) => t.path),
-          });
-        }
         const mentionPaths = [
           ...parseMentions(apiPrompt),
           ...attachmentsSnapshot.map((f) => f.name),
@@ -576,6 +579,37 @@ export const useAIStore = create<AIStore>()(
             return { messages: updated, threads: updatedThreads };
           });
         };
+
+        let zlWarmContext = '';
+        if (editorState.projectPath && caval?.zlCompleteChat) {
+          try {
+            const zlResult = await caval.zlCompleteChat({
+              workspaceRoot: editorState.projectPath,
+              objectiveDraft: apiPrompt,
+              activeFile: editorState.tabs.find((t) => t.id === editorState.activeTabId)?.path,
+              openFiles: editorState.tabs.map((t) => t.path),
+              selectedModel,
+            });
+            if (zlResult?.ok && zlResult.prep) {
+              zlWarmContext = zlResult.prep.warmContext ?? '';
+              if (zlResult.prep.partialPlan && agentMode !== 'code') {
+                updateAssistant({
+                  content: [
+                    'Plan preliminar (Zero-Latency):',
+                    ...zlResult.prep.partialPlan.plan.steps
+                      .slice(0, 5)
+                      .map((s, i) => `${i + 1}. ${s.title}`),
+                  ].join('\n'),
+                });
+              }
+            }
+          } catch {
+            /* best-effort */
+          }
+        }
+
+        set({ prepareState: null });
+        prepareTokenId = null;
 
         const updateActivity = (
           phase: ChatActivityPhase,
@@ -911,7 +945,11 @@ export const useAIStore = create<AIStore>()(
             messages.map((m) => ({ role: m.role, content: m.content })),
             agentMode
           );
-          startIpcStream(contextMessages, {}, scaffoldMode);
+          startIpcStream(
+            contextMessages,
+            { projectContext: prepWarmReady && zlWarmContext ? zlWarmContext : undefined },
+            scaffoldMode
+          );
           return;
         }
 
@@ -927,7 +965,9 @@ export const useAIStore = create<AIStore>()(
         }
 
         let projectContext = '';
-        if (attachProject) {
+        if (prepWarmReady && zlWarmContext.trim()) {
+          projectContext = zlWarmContext;
+        } else if (attachProject) {
           if (!prepReady) {
             updateActivity('prepare', 'active');
           }

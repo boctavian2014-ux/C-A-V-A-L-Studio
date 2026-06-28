@@ -409,9 +409,19 @@ interface CavalBridge {
     objectiveDraft?: string;
     activeFile?: string;
     openFiles?: string[];
+    selectedModel?: string;
   }) => Promise<{
     ok: boolean;
-    prep?: { warmContext: string; modelBundle?: { warmedModels: string[] } };
+    prep?: {
+      warmContext: string;
+      partialPlan?: {
+        planId: string;
+        objective: string;
+        confidence: number;
+        plan: { steps: Array<{ title: string }> };
+      };
+      modelBundle?: { warmedModels: string[] };
+    };
   }>;
   chatPrepare?: (input: {
     workspaceRoot: string;

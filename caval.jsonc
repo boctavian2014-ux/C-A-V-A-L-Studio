@@ -99,5 +99,13 @@
     "defaultMode": "balanced",
     "endOfResponseRecap": true,
     "autoSwitch": true
+  },
+  "zeroLatency": {
+    "enabled": true,
+    "typingDebounceMs": 350,
+    "frontierPrewarm": true,
+    "draftPlan": "fast-then-frontier",
+    "maxWarmFiles": 8,
+    "maxWarmChars": 2500
   }
 }

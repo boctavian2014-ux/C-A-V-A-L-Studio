@@ -1,5 +1,6 @@
 import { warmCacheManager } from "../../context/warm-cache/warm-cache-manager";
 import { zeroLatencyCache, type ZeroLatencyCache } from "./zl-cache";
+import { loadZeroLatencyConfig } from "./zl-config";
 import { zlContextPreloader, type ZLContextPreloader } from "./zl-context-preloader";
 import { zlModelPreloader, type ZLModelPreloader } from "./zl-model-preloader";
 import { zlPreplanner, type ZLPreplanner } from "./zl-preplanner";
@@ -18,6 +19,9 @@ export class ZeroLatencyComposer {
 
   /** Called while the user is typing or focusing Composer. */
   prepare(signals: ZLSignals): string {
+    const cfg = loadZeroLatencyConfig(signals.workspaceRoot);
+    if (!cfg.enabled) return this.scheduler.createToken();
+
     const tokenId = this.scheduler.createToken();
     console.log(`${ZL_LOG_PREFIX} prepare ${signals.workspaceRoot}`);
 
@@ -55,7 +59,12 @@ export class ZeroLatencyComposer {
       priority: "LOW",
       tokenId,
       run: async () => {
-        this.preplanner.preplan(signals);
+        if (cfg.draftPlan === 'off') return;
+        if (cfg.draftPlan === 'stub') {
+          this.preplanner.preplan(signals);
+          return;
+        }
+        await this.preplanner.preplanAsync(signals, cfg.draftPlan);
       },
     });
 

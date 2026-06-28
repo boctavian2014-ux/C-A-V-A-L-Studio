@@ -99,7 +99,7 @@ function useTerminal(containerId: string) {
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
       const dims = fitAddon.proposeDimensions();
-      if (dims) {
+      if (dims && dims.cols > 0 && dims.rows > 0) {
         void caval.terminal.resize(id, dims.cols, dims.rows);
       }
     });

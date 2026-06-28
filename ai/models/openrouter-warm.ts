@@ -4,7 +4,7 @@ const WARM_INTERVAL_MS = 5 * 60_000;
 let lastWarmAt = 0;
 
 /** Keep TLS + OpenRouter route hot — abort after first stream byte. */
-export function warmOpenRouterConnection(force = false): void {
+export function warmOpenRouterConnection(force = false, modelId = 'stepfun-step-3-7-flash'): void {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) return;
 
@@ -12,8 +12,8 @@ export function warmOpenRouterConnection(force = false): void {
   if (!force && now - lastWarmAt < WARM_INTERVAL_MS) return;
   lastWarmAt = now;
 
-  const profile = getModelProfile("stepfun-step-3-7-flash");
-  const model = profile?.providerModelId ?? "stepfun/step-3.7-flash";
+  const profile = getModelProfile(modelId);
+  const model = profile?.providerModelId ?? (modelId.includes('/') ? modelId : 'stepfun/step-3.7-flash');
 
   void (async () => {
     try {

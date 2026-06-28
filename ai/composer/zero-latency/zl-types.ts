@@ -15,13 +15,19 @@ export interface ZLSignals {
   openFiles?: string[];
   language?: string;
   projectType?: string;
+  selectedModel?: string;
 }
 
+export type DraftPlanStatus = 'draft' | 'accepted' | 'replaced' | 'discarded';
+
 export interface ZLPartialPlan {
+  planId: string;
   objective: string;
   plan: ComposerPlan;
   confidence: number;
   createdAt: number;
+  status: DraftPlanStatus;
+  source: 'stub' | 'fast-llm' | 'frontier-llm';
 }
 
 export interface ZLCacheEntry {

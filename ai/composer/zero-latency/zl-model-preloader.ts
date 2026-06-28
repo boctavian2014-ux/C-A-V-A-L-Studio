@@ -1,34 +1,51 @@
-import { ModelRouter } from "../../model-router";
-import { preloadModel } from "../../models/model-preload";
-import { zeroLatencyCache, type ZeroLatencyCache } from "./zl-cache";
-import type { ZLSignals } from "./zl-types";
-import { ZL_LOG_PREFIX } from "./zl-types";
+import { randomUUID } from 'node:crypto';
+
+import { preloadManager } from '../../preload/preload-manager';
+import { resolveModelSelection } from '../../models/auto-router';
+import type { ModelSelectionId } from '../../models/model-catalog';
+import { zeroLatencyCache, type ZeroLatencyCache } from './zl-cache';
+import { isFrontierSelection, loadZeroLatencyConfig } from './zl-config';
+import type { ZLSignals } from './zl-types';
+import { ZL_LOG_PREFIX } from './zl-types';
 
 export class ZLModelPreloader {
-  constructor(
-    private readonly router = new ModelRouter(),
-    private readonly cache: ZeroLatencyCache = zeroLatencyCache
-  ) {}
+  constructor(private readonly cache: ZeroLatencyCache = zeroLatencyCache) {}
 
-  preload(signals: ZLSignals): void {
-    const planning = this.router.predictModelForTask({ capability: "planning", intent: "planning" });
-    const coding = this.router.predictModelForTask({ capability: "code", intent: "kilocode" });
-    const models = Array.from(new Set([planning.model, coding.model, "qwen2.5-coder:7b"]));
+  async preload(signals: ZLSignals): Promise<void> {
+    const cfg = loadZeroLatencyConfig(signals.workspaceRoot);
+    if (!cfg.enabled) return;
+
+    const models = new Set<string>(['stepfun-step-3-7-flash']);
+
+    if (signals.selectedModel) {
+      try {
+        const resolved = await resolveModelSelection(
+          signals.selectedModel as ModelSelectionId,
+          'fallback'
+        );
+        models.add(resolved.modelId);
+        if (cfg.frontierPrewarm && isFrontierSelection(signals.selectedModel)) {
+          models.add('nex-n2-pro');
+        }
+      } catch {
+        /* ignore */
+      }
+    }
 
     for (const model of models) {
       console.log(`${ZL_LOG_PREFIX} preload model ${model}`);
-      preloadModel(model, { background: true, priority: 90 });
+      void preloadManager.warmModel(model, 'chat');
     }
 
     this.cache.upsert({
       workspaceRoot: signals.workspaceRoot,
       objectiveDraft: signals.objectiveDraft,
-      warmedModels: models,
+      warmedModels: Array.from(models),
     });
   }
 
   /** Models pre-warmed for this workspace/objective (Zero-Latency Fusion API). */
-  getModelBundle(workspaceRoot: string, objectiveDraft = ""): string[] {
+  getModelBundle(workspaceRoot: string, objectiveDraft = ''): string[] {
     const cached = this.cache.get(workspaceRoot, objectiveDraft);
     return cached?.warmedModels ?? [];
   }

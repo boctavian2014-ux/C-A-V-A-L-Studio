@@ -72,13 +72,19 @@ export class WarmCacheManager {
       .catch((error) => this.logError(error));
   }
 
-  predictAndWarm(input: { activeFile?: string; openFiles?: string[]; userAction?: string }): void {
+  predictAndWarm(input: {
+    activeFile?: string;
+    openFiles?: string[];
+    userAction?: string;
+    objectiveDraft?: string;
+  }): void {
     if (!this.workspaceRoot) return;
     const prediction = this.predictor.predict({
       workspaceRoot: this.workspaceRoot,
       activeFile: input.activeFile,
       openFiles: input.openFiles,
       userAction: input.userAction,
+      objectiveDraft: input.objectiveDraft,
     });
     if (prediction.files.length === 0) return;
     void this.loader

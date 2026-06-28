@@ -39,7 +39,10 @@ ipcMain.handle('terminal:write', async (_event, id: string, data: string) => {
 ipcMain.handle('terminal:resize', async (_event, id: string, cols: number, rows: number) => {
   const session = sessions.get(id);
   if (!session) return { ok: false };
-  session.resize(cols, rows);
+  const safeCols = Math.floor(cols);
+  const safeRows = Math.floor(rows);
+  if (safeCols < 1 || safeRows < 1) return { ok: false, skipped: true };
+  session.resize(safeCols, safeRows);
   return { ok: true };
 });
 

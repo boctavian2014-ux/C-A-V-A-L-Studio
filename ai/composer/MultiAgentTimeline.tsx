@@ -79,8 +79,8 @@ export function MultiAgentTimeline({ steps, collapsed }: MultiAgentTimelineProps
       ))}
       <style>{`
         @keyframes zl-step-pulse {
-          0%, 100% { opacity: 0.45; transform: scale(0.85); }
-          50% { opacity: 1; transform: scale(1); }
+          0%, 100% { opacity: 0.45; }
+          50% { opacity: 1; }
         }
       `}</style>
     </div>

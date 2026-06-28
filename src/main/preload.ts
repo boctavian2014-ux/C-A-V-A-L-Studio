@@ -144,6 +144,7 @@ export interface CavalChatPrepareResult {
   draftHash: string;
   warmContextReady: boolean;
   resolvedModelHint?: string;
+  partialPlanPreview?: string;
   tokenId?: string;
   error?: string;
 }
@@ -415,10 +416,20 @@ contextBridge.exposeInMainWorld("caval", {
     objectiveDraft?: string;
     activeFile?: string;
     openFiles?: string[];
+    selectedModel?: string;
   }) =>
     ipcRenderer.invoke("caval:zl-complete-chat", signals) as Promise<{
       ok: boolean;
-      prep?: { warmContext: string; modelBundle?: { warmedModels: string[] } };
+      prep?: {
+        warmContext: string;
+        partialPlan?: {
+          planId: string;
+          objective: string;
+          confidence: number;
+          plan: { steps: Array<{ title: string }> };
+        };
+        modelBundle?: { warmedModels: string[] };
+      };
     }>,
   chatPrepare: (input: CavalChatPrepareRequest) =>
     ipcRenderer.invoke("caval:chat-prepare", input) as Promise<CavalChatPrepareResult>,

@@ -567,6 +567,27 @@ export function WorkbenchRoot() {
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }
         }
+        @keyframes cursor-blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+        @keyframes zl-step-pulse {
+          0%, 100% { opacity: 0.45; }
+          50% { opacity: 1; }
+        }
+        .caval-stream-text {
+          font-family: inherit;
+        }
+        .caval-stream-cursor {
+          display: inline-block;
+          width: 2px;
+          height: 0.9em;
+          margin-left: 1px;
+          vertical-align: -0.05em;
+          background: var(--caval-accent);
+          animation: cursor-blink 0.9s step-end infinite;
+          flex-shrink: 0;
+        }
 
         /* ── Diff block stiluri ── */
         .diff-remove { background: rgba(255, 70, 70, 0.08); color: #ff7070; }

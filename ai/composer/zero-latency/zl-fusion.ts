@@ -1,12 +1,13 @@
 import { warmCacheManager } from "../../context/warm-cache/warm-cache-manager";
 import { warmCacheStore } from "../../context/warm-cache/warm-cache-store";
 import type { WarmCacheEntry } from "../../context/warm-cache/warm-cache-types";
-import { zeroLatencyCache } from "./zl-cache";
 import { zeroLatencyComposer } from "./zl-composer";
+import { zeroLatencyCache } from "./zl-cache";
 import { zlModelPreloader } from "./zl-model-preloader";
 import { zlPreplanner } from "./zl-preplanner";
 import type { ZLComposerSnapshot, ZLPartialPlan, ZLSignals } from "./zl-types";
 import { ZL_LOG_PREFIX } from "./zl-types";
+import { loadZeroLatencyConfig } from "./zl-config";
 
 export interface ZLModelBundle {
   warmedModels: string[];
@@ -198,13 +199,21 @@ export class ZeroLatencyFusion {
   }
 
   /** Called on Enter — finalize plan + return warm context bundle. */
-  completeForChat(signals: ZLSignals): ZLChatPrep {
-    zlPreplanner.preplan(signals);
+  async completeForChat(signals: ZLSignals): Promise<ZLChatPrep> {
+    const cfg = loadZeroLatencyConfig(signals.workspaceRoot);
+    if (cfg.draftPlan !== 'off') {
+      if (cfg.draftPlan === 'stub') {
+        zlPreplanner.preplan(signals);
+      } else {
+        await zlPreplanner.preplanAsync(signals, cfg.draftPlan);
+      }
+    }
     const warmContext = buildWarmContextBlock({
       workspaceRoot: signals.workspaceRoot,
       objectiveDraft: signals.objectiveDraft,
       activeFile: signals.activeFile,
       openFiles: signals.openFiles,
+      maxFiles: cfg.maxWarmFiles,
     });
     const cached = zeroLatencyComposer.getCached(
       signals.workspaceRoot,

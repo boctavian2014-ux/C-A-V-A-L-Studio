@@ -26,6 +26,7 @@ export interface ChatPrepareResult {
   draftHash: string;
   warmContextReady: boolean;
   resolvedModelHint?: string;
+  partialPlanPreview?: string;
   tokenId?: string;
   error?: string;
 }

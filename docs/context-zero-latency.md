@@ -184,8 +184,8 @@ flowchart TB
 | Workspace open | `preloadManager.onWorkspaceOpen` → `zeroLatencyFusion.onWorkspaceOpen` |
 | File open / change | `warmCacheManager.onFileOpen/onFileChange` + `zlPrepare` |
 | AI Panel open | `caval:zl-panel-open` |
-| User typing | `caval:zl-prepare` (400ms debounce in AIPanel) |
-| Enter / chat | `enrichChatWithZeroLatency` in `model-handlers.ts` |
+| User typing | `caval:chat-prepare` (debounce from `zeroLatency.typingDebounceMs`) |
+| Enter / chat | `await zlCompleteChat` + `enrichChatWithZeroLatency` in `model-handlers.ts` |
 | Composer run | `zeroLatencyFusion.prepare` before `AIComposer.run` |
 
 ### Cache invalidation
@@ -197,6 +197,23 @@ flowchart TB
 ### Why responses feel instant
 
 1. Context is pre-loaded in worker threads before Enter
-2. Models are warmed by `ZLModelPreloader` + `PreloadManager` in parallel
-3. Partial plans exist in `ZeroLatencyCache` before the full request
-4. Chat stream injects warm context instead of rebuilding from scratch
+2. Auto Frontier triggers `preloadManager.warmModel('nex-n2-pro')` during typing
+3. Partial plan draft appears in the input bar while typing (`partialPlanPreview`)
+4. On Enter, `zlCompleteChat` injects full warm context (up to `maxWarmChars`)
+
+### Configuration (`caval.jsonc`)
+
+```jsonc
+"zeroLatency": {
+  "enabled": true,
+  "typingDebounceMs": 350,
+  "frontierPrewarm": true,
+  "draftPlan": "fast-then-frontier",
+  "maxWarmFiles": 8,
+  "maxWarmChars": 2500
+}
+```
+
+- `frontierPrewarm`: pre-warm Nex N2 Pro when `caval-auto/frontier` is selected
+- `draftPlan`: `stub` | `fast` | `fast-then-frontier` | `off`
+- `caval:zl-prepare` is deprecated; use `caval:chat-prepare`

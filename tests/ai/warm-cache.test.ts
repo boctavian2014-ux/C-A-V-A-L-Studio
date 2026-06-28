@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { WarmCachePredictor } from "../../ai/context/warm-cache/warm-cache-predictor";
 import { WarmCacheStore } from "../../ai/context/warm-cache/warm-cache-store";
+import { warmCacheStore } from "../../ai/context/warm-cache/warm-cache-store";
 import type { ParallelLoadResult } from "../../ai/context/parallel/parallel-types";
 
 describe("WarmCacheStore", () => {
@@ -84,5 +85,29 @@ describe("WarmCachePredictor", () => {
       activeFile: "/p/src/app.ts",
     });
     expect(prediction.files.some((f) => f.endsWith("app.tsx") || f.includes("app"))).toBe(true);
+  });
+
+  it("includes files matching objective keywords from warm store", () => {
+    warmCacheStore.upsertFromParallel({
+      documents: [
+        {
+          id: "d1",
+          path: "/p/src/payment.service.ts",
+          language: "ts",
+          contentHash: "h1",
+          chunks: [],
+        },
+      ],
+      embeddings: [],
+      symbols: [{ name: "PaymentService", kind: "class", file: "/p/src/payment.service.ts", line: 1 }],
+      dependencies: [],
+      semantics: [{ file: "/p/src/payment.service.ts", tokens: 10, lines: 1, imports: 0, exports: 1, keywords: ["payment", "stripe"] }],
+      durationMs: 1,
+    });
+    const prediction = predictor.predict({
+      workspaceRoot: "/p",
+      objectiveDraft: "implement stripe webhook payment",
+    });
+    expect(prediction.files.some((f) => f.includes("payment.service"))).toBe(true);
   });
 });

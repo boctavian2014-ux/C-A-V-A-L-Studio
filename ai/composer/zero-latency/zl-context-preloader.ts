@@ -16,6 +16,7 @@ export class ZLContextPreloader {
       activeFile: signals.activeFile,
       openFiles: signals.openFiles,
       userAction: "zl.context",
+      objectiveDraft: signals.objectiveDraft,
     });
 
     if (!signals.objectiveDraft?.trim()) return;

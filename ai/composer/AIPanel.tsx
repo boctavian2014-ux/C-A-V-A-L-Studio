@@ -14,6 +14,7 @@ import { MultiAgentTimeline } from './MultiAgentTimeline';
 import { ArenaHorseWait } from './ArenaHorseWait';
 import { resolveWaitPhase } from './arena-wait-copy';
 import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
+import { DEFAULT_ZERO_LATENCY_CONFIG } from '../../ai/composer/zero-latency/zl-config-shared';
 
 const ARENA_INPUT_ROWS = 4;
 const ARENA_LINE_HEIGHT = 1.5;
@@ -353,32 +354,17 @@ function StreamingDots() {
 function StreamingText({ content }: { content: string }) {
   return (
     <div
+      className="caval-stream-text"
       style={{
         whiteSpace: 'pre-wrap',
         overflowWrap: 'break-word',
         userSelect: 'text',
         WebkitUserSelect: 'text',
-        fontFamily: 'inherit',
+        lineHeight: 1.6,
       }}
     >
       {content}
-      <span
-        style={{
-          display: 'inline-block',
-          width: 2,
-          height: '1em',
-          marginLeft: 2,
-          verticalAlign: 'text-bottom',
-          background: 'var(--caval-accent)',
-          animation: 'cursor-blink 0.9s step-end infinite',
-        }}
-      />
-      <style>{`
-        @keyframes cursor-blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0; }
-        }
-      `}</style>
+      <span className="caval-stream-cursor" aria-hidden="true" />
     </div>
   );
 }
@@ -402,6 +388,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState('');
+  const [preloadHint, setPreloadHint] = useState('');
 
   // ── Resize drag ──
   const [panelWidth, setPanelWidth] = useState(340);
@@ -431,6 +418,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       window.removeEventListener('mouseup', onUp);
     };
   }, []);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prepareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -452,6 +440,19 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   useEffect(() => {
     void loadModelLabels();
   }, [loadModelLabels]);
+
+  useEffect(() => {
+    const caval = (window as unknown as { caval?: { preload?: { onEvent?: (cb: (e: { type: string; modelId?: string }) => void) => () => void } } }).caval;
+    const unsub = caval?.preload?.onEvent?.((event) => {
+      if (event.type === 'preload.start' && event.modelId) {
+        setPreloadHint(`Încălzesc ${event.modelId}…`);
+      }
+      if (event.type === 'preload.cache.hit' && event.modelId) {
+        setPreloadHint(`${event.modelId} pregătit`);
+      }
+    });
+    return () => unsub?.();
+  }, []);
 
   useEffect(() => {
     if (!pendingChatDraft) return;
@@ -493,15 +494,23 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         activeFile: activeTab?.path,
         openFiles: tabs.map((t) => t.path),
       });
-    }, 350);
+    }, DEFAULT_ZERO_LATENCY_CONFIG.typingDebounceMs);
     return () => {
       if (prepareTimer.current) clearTimeout(prepareTimer.current);
     };
   }, [input, projectPath, tabs, activeTabId, chatPrepareDraft, clearPrepareState]);
 
-  // Auto-scroll la ultimul mesaj
+  // Auto-scroll: instant during stream (smooth scroll on every token causes jitter)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesScrollRef.current;
+    if (!container) return;
+
+    if (isStreaming) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [messages, isStreaming]);
 
   const handleSend = useCallback(async () => {
@@ -656,7 +665,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       )}
 
       {/* ── Messages ───────────────────────── */}
-      <div className="ai-messages-scroll caval-selectable" style={{
+      <div ref={messagesScrollRef} className="ai-messages-scroll caval-selectable" style={{
         flex: 1, overflowY: 'auto', padding: messages.length === 0 ? 0 : '10px',
         display: 'flex', flexDirection: 'column', gap: 10,
       }}>
@@ -787,7 +796,26 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                   }}
                 />
                 {isPrepareReady ? 'Pregătit' : 'Pregătesc…'}
+                {preloadHint && (
+                  <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
+                )}
               </span>
+            )}
+
+            {isPrepareReady && prepareState?.partialPlanPreview && !isStreaming && (
+              <div
+                style={{
+                  fontSize: 10.5,
+                  lineHeight: 1.4,
+                  color: 'var(--caval-text-muted)',
+                  maxWidth: 220,
+                  whiteSpace: 'pre-wrap',
+                  overflow: 'hidden',
+                  maxHeight: '4.2em',
+                }}
+              >
+                {prepareState.partialPlanPreview}
+              </div>
             )}
 
             {/* Model + Send */}
