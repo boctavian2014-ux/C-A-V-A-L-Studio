@@ -5,6 +5,8 @@ import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { getAgentMode, isAgenticPipelineMode } from '../modes/agent-modes';
+import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { ChatReasoningBlock } from './ChatReasoningBlock';
@@ -183,18 +185,47 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   );
 }
 
+function ModelProfileChips({ modelId }: { modelId: string }) {
+  const summary = getModelProfileSummary(modelId);
+  if (!summary.chips.length) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap', marginLeft: 4 }}>
+      {summary.chips.slice(0, 4).map((chip) => (
+        <span
+          key={chip}
+          style={{
+            fontSize: 8.5,
+            padding: '1px 5px',
+            borderRadius: 4,
+            border: '1px solid var(--caval-border)',
+            color: 'var(--caval-text-muted)',
+            textTransform: 'none',
+            letterSpacing: 0,
+          }}
+        >
+          {chip}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   const { modelLabels, agentMode } = useAIStore();
-  const arenaMode = agentMode === 'code';
+  const arenaMode = isAgenticPipelineMode(agentMode);
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
   const resolvedLabel = message.resolvedModel
     ? getModelDisplayLabel(message.resolvedModel, modelLabels)
     : null;
-  const modelLabel =
-    resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
+  const effectiveModelId = message.resolvedModel ?? message.model ?? '';
+  const modelLabel = arenaMode
+    ? resolvedLabel
+      ? `Agentic · ${resolvedLabel}`
+      : 'Agentic · multi-model'
+    : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
-      : resolvedLabel ?? selectionLabel ?? 'Cavallo Arena';
+      : resolvedLabel ?? selectionLabel ?? 'Model';
 
   const displayText = arenaMode
     ? message.reasoningBrief || message.recap
@@ -218,9 +249,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       {/* Label */}
       <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em', paddingLeft: 2 }}>
         {isUser ? 'Tu' : (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--caval-accent)', display: 'inline-block' }} />
-            {modelLabel}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--caval-accent)', display: 'inline-block', flexShrink: 0 }} />
+            <span>{modelLabel}</span>
+            {!arenaMode && effectiveModelId ? <ModelProfileChips modelId={effectiveModelId} /> : null}
           </span>
         )}
       </div>
@@ -450,14 +482,25 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     attachedFiles, addAttachments, removeAttachment,
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
-    agentMode, strictReview, setStrictReview,
+    agentMode, strictReview, setStrictReview, modelLabels,
+    deliveryPause, submitUiDeliveryPreferences,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
+  const modeDef = getAgentMode(agentMode);
+  const isAgentic = isAgenticPipelineMode(agentMode);
+  const inputPlaceholder = isAgentic
+    ? 'Descrie proiectul — Agentic livrează end-to-end (Enter = trimite)'
+    : agentMode === 'code'
+      ? `Prompt pentru ${getModelDisplayLabel(selectedModel, modelLabels)} (Enter = trimite)`
+      : `${modeDef.label} — ${modeDef.description.slice(0, 60)}…`;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState('');
   const [preloadHint, setPreloadHint] = useState('');
+  const [uiTheme, setUiTheme] = useState<'light' | 'dark'>('dark');
+  const [uiStyle, setUiStyle] = useState('modern');
+  const [uiNotes, setUiNotes] = useState('');
 
   // ── Resize drag ──
   const [panelWidth, setPanelWidth] = useState(340);
@@ -667,10 +710,14 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               fontSize: 11.5, fontWeight: 600, color: 'var(--caval-text)',
               letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>
-              Coding Arena
+              {isAgentic ? 'Coding Arena' : modeDef.label}
             </span>
             <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', lineHeight: 1.2 }}>
-              Full SDE · Reasoning · cod în editor
+              {isAgentic
+                ? 'Full SDE · livrare proiect'
+                : agentMode === 'code'
+                  ? 'Model direct · patch în editor'
+                  : modeDef.description}
             </div>
           </div>
         </div>
@@ -729,7 +776,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               {t.title.slice(0, 20)}
             </button>
           ))}
-          <button type="button" onClick={newThread} title="Chat nou" style={{ padding: '2px 8px', fontSize: 10, border: '1px dashed var(--caval-border)', borderRadius: 4, background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer' }}>+</button>
+          <button type="button" onClick={() => newThread()} title="Chat nou" style={{ padding: '2px 8px', fontSize: 10, border: '1px dashed var(--caval-border)', borderRadius: 4, background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer' }}>+</button>
         </div>
       )}
 
@@ -752,12 +799,17 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           quickPrompts={QUICK_PROMPTS}
           onQuickPrompt={handleQuickPrompt}
         />
-        {agentMode === 'code' && (
+        {isAgentic && (
           <StrictReviewToggle
             enabled={strictReview}
             onChange={setStrictReview}
             disabled={isStreaming}
           />
+        )}
+        {agentMode === 'code' && selectedModel.startsWith('caval-auto/') && (
+          <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', lineHeight: 1.35 }}>
+            Auto routează modelul — alege un model explicit pentru a testa puterea lui.
+          </div>
         )}
         <div style={{
           background: 'var(--caval-surface)', border: '2px solid var(--caval-border)',
@@ -772,7 +824,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder="Prompt Coding Arena (Enter = trimite, Shift+Enter = linie nouă)"
+            placeholder={inputPlaceholder}
             disabled={isStreaming}
             rows={ARENA_INPUT_ROWS}
             style={{
@@ -876,6 +928,82 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                   <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
                 )}
               </span>
+            )}
+
+            {deliveryPause && (
+              <div
+                style={{
+                  marginBottom: 8,
+                  padding: 10,
+                  borderRadius: 8,
+                  border: '1px solid var(--caval-accent)',
+                  background: 'rgba(0,224,255,0.06)',
+                  fontSize: 11,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Design UI — preferințe</div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                  <select
+                    value={uiStyle}
+                    onChange={(e) => setUiStyle(e.target.value)}
+                    style={{ fontSize: 11, padding: '2px 6px' }}
+                  >
+                    <option value="modern">Modern</option>
+                    <option value="minimal">Minimal</option>
+                  </select>
+                  <select
+                    value={uiTheme}
+                    onChange={(e) => setUiTheme(e.target.value as 'light' | 'dark')}
+                    style={{ fontSize: 11, padding: '2px 6px' }}
+                  >
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
+                </div>
+                <textarea
+                  value={uiNotes}
+                  onChange={(e) => setUiNotes(e.target.value)}
+                  placeholder="Layout, culori, componente… (opțional)"
+                  rows={2}
+                  style={{
+                    width: '100%',
+                    fontSize: 11,
+                    marginBottom: 6,
+                    resize: 'vertical',
+                    background: 'var(--caval-bg)',
+                    color: 'var(--caval-text)',
+                    border: '1px solid var(--caval-border)',
+                    borderRadius: 4,
+                    padding: 6,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prefs = [
+                      `Stil: ${uiStyle}`,
+                      `Temă: ${uiTheme}`,
+                      uiNotes.trim() ? `Note: ${uiNotes.trim()}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join('\n');
+                    void submitUiDeliveryPreferences(prefs);
+                    setUiNotes('');
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'var(--caval-accent)',
+                    color: '#0E0E0F',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Continuă delivery UI →
+                </button>
+              </div>
             )}
 
             {isPrepareReady && prepareState?.partialPlanPreview && !isStreaming && (

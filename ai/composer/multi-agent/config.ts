@@ -37,6 +37,7 @@ export function loadMultiAgentConfig(workspaceRoot?: string): MultiAgentConfig {
       const parsed = JSON.parse(stripJsoncComments(raw)) as {
         multiAgent?: Partial<MultiAgentConfig> & {
           reasoningLayer?: Partial<import('./types').ReasoningLayerConfig>;
+          fullDelivery?: Partial<import('./types').FullDeliveryConfig>;
         };
       };
       if (parsed.multiAgent) {
@@ -47,6 +48,10 @@ export function loadMultiAgentConfig(workspaceRoot?: string): MultiAgentConfig {
           reasoningLayer: {
             ...DEFAULT_MULTI_AGENT_CONFIG.reasoningLayer,
             ...cfg.reasoningLayer,
+          },
+          fullDelivery: {
+            ...DEFAULT_MULTI_AGENT_CONFIG.fullDelivery,
+            ...cfg.fullDelivery,
           },
         };
       }
@@ -77,7 +82,7 @@ export function shouldUseMultiAgentPipeline(
   workspaceRoot: string | undefined,
   config?: MultiAgentConfig
 ): boolean {
-  if (mode !== 'code') return false;
+  if (mode !== 'agentic') return false;
   if (!workspaceRoot) return false;
   const cfg = config ?? loadMultiAgentConfig(workspaceRoot);
   if (!cfg.enabled) return false;

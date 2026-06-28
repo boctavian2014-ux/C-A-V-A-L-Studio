@@ -113,6 +113,49 @@ export class PipelineContextStore {
     return this.subAgentOutputs.get(taskId);
   }
 
+  getMergeRaw(): string {
+    return this.mergeRaw;
+  }
+
+  exportSnapshot(): {
+    context: PipelineContext;
+    tasks: PipelineTask[];
+    decompositionRaw: string;
+    mergeRaw: string;
+    subAgentOutputs: Record<string, string>;
+  } {
+    return {
+      context: this.getContext(),
+      tasks: this.getTasks(),
+      decompositionRaw: this.decompositionRaw,
+      mergeRaw: this.mergeRaw,
+      subAgentOutputs: Object.fromEntries(this.subAgentOutputs),
+    };
+  }
+
+  static fromSnapshot(snapshot: {
+    context: PipelineContext;
+    tasks?: PipelineTask[];
+    decompositionRaw?: string;
+    mergeRaw?: string;
+    subAgentOutputs?: Record<string, string>;
+  }): PipelineContextStore {
+    const store = new PipelineContextStore({ ...snapshot.context });
+    if (snapshot.tasks) store.setTasks(snapshot.tasks);
+    if (snapshot.decompositionRaw) store.setDecompositionRaw(snapshot.decompositionRaw);
+    if (snapshot.mergeRaw) store.setMergeRaw(snapshot.mergeRaw);
+    for (const [id, out] of Object.entries(snapshot.subAgentOutputs ?? {})) {
+      store.setSubAgentOutput(id, out);
+    }
+    return store;
+  }
+
+  applyUiPreferences(prefs: string): void {
+    const block = `\n\n## UI Design Preferences (user)\n${prefs.trim()}`;
+    this.context.interfaceContext = (this.context.interfaceContext ?? '') + block;
+    this.context.normalizedRequirements += block;
+  }
+
   addPendingIssues(issues: string[]): void {
     this.context.pendingIssues = [...new Set([...this.context.pendingIssues, ...issues])];
   }

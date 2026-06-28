@@ -25,6 +25,7 @@ import { formatToolCallNotice } from "../../ai/pipeline/tool-agent-loop";
 import { enrichChatWithZeroLatency } from "./zl-handlers";
 import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
+import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
 import { CODING_ARENA_SYSTEM_PROMPT } from "../../ai/prompts/coding-arena";
 import {
   buildMultiModelSystemPrompt,
@@ -32,6 +33,7 @@ import {
 } from "../../ai/prompts/multi-model-reasoning-chat";
 import {
   runCavalloMultiAgentPipeline,
+  resumeCavalloMultiAgentPipeline,
   shouldUseMultiAgentPipeline,
   abortMultiAgentPipeline,
 } from "../../ai/composer/multi-agent";
@@ -59,7 +61,7 @@ export interface CavalChatStreamRequest {
 
   model: string;
 
-  mode?: "ask" | "plan" | "code" | "architect" | "debug";
+  mode?: "ask" | "plan" | "code" | "agentic" | "architect" | "debug";
 
   intent?: RoutingIntent;
 
@@ -149,6 +151,8 @@ function modeToIntent(mode?: string): RoutingIntent {
 
     case "code":
 
+    case "agentic":
+
       return "kilocode";
 
     default:
@@ -167,7 +171,7 @@ function capabilityForMode(mode?: string): CompleteModelTextInput["capability"] 
 
   if (mode === "debug") return "debug";
 
-  if (mode === "code") return "code";
+  if (mode === "code" || mode === "agentic") return "code";
 
   return "chat";
 
@@ -177,13 +181,15 @@ function capabilityForMode(mode?: string): CompleteModelTextInput["capability"] 
 
 function systemPromptForMode(mode?: string): string {
   switch (mode) {
-    case "code":
+    case "agentic":
       return CODING_ARENA_SYSTEM_PROMPT;
+    case "code":
+      return `${buildMultiModelSystemPrompt({ agentMode: "code" })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: direct coding with the selected model. Apply patches via code fences when needed.`;
     case "plan":
     case "architect":
       return `${buildMultiModelSystemPrompt({ agentMode: mode })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: structured plans before code changes. Use Technical Mode Steps 1–4.`;
     case "debug":
-      return `${buildMultiModelSystemPrompt({ agentMode: mode })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: analyze errors, trace root causes, suggest fixes. Technical Mode.`;
+      return `${buildMultiModelSystemPrompt({ agentMode: mode })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: analyze errors, trace root causes, suggest fixes. When workspace is open, emit fixes as \`\`\`lang:relative/path\`\`\` with full file content.`;
     default:
       return `${buildMultiModelSystemPrompt({ agentMode: mode ?? "ask" })}${MULTI_MODEL_RECAP_ADDON}`;
   }
@@ -264,6 +270,7 @@ function scaffoldSystemAddon(): string {
     "- Include README.md, docs/requirements.md, docs/architecture.md for complex projects.",
     "- Include tests, CI/CD configs (Dockerfile, .github/workflows), deployment notes when relevant.",
     "- Prefer 5–15 real files over chat prose; stop when files exist; do not repeat the spec.",
+    SCAFFOLD_EMISSION_RULE,
     REASONING_CHAT_ADDON,
   ].join("\n");
 }
@@ -415,10 +422,21 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 
 
 function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
-  if (mode !== "code" || !workspaceRoot?.trim()) return false;
-  // Auto Free / local: tools → list_dir loops, no write_file — use code fences instead.
-  if (!model || model.startsWith("caval-auto/") || model === "ollama-local") return false;
+  if (!workspaceRoot?.trim()) return false;
+  if (mode !== "code" && mode !== "debug") return false;
+  if (!model || model === "ollama-local") return false;
+  if (model.startsWith("caval-auto/free")) return false;
   return true;
+}
+
+async function resolveEffectiveChatModel(model: string, mode?: string): Promise<string> {
+  if (!model.startsWith("caval-auto/")) return model;
+  try {
+    const resolved = await resolveModelSelection(model, modeToIntent(mode));
+    return resolved.modelId;
+  } catch {
+    return model;
+  }
 }
 
 function agentCompleteUsesTools(model: string): boolean {
@@ -489,6 +507,30 @@ function enrichRequestWithWorkspaceBootstrap(
   };
 }
 
+const activeStreamsBySender = new Map<number, Set<string>>();
+
+function trackActiveStream(senderId: number, streamId: string): void {
+  let streams = activeStreamsBySender.get(senderId);
+  if (!streams) {
+    streams = new Set();
+    activeStreamsBySender.set(senderId, streams);
+  }
+  streams.add(streamId);
+}
+
+function untrackActiveStream(senderId: number, streamId: string): void {
+  activeStreamsBySender.get(senderId)?.delete(streamId);
+}
+
+export function abortAllStreamsForSender(senderId: number): void {
+  const streams = activeStreamsBySender.get(senderId);
+  if (!streams?.size) return;
+  for (const streamId of [...streams]) {
+    abortMultiAgentPipeline(streamId);
+  }
+  streams.clear();
+}
+
 async function streamToRenderer(
   sender: WebContents,
   senderId: number,
@@ -496,8 +538,14 @@ async function streamToRenderer(
   request: CavalChatStreamRequest,
   getWorkspaceRoot: (senderId: number) => string
 ): Promise<void> {
+  trackActiveStream(senderId, streamId);
+  try {
   const workspaceRoot = request.workspaceRoot ?? getWorkspaceRoot(senderId);
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
+
+  if (workspaceRoot?.trim()) {
+    void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
+  }
 
   const useMultiAgent =
     !request.skipMultiAgent &&
@@ -534,6 +582,10 @@ async function streamToRenderer(
       },
     });
 
+    if (result.ok && result.paused) {
+      return;
+    }
+
     if (result.ok) {
       if (result.text?.includes('```')) {
         sender.send("caval:ai-stream-chunk", {
@@ -549,7 +601,8 @@ async function streamToRenderer(
         provider: result.provider,
         reasoningBrief: result.reasoningBrief,
         pipelineRecapMeta: result.pipelineRecapMeta,
-        composeText: result.text,
+        composeText: result.composeText ?? result.text,
+        writtenFiles: result.writtenFiles,
       });
       return;
     }
@@ -567,7 +620,8 @@ async function streamToRenderer(
       ? request
       : enrichChatWithZeroLatency(request, workspaceRoot);
 
-  const useTools = chatPanelUsesTools(fusedRequest.mode, workspaceRoot, fusedRequest.model);
+  const effectiveModel = await resolveEffectiveChatModel(fusedRequest.model, fusedRequest.mode);
+  const useTools = chatPanelUsesTools(fusedRequest.mode, workspaceRoot, effectiveModel);
   if (useTools) {
     void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
   }
@@ -605,8 +659,8 @@ async function streamToRenderer(
       sendStatusChunk(sender, streamId, phase, status, detail);
     },
     onToolCall: (toolName, status, detail, writtenPath) => {
-      const isCodeMode = fusedRequest.mode === "code";
-      if (!isCodeMode) {
+      const isDirectCodingMode = fusedRequest.mode === "code" || fusedRequest.mode === "debug";
+      if (!isDirectCodingMode) {
         const notice = formatToolCallNotice(toolName, status, detail);
         if (notice) {
           sender.send("caval:ai-stream-chunk", { streamId, type: "delta", delta: notice });
@@ -663,6 +717,81 @@ async function streamToRenderer(
 
   });
 
+  } finally {
+    untrackActiveStream(senderId, streamId);
+  }
+}
+
+async function streamResumeToRenderer(
+  sender: WebContents,
+  senderId: number,
+  input: {
+    runId: string;
+    streamId: string;
+    uiPreferences: string;
+    workspaceRoot: string;
+    model: string;
+    strictReview?: boolean;
+  }
+): Promise<void> {
+  const { streamId } = input;
+  trackActiveStream(senderId, streamId);
+  try {
+    sendStatusChunk(sender, streamId, "prepare", "done");
+    sendMultiAgentStatusChunk(sender, streamId, "subagent", "active", "UI delivery resume");
+
+    const result = await resumeCavalloMultiAgentPipeline(sender, streamId, input, {
+      onMultiAgentStatus: (phase, status, detail) => {
+        sendMultiAgentStatusChunk(sender, streamId, phase, status, detail);
+      },
+      onMeta: (resolvedModel, reason) => {
+        sender.send("caval:ai-stream-chunk", {
+          streamId,
+          type: "meta",
+          resolvedModel,
+          reason,
+        });
+      },
+      onDelta: (delta) => {
+        sender.send("caval:ai-stream-chunk", { streamId, type: "delta", delta });
+      },
+      onReasoning: (reasoningDelta) => {
+        sender.send("caval:ai-stream-chunk", { streamId, type: "reasoning", reasoningDelta });
+      },
+      onStatus: (phase, status, detail) => {
+        sendStatusChunk(sender, streamId, phase, status, detail);
+      },
+    });
+
+    if (result.ok) {
+      if (result.text?.includes("```")) {
+        sender.send("caval:ai-stream-chunk", {
+          streamId,
+          type: "delta",
+          delta: result.text,
+        });
+      }
+      sender.send("caval:ai-stream-chunk", {
+        streamId,
+        type: "done",
+        model: result.resolvedModel,
+        provider: result.provider,
+        reasoningBrief: result.reasoningBrief,
+        pipelineRecapMeta: result.pipelineRecapMeta,
+        composeText: result.composeText ?? result.text,
+        writtenFiles: result.writtenFiles,
+      });
+      return;
+    }
+
+    sender.send("caval:ai-stream-chunk", {
+      streamId,
+      type: "error",
+      error: result.error ?? "Pipeline resume failed",
+    });
+  } finally {
+    untrackActiveStream(senderId, streamId);
+  }
 }
 
 
@@ -708,6 +837,30 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
     abortMultiAgentPipeline(streamId);
     return { ok: true };
   });
+
+  ipcMain.handle("caval:workspace-session-reset", async (event) => {
+    abortAllStreamsForSender(event.sender.id);
+    return { ok: true };
+  });
+
+  ipcMain.handle(
+    "caval:pipeline-resume",
+    async (
+      event,
+      input: {
+        runId: string;
+        streamId: string;
+        uiPreferences: string;
+        workspaceRoot: string;
+        model: string;
+        strictReview?: boolean;
+      }
+    ) => {
+      warmOpenRouterConnection();
+      void streamResumeToRenderer(event.sender, event.sender.id, input);
+      return { ok: true, started: true };
+    }
+  );
 
 
 

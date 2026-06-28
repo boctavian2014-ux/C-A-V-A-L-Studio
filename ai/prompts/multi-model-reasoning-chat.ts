@@ -78,6 +78,7 @@ export type ReasoningChatModeHint = 'technical' | 'chat' | 'collaboration';
 export function modeHintForAgent(agentMode?: string): ReasoningChatModeHint {
   switch (agentMode) {
     case 'code':
+    case 'agentic':
     case 'architect':
     case 'debug':
     case 'plan':

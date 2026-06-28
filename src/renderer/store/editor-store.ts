@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { notifyWorkspaceChanged } from './workspace-bridge';
 
 // ──────────────────────────────────────────────
 //  Types
@@ -81,7 +82,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   projectPath: null,
   fileTree: [],
 
-  setProjectPath: (path) => set({ projectPath: path }),
+  setProjectPath: (path) => {
+    const prev = get().projectPath;
+    set({ projectPath: path });
+    if (prev !== path) {
+      notifyWorkspaceChanged(path);
+    }
+  },
   setFileTree: (tree) => set({ fileTree: tree }),
 
   refreshTree: async () => {

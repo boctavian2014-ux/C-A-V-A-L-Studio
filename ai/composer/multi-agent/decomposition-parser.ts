@@ -20,6 +20,20 @@ function normalizeModuleName(line: string): { module: string; purpose: string } 
   return { module: `module-${Date.now()}`, purpose: line.trim() };
 }
 
+const PHASE_UI_TAG = /\[phase:ui\]/i;
+
+function parseTaskDescription(raw: string): { description: string; phase?: 'ui' | 'core' } {
+  let description = raw.trim();
+  let phase: 'ui' | 'core' | undefined;
+  if (PHASE_UI_TAG.test(description)) {
+    phase = 'ui';
+    description = description.replace(PHASE_UI_TAG, '').trim();
+  } else if (/\b(frontend|ui\/ux|user interface|dashboard ui|ui shell)\b/i.test(description)) {
+    phase = 'ui';
+  }
+  return { description, phase };
+}
+
 export function parseDecompositionOutput(raw: string, maxTasks = 8): PipelineTask[] {
   const tasks: PipelineTask[] = [];
   let currentModule = 'core';
@@ -44,12 +58,14 @@ export function parseDecompositionOutput(raw: string, maxTasks = 8): PipelineTas
     const taskMatch = line.match(TASK_LINE) ?? line.match(BULLET_TASK);
     if (taskMatch) {
       const taskId = taskMatch[1]!.toLowerCase().replace(/\s+/g, '-');
+      const { description, phase } = parseTaskDescription(taskMatch[2]!);
       tasks.push({
         id: taskId,
         module: currentModule,
         purpose: currentPurpose,
-        description: taskMatch[2]!.trim(),
+        description,
         dependencies: [],
+        phase,
       });
     }
   }

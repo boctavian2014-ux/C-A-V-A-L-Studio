@@ -1,4 +1,6 @@
 /** Cavallo Reasoning & Communication Layer — Balanced Mode (Code Arena). */
+import { SCAFFOLD_EMISSION_RULE } from './scaffold-emission-rule';
+
 export const REASONING_COMMUNICATION_PROMPT = `You are Cavallo Reasoning & Communication Layer — Balanced Mode.
 
 You are not a chatbot.
@@ -23,8 +25,11 @@ Rules:
 
 Cavalo IDE (mandatory):
 - Every file as \`\`\`lang:relative/path\`\`\` with FULL source — parsed into workspace.
+- Reasoning/Plan alone is INVALID — you MUST emit fenced files before finishing.
 - Chat panel: structured brief + recap only; never dump source in chat.
-- Do NOT use list_dir or write_file for generation.`;
+- Do NOT use list_dir or write_file for generation.
+
+${SCAFFOLD_EMISSION_RULE}`;
 
 export const REASONING_CHAT_ADDON = `
 REASONING OUTPUT (after code fences):

@@ -122,7 +122,7 @@ type ChatActivityPhase =
 
 interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -150,7 +150,10 @@ interface CavalStreamChunk {
     devTools?: Record<string, unknown>;
     supervisor?: { approved: boolean; summary: string; issues: unknown[] };
   };
-  composeText?: string;
+      composeText?: string;
+      writtenFiles?: string[];
+      pauseReason?: "ui-design";
+  runId?: string;
 }
 
 interface CavalChatPrepareResult {
@@ -336,7 +339,7 @@ interface CavalBridge {
     request: {
       message: string;
       model: string;
-      mode?: "ask" | "plan" | "code" | "architect" | "debug";
+      mode?: "ask" | "plan" | "code" | "agentic" | "architect" | "debug";
       intent?: string;
       streamId: string;
       workspaceRoot?: string;
@@ -346,6 +349,7 @@ interface CavalBridge {
       temperature?: number;
       timeoutMs?: number;
       scaffoldMode?: boolean;
+      skipMultiAgent?: boolean;
       strictReview?: boolean;
       context?: {
         filePath?: string;
@@ -358,6 +362,19 @@ interface CavalBridge {
     onChunk: (chunk: CavalStreamChunk) => void
   ) => () => void;
   abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
+  workspaceSessionReset?: () => Promise<{ ok: boolean }>;
+  onWorkspaceSessionReset?: (callback: () => void) => () => void;
+  pipelineResumeStream?: (
+    input: {
+      runId: string;
+      streamId: string;
+      uiPreferences: string;
+      workspaceRoot: string;
+      model: string;
+      strictReview?: boolean;
+    },
+    onChunk: (chunk: CavalStreamChunk) => void
+  ) => () => void;
   aiComplete?: (request: {
     model: string;
     intent?: string;
@@ -435,6 +452,7 @@ interface CavalBridge {
     openFiles?: string[];
   }) => Promise<CavalChatPrepareResult>;
   mcpList?: () => Promise<{ ok: boolean; servers?: McpServerStatus[] }>;
+  mcpEnsureReady?: () => Promise<{ ok: boolean; servers?: McpServerStatus[] }>;
   mcpStart?: (serverId: string) => Promise<{ ok: boolean; status?: McpServerStatus }>;
   mcpStop?: (serverId: string) => Promise<{ ok: boolean }>;
   toolExecute?: (input: { name: string; arguments: Record<string, unknown> }) => Promise<{ ok: boolean; output?: unknown; error?: string }>;

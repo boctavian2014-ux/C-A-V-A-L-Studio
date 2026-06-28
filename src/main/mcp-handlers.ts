@@ -24,6 +24,16 @@ async function loadCavalConfig(workspaceRoot: string): Promise<CavalConfig> {
 }
 
 export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => string): void {
+  ipcMain.handle("caval:mcp-ensure", async (event) => {
+    const root = getWorkspaceRoot(event.sender.id);
+    if (!root?.trim()) {
+      return { ok: true, servers: [] };
+    }
+    await ensureMcpServersReady(root);
+    syncRegistryMcpTools(getOrCreateToolRegistry(event.sender.id, root));
+    return { ok: true, servers: mcpManager.list() };
+  });
+
   ipcMain.handle("caval:mcp-list", async (event) => {
     const root = getWorkspaceRoot(event.sender.id);
     const config = await loadCavalConfig(root);

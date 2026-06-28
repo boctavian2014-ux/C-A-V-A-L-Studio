@@ -52,6 +52,12 @@ import {
 
 } from './stage-runners';
 
+import { partitionTasksByUiPhase, hasUiSpecInPrompt } from '../ui-spec-detector';
+import { applyPipelineScaffold } from '../scaffold-apply-node';
+import { ensureMcpServersReady } from '../../tools/tool-runtime';
+
+import { rememberCheckpoint, getCheckpoint, loadCheckpointFromDisk, clearCheckpoint } from './pipeline-checkpoint';
+
 import type {
 
   MultiAgentPipelineCallbacks,
@@ -280,7 +286,7 @@ function buildCompactChatSummary(state: PipelineState): string {
 
 
 
-function buildSyntheticMerge(store: PipelineContextStore): string {
+export function buildSyntheticMerge(store: PipelineContextStore): string {
 
   const tasks = store.getTasks();
 
@@ -458,6 +464,10 @@ export async function runCavalloMultiAgentPipeline(
 
   try {
 
+    if (workspaceRoot?.trim()) {
+      await ensureMcpServersReady(workspaceRoot).catch(() => undefined);
+    }
+
     callbacks.onStatus?.('prepare', 'done');
 
     callbacks.onStatus?.('route', 'active');
@@ -584,25 +594,85 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    state.subAgentResults = await runSubAgents(
+    state.subAgentResults = [];
 
-      decomp.tasks,
+    const { preUi, ui } = partitionTasksByUiPhase(decomp.tasks);
 
-      plan,
+    if (preUi.length > 0) {
+      const preResults = await runSubAgents(
+        preUi,
+        plan,
+        store,
+        config,
+        workspaceRoot,
+        rotator,
+        pipelineCallbacks,
+        isAborted
+      );
+      state.subAgentResults.push(...preResults);
+    }
 
-      store,
+    if (isAborted()) {
+      state.aborted = true;
+      return { ok: false, error: 'Aborted', runId };
+    }
 
-      config,
+    const needsUiGate =
+      config.fullDelivery.enabled &&
+      config.fullDelivery.uiCheckpoint &&
+      ui.length > 0 &&
+      !hasUiSpecInPrompt(request.message);
 
-      workspaceRoot,
+    if (needsUiGate) {
+      const snapshot = store.exportSnapshot();
+      rememberCheckpoint({
+        runId,
+        streamId,
+        workspaceRoot,
+        model,
+        strictReview: request.strictReview,
+        userMessage: request.message,
+        decompositionRaw: state.decompositionRaw ?? decomp.raw,
+        tasks: decomp.tasks,
+        uiTasks: ui,
+        preUiResults: [...state.subAgentResults],
+        plan,
+        context: snapshot.context,
+        subAgentOutputs: snapshot.subAgentOutputs,
+        reasoningBrief: state.reasoningBrief,
+      });
 
-      rotator,
+      sender.send('caval:ai-stream-chunk', {
+        streamId,
+        type: 'delivery-pause',
+        pauseReason: 'ui-design',
+        runId,
+      });
 
-      pipelineCallbacks,
+      clearMultiAgentAbort(streamId);
+      return {
+        ok: true,
+        paused: true,
+        pauseReason: 'ui-design',
+        runId,
+        text: 'Preferințe UI necesare — continuă delivery după răspuns.',
+        reasoningBrief: state.reasoningBrief,
+      };
+    }
 
-      isAborted
-
-    );
+    if (ui.length > 0) {
+      const uiResults = await runSubAgents(
+        ui,
+        plan,
+        store,
+        config,
+        workspaceRoot,
+        rotator,
+        pipelineCallbacks,
+        isAborted
+      );
+      state.subAgentResults.push(...uiResults);
+    }
 
 
 
@@ -730,17 +800,37 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    const compose = await runFinalComposer(model, store, workspaceRoot, pipelineCallbacks, isAborted);
+    let composeText = '';
+    let composeModel = model;
+    let composeProvider = '';
+    let composeWaves = 0;
+    const maxWaves = config.fullDelivery.enabled ? config.fullDelivery.maxComposeWaves : 1;
 
-    if (!compose.ok) {
+    while (composeWaves < maxWaves) {
+      const compose = await runFinalComposer(
+        model,
+        store,
+        workspaceRoot,
+        pipelineCallbacks,
+        isAborted,
+        { waveIndex: composeWaves }
+      );
 
-      return { ok: false, error: compose.error, runId };
+      if (!compose.ok) {
+        return { ok: false, error: compose.error, runId };
+      }
 
+      composeText = composeWaves === 0 ? compose.text : `${composeText}\n\n${compose.text}`;
+      composeModel = compose.model;
+      composeProvider = compose.provider;
+      composeWaves += 1;
+
+      const fenceCount = Math.floor((compose.text.match(/```/g)?.length ?? 0) / 2);
+      if (fenceCount >= 2) break;
+      if (!config.fullDelivery.enabled) break;
     }
 
-
-
-    state.composerText = compose.text;
+    state.composerText = composeText;
 
 
 
@@ -784,17 +874,23 @@ export async function runCavalloMultiAgentPipeline(
 
     const stageSummary = buildRuntimeSummary(state);
 
+    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
+
 
 
     return {
 
       ok: true,
 
-      text: compose.text.trim() ? compose.text : chatSummary,
+      text: composeText.trim() ? composeText : chatSummary,
 
-      resolvedModel: compose.model,
+      composeText,
 
-      provider: compose.provider,
+      writtenFiles,
+
+      resolvedModel: composeModel,
+
+      provider: composeProvider,
 
       runId,
 
@@ -812,6 +908,8 @@ export async function runCavalloMultiAgentPipeline(
 
             pendingIssues: state.context.pendingIssues,
 
+            composeWaves,
+
             devTools: state.devTools,
 
             supervisor: state.supervisor,
@@ -828,6 +926,163 @@ export async function runCavalloMultiAgentPipeline(
 
   }
 
+}
+
+
+
+export async function resumeCavalloMultiAgentPipeline(
+  _sender: WebContents,
+  streamId: string,
+  input: {
+    runId: string;
+    uiPreferences: string;
+    workspaceRoot: string;
+    model: string;
+    strictReview?: boolean;
+  },
+  callbacks: MultiAgentPipelineCallbacks
+): Promise<MultiAgentPipelineResult> {
+  const cp =
+    getCheckpoint(input.runId) ?? loadCheckpointFromDisk(input.workspaceRoot, input.runId);
+  if (!cp) {
+    return { ok: false, error: 'Checkpoint not found', runId: input.runId };
+  }
+
+  const workspaceRoot = input.workspaceRoot;
+  const config = applyMultiAgentOverrides(loadMultiAgentConfig(workspaceRoot), {
+    strictReview: input.strictReview ?? cp.strictReview,
+  });
+  const model = (input.model || cp.model) as ModelSelectionId;
+  const runId = cp.runId;
+
+  let aborted = false;
+  registerMultiAgentAbort(streamId, () => {
+    aborted = true;
+  });
+  const isAborted = () => aborted;
+
+  const store = PipelineContextStore.fromSnapshot({
+    context: cp.context,
+    tasks: cp.tasks,
+    decompositionRaw: cp.decompositionRaw,
+    subAgentOutputs: cp.subAgentOutputs,
+  });
+  store.applyUiPreferences(input.uiPreferences);
+
+  const rotator = new ModelRotator();
+  await rotator.init();
+
+  const memoryEngine = PipelineMemoryEngine.load(workspaceRoot);
+
+  const pipelineCallbacks: MultiAgentPipelineCallbacks = {
+    ...callbacks,
+    onMultiAgentStatus: (stage, status, detail) => {
+      callbacks.onMultiAgentStatus?.(stage, status, detail);
+    },
+  };
+
+  try {
+    if (cp.uiTasks.length > 0) {
+      await runSubAgents(
+        cp.uiTasks,
+        cp.plan,
+        store,
+        config,
+        workspaceRoot,
+        rotator,
+        pipelineCallbacks,
+        isAborted
+      );
+    }
+
+    if (isAborted()) {
+      return { ok: false, error: 'Aborted', runId };
+    }
+
+    let supervisor;
+    if (config.fastPipeline) {
+      const synth = buildSyntheticMerge(store);
+      store.setMergeRaw(synth);
+      supervisor = {
+        approved: true,
+        raw: 'FAST_PIPELINE',
+        issues: [],
+        summary: 'fast path ok',
+      };
+    } else {
+      const mergeResult = await runMerge(model, store, workspaceRoot, pipelineCallbacks);
+      if ('error' in mergeResult) {
+        return { ok: false, error: mergeResult.error, runId };
+      }
+      const sup = await runSupervisor(model, store, workspaceRoot, pipelineCallbacks);
+      if ('error' in sup) {
+        return { ok: false, error: sup.error, runId };
+      }
+      supervisor = sup;
+    }
+
+    let composeText = '';
+    let composeModel = model;
+    let composeProvider = '';
+    let composeWaves = 0;
+    const maxWaves = config.fullDelivery.enabled ? config.fullDelivery.maxComposeWaves : 1;
+
+    while (composeWaves < maxWaves) {
+      const compose = await runFinalComposer(
+        model,
+        store,
+        workspaceRoot,
+        pipelineCallbacks,
+        isAborted,
+        { waveIndex: composeWaves }
+      );
+      if (!compose.ok) {
+        return { ok: false, error: compose.error, runId };
+      }
+      composeText = composeWaves === 0 ? compose.text : `${composeText}\n\n${compose.text}`;
+      composeModel = compose.model;
+      composeProvider = compose.provider;
+      composeWaves += 1;
+      const fenceCount = Math.floor((compose.text.match(/```/g)?.length ?? 0) / 2);
+      if (fenceCount >= 2) break;
+      if (!config.fullDelivery.enabled) break;
+    }
+
+    if (config.enableDevToolsIntegration) {
+      await runDevToolsIntegration(workspaceRoot);
+    }
+
+    memoryEngine.recordRun({
+      runId,
+      userMessage: cp.userMessage,
+      tasks: cp.tasks,
+      supervisor,
+    });
+    memoryEngine.save(workspaceRoot);
+    clearCheckpoint(runId);
+
+    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
+
+    return {
+      ok: true,
+      text: composeText,
+      composeText,
+      writtenFiles,
+      resolvedModel: composeModel,
+      provider: composeProvider,
+      runId,
+      reasoningBrief: cp.reasoningBrief,
+      pipelineRecapMeta: {
+        taskCount: cp.tasks.length,
+        fastPipeline: config.fastPipeline,
+        pendingIssues: store.getContext().pendingIssues,
+        composeWaves,
+        supervisor,
+      },
+    };
+  } finally {
+    clearMultiAgentAbort(streamId);
+  }
 }
 
 

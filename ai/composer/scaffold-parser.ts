@@ -47,6 +47,9 @@ const LANG_DEFAULT_FILE: Record<string, string> = {
   env: '.env',
   dockerfile: 'Dockerfile',
   docker: 'Dockerfile',
+  vue: 'src/App.vue',
+  svelte: 'src/App.svelte',
+  astro: 'src/pages/index.astro',
 };
 
 const INFER_ONLY_LANGS = new Set(['text', 'plaintext', 'txt']);
@@ -99,7 +102,7 @@ function defaultPathForLang(lang: string, index: number, content = ''): string {
 }
 
 const FILE_PATH_RE =
-  /^[\w./\\-]+\.(ts|tsx|js|jsx|json|py|go|rs|java|kt|swift|dart|cs|cpp|c|h|ino|yaml|yml|toml|md|html|css|scss|sql|env|sh|gradle|xml|plist|properties|txt)$/i;
+  /^[\w./\\-]+\.(ts|tsx|js|jsx|json|py|go|rs|java|kt|swift|dart|cs|cpp|c|h|ino|yaml|yml|toml|md|mdx|html|htm|css|scss|sass|less|sql|env|sh|gradle|xml|plist|properties|txt|vue|svelte|astro|prisma|graphql|gql|rb|php|ex|exs|erl|hs|lua|r|m|mm|swift|wasm|wast|proto|tf|hcl|lock)$/i;
 
 function normalizeRelativePath(raw: string): string | null {
   const path = raw

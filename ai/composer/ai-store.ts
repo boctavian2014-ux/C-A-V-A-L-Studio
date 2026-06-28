@@ -6,8 +6,9 @@ import {
   type ApiKeys,
 } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { isByokModel, hasOpenRouterKey } from '../models/model-readiness';
-import { getAgentMode, type AgentModeId } from '../modes/agent-modes';
+import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
+import { modeSupportsFileApply } from '../models/model-coding-guide';
+import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId } from '../modes/agent-modes';
 import {
   buildContextMessages,
   buildFastChatMessages,
@@ -17,6 +18,22 @@ import {
   shouldAttachProjectContext,
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
+import { isScaffoldContinueRequest } from '../prompts/scaffold-emission-rule';
+import {
+  buildDeliveryContinueMessage,
+  isDeliveryContinueRequest,
+} from '../prompts/full-delivery-rule';
+import {
+  canAutoContinueDelivery,
+  isDeliveryIncomplete,
+} from './delivery-orchestrator';
+import { DEFAULT_FULL_DELIVERY_CONFIG } from './multi-agent/types';
+import {
+  DEFAULT_SESSION_FOCUS,
+  isStaleWorkspace,
+  workspaceFolderTitle,
+} from './workspace-session';
+import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
 import { applyUnifiedDiff } from '../../src/shared/diff-utils';
@@ -108,6 +125,7 @@ export interface ChatThread {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+  workspacePath?: string | null;
 }
 
 type IncludeMode = 'file' | 'project' | 'selection';
@@ -130,14 +148,37 @@ interface CavalWindow {
           attachments?: Array<{ path: string; name: string; content: string }>;
         };
         scaffoldMode?: boolean;
+        skipMultiAgent?: boolean;
         strictReview?: boolean;
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
     abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
+    workspaceSessionReset?: () => Promise<{ ok: boolean }>;
+    onWorkspaceSessionReset?: (callback: () => void) => () => void;
+    pipelineResume?: (input: {
+      runId: string;
+      streamId: string;
+      uiPreferences: string;
+      workspaceRoot: string;
+      model: string;
+      strictReview?: boolean;
+    }) => Promise<{ ok: boolean; started?: boolean }>;
+    pipelineResumeStream?: (
+      input: {
+        runId: string;
+        streamId: string;
+        uiPreferences: string;
+        workspaceRoot: string;
+        model: string;
+        strictReview?: boolean;
+      },
+      onChunk: (chunk: CavalStreamChunk) => void
+    ) => () => void;
     contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<Record<string, unknown>> }>;
     workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
     workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+    mcpEnsureReady?: () => Promise<{ ok: boolean; servers?: unknown[] }>;
     getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
     zlPrepare?: (signals: {
       workspaceRoot: string;
@@ -226,9 +267,10 @@ interface AIStore {
   addAttachments: (paths: string[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
-  newThread: () => void;
+  newThread: (title?: string) => void;
   selectThread: (id: string) => void;
   deleteThread: (id: string) => void;
+  onWorkspaceChanged: (nextPath: string | null) => void;
 
   sendMessage: (userText: string) => Promise<void>;
   chatPrepareDraft: (input: {
@@ -247,15 +289,25 @@ interface AIStore {
   pendingAutoSend: boolean;
   clearPendingChatDraft: () => void;
   handoffFromEngineering: (input: { project: EngProject; userPrompt: string }) => { ok: true } | { ok: false; error: string };
+
+  deliveryPause: { runId: string; streamId: string } | null;
+  submitUiDeliveryPreferences: (prefs: string) => Promise<void>;
 }
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createThread(title = 'Chat nou'): ChatThread {
+function createThread(title = 'Chat nou', workspacePath: string | null = null): ChatThread {
   const id = generateId();
-  return { id, title, messages: [], createdAt: Date.now(), updatedAt: Date.now() };
+  return {
+    id,
+    title,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    workspacePath,
+  };
 }
 
 function detectDiff(content: string, activeTabPath: string | null): DetectedDiff | undefined {
@@ -292,6 +344,22 @@ function attachmentName(filePath: string): string {
 
 const getCaval = (): CavalWindow['caval'] => (window as unknown as CavalWindow).caval;
 
+/** Nu bloca trimiterea mesajului dacă prefetch-ul depășește limita. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  if (ms <= 0) return fallback;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const persistApiKeys = async (apiKeys: ApiKeys): Promise<void> => {
   await getCaval()?.secretsSet?.(apiKeys as Record<string, string>);
 };
@@ -306,6 +374,8 @@ let streamCleanup: (() => void) | null = null;
 let activeStreamId: string | null = null;
 let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
+let deliveryWaveIndex = 0;
+let resumeAfterUiPrefs: { runId: string; uiPreferences: string } | null = null;
 
 const initialThread = createThread();
 
@@ -328,6 +398,7 @@ export const useAIStore = create<AIStore>()(
       prepareInFlight: false,
       pendingChatDraft: null,
       pendingAutoSend: false,
+      deliveryPause: null,
 
       setModel: (id) => {
         set({ selectedModel: id, activeResolvedModel: null });
@@ -409,13 +480,41 @@ export const useAIStore = create<AIStore>()(
         }
       },
 
-      newThread: () => {
-        const thread = createThread();
+      newThread: (title?: string) => {
+        const workspacePath = useEditorStore.getState().projectPath;
+        const thread = createThread(
+          title ?? workspaceFolderTitle(workspacePath),
+          workspacePath
+        );
         set((s) => ({
           threads: [thread, ...s.threads],
           activeThreadId: thread.id,
           messages: [],
         }));
+      },
+
+      onWorkspaceChanged: (nextPath) => {
+        if (!DEFAULT_SESSION_FOCUS.singleProjectFocus) return;
+
+        const active = get().threads.find((t) => t.id === get().activeThreadId);
+        const alreadyOnWorkspace =
+          active?.workspacePath === nextPath && !get().isStreaming && !get().prepareInFlight;
+        if (alreadyOnWorkspace) return;
+
+        void getCaval()?.workspaceSessionReset?.();
+        get().stopStreaming();
+        get().clearPrepareState();
+        set({ pendingChatDraft: null, pendingAutoSend: false, attachedFiles: [] });
+        useEditorStore.getState().closeAiPreview();
+
+        if (DEFAULT_SESSION_FOCUS.newThreadOnWorkspaceChange) {
+          const thread = createThread(workspaceFolderTitle(nextPath), nextPath);
+          set((s) => ({
+            threads: [thread, ...s.threads],
+            activeThreadId: thread.id,
+            messages: [],
+          }));
+        }
       },
 
       selectThread: (id) => {
@@ -489,7 +588,15 @@ export const useAIStore = create<AIStore>()(
       },
 
       sendMessage: async (userText) => {
-        const {
+        if (!isDeliveryContinueRequest(userText) && !isScaffoldContinueRequest(userText)) {
+          deliveryWaveIndex = 0;
+        }
+        set({ deliveryPause: null });
+
+        const editorState = useEditorStore.getState();
+        const boundWorkspace = editorState.projectPath;
+
+        let {
           selectedModel,
           apiKeys,
           messages,
@@ -500,10 +607,28 @@ export const useAIStore = create<AIStore>()(
           prepareState,
           strictReview,
         } = get();
+
+        const activeThread = get().threads.find((t) => t.id === activeThreadId);
+        if (
+          activeThread?.workspacePath != null &&
+          activeThread.workspacePath !== boundWorkspace
+        ) {
+          get().newThread();
+          ({
+            selectedModel,
+            apiKeys,
+            messages,
+            includeMode,
+            agentMode,
+            activeThreadId,
+            attachedFiles,
+            prepareState,
+            strictReview,
+          } = get());
+        }
+
         const modeDef = getAgentMode(agentMode);
         const attachmentsSnapshot = [...attachedFiles];
-
-        const editorState = useEditorStore.getState();
         let apiPrompt = userText;
         let fashionSeeded = false;
         let fashionSeedCount = 0;
@@ -518,13 +643,13 @@ export const useAIStore = create<AIStore>()(
             const pipelinePath = `${editorState.projectPath}${sep}fashion-matching-engine${sep}src${sep}fashion_matching${sep}pipeline.py`;
             void editorState.openFile(pipelinePath);
             apiPrompt = `${fashionMatchingSeedPrompt()}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
-            set({ agentMode: 'code', includeMode: 'project' });
+            set({ agentMode: 'agentic', includeMode: 'project' });
           }
         }
 
         const draftHash = hashChatDraft(apiPrompt, selectedModel, editorState.projectPath);
         const prepReady = prepareState?.ready === true && prepareState.draftHash === draftHash;
-        const routeHint = prepReady ? prepareState.resolvedModelHint : undefined;
+        const routeHint = prepReady && prepareState ? prepareState.resolvedModelHint : undefined;
         const prepWarmReady = prepReady && prepareState?.warmContextReady === true;
 
         const userMsg: ChatMessage = {
@@ -540,13 +665,12 @@ export const useAIStore = create<AIStore>()(
         const assistantMsg: ChatMessage = {
           id: assistantMsgId,
           role: 'assistant',
-          content: agentMode === 'code' ? '⚡ Full Integration pipeline…' : '',
+          content: isAgenticPipelineMode(agentMode) ? '⚡ Full Integration pipeline…' : '',
           timestamp: Date.now(),
           model: selectedModel,
           isStreaming: true,
-          multiAgentStatus: agentMode === 'code' ? 'Memory…' : undefined,
-          multiAgentSteps:
-            agentMode === 'code'
+          multiAgentStatus: isAgenticPipelineMode(agentMode) ? 'Memory…' : undefined,
+          multiAgentSteps: isAgenticPipelineMode(agentMode)
               ? [{ phase: 'memory', status: 'active', detail: 'init', at: Date.now() }]
               : undefined,
           activitySteps: createInitialActivitySteps(prepReady, prepReady, routeHint),
@@ -567,16 +691,6 @@ export const useAIStore = create<AIStore>()(
           hasAttachments: attachmentsSnapshot.length > 0,
           hasProjectPath: Boolean(editorState.projectPath),
         });
-
-        let workspaceBootstrap = '';
-        if (editorState.projectPath && caval?.getWorkspaceBootstrap) {
-          try {
-            const boot = await caval.getWorkspaceBootstrap(editorState.projectPath);
-            if (boot?.ok && boot.bootstrap) workspaceBootstrap = boot.bootstrap;
-          } catch {
-            /* best-effort */
-          }
-        }
 
         const updateAssistant = (patch: Partial<ChatMessage>) => {
           set((s) => {
@@ -600,30 +714,52 @@ export const useAIStore = create<AIStore>()(
         };
 
         let zlWarmContext = '';
-        if (editorState.projectPath && caval?.zlCompleteChat) {
-          try {
-            const zlResult = await caval.zlCompleteChat({
-              workspaceRoot: editorState.projectPath,
-              objectiveDraft: apiPrompt,
-              activeFile: editorState.tabs.find((t) => t.id === editorState.activeTabId)?.path,
-              openFiles: editorState.tabs.map((t) => t.path),
-              selectedModel,
-            });
-            if (zlResult?.ok && zlResult.prep) {
-              zlWarmContext = zlResult.prep.warmContext ?? '';
-              if (zlResult.prep.partialPlan && agentMode !== 'code') {
-                updateAssistant({
-                  content: [
-                    'Plan preliminar (Zero-Latency):',
-                    ...zlResult.prep.partialPlan.plan.steps
-                      .slice(0, 5)
-                      .map((s, i) => `${i + 1}. ${s.title}`),
-                  ].join('\n'),
-                });
-              }
+        let workspaceBootstrap = '';
+        // Agentic: pipeline multi-agent + bootstrap pe main — fără prefetch blocant în renderer.
+        const skipRendererPrefetch = isAgenticPipelineMode(agentMode);
+
+        if (!skipRendererPrefetch && editorState.projectPath && caval) {
+          const bootstrapPromise = caval.getWorkspaceBootstrap
+            ? withTimeout(
+                caval
+                  .getWorkspaceBootstrap(editorState.projectPath)
+                  .then((b) => (b?.ok && b.bootstrap ? b.bootstrap : '')),
+                350,
+                ''
+              )
+            : Promise.resolve('');
+
+          const zlPromise =
+            !prepWarmReady && caval.zlCompleteChat
+              ? withTimeout(
+                  caval
+                    .zlCompleteChat({
+                      workspaceRoot: editorState.projectPath,
+                      objectiveDraft: apiPrompt,
+                      activeFile: editorState.tabs.find((t) => t.id === editorState.activeTabId)?.path,
+                      openFiles: editorState.tabs.map((t) => t.path),
+                      selectedModel,
+                    })
+                    .then((r) => (r?.ok && r.prep ? r.prep : null)),
+                  500,
+                  null
+                )
+              : Promise.resolve(null);
+
+          const [boot, zlPrep] = await Promise.all([bootstrapPromise, zlPromise]);
+          workspaceBootstrap = boot;
+          if (zlPrep) {
+            zlWarmContext = zlPrep.warmContext ?? '';
+            if (zlPrep.partialPlan) {
+              updateAssistant({
+                content: [
+                  'Plan preliminar (Zero-Latency):',
+                  ...zlPrep.partialPlan.plan.steps
+                    .slice(0, 5)
+                    .map((s, i) => `${i + 1}. ${s.title}`),
+                ].join('\n'),
+              });
             }
-          } catch {
-            /* best-effort */
           }
         }
 
@@ -658,9 +794,14 @@ export const useAIStore = create<AIStore>()(
         const toolWrittenPaths: string[] = [];
         let capturedReasoningBrief: ReasoningBrief | undefined;
         let capturedRecapMeta: PipelineRecapMeta | undefined;
+        let capturedComposeText = '';
+        let pipelineWrittenFiles: string[] = [];
+
+        const isSessionStale = () =>
+          isStaleWorkspace(boundWorkspace, useEditorStore.getState().projectPath);
 
         const syncLiveEditorPreview = (buffer: string) => {
-          if (agentMode !== 'code') return;
+          if (!modeSupportsFileApply(agentMode)) return;
           const live = parseStreamingScaffold(buffer);
           if (!live?.content.trim()) return;
           useEditorStore.getState().updateAiPreview(live.path, live.content);
@@ -675,12 +816,23 @@ export const useAIStore = create<AIStore>()(
         };
 
         const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
+          if (isSessionStale()) {
+            updateAssistant({
+              content: 'Workspace schimbat — răspuns ignorat.',
+              isStreaming: false,
+              error: 'workspace-changed',
+            });
+            set({ isStreaming: false });
+            useEditorStore.getState().closeAiPreview();
+            return;
+          }
+
           const msgForParse = get().messages.find((m) => m.id === assistantMsgId);
           const reasoningWithFences =
             msgForParse?.reasoning && (msgForParse.reasoning.match(/```/g)?.length ?? 0) >= 2
               ? msgForParse.reasoning
               : '';
-          const parseSource = rawStreamBuffer || reasoningWithFences || content;
+          const parseSource = capturedComposeText || rawStreamBuffer || reasoningWithFences || content;
           let finalContent = content;
           if (
             isLlmRefusal(content) &&
@@ -702,12 +854,17 @@ export const useAIStore = create<AIStore>()(
           set({ isStreaming: false });
 
           const projectPath = useEditorStore.getState().projectPath;
-          if (agentMode !== 'code' || !projectPath || diff) return;
+          const appliesScaffold = modeSupportsFileApply(agentMode);
+          if (!appliesScaffold || !projectPath || diff) return;
 
           void (async () => {
+            if (isSessionStale()) {
+              useEditorStore.getState().closeAiPreview();
+              return;
+            }
             let writtenFiles = fashionSeeded
               ? getFashionMatchingScaffoldFiles().map((f) => f.path)
-              : [...toolWrittenPaths];
+              : [...new Set([...toolWrittenPaths, ...pipelineWrittenFiles])];
             const parsed = parseScaffoldFiles(parseSource);
             if (parsed.length > 0) {
               writtenFiles = [
@@ -717,14 +874,47 @@ export const useAIStore = create<AIStore>()(
             }
             writtenFiles = [...new Set(writtenFiles)];
             await useEditorStore.getState().refreshTree();
+
+            const recapText = msgForParse?.recap ?? capturedRecapMeta?.pendingIssues?.join(' ');
+            const incomplete = isDeliveryIncomplete({
+              writtenFiles,
+              recap: recapText,
+              taskCount: capturedRecapMeta?.taskCount ?? 0,
+              parseSource,
+            });
+
+            if (
+              isAgenticPipelineMode(agentMode) &&
+              incomplete &&
+              canAutoContinueDelivery(deliveryWaveIndex, DEFAULT_FULL_DELIVERY_CONFIG) &&
+              !isSessionStale()
+            ) {
+              deliveryWaveIndex += 1;
+              const planContext =
+                reasoningWithFences ||
+                msgForParse?.reasoning ||
+                (capturedReasoningBrief
+                  ? [capturedReasoningBrief.goal, capturedReasoningBrief.approach].join('\n')
+                  : '');
+              updateAssistant({
+                error: undefined,
+                content: `Continuă delivery (${deliveryWaveIndex}/${DEFAULT_FULL_DELIVERY_CONFIG.maxComposeWaves})…`,
+                multiAgentStatus: 'Delivery…',
+              });
+              void get().sendMessage(
+                buildDeliveryContinueMessage(planContext, deliveryWaveIndex - 1)
+              );
+              return;
+            }
+
             if (writtenFiles.length === 0) {
               useEditorStore.getState().closeAiPreview();
               const hadReasoningPlan = Boolean(
-                reasoningWithFences || msgForParse?.reasoning?.trim()
+                reasoningWithFences || msgForParse?.reasoning?.trim() || capturedReasoningBrief
               );
               updateAssistant({
                 error: hadReasoningPlan
-                  ? 'AI a planificat în Reasoning fără fișiere (```). Retrimite: „continuă — emite toate fișierele ca ```lang:path```”.'
+                  ? 'AI a planificat fără fișiere valide (```lang:path```). Trimite SCAFFOLD_CONTINUE sau reformulează promptul.'
                   : 'Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.',
               });
               return;
@@ -732,7 +922,7 @@ export const useAIStore = create<AIStore>()(
             useEditorStore.getState().closeAiPreview();
             openWrittenFile(writtenFiles[writtenFiles.length - 1]!);
             const recapPatch: Partial<ChatMessage> = { writtenFiles };
-            if (agentMode === 'code' && capturedReasoningBrief) {
+            if (isAgenticPipelineMode(agentMode) && capturedReasoningBrief) {
               const recap = buildFinalRecap({
                 brief: capturedReasoningBrief,
                 writtenFiles,
@@ -749,6 +939,19 @@ export const useAIStore = create<AIStore>()(
           })();
         };
 
+        if (
+          !fashionSeeded &&
+          !isDeliveryContinueRequest(userText) &&
+          !isScaffoldContinueRequest(userText) &&
+          (agentMode === 'code' || agentMode === 'debug' || isAgenticPipelineMode(agentMode))
+        ) {
+          const readiness = await checkModelReadiness(selectedModel, get().apiKeys);
+          if (!readiness.ready) {
+            finish(`${readiness.reason}\n\n${readiness.hint}`, { error: readiness.reason });
+            return;
+          }
+        }
+
         if (isFashionMatchingEngineRequest(userText) && !editorState.projectPath) {
           finish(
             'Deschide un folder de proiect (**File → Open Folder**) apoi retrimite promptul. Fără folder nu pot crea `fashion-matching-engine/`.',
@@ -757,7 +960,7 @@ export const useAIStore = create<AIStore>()(
           return;
         }
 
-        if (agentMode === 'code' && !editorState.projectPath && !fashionSeeded) {
+        if (isAgenticPipelineMode(agentMode) && !editorState.projectPath && !fashionSeeded) {
           finish(
             'Deschide un folder (**File → Open Folder**) — fără proiect deschis nu pot crea fișiere.',
             { error: 'projectPath lipsă' }
@@ -775,6 +978,29 @@ export const useAIStore = create<AIStore>()(
         }
 
         const handleStreamChunk = (chunk: CavalStreamChunk) => {
+          if (chunk.type === 'delivery-pause' && chunk.runId) {
+            updateAssistant({
+              content:
+                'Backend finalizat. Specifică preferințele UI (stil, temă, layout) în panoul de mai jos.',
+              isStreaming: false,
+              multiAgentStatus: 'UI checkpoint',
+            });
+            set({
+              isStreaming: false,
+              deliveryPause: { runId: chunk.runId, streamId: chunk.streamId },
+            });
+            streamCleanup?.();
+            streamCleanup = null;
+            return;
+          }
+          if (isSessionStale()) {
+            if (chunk.type === 'done' || chunk.type === 'error') {
+              finish('Workspace schimbat — stream oprit.', { error: 'workspace-changed' });
+              streamCleanup?.();
+              streamCleanup = null;
+            }
+            return;
+          }
           if (chunk.type === 'reasoning' && chunk.reasoningDelta) {
             const prev =
               get().messages.find((m) => m.id === assistantMsgId)?.reasoning ?? '';
@@ -794,7 +1020,7 @@ export const useAIStore = create<AIStore>()(
               chunk.detail
             );
             updateAssistant({ multiAgentStatus: label, multiAgentSteps });
-            if (agentMode === 'code' && !gotFirstDelta) {
+            if (isAgenticPipelineMode(agentMode) && !gotFirstDelta) {
               const content = capturedReasoningBrief
                 ? formatArenaReasoning(capturedReasoningBrief, undefined, true)
                 : stripArenaChatNoise(rawStreamBuffer) || label;
@@ -808,7 +1034,7 @@ export const useAIStore = create<AIStore>()(
             };
             updateAssistant({
               reasoningBrief: capturedReasoningBrief,
-              content: buildEarlyArenaMessage(capturedReasoningBrief),
+              content: buildEarlyArenaMessage(capturedReasoningBrief, true),
             });
           }
           if (chunk.type === 'meta' && chunk.resolvedModel) {
@@ -816,6 +1042,7 @@ export const useAIStore = create<AIStore>()(
             set({ activeResolvedModel: chunk.resolvedModel });
           }
           if (chunk.type === 'tool' && chunk.toolName === 'write_file' && chunk.toolStatus === 'done') {
+            if (isSessionStale()) return;
             const relPath =
               chunk.toolWrittenPath ??
               chunk.toolDetail?.match(/"path"\s*:\s*"([^"]+)"/)?.[1];
@@ -835,8 +1062,7 @@ export const useAIStore = create<AIStore>()(
             activeStreamBuffer = rawStreamBuffer;
             syncLiveEditorPreview(rawStreamBuffer);
             updateAssistant({
-              content:
-                agentMode === 'code'
+              content: isAgenticPipelineMode(agentMode)
                   ? capturedReasoningBrief
                     ? formatArenaReasoning(capturedReasoningBrief, undefined, true, true)
                     : stripArenaChatNoise(rawStreamBuffer) || '⚡ Scriu cod în editor…'
@@ -855,21 +1081,23 @@ export const useAIStore = create<AIStore>()(
             if (chunk.pipelineRecapMeta) {
               capturedRecapMeta = chunk.pipelineRecapMeta as PipelineRecapMeta;
             }
-            if (
-              chunk.composeText &&
-              (chunk.composeText.match(/```/g)?.length ?? 0) >= 2 &&
-              (rawStreamBuffer.match(/```/g)?.length ?? 0) < 2
-            ) {
-              rawStreamBuffer = chunk.composeText;
-              activeStreamBuffer = chunk.composeText;
-              syncLiveEditorPreview(chunk.composeText);
+            if (chunk.composeText?.trim()) {
+              capturedComposeText = chunk.composeText;
+              if ((rawStreamBuffer.match(/```/g)?.length ?? 0) < 2) {
+                rawStreamBuffer = chunk.composeText;
+                activeStreamBuffer = chunk.composeText;
+                syncLiveEditorPreview(chunk.composeText);
+              }
+            }
+            if (chunk.writtenFiles?.length) {
+              pipelineWrittenFiles = chunk.writtenFiles;
             }
             const finalSteps = markAllActivityDone(
               get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
                 createInitialActivitySteps()
             );
             const streamContent =
-              agentMode === 'code' && capturedReasoningBrief
+              isAgenticPipelineMode(agentMode) && capturedReasoningBrief
                 ? formatArenaReasoning(capturedReasoningBrief, undefined, false, true)
                 : rawStreamBuffer ||
                   activeStreamBuffer ||
@@ -898,6 +1126,11 @@ export const useAIStore = create<AIStore>()(
           },
           scaffoldMode: boolean
         ) => {
+          const uiResume = resumeAfterUiPrefs;
+          if (uiResume) {
+            resumeAfterUiPrefs = null;
+          }
+
           const streamId = generateId();
           activeStreamId = streamId;
           abortController = new AbortController();
@@ -906,13 +1139,33 @@ export const useAIStore = create<AIStore>()(
           gotFirstDelta = false;
           activeTabPath = streamContext.filePath ?? null;
 
+          if (uiResume && caval?.pipelineResumeStream) {
+            streamCleanup =
+              caval.pipelineResumeStream(
+                {
+                  runId: uiResume.runId,
+                  streamId,
+                  uiPreferences: uiResume.uiPreferences,
+                  workspaceRoot: boundWorkspace ?? editorState.projectPath ?? '',
+                  model: selectedModel,
+                  strictReview: isAgenticPipelineMode(agentMode) ? strictReview : undefined,
+                },
+                handleStreamChunk
+              ) ?? null;
+            if (!streamCleanup) {
+              finish('Pipeline resume indisponibil.', undefined, streamContext.filePath);
+            }
+            return;
+          }
+
           streamCleanup = caval?.chatStream?.(
             {
               message: apiPrompt,
               model: selectedModel,
               mode: agentMode === 'ask' ? 'ask' : agentMode,
               streamId,
-              workspaceRoot: editorState.projectPath ?? undefined,
+              workspaceRoot: boundWorkspace ?? undefined,
+              skipMultiAgent: !isAgenticPipelineMode(agentMode),
               messages: contextMessages.map((m) => ({
                 role: m.role,
                 content: m.content,
@@ -929,7 +1182,7 @@ export const useAIStore = create<AIStore>()(
                 })),
               },
               scaffoldMode,
-              strictReview: agentMode === 'code' ? strictReview : undefined,
+              strictReview: isAgenticPipelineMode(agentMode) ? strictReview : undefined,
             },
             handleStreamChunk
           ) ?? null;
@@ -941,10 +1194,12 @@ export const useAIStore = create<AIStore>()(
 
         if (editorState.projectPath) {
           void caval?.workspaceSync?.(editorState.projectPath);
+          void caval?.mcpEnsureReady?.();
         }
 
         const isFastChat =
           agentMode !== 'code' &&
+          !isAgenticPipelineMode(agentMode) &&
           !editorState.projectPath &&
           !attachProject &&
           !isByokModel(selectedModel) &&
@@ -952,12 +1207,14 @@ export const useAIStore = create<AIStore>()(
           attachmentsSnapshot.length === 0;
 
         const scaffoldMode =
-          agentMode === 'code' &&
+          modeSupportsFileApply(agentMode) &&
           (fashionSeeded ||
             attachmentsSnapshot.some((f) => f.path.startsWith('engineering://')) ||
-            /\bSCAFFOLD\b/i.test(apiPrompt));
+            /\bSCAFFOLD\b/i.test(apiPrompt) ||
+            isScaffoldContinueRequest(apiPrompt) ||
+            (isAgenticPipelineMode(agentMode) && isDeliveryContinueRequest(apiPrompt)));
 
-        if (agentMode === 'code' && editorState.projectPath) {
+        if (isAgenticPipelineMode(agentMode) && editorState.projectPath) {
           useEditorStore.getState().showAiPreview('generating.ts', '// AI scrie cod…\n');
         }
 
@@ -998,13 +1255,17 @@ export const useAIStore = create<AIStore>()(
           if (!prepReady) {
             updateActivity('prepare', 'active');
           }
-          if (!prepWarmReady && caval?.contextSearch) {
+          if (!prepWarmReady && caval?.contextSearch && !isAgenticPipelineMode(agentMode)) {
             try {
               const searchQuery =
                 apiPrompt.trim().length > 3
                   ? apiPrompt
                   : [activeTab?.path, editorState.projectPath].filter(Boolean).join(' ');
-              const search = await caval.contextSearch({ query: searchQuery, limit: 6 });
+              const search = await withTimeout(
+                caval.contextSearch({ query: searchQuery, limit: 6 }),
+                500,
+                { ok: false as const }
+              );
               if (search.ok && search.results?.length) {
                 projectContext = formatContextSearchResults(search.results);
               }
@@ -1013,7 +1274,10 @@ export const useAIStore = create<AIStore>()(
           updateActivity('prepare', 'done');
         }
 
-        projectContext = mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
+        projectContext =
+          isAgenticPipelineMode(agentMode)
+            ? ''
+            : mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
 
         const mentionFiles =
           uniqueMentions.length > 0 && caval?.fs?.readFile
@@ -1029,7 +1293,7 @@ export const useAIStore = create<AIStore>()(
           messages.map((m) => ({ role: m.role, content: m.content })),
           {
             activeTab,
-            fileTree: attachProject ? editorState.fileTree : [],
+            fileTree: attachProject && !isAgenticPipelineMode(agentMode) ? editorState.fileTree : [],
             projectPath: editorState.projectPath,
             includeMode: attachProject ? includeMode : 'file',
             skipActiveFile: !attachProject,
@@ -1175,6 +1439,14 @@ export const useAIStore = create<AIStore>()(
 
       clearPendingChatDraft: () => set({ pendingChatDraft: null }),
 
+      submitUiDeliveryPreferences: async (prefs) => {
+        const pause = get().deliveryPause;
+        if (!pause || !prefs.trim()) return;
+        resumeAfterUiPrefs = { runId: pause.runId, uiPreferences: prefs.trim() };
+        set({ deliveryPause: null });
+        await get().sendMessage(`[UI Preferences]\n${prefs.trim()}`);
+      },
+
       handoffFromEngineering: ({ project, userPrompt }) => {
         const projectPath = useEditorStore.getState().projectPath;
         if (!projectPath) {
@@ -1187,13 +1459,13 @@ export const useAIStore = create<AIStore>()(
         const title = project.spec.title.trim().slice(0, 48) || 'Software din Engineering';
         const contextMarkdown = formatEngineeringContextForCoding(project, userPrompt);
         const suggestedPrompt = buildSoftwareHandoffPrompt(project);
-        const thread = createThread(title);
+        const thread = createThread(title, projectPath);
 
         get().clearPrepareState();
 
         set({
-          agentMode: 'code',
-          selectedModel: getAgentMode('code').defaultModel,
+          agentMode: 'agentic',
+          selectedModel: getAgentMode('agentic').defaultModel,
           includeMode: 'project',
           activeThreadId: thread.id,
           threads: [thread, ...get().threads],
@@ -1239,6 +1511,23 @@ export const useAIStore = create<AIStore>()(
         }
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
         if (thread) state.messages = thread.messages;
+        // Migrate legacy Code threads that used the multi-agent pipeline
+        if (state.agentMode === 'code') {
+          const hasPipelineArtifacts = state.threads.some((t) =>
+            t.messages.some(
+              (m) =>
+                (m.multiAgentSteps?.length ?? 0) > 0 ||
+                Boolean(m.reasoningBrief) ||
+                Boolean(m.recap)
+            )
+          );
+          if (hasPipelineArtifacts) {
+            state.agentMode = 'agentic';
+          }
+        }
+        if (!AGENT_MODES.some((m) => m.id === state.agentMode)) {
+          state.agentMode = 'code';
+        }
         void loadApiKeysFromSecrets().then((secrets) => {
           if (Object.keys(secrets).length > 0) {
             useAIStore.setState({ apiKeys: secrets });
@@ -1248,6 +1537,18 @@ export const useAIStore = create<AIStore>()(
     }
   )
 );
+
+registerWorkspaceChangeHandler((path) => {
+  useAIStore.getState().onWorkspaceChanged(path);
+});
+
+if (typeof window !== 'undefined') {
+  queueMicrotask(() => {
+    getCaval()?.onWorkspaceSessionReset?.(() => {
+      useAIStore.getState().onWorkspaceChanged(useEditorStore.getState().projectPath);
+    });
+  });
+}
 
 export function getModelDisplayLabel(id: string, labels: Record<string, string>): string {
   if (labels[id]) return labels[id];

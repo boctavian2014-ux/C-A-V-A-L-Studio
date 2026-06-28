@@ -17,6 +17,7 @@ export interface PipelineTask {
   purpose: string;
   description: string;
   dependencies: string[];
+  phase?: 'ui' | 'core';
 }
 
 export interface SubAgentResult {
@@ -72,9 +73,24 @@ export interface PipelineRecapMeta {
   taskCount: number;
   fastPipeline: boolean;
   pendingIssues: string[];
+  composeWaves?: number;
   devTools?: DevToolsIntegrationResult;
   supervisor?: SupervisorResult;
 }
+
+export interface FullDeliveryConfig {
+  enabled: boolean;
+  maxComposeWaves: number;
+  autoContinue: boolean;
+  uiCheckpoint: boolean;
+}
+
+export const DEFAULT_FULL_DELIVERY_CONFIG: FullDeliveryConfig = {
+  enabled: true,
+  maxComposeWaves: 3,
+  autoContinue: true,
+  uiCheckpoint: true,
+};
 
 export interface PipelineContext {
   userIntent: string;
@@ -166,11 +182,12 @@ export interface MultiAgentConfig {
   /** Post-compose Git/MCP/terminal probes */
   enableDevToolsIntegration: boolean;
   reasoningLayer: ReasoningLayerConfig;
+  fullDelivery: FullDeliveryConfig;
 }
 
 export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
   enabled: true,
-  maxTasks: 3,
+  maxTasks: 8,
   parallelSubAgents: 2,
   supervisorRetries: 1,
   persistArtifacts: true,
@@ -178,6 +195,7 @@ export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
   fastPipeline: true,
   enableDevToolsIntegration: true,
   reasoningLayer: { ...DEFAULT_REASONING_LAYER_CONFIG },
+  fullDelivery: { ...DEFAULT_FULL_DELIVERY_CONFIG },
 };
 
 export interface MultiAgentPipelineCallbacks {
@@ -199,6 +217,11 @@ export type MultiAgentPipelineResult =
       stageSummary?: string;
       reasoningBrief?: ReasoningBrief;
       pipelineRecapMeta?: PipelineRecapMeta;
+      paused?: boolean;
+      pauseReason?: 'ui-design';
+      /** Raw final composer output (may differ from chat summary text) */
+      composeText?: string;
+      writtenFiles?: string[];
     }
   | {
       ok: false;

@@ -5,7 +5,7 @@
 import type { RoutingIntent } from "../types";
 import type { ModelSelectionId } from "../models/model-catalog";
 
-export type AgentModeId = "ask" | "code" | "architect" | "debug";
+export type AgentModeId = "ask" | "code" | "agentic" | "architect" | "debug";
 
 export interface AgentMode {
   id: AgentModeId;
@@ -17,6 +17,14 @@ export interface AgentMode {
 }
 
 export const AGENT_MODES: AgentMode[] = [
+  {
+    id: "agentic",
+    label: "Agentic",
+    shortLabel: "Agentic",
+    intent: "kilocode",
+    defaultModel: "caval-auto/balanced",
+    description: "Pipeline complet — de la idee la proiect livrat",
+  },
   {
     id: "ask",
     label: "Ask",
@@ -31,7 +39,7 @@ export const AGENT_MODES: AgentMode[] = [
     shortLabel: "Code",
     intent: "kilocode",
     defaultModel: "caval-auto/balanced",
-    description: "Scrie, refactorizează și aplică modificări de cod",
+    description: "Scrie cod cu modelul ales — direct, fără pipeline multi-agent",
   },
   {
     id: "architect",
@@ -52,7 +60,12 @@ export const AGENT_MODES: AgentMode[] = [
 ];
 
 export function getAgentMode(id: AgentModeId): AgentMode {
-  return AGENT_MODES.find((m) => m.id === id) ?? AGENT_MODES[0];
+  return AGENT_MODES.find((m) => m.id === id) ?? AGENT_MODES.find((m) => m.id === "code")!;
+}
+
+/** Multi-agent pipeline + full delivery — only in Agentic mode. */
+export function isAgenticPipelineMode(mode: string | undefined): boolean {
+  return mode === "agentic";
 }
 
 export interface CavalConfig {
@@ -82,6 +95,7 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
     perMode: {
       ask: "caval-auto/balanced",
       code: "caval-auto/balanced",
+      agentic: "caval-auto/balanced",
       architect: "caval-auto/frontier",
       debug: "caval-auto/balanced",
     },

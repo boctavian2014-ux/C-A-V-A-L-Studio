@@ -294,6 +294,7 @@ const sendMenuCommand = (command: string): void => {
 };
 
 const sendWorkspaceToRenderer = async (webContentsId: number, sender: Electron.WebContents, folderPath: string): Promise<void> => {
+  sender.send("caval:workspace-session-reset");
   workspaceRoots.set(webContentsId, folderPath);
   const files = await listFolderFiles(folderPath, 240);
   sender.send("caval:folder-opened", {

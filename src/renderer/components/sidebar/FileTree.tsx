@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { useEditorStore, type FileNode } from '../../store/editor-store';
-import { useAIStore } from '../../../ai/composer/ai-store';
+import { useAIStore } from '../../../../ai/composer/ai-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';

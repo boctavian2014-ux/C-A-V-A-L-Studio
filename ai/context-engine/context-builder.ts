@@ -11,6 +11,7 @@ import {
   buildMultiModelSystemPrompt,
   MULTI_MODEL_RECAP_ADDON,
 } from '../prompts/multi-model-reasoning-chat';
+import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
 
 export interface ContextOptions {
   activeTab:    EditorTab | null;
@@ -24,7 +25,7 @@ export interface ContextOptions {
   attachments?: Array<{ path: string; name: string; content: string }>;
   /** Nu atașa fișierul activ (întrebări generale fără legătură cu codul deschis) */
   skipActiveFile?: boolean;
-  agentMode?: 'ask' | 'plan' | 'code' | 'architect' | 'debug';
+  agentMode?: 'ask' | 'plan' | 'code' | 'agentic' | 'architect' | 'debug';
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)
@@ -76,7 +77,7 @@ export function buildFastChatMessages(
   agentMode?: ContextOptions['agentMode']
 ): AIMessage[] {
   const system =
-    agentMode === 'code'
+    agentMode === 'agentic'
       ? CODING_ARENA_SYSTEM_PROMPT
       : buildLiteSystemPrompt(agentMode);
   const msgs: AIMessage[] = [{ role: 'system', content: system }];
@@ -164,9 +165,11 @@ export function buildContextMessages(
   });
 
   const systemContent =
-    opts.agentMode === 'code'
-      ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace: ${opts.projectPath}` : ''}`
-      : attachProject
+    opts.agentMode === 'agentic'
+      ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace activ: ${opts.projectPath}` : ''}`
+      : opts.agentMode === 'debug' && opts.projectPath
+        ? `${buildLiteSystemPrompt(opts.agentMode)}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: debug errors and apply fixes as \`\`\`lang:path\`\`\` fences.\n${SCAFFOLD_EMISSION_RULE}`
+        : attachProject
         ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
         : buildLiteSystemPrompt(opts.agentMode);
   messages.push({ role: 'system', content: systemContent });

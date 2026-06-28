@@ -46,8 +46,9 @@ export function parseReasoningFromDecomposition(
   return { goal, approach, modules };
 }
 
-export function buildEarlyArenaMessage(brief: ReasoningBrief): string {
-  return [`Goal: ${brief.goal}`, `Plan: ${brief.approach}`].join('\n');
+export function buildEarlyArenaMessage(brief: ReasoningBrief, continuing = false): string {
+  const base = [`Goal: ${brief.goal}`, `Plan: ${brief.approach}`].join('\n');
+  return continuing ? `${base}\n· continuă delivery…` : base;
 }
 
 export function buildFinalRecap(input: RecapInput): string {

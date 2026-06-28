@@ -18,6 +18,7 @@ Output format (MUST follow):
   - Module A: name + purpose
     - Task A1: clear, atomic, implementable
     - Task A2: ...
+  - For frontend/UI tasks use tag: \`[phase:ui]\` in the task line, e.g. \`- Task ui-1: [phase:ui] Frontend shell + components\`
 - **Dependencies:** What depends on what
 - **Store / Platform Constraints (if app):** App Store / Google Play, permissions, privacy
 - **Deployment & Ops Tasks:** CI/CD, Docker, monitoring

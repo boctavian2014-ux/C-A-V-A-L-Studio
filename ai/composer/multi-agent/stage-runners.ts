@@ -8,6 +8,8 @@ import {
   SUB_AGENT_PROMPT,
   SUPERVISOR_AGENT_PROMPT,
 } from '../../prompts/multi-agent';
+import { SCAFFOLD_EMISSION_RULE } from '../../prompts/scaffold-emission-rule';
+import { FULL_DELIVERY_RULE } from '../../prompts/full-delivery-rule';
 import type { ModelSelectionId } from '../../models/model-catalog';
 import { parseSupervisorOutput } from './supervisor-parser';
 import { parseDecomposition } from './decomposition-parser';
@@ -30,7 +32,10 @@ export const SCAFFOLD_SYSTEM_ADDON = [
   '- Output each file as a fenced block: ```lang:relative/path with FULL source.',
   '- Include README.md, docs/requirements.md, docs/architecture.md for complex projects.',
   '- Include tests, CI/CD configs (Dockerfile, .github/workflows), deployment notes when relevant.',
-  '- Prefer 5–15 real files over chat prose; stop when files exist; do not repeat the spec.',
+  '- Emit ALL modules from the plan — do not stop after the first batch of files.',
+  '- Each sub-agent output must use ```lang:relative/path``` fences with FULL source.',
+  FULL_DELIVERY_RULE,
+  SCAFFOLD_EMISSION_RULE,
 ].join('\n');
 
 function wrapUser(content: string): string {
@@ -277,11 +282,15 @@ export async function runFinalComposer(
   store: PipelineContextStore,
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks,
-  isAborted?: () => boolean
+  isAborted?: () => boolean,
+  opts?: { waveIndex?: number }
 ): Promise<{ ok: true; text: string; model: string; provider: string } | { ok: false; error: string }> {
-  emitStage(callbacks, 'compose', 'active');
+  emitStage(callbacks, 'compose', 'active', opts?.waveIndex ? `wave ${opts.waveIndex + 1}` : undefined);
   const system = `${FINAL_COMPOSER_WITH_REASONING}\n${SCAFFOLD_SYSTEM_ADDON}`;
-  const user = store.buildPromptFor('compose');
+  let user = store.buildPromptFor('compose');
+  if (opts?.waveIndex && opts.waveIndex > 0) {
+    user += `\n\n## DELIVERY WAVE ${opts.waveIndex + 1}\nComplete ALL missing files from the plan. Emit every remaining file as \`\`\`lang:path\`\`\` fences with full source. Do not repeat explanations.`;
+  }
 
   const messages: CompletionMessage[] = [
     { role: 'system', content: system },
@@ -295,9 +304,9 @@ export async function runFinalComposer(
       capability: 'code',
       intent: 'kilocode',
       workspaceRoot,
-      requestId: 'ma-compose',
+      requestId: opts?.waveIndex ? `ma-compose-w${opts.waveIndex}` : 'ma-compose',
       useTools: false,
-      maxTokens: 8192,
+      maxTokens: 16_384,
     },
     {
       onMeta: callbacks?.onMeta,

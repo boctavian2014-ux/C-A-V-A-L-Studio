@@ -82,7 +82,10 @@ export function formatArenaReasoning(
     if (brief.modules?.length) {
       lines.push(`Modules: ${brief.modules.slice(0, 3).join(', ')}`);
     }
-    return lines.slice(0, 4).join('\n');
+    if (isStreaming && !composePhase && !recap) {
+      lines.push('· continuă delivery…');
+    }
+    return lines.slice(0, 5).join('\n');
   }
   return isStreaming ? 'Full Integration pipeline…' : '';
 }

@@ -201,7 +201,11 @@ export class ZeroLatencyFusion {
   /** Called on Enter — finalize plan + return warm context bundle. */
   async completeForChat(signals: ZLSignals): Promise<ZLChatPrep> {
     const cfg = loadZeroLatencyConfig(signals.workspaceRoot);
-    if (cfg.draftPlan !== 'off') {
+    const cached = zeroLatencyComposer.getCached(
+      signals.workspaceRoot,
+      signals.objectiveDraft ?? ""
+    );
+    if (cfg.draftPlan !== 'off' && !cached?.partialPlan) {
       if (cfg.draftPlan === 'stub') {
         zlPreplanner.preplan(signals);
       } else {
@@ -215,13 +219,13 @@ export class ZeroLatencyFusion {
       openFiles: signals.openFiles,
       maxFiles: cfg.maxWarmFiles,
     });
-    const cached = zeroLatencyComposer.getCached(
+    const planCached = zeroLatencyComposer.getCached(
       signals.workspaceRoot,
       signals.objectiveDraft ?? ""
     );
     return {
       warmContext,
-      partialPlan: cached?.partialPlan,
+      partialPlan: planCached?.partialPlan,
       modelBundle: getModelBundle(signals.workspaceRoot, signals.objectiveDraft),
     };
   }

@@ -59,7 +59,7 @@ export interface CavalModelCatalog {
 export interface CavalChatStreamRequest {
   message: string;
   model: string;
-  mode?: "ask" | "plan" | "code" | "architect" | "debug";
+  mode?: "ask" | "plan" | "code" | "agentic" | "architect" | "debug";
   streamId: string;
   workspaceRoot?: string;
   messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
@@ -70,7 +70,9 @@ export interface CavalChatStreamRequest {
   /** Override provider timeout (Engineering JSON uses 120s) */
   timeoutMs?: number;
   scaffoldMode?: boolean;
-  /** Force merge + supervisor review in Code Arena pipeline */
+  /** Skip multi-agent pipeline — direct single-model stream */
+  skipMultiAgent?: boolean;
+  /** Force merge + supervisor review in Agentic pipeline */
   strictReview?: boolean;
   context?: {
     filePath?: string;
@@ -101,7 +103,7 @@ export type MultiAgentPhase =
 
 export interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -130,6 +132,9 @@ export interface CavalStreamChunk {
     supervisor?: { approved: boolean; summary: string; issues: unknown[] };
   };
   composeText?: string;
+  writtenFiles?: string[];
+  pauseReason?: "ui-design";
+  runId?: string;
 }
 
 export interface CavalChatPrepareRequest {
@@ -290,6 +295,44 @@ contextBridge.exposeInMainWorld("caval", {
   },
   abortChatStream: (streamId: string) =>
     ipcRenderer.invoke("caval:ai-stream-abort", streamId) as Promise<{ ok: boolean }>,
+  workspaceSessionReset: () =>
+    ipcRenderer.invoke("caval:workspace-session-reset") as Promise<{ ok: boolean }>,
+  pipelineResume: (input: {
+    runId: string;
+    streamId: string;
+    uiPreferences: string;
+    workspaceRoot: string;
+    model: string;
+    strictReview?: boolean;
+  }) => ipcRenderer.invoke("caval:pipeline-resume", input) as Promise<{ ok: boolean; started?: boolean }>,
+  pipelineResumeStream: (
+    input: {
+      runId: string;
+      streamId: string;
+      uiPreferences: string;
+      workspaceRoot: string;
+      model: string;
+      strictReview?: boolean;
+    },
+    onChunk: (chunk: CavalStreamChunk) => void
+  ) => {
+    const listener = (_event: Electron.IpcRendererEvent, chunk: CavalStreamChunk) => {
+      if (chunk.streamId !== input.streamId) return;
+      onChunk(chunk);
+      if (chunk.type === "done" || chunk.type === "error") cleanup();
+    };
+    ipcRenderer.on("caval:ai-stream-chunk", listener);
+    const cleanup = () => ipcRenderer.removeListener("caval:ai-stream-chunk", listener);
+    void ipcRenderer.invoke("caval:pipeline-resume", input).then((result: { ok: boolean }) => {
+      if (!result.ok) cleanup();
+    });
+    return cleanup;
+  },
+  onWorkspaceSessionReset: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("caval:workspace-session-reset", listener);
+    return () => ipcRenderer.removeListener("caval:workspace-session-reset", listener);
+  },
   aiComplete: (request: {
     model: string;
     intent?: string;
@@ -461,6 +504,8 @@ contextBridge.exposeInMainWorld("caval", {
   secretsSet: (secrets: Record<string, string>) =>
     ipcRenderer.invoke("caval:secrets-set", secrets) as Promise<{ ok: boolean }>,
   mcpList: () => ipcRenderer.invoke("caval:mcp-list") as Promise<{ ok: boolean; servers?: unknown[] }>,
+  mcpEnsureReady: () =>
+    ipcRenderer.invoke("caval:mcp-ensure") as Promise<{ ok: boolean; servers?: unknown[] }>,
   mcpStart: (serverId: string) => ipcRenderer.invoke("caval:mcp-start", serverId),
   mcpStop: (serverId: string) => ipcRenderer.invoke("caval:mcp-stop", serverId),
   toolExecute: (input: { name: string; arguments: Record<string, unknown> }) =>

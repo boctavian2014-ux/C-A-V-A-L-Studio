@@ -5,6 +5,7 @@
     "perMode": {
       "ask": "caval-auto/balanced",
       "code": "caval-auto/balanced",
+      "agentic": "caval-auto/balanced",
       "architect": "caval-auto/frontier",
       "debug": "caval-auto/balanced"
     }
@@ -71,13 +72,19 @@
   },
   "multiAgent": {
     "enabled": true,
-    "maxTasks": 3,
+    "maxTasks": 8,
     "parallelSubAgents": 2,
     "supervisorRetries": 1,
     "persistArtifacts": true,
     "skipContextLlm": true,
     "fastPipeline": true,
     "enableDevToolsIntegration": true,
+    "fullDelivery": {
+      "enabled": true,
+      "maxComposeWaves": 3,
+      "autoContinue": true,
+      "uiCheckpoint": true
+    },
     "reasoningLayer": {
       "enabled": true,
       "showEarlyBrief": true,
@@ -107,5 +114,9 @@
     "draftPlan": "fast-then-frontier",
     "maxWarmFiles": 8,
     "maxWarmChars": 2500
+  },
+  "session": {
+    "singleProjectFocus": true,
+    "newThreadOnWorkspaceChange": true
   }
 }
