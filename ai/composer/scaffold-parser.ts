@@ -114,6 +114,44 @@ function normalizeRelativePath(raw: string): string | null {
   return path;
 }
 
+const FRAGMENT_INTERNAL_MARKERS = [
+  /\babortController\b/,
+  /\bstreamCleanup\b/,
+  /\buseEditorStore\.getState\b/,
+  /\bget\(\)\.messages\b/,
+  /\bset\(\(s\)\s*=>/,
+  /\bapplyUnifiedDiff\b/,
+];
+
+/** Reject IDE/chat snippets that are not standalone modules (prevents junk like src/index.ts). */
+export function isScaffoldFragment(content: string): boolean {
+  const body = content.trim();
+  if (!body) return true;
+
+  if (FRAGMENT_INTERNAL_MARKERS.some((re) => re.test(body))) return true;
+
+  if (/\blet\s+ctx\s*=/.test(body) && /\btab\.path\b/.test(body) && /\breturn\s+ctx\b/.test(body)) {
+    return true;
+  }
+
+  const hasTopLevelReturn = /(?:^|\n)\s*return\b/.test(body);
+  const hasModuleStructure =
+    /(?:^|\n)\s*(?:export\s+)?(?:async\s+)?function\b/m.test(body) ||
+    /(?:^|\n)\s*def\s+\w+/m.test(body) ||
+    /(?:^|\n)\s*(?:export\s+)?(?:async\s+)?(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/m.test(body) ||
+    /(?:^|\n)\s*export\s+/m.test(body) ||
+    /(?:^|\n)\s*import\s+/m.test(body) ||
+    /(?:^|\n)\s*class\s+\w+/m.test(body);
+
+  if (hasTopLevelReturn && !hasModuleStructure) return true;
+
+  return false;
+}
+
+function acceptScaffoldBody(body: string): boolean {
+  return !isScaffoldFragment(body);
+}
+
 /** Extract file paths + contents from model output (fallback when tools are unavailable). */
 export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
   const found = new Map<string, string>();
@@ -126,7 +164,9 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
       };
       for (const file of parsed.files ?? []) {
         const rel = normalizeRelativePath(file.path ?? file.name ?? '');
-        if (rel && file.content) found.set(rel, file.content);
+        if (rel && file.content && acceptScaffoldBody(file.content)) {
+          found.set(rel, file.content);
+        }
       }
     } catch {
       /* ignore invalid JSON */
@@ -141,6 +181,7 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
     const pathHint = match[2]?.trim() ?? '';
     const body = match[3]?.trimEnd().trimStart() ?? '';
     if (!body || lang === 'diff' || lang === 'json') continue;
+    if (!acceptScaffoldBody(body)) continue;
 
     const fromHeader = normalizeRelativePath(pathHint);
     if (fromHeader) {
@@ -154,6 +195,7 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
     const fromComment = fileLine ? normalizeRelativePath(fileLine[1]) : null;
     if (fromComment) {
       const stripped = body.replace(fileLine![0], '').trimStart();
+      if (!acceptScaffoldBody(stripped)) continue;
       found.set(fromComment, stripped);
       continue;
     }
@@ -181,7 +223,7 @@ export function parseStreamingScaffold(content: string): ParsedScaffoldFile | nu
   const rel =
     normalizeRelativePath(pathHint) ??
     (lang || body ? defaultPathForLang(lang, 0, body) : 'generating.ts');
-  if (!body.trim()) return null;
+  if (!body.trim() || isScaffoldFragment(body)) return null;
 
   return { path: rel, content: body };
 }

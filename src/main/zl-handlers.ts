@@ -18,6 +18,11 @@ import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { resolveModelSelection } from "../../ai/models/auto-router";
 import type { ModelSelectionId } from "../../ai/models/model-catalog";
 import { preloadManager } from "../../ai/preload/preload-manager";
+import {
+  buildWorkspaceBootstrap,
+  mergeProjectContextWithBootstrap,
+} from "../../ai/context/workspace-bootstrap";
+import { WORKSPACE_BOOTSTRAP_MARKER } from "../../ai/context/workspace-bootstrap-shared";
 
 export interface CavalChatPrepareInput {
   workspaceRoot: string;
@@ -155,33 +160,45 @@ export function enrichChatWithZeroLatency<
   if ((request.context?.fileContent?.length ?? 0) > 400) return request;
 
   const existing = request.context?.projectContext ?? '';
-  if (existing.includes('Context Zero-Latency')) return request;
-
   const cfg = loadZeroLatencyConfig(workspaceRoot);
-  const warmContext =
-    existing.trim().length > 0
-      ? existing
-      : buildWarmContextBlock({
-          workspaceRoot,
-          objectiveDraft: request.message,
-          activeFile: request.context?.filePath,
-          openFiles: request.context?.mentions,
-          maxFiles: cfg.maxWarmFiles,
-        });
 
-  const capped =
-    warmContext.length > cfg.maxWarmChars
-      ? `${warmContext.slice(0, cfg.maxWarmChars)}\n...(truncat)`
-      : warmContext;
+  const warmBlock = buildWarmContextBlock({
+    workspaceRoot,
+    objectiveDraft: request.message,
+    activeFile: request.context?.filePath,
+    openFiles: request.context?.mentions,
+    maxFiles: cfg.maxWarmFiles,
+  });
 
-  if (!capped.trim()) return request;
+  const warmCapped =
+    warmBlock.length > cfg.maxWarmChars
+      ? `${warmBlock.slice(0, cfg.maxWarmChars)}\n...(truncat)`
+      : warmBlock;
+
+  let baseContext = existing;
+  if (!baseContext.includes(WORKSPACE_BOOTSTRAP_MARKER)) {
+    baseContext = mergeProjectContextWithBootstrap(
+      baseContext,
+      buildWorkspaceBootstrap(workspaceRoot)
+    );
+  }
+
+  const parts: string[] = [];
+  if (baseContext.trim()) parts.push(baseContext);
+  if (warmCapped.trim() && !baseContext.includes(warmCapped.slice(0, 80))) {
+    parts.push(warmCapped);
+  }
+
+  if (parts.length === 0) return request;
+
+  const mergedContext = parts.join("\n\n---\n\n");
 
   const lastUser = [...(request.messages ?? [])].reverse().find((m) => m.role === "user");
-  if (lastUser?.content.includes(capped.slice(0, 80))) return request;
+  if (lastUser?.content.includes(mergedContext.slice(0, 80))) return request;
 
   let messages = request.messages;
-  if (messages?.length) {
-    messages = injectWarmContextIntoMessages(messages, capped);
+  if (messages?.length && warmCapped.trim()) {
+    messages = injectWarmContextIntoMessages(messages, warmCapped);
   }
 
   return {
@@ -189,7 +206,7 @@ export function enrichChatWithZeroLatency<
     messages,
     context: {
       ...request.context,
-      projectContext: [request.context?.projectContext, capped].filter(Boolean).join("\n\n---\n\n"),
+      projectContext: mergedContext,
     },
   };
 }

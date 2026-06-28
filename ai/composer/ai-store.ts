@@ -16,6 +16,7 @@ import {
   resolveMentionFiles,
   shouldAttachProjectContext,
 } from '../context-engine/context-builder';
+import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
 import { applyUnifiedDiff } from '../../src/shared/diff-utils';
@@ -129,6 +130,7 @@ interface CavalWindow {
           attachments?: Array<{ path: string; name: string; content: string }>;
         };
         scaffoldMode?: boolean;
+        strictReview?: boolean;
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
@@ -136,6 +138,7 @@ interface CavalWindow {
     contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<Record<string, unknown>> }>;
     workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
     workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+    getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
     zlPrepare?: (signals: {
       workspaceRoot: string;
       objectiveDraft?: string;
@@ -314,7 +317,7 @@ export const useAIStore = create<AIStore>()(
       apiKeys: {},
       modelLabels: {},
       activeResolvedModel: null,
-      includeMode: 'file',
+      includeMode: 'project',
       strictReview: false,
       attachedFiles: [],
       activeThreadId: initialThread.id,
@@ -562,7 +565,18 @@ export const useAIStore = create<AIStore>()(
         const attachProject = shouldAttachProjectContext(apiPrompt, includeMode, {
           hasMentions: uniqueMentions.length > 0,
           hasAttachments: attachmentsSnapshot.length > 0,
+          hasProjectPath: Boolean(editorState.projectPath),
         });
+
+        let workspaceBootstrap = '';
+        if (editorState.projectPath && caval?.getWorkspaceBootstrap) {
+          try {
+            const boot = await caval.getWorkspaceBootstrap(editorState.projectPath);
+            if (boot?.ok && boot.bootstrap) workspaceBootstrap = boot.bootstrap;
+          } catch {
+            /* best-effort */
+          }
+        }
 
         const updateAssistant = (patch: Partial<ChatMessage>) => {
           set((s) => {
@@ -930,6 +944,8 @@ export const useAIStore = create<AIStore>()(
         }
 
         const isFastChat =
+          agentMode !== 'code' &&
+          !editorState.projectPath &&
           !attachProject &&
           !isByokModel(selectedModel) &&
           uniqueMentions.length === 0 &&
@@ -953,7 +969,12 @@ export const useAIStore = create<AIStore>()(
           );
           startIpcStream(
             contextMessages,
-            { projectContext: prepWarmReady && zlWarmContext ? zlWarmContext : undefined },
+            {
+              projectContext: mergeProjectContextWithBootstrap(
+                prepWarmReady && zlWarmContext ? zlWarmContext : undefined,
+                workspaceBootstrap
+              ) || undefined,
+            },
             scaffoldMode
           );
           return;
@@ -991,6 +1012,8 @@ export const useAIStore = create<AIStore>()(
           }
           updateActivity('prepare', 'done');
         }
+
+        projectContext = mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
 
         const mentionFiles =
           uniqueMentions.length > 0 && caval?.fs?.readFile
@@ -1204,6 +1227,9 @@ export const useAIStore = create<AIStore>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+        if (state.includeMode === 'file') {
+          state.includeMode = 'project';
+        }
         if (state.selectedModel === 'caval-auto/free') {
           void getCaval()?.secretsGet?.().then((res) => {
             if (hasOpenRouterKey(undefined, res?.secrets)) {

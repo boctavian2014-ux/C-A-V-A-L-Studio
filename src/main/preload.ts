@@ -398,6 +398,11 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.invoke("caval:workspace-open", folderPath) as Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>,
   workspaceSync: (folderPath: string) =>
     ipcRenderer.invoke("caval:workspace-sync", folderPath) as Promise<{ ok: boolean; path?: string }>,
+  getWorkspaceBootstrap: (workspaceRoot: string) =>
+    ipcRenderer.invoke("caval:workspace-bootstrap", workspaceRoot) as Promise<{
+      ok: boolean;
+      bootstrap?: string;
+    }>,
   zlPrepare: (signals: {
     workspaceRoot: string;
     objectiveDraft?: string;

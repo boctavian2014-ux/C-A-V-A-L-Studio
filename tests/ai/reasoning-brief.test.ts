@@ -46,7 +46,7 @@ describe('reasoning-brief', () => {
       writtenFiles: ['src/a.ts', 'src/b.ts'],
       taskCount: 2,
       fastPipeline: true,
-      supervisor: { approved: true, raw: '', issues: [], summary: 'ok' },
+      supervisor: { approved: true, raw: 'FAST_PIPELINE', issues: [], summary: 'fast path ok' },
       devTools: {
         terminal: { packageJson: true, testScript: true, buildScript: true },
         git: { isRepo: true, changedFiles: 2 },
@@ -55,5 +55,18 @@ describe('reasoning-brief', () => {
     expect(recap).toContain('Implementat: 2');
     expect(recap).toContain('Decizii:');
     expect(recap).toContain('Next:');
+    expect(recap).not.toContain('Lipsă:');
+  });
+
+  it('omits pending line when no issues', () => {
+    const recap = buildFinalRecap({
+      brief: { goal: 'g', approach: 'a', modules: [] },
+      writtenFiles: ['src/a.ts'],
+      taskCount: 1,
+      fastPipeline: true,
+      supervisor: { approved: true, raw: 'FAST_PIPELINE', issues: [], summary: 'fast path ok' },
+    });
+    expect(recap.split('\n')).toHaveLength(3);
+    expect(recap).not.toMatch(/Lipsă|Pending/);
   });
 });

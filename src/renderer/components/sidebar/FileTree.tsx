@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { useEditorStore, type FileNode } from '../../store/editor-store';
+import { useAIStore } from '../../../ai/composer/ai-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
@@ -222,6 +223,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
     const folderPath = await window.caval.fs.openFolder();
     if (!folderPath) return;
     setProjectPath(folderPath);
+    useAIStore.getState().setIncludeMode('project');
     const tree = await window.caval.fs.readTree(folderPath);
     setFileTree(tree);
     await window.caval.workspaceOpen?.(folderPath);

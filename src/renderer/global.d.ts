@@ -392,6 +392,7 @@ interface CavalBridge {
   contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: unknown[]; error?: string }>;
   workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
   workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+  getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
   zlPrepare?: (signals: {
     workspaceRoot: string;
     objectiveDraft?: string;

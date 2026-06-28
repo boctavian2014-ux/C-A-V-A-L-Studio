@@ -1,4 +1,6 @@
 /** Cavallo Multi-Model Reasoning & Chat Layer — Balanced Mode (all models, all chat paths). */
+import { CAVALO_DEV_ASSISTANT_CORE } from './cavalo-dev-assistant';
+
 export const MULTI_MODEL_REASONING_CHAT_PROMPT = `You are the Cavallo Multi-Model Reasoning & Chat Layer — Balanced Mode.
 
 You are not limited to one role.
@@ -91,7 +93,7 @@ export function buildMultiModelSystemPrompt(opts?: {
   collaboration?: boolean;
   workspacePath?: string | null;
 }): string {
-  const parts = [MULTI_MODEL_REASONING_CHAT_PROMPT];
+  const parts = [MULTI_MODEL_REASONING_CHAT_PROMPT, CAVALO_DEV_ASSISTANT_CORE];
   const hint = modeHintForAgent(opts?.agentMode);
   if (hint === 'technical') {
     parts.push('\nDEFAULT FOR THIS SESSION: Technical Mode (Steps 1–4 when generating code or plans).');

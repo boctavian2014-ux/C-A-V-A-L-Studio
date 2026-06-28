@@ -4,6 +4,7 @@ import {
   parseStreamingScaffold,
   pickCodeStreamOutput,
   inferExtensionFromContent,
+  isScaffoldFragment,
 } from '../../ai/composer/scaffold-parser';
 
 describe('scaffold-parser', () => {
@@ -71,5 +72,40 @@ describe('scaffold-parser', () => {
   it('accepts Dockerfile path without extension', () => {
     const text = '```dockerfile:Dockerfile\nFROM node:20\n```';
     expect(parseScaffoldFiles(text)[0]?.path).toBe('Dockerfile');
+  });
+
+  it('rejects context-builder fragment without explicit path', () => {
+    const text = [
+      '```typescript',
+      "let ctx = '';",
+      'if (tab && tab.path) {',
+      '  ctx += tab.path;',
+      '}',
+      'return ctx;',
+      '```',
+    ].join('\n');
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
+    expect(isScaffoldFragment("let ctx = '';\nif (tab && tab.path) {}\nreturn ctx;")).toBe(true);
+  });
+
+  it('rejects ai-store snippet fragments', () => {
+    const text = '```typescript\nconst stopStreaming = () => {\n  abortController?.abort();\n};\n```';
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
+  });
+
+  it('accepts valid module with explicit path even after fragment rejection', () => {
+    const text = '```typescript:src/app.ts\nexport const x = 1;\n```';
+    expect(parseScaffoldFiles(text)).toEqual([{ path: 'src/app.ts', content: 'export const x = 1;' }]);
+  });
+
+  it('rejects multiple anonymous fragment fences', () => {
+    const fragment = "let ctx = '';\nreturn ctx;";
+    const text = `\`\`\`typescript\n${fragment}\n\`\`\`\n\`\`\`typescript\n${fragment}\n\`\`\``;
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
+  });
+
+  it('parseStreamingScaffold returns null for fragment body', () => {
+    const text = '```typescript\nreturn ctx;\n```';
+    expect(parseStreamingScaffold(text)).toBeNull();
   });
 });

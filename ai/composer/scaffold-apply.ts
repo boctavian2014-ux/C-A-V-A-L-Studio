@@ -1,4 +1,4 @@
-import { parseScaffoldFiles, type ParsedScaffoldFile } from './scaffold-parser';
+import { parseScaffoldFiles, isScaffoldFragment, type ParsedScaffoldFile } from './scaffold-parser';
 
 function joinWorkspace(root: string, relative: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
@@ -23,6 +23,7 @@ export async function applyScaffoldToWorkspace(
   const mkdirDone = new Set<string>();
 
   for (const file of files) {
+    if (isScaffoldFragment(file.content)) continue;
     const abs = joinWorkspace(projectPath, file.path);
     const dir = parentDir(abs);
     if (!mkdirDone.has(dir) && caval.fs.createDir) {

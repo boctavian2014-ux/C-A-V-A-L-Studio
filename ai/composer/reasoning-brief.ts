@@ -1,3 +1,4 @@
+import { fastPipelineRecapLabel } from '../pipeline/fast-pipeline';
 import type { DevToolsIntegrationResult, PipelineContext, SupervisorResult } from './multi-agent/types';
 import type { PipelineTask } from './multi-agent/types';
 
@@ -59,12 +60,16 @@ export function buildFinalRecap(input: RecapInput): string {
       ? `Implementat: ${files.length} fișier(e)${fileList ? ` (${fileList}${fileSuffix})` : ''}`
       : 'Implementat: vezi editorul';
 
-  const pipelineMode = input.fastPipeline ? 'fast pipeline' : 'full pipeline';
-  const sup = input.supervisor?.summary ?? 'review skipped';
-  const decisions = `Decizii: ${pipelineMode} · ${input.taskCount} module · ${sup}`;
+  const pipelineLabel = fastPipelineRecapLabel(input.fastPipeline ? 'fast' : 'full');
+  const sup =
+    input.fastPipeline && input.supervisor?.raw === 'FAST_PIPELINE'
+      ? pipelineLabel
+      : (input.supervisor?.summary ?? 'review skipped');
+  const decisions = `Decizii: ${pipelineLabel} · ${input.taskCount} module · ${sup}`;
 
   const pending = input.pendingIssues?.filter(Boolean) ?? [];
-  const missing = pending.length > 0 ? `Lipsă: ${pending.slice(0, 2).join('; ')}` : 'Lipsă: —';
+  const missing =
+    pending.length > 0 ? `Pending: ${pending.slice(0, 2).join('; ')}` : '';
 
   const nextParts: string[] = [];
   if (input.devTools?.terminal?.testScript) {
@@ -79,7 +84,7 @@ export function buildFinalRecap(input: RecapInput): string {
   const next =
     nextParts.length > 0 ? `Next: ${nextParts.join(' → ')}` : 'Next: verifică fișierele în editor';
 
-  return [implemented, decisions, missing, next].join('\n');
+  return [implemented, decisions, missing, next].filter(Boolean).join('\n');
 }
 
 export function formatReasoningMarkdown(brief: ReasoningBrief, recap?: string): string {

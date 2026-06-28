@@ -129,8 +129,10 @@ Mobile app rapid (când întreabă):
 export function shouldAttachProjectContext(
   userMessage: string,
   includeMode: ContextOptions['includeMode'],
-  opts?: { hasMentions?: boolean; hasAttachments?: boolean }
+  opts?: { hasMentions?: boolean; hasAttachments?: boolean; hasProjectPath?: boolean }
 ): boolean {
+  // Folder deschis → context proiect mereu (indiferent de includeMode vechi din localStorage)
+  if (opts?.hasProjectPath && includeMode !== 'selection') return true;
   if (includeMode !== 'project') return false;
   if (opts?.hasMentions || opts?.hasAttachments) return true;
   if (parseMentions(userMessage).length > 0) return true;
@@ -138,8 +140,8 @@ export function shouldAttachProjectContext(
   const t = userMessage.trim();
   if (t.length < 200) {
     const codeHints =
-      /\b(bug|fix|refactor|funcție|function|class|import|fișier|file|cod|code|eroare|error|test|component|hook|api|diff|commit)\b/i;
-    const pathHints = /[@/\\]|\.(ts|tsx|js|jsx|py|go|rs)\b/i;
+      /\b(bug|fix|refactor|funcție|function|class|import|fișier|file|cod|code|eroare|error|test|component|hook|api|diff|commit|enterprise|audit|verific|docker|package\.json|readme|proiect|folder|structură|structura|workspace|deploy|ci\/cd)\b/i;
+    const pathHints = /[@/\\]|\.(ts|tsx|js|jsx|py|go|rs|json|md|yml|yaml)\b/i;
     if (!codeHints.test(t) && !pathHints.test(t)) return false;
   }
   return true;
@@ -158,6 +160,7 @@ export function buildContextMessages(
   const attachProject = shouldAttachProjectContext(userMessage, opts.includeMode, {
     hasMentions: Boolean(opts.mentions?.length),
     hasAttachments: Boolean(opts.attachments?.length),
+    hasProjectPath: Boolean(opts.projectPath),
   });
 
   const systemContent =
@@ -172,10 +175,11 @@ export function buildContextMessages(
   const contextParts: string[] = [];
 
   if (attachProject) {
+    if (opts.fileTree.length > 0) {
+      contextParts.push(`Structura proiectului:\n${buildProjectTreeSummary(opts.fileTree)}`);
+    }
     if (opts.projectContext) {
       contextParts.push(`Fragmente relevante:\n${opts.projectContext}`);
-    } else if (opts.fileTree.length > 0) {
-      contextParts.push(`Structura proiectului:\n${buildProjectTreeSummary(opts.fileTree)}`);
     }
   }
 

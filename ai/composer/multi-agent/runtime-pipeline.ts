@@ -638,7 +638,7 @@ export async function runCavalloMultiAgentPipeline(
 
         issues: [],
 
-        summary: 'Fast pipeline',
+        summary: 'fast path ok',
 
       };
 

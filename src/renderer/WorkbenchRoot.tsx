@@ -5,6 +5,7 @@ import { TabBar } from './components/editor/TabBar';
 import { MonacoEditor } from './components/editor/MonacoEditor';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { useEditorStore } from './store/editor-store';
+import { useAIStore } from '../../ai/composer/ai-store';
 import { AIPanel } from '../../ai/composer/AIPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { useGitStore } from './store/git-store';
@@ -360,6 +361,7 @@ export function WorkbenchRoot() {
     const offFolder = caval.onFolderOpened((folder) => {
       setProjectPath(folder.path);
       void window.caval.fs.readTree(folder.path).then((tree) => setFileTree(tree));
+      useAIStore.getState().setIncludeMode('project');
       const first = folder.files?.[0];
       if (first?.path) void openFile(first.path);
     });

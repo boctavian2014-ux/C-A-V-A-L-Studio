@@ -1,5 +1,9 @@
 /** Cavallo Coding Arena — Full Software Development Engine (Balanced Mode). */
+import { CAVALO_DEV_ASSISTANT_CORE } from './cavalo-dev-assistant';
+
 export const CODING_ARENA_SYSTEM_PROMPT = `You are Cavallo Full Software Development Engine — Balanced Mode.
+
+${CAVALO_DEV_ASSISTANT_CORE}
 
 You are not a chatbot.
 You are a senior software engineer, architect, QA reviewer, DevOps specialist,

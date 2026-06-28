@@ -35,6 +35,11 @@ import {
   shouldUseMultiAgentPipeline,
   abortMultiAgentPipeline,
 } from "../../ai/composer/multi-agent";
+import {
+  buildWorkspaceBootstrap,
+  mergeProjectContextWithBootstrap,
+} from "../../ai/context/workspace-bootstrap";
+import { WORKSPACE_BOOTSTRAP_MARKER } from "../../ai/context/workspace-bootstrap-shared";
 
 
 
@@ -263,6 +268,30 @@ function scaffoldSystemAddon(): string {
   ].join("\n");
 }
 
+function injectProjectContextIntoMessages(
+  msgs: ChatStreamMessage[],
+  projectContext: string
+): ChatStreamMessage[] {
+  const ctx = projectContext.trim();
+  if (!ctx) return msgs;
+
+  const alreadyPresent = msgs.some(
+    (m) =>
+      m.content.includes("<<PROJECT_CONTEXT>>") ||
+      m.content.includes("Context proiect") ||
+      m.content.includes(WORKSPACE_BOOTSTRAP_MARKER)
+  );
+  if (alreadyPresent) return msgs;
+
+  const block = `Context proiect (automat):\n${ctx.slice(0, 12_000)}`;
+  const lastUserRev = [...msgs].reverse().findIndex((m) => m.role === "user");
+  if (lastUserRev < 0) {
+    return [...msgs, { role: "user", content: block }];
+  }
+  const insertAt = msgs.length - 1 - lastUserRev;
+  return [...msgs.slice(0, insertAt), { role: "user", content: block }, ...msgs.slice(insertAt)];
+}
+
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
 
   let system = systemPromptForMode(request.mode);
@@ -322,7 +351,22 @@ function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
 
     }
 
-    return msgs;
+    const withContext = injectProjectContextIntoMessages(
+      msgs,
+      request.context?.projectContext ?? ""
+    );
+
+    if (request.workspaceRoot) {
+      const sysIdx = withContext.findIndex((m) => m.role === "system");
+      if (sysIdx >= 0 && !withContext[sysIdx]!.content.includes("Workspace:")) {
+        withContext[sysIdx] = {
+          ...withContext[sysIdx]!,
+          content: `${withContext[sysIdx]!.content}\n\nWorkspace: ${request.workspaceRoot}`,
+        };
+      }
+    }
+
+    return withContext;
 
   }
 
@@ -428,6 +472,23 @@ function sendReasoningBriefChunk(
   });
 }
 
+function enrichRequestWithWorkspaceBootstrap(
+  request: CavalChatStreamRequest,
+  workspaceRoot: string
+): CavalChatStreamRequest {
+  if (!workspaceRoot?.trim()) return request;
+  const bootstrap = buildWorkspaceBootstrap(workspaceRoot);
+  if (!bootstrap.trim()) return request;
+  const merged = mergeProjectContextWithBootstrap(request.context?.projectContext, bootstrap);
+  return {
+    ...request,
+    context: {
+      ...request.context,
+      projectContext: merged,
+    },
+  };
+}
+
 async function streamToRenderer(
   sender: WebContents,
   senderId: number,
@@ -436,6 +497,7 @@ async function streamToRenderer(
   getWorkspaceRoot: (senderId: number) => string
 ): Promise<void> {
   const workspaceRoot = request.workspaceRoot ?? getWorkspaceRoot(senderId);
+  request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 
   const useMultiAgent =
     !request.skipMultiAgent &&
@@ -606,6 +668,11 @@ async function streamToRenderer(
 
 
 export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => string = () => process.cwd()): void {
+
+  ipcMain.handle("caval:workspace-bootstrap", async (_event, workspaceRoot: string) => {
+    const bootstrap = buildWorkspaceBootstrap(workspaceRoot);
+    return { ok: true, bootstrap };
+  });
 
   ipcMain.handle("caval:models-list", async () => {
 
