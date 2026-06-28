@@ -345,6 +345,8 @@ interface CavalBridge {
       maxTokens?: number;
       temperature?: number;
       timeoutMs?: number;
+      scaffoldMode?: boolean;
+      strictReview?: boolean;
       context?: {
         filePath?: string;
         fileContent?: string;

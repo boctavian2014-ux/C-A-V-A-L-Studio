@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isPartialRunRequest,
   shouldUseMultiAgentPipeline,
+  applyMultiAgentOverrides,
 } from '../../../ai/composer/multi-agent/config';
 
 describe('multi-agent config', () => {
@@ -33,5 +34,29 @@ describe('multi-agent config', () => {
         persistArtifacts: true,
       })
     ).toBe(false);
+  });
+
+  it('strictReview override disables fastPipeline', () => {
+    const base = {
+      enabled: true,
+      maxTasks: 3,
+      parallelSubAgents: 2,
+      supervisorRetries: 1,
+      persistArtifacts: true,
+      skipContextLlm: true,
+      fastPipeline: true,
+      enableDevToolsIntegration: true,
+      reasoningLayer: {
+        enabled: true,
+        showEarlyBrief: true,
+        showFinalRecap: true,
+        showPipelineTimeline: true,
+        showLiveReasoning: true,
+        showHorseWaitAnimation: true,
+        waitMessageRotateMs: 3500,
+      },
+    };
+    expect(applyMultiAgentOverrides(base, { strictReview: false }).fastPipeline).toBe(true);
+    expect(applyMultiAgentOverrides(base, { strictReview: true }).fastPipeline).toBe(false);
   });
 });

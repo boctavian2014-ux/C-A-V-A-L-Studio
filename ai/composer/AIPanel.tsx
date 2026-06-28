@@ -369,6 +369,74 @@ function StreamingText({ content }: { content: string }) {
   );
 }
 
+function StrictReviewToggle({
+  enabled,
+  onChange,
+  disabled,
+}: {
+  enabled: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      disabled={disabled}
+      title="Review strict: pornește Merge + Supervisor LLM înainte de Compose (mai lent, mai sigur)"
+      onClick={() => onChange(!enabled)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '5px 10px',
+        borderRadius: 8,
+        border: `1px solid ${enabled ? 'var(--caval-accent-ring)' : 'var(--caval-border)'}`,
+        background: enabled ? 'var(--caval-accent-glow)' : 'var(--caval-surface)',
+        color: enabled ? 'var(--caval-text)' : 'var(--caval-text-muted)',
+        fontSize: 11,
+        fontWeight: 500,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.55 : 1,
+        width: '100%',
+        textAlign: 'left',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 28,
+          height: 16,
+          borderRadius: 999,
+          background: enabled ? 'var(--caval-accent)' : 'var(--caval-surface-raised)',
+          border: `1px solid ${enabled ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
+          position: 'relative',
+          flexShrink: 0,
+          transition: 'background 0.15s ease',
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            top: 2,
+            left: enabled ? 14 : 2,
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            background: enabled ? '#0E0E0F' : 'var(--caval-text-muted)',
+            transition: 'left 0.15s ease',
+          }}
+        />
+      </span>
+      <span>Review strict</span>
+      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>
+        {enabled ? 'Merge + Supervisor' : 'Fast pipeline'}
+      </span>
+    </button>
+  );
+}
+
 // ──────────────────────────────────────────────
 //  AIPanel — componenta principală
 // ──────────────────────────────────────────────
@@ -382,6 +450,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     attachedFiles, addAttachments, removeAttachment,
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
+    agentMode, strictReview, setStrictReview,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
@@ -683,6 +752,13 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           quickPrompts={QUICK_PROMPTS}
           onQuickPrompt={handleQuickPrompt}
         />
+        {agentMode === 'code' && (
+          <StrictReviewToggle
+            enabled={strictReview}
+            onChange={setStrictReview}
+            disabled={isStreaming}
+          />
+        )}
         <div style={{
           background: 'var(--caval-surface)', border: '2px solid var(--caval-border)',
           borderRadius: 10, overflow: 'hidden',

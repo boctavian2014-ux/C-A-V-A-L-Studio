@@ -217,6 +217,8 @@ interface AIStore {
   prepareInFlight: boolean;
   includeMode: IncludeMode;
   setIncludeMode: (mode: IncludeMode) => void;
+  strictReview: boolean;
+  setStrictReview: (enabled: boolean) => void;
   attachedFiles: ChatAttachment[];
   addAttachments: (paths: string[]) => Promise<void>;
   removeAttachment: (id: string) => void;
@@ -313,6 +315,7 @@ export const useAIStore = create<AIStore>()(
       modelLabels: {},
       activeResolvedModel: null,
       includeMode: 'file',
+      strictReview: false,
       attachedFiles: [],
       activeThreadId: initialThread.id,
       threads: [initialThread],
@@ -333,6 +336,7 @@ export const useAIStore = create<AIStore>()(
         void get().refreshResolvedModel();
       },
       setIncludeMode: (mode) => set({ includeMode: mode }),
+      setStrictReview: (enabled) => set({ strictReview: enabled }),
 
       addAttachments: async (paths) => {
         const caval = getCaval();
@@ -491,6 +495,7 @@ export const useAIStore = create<AIStore>()(
           activeThreadId,
           attachedFiles,
           prepareState,
+          strictReview,
         } = get();
         const modeDef = getAgentMode(agentMode);
         const attachmentsSnapshot = [...attachedFiles];
@@ -910,6 +915,7 @@ export const useAIStore = create<AIStore>()(
                 })),
               },
               scaffoldMode,
+              strictReview: agentMode === 'code' ? strictReview : undefined,
             },
             handleStreamChunk
           ) ?? null;
@@ -1192,6 +1198,7 @@ export const useAIStore = create<AIStore>()(
         selectedModel: s.selectedModel,
         agentMode: s.agentMode,
         includeMode: s.includeMode,
+        strictReview: s.strictReview,
         threads: s.threads,
         activeThreadId: s.activeThreadId,
       }),

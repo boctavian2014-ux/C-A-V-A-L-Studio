@@ -62,6 +62,15 @@ export function loadReasoningConfig(workspaceRoot?: string) {
   return loadMultiAgentConfig(workspaceRoot).reasoningLayer;
 }
 
+/** UI "Review strict" forces full merge + supervisor (disables fastPipeline). */
+export function applyMultiAgentOverrides(
+  config: MultiAgentConfig,
+  overrides?: { strictReview?: boolean }
+): MultiAgentConfig {
+  if (!overrides?.strictReview) return config;
+  return { ...config, fastPipeline: false };
+}
+
 export function shouldUseMultiAgentPipeline(
   mode: string | undefined,
   message: string,

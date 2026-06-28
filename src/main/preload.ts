@@ -70,6 +70,8 @@ export interface CavalChatStreamRequest {
   /** Override provider timeout (Engineering JSON uses 120s) */
   timeoutMs?: number;
   scaffoldMode?: boolean;
+  /** Force merge + supervisor review in Code Arena pipeline */
+  strictReview?: boolean;
   context?: {
     filePath?: string;
     fileContent?: string;

@@ -22,7 +22,7 @@ import type { ModelSelectionId } from '../../models/model-catalog';
 
 import { runDevToolsIntegration } from './devtools-integration';
 
-import { loadMultiAgentConfig } from './config';
+import { loadMultiAgentConfig, applyMultiAgentOverrides } from './config';
 
 import { FullIntegrationAgent } from './integration-agent';
 
@@ -330,7 +330,9 @@ export async function runCavalloMultiAgentPipeline(
 
   const workspaceRoot = request.workspaceRoot ?? process.cwd();
 
-  const config = loadMultiAgentConfig(workspaceRoot);
+  const config = applyMultiAgentOverrides(loadMultiAgentConfig(workspaceRoot), {
+    strictReview: request.strictReview,
+  });
 
   const model = request.model as ModelSelectionId;
 

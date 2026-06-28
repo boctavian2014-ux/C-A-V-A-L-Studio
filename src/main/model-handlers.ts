@@ -93,6 +93,9 @@ export interface CavalChatStreamRequest {
   /** Skip multi-agent pipeline — use single-call Balanced Mode */
   skipMultiAgent?: boolean;
 
+  /** Force merge + supervisor review (overrides fastPipeline from caval.jsonc) */
+  strictReview?: boolean;
+
 }
 
 
