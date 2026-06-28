@@ -86,3 +86,16 @@ export function formatArenaReasoning(
   }
   return isStreaming ? 'Full Integration pipeline…' : '';
 }
+
+const MAX_LIVE_REASONING_LINES = 12;
+
+/** Cap live reasoning for Arena chat (strip noise, max lines). */
+export function sanitizeLiveReasoning(raw: string, maxLines = MAX_LIVE_REASONING_LINES): string {
+  const cleaned = stripArenaChatNoise(raw)
+    .replace(CODE_FENCE, '')
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (cleaned.length <= maxLines) return cleaned.join('\n');
+  return [...cleaned.slice(0, maxLines), '…'].join('\n');
+}

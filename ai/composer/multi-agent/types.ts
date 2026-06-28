@@ -52,12 +52,20 @@ export interface ReasoningLayerConfig {
   enabled: boolean;
   showEarlyBrief: boolean;
   showFinalRecap: boolean;
+  showPipelineTimeline: boolean;
+  showLiveReasoning: boolean;
+  showHorseWaitAnimation: boolean;
+  waitMessageRotateMs: number;
 }
 
 export const DEFAULT_REASONING_LAYER_CONFIG: ReasoningLayerConfig = {
   enabled: true,
   showEarlyBrief: true,
   showFinalRecap: true,
+  showPipelineTimeline: true,
+  showLiveReasoning: true,
+  showHorseWaitAnimation: true,
+  waitMessageRotateMs: 3500,
 };
 
 export interface PipelineRecapMeta {

@@ -54,7 +54,7 @@ export function ChatReasoningBlock({
             animation: isStreaming ? 'zl-step-pulse 1s ease-in-out infinite' : 'none',
           }}
         />
-        <span style={{ fontWeight: 600, color: 'var(--caval-text)' }}>Gândire</span>
+        <span style={{ fontWeight: 600, color: 'var(--caval-text)' }}>Reasoning</span>
         {!showExpanded && preview && (
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.75 }}>
             {preview}…

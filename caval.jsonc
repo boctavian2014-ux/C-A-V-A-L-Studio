@@ -81,7 +81,11 @@
     "reasoningLayer": {
       "enabled": true,
       "showEarlyBrief": true,
-      "showFinalRecap": true
+      "showFinalRecap": true,
+      "showPipelineTimeline": true,
+      "showLiveReasoning": true,
+      "showHorseWaitAnimation": true,
+      "waitMessageRotateMs": 3500
     }
   },
   "fullAudit": {

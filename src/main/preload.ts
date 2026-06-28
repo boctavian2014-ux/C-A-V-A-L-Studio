@@ -127,6 +127,7 @@ export interface CavalStreamChunk {
     devTools?: Record<string, unknown>;
     supervisor?: { approved: boolean; summary: string; issues: unknown[] };
   };
+  composeText?: string;
 }
 
 export interface CavalChatPrepareRequest {

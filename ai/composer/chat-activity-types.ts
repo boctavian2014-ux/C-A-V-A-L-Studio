@@ -46,7 +46,7 @@ export const CHAT_ACTIVITY_LABELS: Record<ChatActivityPhase, string> = {
   prepare: 'Pregătesc context',
   route: 'Aleg modelul',
   connect: 'Conectez',
-  think: 'Gândesc',
+  think: 'Reasoning',
   write: 'Scriu răspunsul',
 };
 
@@ -114,4 +114,44 @@ export function patchActivityStep(
 
 export function markAllActivityDone(steps: ChatActivityStep[]): ChatActivityStep[] {
   return steps.map((s) => ({ ...s, status: 'done' as const }));
+}
+
+export interface MultiAgentStepRecord {
+  phase: MultiAgentPhase;
+  status: 'active' | 'done';
+  detail?: string;
+  at: number;
+}
+
+/** Accumulate multi-agent pipeline steps for Arena timeline UI. */
+export function patchMultiAgentSteps(
+  steps: MultiAgentStepRecord[] | undefined,
+  phase: MultiAgentPhase,
+  status: 'active' | 'done',
+  detail?: string
+): MultiAgentStepRecord[] {
+  const next = [...(steps ?? [])];
+  const now = Date.now();
+  const idx = next.findIndex((s) => s.phase === phase);
+
+  if (status === 'active') {
+    for (let i = 0; i < next.length; i++) {
+      if (next[i]!.status === 'active' && next[i]!.phase !== phase) {
+        next[i] = { ...next[i]!, status: 'done' };
+      }
+    }
+    if (idx >= 0) {
+      next[idx] = { ...next[idx]!, status: 'active', detail: detail ?? next[idx]!.detail, at: now };
+    } else {
+      next.push({ phase, status: 'active', detail, at: now });
+    }
+    return next;
+  }
+
+  if (idx >= 0) {
+    next[idx] = { ...next[idx]!, status: 'done', detail: detail ?? next[idx]!.detail, at: now };
+  } else {
+    next.push({ phase, status: 'done', detail, at: now });
+  }
+  return next;
 }

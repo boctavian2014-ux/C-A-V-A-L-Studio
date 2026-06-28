@@ -28,6 +28,8 @@ import {
   markAllActivityDone,
   patchActivityStep,
   formatMultiAgentStatus,
+  patchMultiAgentSteps,
+  type MultiAgentStepRecord,
 } from './chat-activity-types';
 import { hashChatDraft } from './chat-prepare';
 import type { EngProject } from '../engineering/engineering-generator';
@@ -76,6 +78,7 @@ export interface ChatMessage {
   reasoningExpanded?: boolean;
   writtenFiles?: string[];
   multiAgentStatus?: string;
+  multiAgentSteps?: MultiAgentStepRecord[];
   reasoningBrief?: ReasoningBrief;
   recap?: string;
 }
@@ -522,6 +525,10 @@ export const useAIStore = create<AIStore>()(
           model: selectedModel,
           isStreaming: true,
           multiAgentStatus: agentMode === 'code' ? 'Memory…' : undefined,
+          multiAgentSteps:
+            agentMode === 'code'
+              ? [{ phase: 'memory', status: 'active', detail: 'init', at: Date.now() }]
+              : undefined,
           activitySteps: createInitialActivitySteps(prepReady, prepReady, routeHint),
         };
 
@@ -615,7 +622,12 @@ export const useAIStore = create<AIStore>()(
         };
 
         const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
-          const parseSource = rawStreamBuffer || content;
+          const msgForParse = get().messages.find((m) => m.id === assistantMsgId);
+          const reasoningWithFences =
+            msgForParse?.reasoning && (msgForParse.reasoning.match(/```/g)?.length ?? 0) >= 2
+              ? msgForParse.reasoning
+              : '';
+          const parseSource = rawStreamBuffer || reasoningWithFences || content;
           let finalContent = content;
           if (
             isLlmRefusal(content) &&
@@ -654,8 +666,13 @@ export const useAIStore = create<AIStore>()(
             await useEditorStore.getState().refreshTree();
             if (writtenFiles.length === 0) {
               useEditorStore.getState().closeAiPreview();
+              const hadReasoningPlan = Boolean(
+                reasoningWithFences || msgForParse?.reasoning?.trim()
+              );
               updateAssistant({
-                error: 'Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.',
+                error: hadReasoningPlan
+                  ? 'AI a planificat în Reasoning fără fișiere (```). Retrimite: „continuă — emite toate fișierele ca ```lang:path```”.'
+                  : 'Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.',
               });
               return;
             }
@@ -713,11 +730,17 @@ export const useAIStore = create<AIStore>()(
           } else if (chunk.type === 'status' && chunk.phase && chunk.status) {
             updateActivity(chunk.phase, chunk.status, chunk.detail);
           } else if (chunk.type === 'multiagent' && chunk.multiAgentPhase) {
-            const label = formatMultiAgentStatus(
-              chunk.multiAgentPhase as MultiAgentPhase,
+            const phase = chunk.multiAgentPhase as MultiAgentPhase;
+            const chunkStatus = chunk.status ?? 'active';
+            const label = formatMultiAgentStatus(phase, chunk.detail);
+            const prevMsg = get().messages.find((m) => m.id === assistantMsgId);
+            const multiAgentSteps = patchMultiAgentSteps(
+              prevMsg?.multiAgentSteps,
+              phase,
+              chunkStatus,
               chunk.detail
             );
-            updateAssistant({ multiAgentStatus: label });
+            updateAssistant({ multiAgentStatus: label, multiAgentSteps });
             if (agentMode === 'code' && !gotFirstDelta) {
               const content = capturedReasoningBrief
                 ? formatArenaReasoning(capturedReasoningBrief, undefined, true)
@@ -778,6 +801,15 @@ export const useAIStore = create<AIStore>()(
             if (chunk.reasoningBrief) capturedReasoningBrief = chunk.reasoningBrief;
             if (chunk.pipelineRecapMeta) {
               capturedRecapMeta = chunk.pipelineRecapMeta as PipelineRecapMeta;
+            }
+            if (
+              chunk.composeText &&
+              (chunk.composeText.match(/```/g)?.length ?? 0) >= 2 &&
+              (rawStreamBuffer.match(/```/g)?.length ?? 0) < 2
+            ) {
+              rawStreamBuffer = chunk.composeText;
+              activeStreamBuffer = chunk.composeText;
+              syncLiveEditorPreview(chunk.composeText);
             }
             const finalSteps = markAllActivityDone(
               get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??

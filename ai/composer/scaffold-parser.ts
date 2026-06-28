@@ -3,8 +3,7 @@ export interface ParsedScaffoldFile {
   content: string;
 }
 
-const CODE_FENCE =
-  /```(?:(?:(\w+)[\s:]*([^\n`]+)?)|([^\n`]+))\n([\s\S]*?)```/g;
+const CODE_FENCE = /```([\w.-]+)?(?::([^\n`]+))?\s*\n([\s\S]*?)```/g;
 
 const LANG_DEFAULT_FILE: Record<string, string> = {
   typescript: 'src/index.ts',
@@ -20,11 +19,39 @@ const LANG_DEFAULT_FILE: Record<string, string> = {
   rs: 'src/main.rs',
   java: 'src/Main.java',
   json: 'package.json',
+  bash: 'src/main.sh',
+  sh: 'src/main.sh',
+  shell: 'src/main.sh',
+  zsh: 'src/main.sh',
+  html: 'src/index.html',
+  htm: 'src/index.html',
+  css: 'src/styles.css',
+  scss: 'src/styles.scss',
+  markdown: 'README.md',
+  md: 'README.md',
+  yaml: 'config.yaml',
+  yml: 'config.yml',
+  toml: 'config.toml',
+  sql: 'schema.sql',
+  cpp: 'src/main.cpp',
+  c: 'src/main.c',
+  h: 'src/main.h',
+  kotlin: 'src/Main.kt',
+  kt: 'src/Main.kt',
+  swift: 'src/main.swift',
+  dart: 'src/main.dart',
+  cs: 'src/Program.cs',
+  csharp: 'src/Program.cs',
+  xml: 'config.xml',
+  ini: 'config.ini',
+  env: '.env',
+  dockerfile: 'Dockerfile',
+  docker: 'Dockerfile',
 };
 
-function defaultPathForLang(lang: string, index: number): string {
-  const base = LANG_DEFAULT_FILE[lang.toLowerCase()];
-  if (!base) return index === 0 ? 'src/main.txt' : `src/file${index}.txt`;
+const INFER_ONLY_LANGS = new Set(['text', 'plaintext', 'txt']);
+
+function indexedPath(base: string, index: number): string {
   if (index === 0) return base;
   const dot = base.lastIndexOf('.');
   const stem = dot > 0 ? base.slice(0, dot) : base;
@@ -32,8 +59,47 @@ function defaultPathForLang(lang: string, index: number): string {
   return `${stem}_${index}${ext}`;
 }
 
+/** Guess extension from fence body when lang tag is missing or unknown. */
+export function inferExtensionFromContent(content: string): string | null {
+  const head = content.slice(0, 1200);
+  const trimmed = head.trimStart();
+
+  if (/^#!.*\bpython/i.test(trimmed)) return 'py';
+  if (/^\s*def \w+\(/m.test(head) || /^\s*class \w+/m.test(head)) return 'py';
+  if (/^(from __future__ import|import \w+)/m.test(head)) return 'py';
+  if (/^#!.*\b(bash|sh|zsh)\b/i.test(trimmed)) return 'sh';
+  if (/^(import .+ from ['"]|export (default )?(async )?(function|class|const|interface)|interface \w+)/m.test(head)) {
+    return /<[A-Za-z]/.test(head) ? 'tsx' : 'ts';
+  }
+  if (/^(const|let|var|function)\s+\w+/m.test(head) || /=>\s*\{/.test(head)) return 'js';
+  if (/^package main\b/m.test(head) || /^import ['"]/m.test(head)) return 'go';
+  if (/^fn main\b|^use (std|crate)::/m.test(head)) return 'rs';
+  if (/^public class \w+|^import java\./m.test(head)) return 'java';
+  if (/^<!DOCTYPE|^<html[\s>]/i.test(trimmed)) return 'html';
+  if (/^@tailwind|^@import url\(|^\.[\w-]+\s*\{|^@media /m.test(head)) return 'css';
+  if (/^\s*\{[\s\S]*"[\w-]+"\s*:/.test(trimmed)) return 'json';
+  if (/^---\r?\n[\w-]+:/m.test(head)) return 'yaml';
+  if (/^(SELECT|CREATE TABLE|INSERT INTO)\s/im.test(head)) return 'sql';
+
+  return null;
+}
+
+function defaultPathForLang(lang: string, index: number, content = ''): string {
+  const key = lang.toLowerCase();
+  const base = INFER_ONLY_LANGS.has(key) ? undefined : LANG_DEFAULT_FILE[key];
+  if (base) return indexedPath(base, index);
+
+  const inferred = inferExtensionFromContent(content);
+  if (inferred) {
+    const stem = index === 0 ? 'src/main' : `src/file${index}`;
+    return `${stem}.${inferred}`;
+  }
+
+  return index === 0 ? 'src/main.txt' : `src/file${index}.txt`;
+}
+
 const FILE_PATH_RE =
-  /^[\w./\\-]+\.(ts|tsx|js|jsx|json|py|go|rs|java|kt|swift|dart|cs|cpp|c|h|ino|yaml|yml|toml|md|html|css|scss|sql|env|sh|gradle|xml|plist|properties)$/i;
+  /^[\w./\\-]+\.(ts|tsx|js|jsx|json|py|go|rs|java|kt|swift|dart|cs|cpp|c|h|ino|yaml|yml|toml|md|html|css|scss|sql|env|sh|gradle|xml|plist|properties|txt)$/i;
 
 function normalizeRelativePath(raw: string): string | null {
   const path = raw
@@ -42,7 +108,9 @@ function normalizeRelativePath(raw: string): string | null {
     .replace(/\\/g, '/')
     .replace(/^\.\/+/, '');
   if (!path || path.includes('..') || path.startsWith('/')) return null;
-  if (!FILE_PATH_RE.test(path.split('/').pop() ?? path)) return null;
+  const base = path.split('/').pop() ?? path;
+  if (base === 'Dockerfile' || base === 'Makefile') return path;
+  if (!FILE_PATH_RE.test(base)) return null;
   return path;
 }
 
@@ -50,7 +118,7 @@ function normalizeRelativePath(raw: string): string | null {
 export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
   const found = new Map<string, string>();
 
-  const jsonMatch = content.match(/```(?:json)?\s*\n([\s\S]*?)```/);
+  const jsonMatch = content.match(/```json\s*\n([\s\S]*?)```/i);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[1]) as {
@@ -69,18 +137,10 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
   let match: RegExpExecArray | null;
   CODE_FENCE.lastIndex = 0;
   while ((match = CODE_FENCE.exec(content)) !== null) {
-    let lang = match[1]?.trim().toLowerCase() ?? '';
-    let pathHint = (match[2] ?? '').trim();
-    if (!lang && match[3]) {
-      const maybeLang = match[3].trim();
-      if (maybeLang && !maybeLang.includes('.') && !maybeLang.includes('/')) {
-        lang = maybeLang.toLowerCase();
-      } else {
-        pathHint = maybeLang;
-      }
-    }
-    const body = match[4]?.trimEnd() ?? '';
-    if (!body || lang === 'diff') continue;
+    const lang = match[1]?.trim().toLowerCase() ?? '';
+    const pathHint = match[2]?.trim() ?? '';
+    const body = match[3]?.trimEnd().trimStart() ?? '';
+    if (!body || lang === 'diff' || lang === 'json') continue;
 
     const fromHeader = normalizeRelativePath(pathHint);
     if (fromHeader) {
@@ -98,19 +158,7 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
       continue;
     }
 
-    if (lang) {
-      const fallback = defaultPathForLang(lang, anonIndex++);
-      if (!found.has(fallback)) found.set(fallback, body);
-    }
-  }
-
-  const PLAIN_FENCE = /```(\w+)\s*\n([\s\S]*?)```/g;
-  let plain: RegExpExecArray | null;
-  while ((plain = PLAIN_FENCE.exec(content)) !== null) {
-    const lang = plain[1]?.trim().toLowerCase() ?? '';
-    const body = plain[2]?.trimEnd() ?? '';
-    if (!body || lang === 'diff' || lang === 'json') continue;
-    const fallback = defaultPathForLang(lang, anonIndex++);
+    const fallback = defaultPathForLang(lang, anonIndex++, body);
     if (!found.has(fallback)) found.set(fallback, body);
   }
 
@@ -129,8 +177,23 @@ export function parseStreamingScaffold(content: string): ParsedScaffoldFile | nu
 
   const pathHint = openFence[2]?.trim() ?? '';
   const body = openFence[3] ?? '';
-  const rel = normalizeRelativePath(pathHint) ?? (openFence[1] ? `generating.${openFence[1] === 'typescript' ? 'ts' : openFence[1]}` : 'generating.ts');
+  const lang = openFence[1]?.trim().toLowerCase() ?? '';
+  const rel =
+    normalizeRelativePath(pathHint) ??
+    (lang || body ? defaultPathForLang(lang, 0, body) : 'generating.ts');
   if (!body.trim()) return null;
 
   return { path: rel, content: body };
+}
+
+export function hasScaffoldFences(text: string): boolean {
+  return (text.match(/```/g)?.length ?? 0) >= 2;
+}
+
+/** Reasoning-only models may emit fences in the reasoning channel, not content deltas. */
+export function pickCodeStreamOutput(full: string, reasoning: string): string {
+  if (hasScaffoldFences(full)) return full;
+  if (hasScaffoldFences(reasoning)) return reasoning;
+  const merged = [full.trim(), reasoning.trim()].filter(Boolean).join('\n\n');
+  return merged || full || reasoning;
 }

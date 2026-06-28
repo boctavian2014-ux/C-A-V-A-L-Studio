@@ -9,7 +9,11 @@ import { ChatActivityTimeline } from './ChatActivityTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
-import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning } from './chat-display';
+import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning, sanitizeLiveReasoning } from './chat-display';
+import { MultiAgentTimeline } from './MultiAgentTimeline';
+import { ArenaHorseWait } from './ArenaHorseWait';
+import { resolveWaitPhase } from './arena-wait-copy';
+import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 
 const ARENA_INPUT_ROWS = 4;
 const ARENA_LINE_HEIGHT = 1.5;
@@ -122,48 +126,59 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 //  Bubble mesaj
 // ──────────────────────────────────────────────
 
-function ArenaReasoningPanel({ message }: { message: ChatMessage }) {
+function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   const isStreaming = Boolean(message.isStreaming);
-  const text = formatArenaReasoning(
+  const cfg = DEFAULT_REASONING_LAYER_CONFIG;
+  const composePhase =
+    isStreaming && Boolean(message.multiAgentStatus?.toLowerCase().includes('compose'));
+  const planText = formatArenaReasoning(
     message.reasoningBrief,
     message.recap,
     isStreaming,
-    isStreaming && Boolean(message.multiAgentStatus?.toLowerCase().includes('compose'))
+    composePhase
   );
-
-  if (message.recap) {
-    return <CompactArenaStatus text={text} />;
-  }
-
-  if (isStreaming) {
-    if (message.reasoningBrief) {
-      return (
-        <CompactArenaStatus
-          text={
-            text ||
-            formatArenaReasoning(message.reasoningBrief, undefined, true) ||
-            'Full Integration pipeline…'
-          }
-        />
-      );
-    }
-    return (
-      <CompactArenaStatus
-        text={message.multiAgentStatus || text || 'Full Integration pipeline…'}
-      />
-    );
-  }
+  const liveReasoning = message.reasoning
+    ? sanitizeLiveReasoning(message.reasoning)
+    : '';
 
   return (
-    <CompactArenaStatus
-      text={
-        text ||
-        formatChatPanelSummary(summarizeForChatPanel(message.content)) ||
-        (message.writtenFiles?.length
-          ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
-          : '')
-      }
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {cfg.showPipelineTimeline && (message.multiAgentSteps?.length ?? 0) > 0 && (
+        <MultiAgentTimeline steps={message.multiAgentSteps!} collapsed={Boolean(message.recap)} />
+      )}
+      {cfg.showLiveReasoning && liveReasoning && (
+        <ChatReasoningBlock
+          reasoning={liveReasoning}
+          isStreaming={Boolean(isStreaming && !message.recap)}
+          defaultExpanded={message.reasoningExpanded ?? true}
+        />
+      )}
+      {message.reasoningBrief && !message.recap && (
+        <CompactArenaStatus
+          text={planText || formatArenaReasoning(message.reasoningBrief, undefined, isStreaming)}
+        />
+      )}
+      {cfg.showHorseWaitAnimation && isStreaming && !message.recap && (
+        <ArenaHorseWait
+          phase={resolveWaitPhase(message.multiAgentSteps, message.multiAgentStatus)}
+          detail={message.multiAgentStatus}
+          isStreaming={isStreaming}
+          rotateMs={cfg.waitMessageRotateMs}
+        />
+      )}
+      {message.recap && <CompactArenaStatus text={planText} />}
+      {!isStreaming && !message.recap && !message.reasoningBrief && planText && (
+        <CompactArenaStatus
+          text={
+            planText ||
+            formatChatPanelSummary(summarizeForChatPanel(message.content)) ||
+            (message.writtenFiles?.length
+              ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
+              : '')
+          }
+        />
+      )}
+    </div>
   );
 }
 
@@ -227,8 +242,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           />
         )}
         {!isUser && arenaMode ? (
-          message.isStreaming || message.reasoningBrief || message.recap ? (
-            <ArenaReasoningPanel message={message} />
+          message.isStreaming ||
+          message.reasoningBrief ||
+          message.recap ||
+          (message.multiAgentSteps?.length ?? 0) > 0 ||
+          Boolean(message.reasoning) ? (
+            <ArenaWorkPanel message={message} />
           ) : (
             <>
               <CompactArenaStatus text={arenaStatusText || (message.writtenFiles?.length ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.` : '')} />

@@ -470,6 +470,13 @@ async function streamToRenderer(
     });
 
     if (result.ok) {
+      if (result.text?.includes('```')) {
+        sender.send("caval:ai-stream-chunk", {
+          streamId,
+          type: "delta",
+          delta: result.text,
+        });
+      }
       sender.send("caval:ai-stream-chunk", {
         streamId,
         type: "done",
@@ -477,6 +484,7 @@ async function streamToRenderer(
         provider: result.provider,
         reasoningBrief: result.reasoningBrief,
         pipelineRecapMeta: result.pipelineRecapMeta,
+        composeText: result.text,
       });
       return;
     }

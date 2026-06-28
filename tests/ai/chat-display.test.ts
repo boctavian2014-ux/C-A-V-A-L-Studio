@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning } from '../../ai/composer/chat-display';
+import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning, sanitizeLiveReasoning } from '../../ai/composer/chat-display';
 
 describe('chat-display', () => {
   it('strips code fences and keeps max 4 lines', () => {
@@ -47,5 +47,10 @@ def foo():
     );
     expect(out).toContain('Goal: Build API');
     expect(out).toContain('Plan: Express layers');
+  });
+
+  it('sanitizeLiveReasoning removes noise', () => {
+    const out = sanitizeLiveReasoning('think step one\nthink step two');
+    expect(out).toContain('think step one');
   });
 });

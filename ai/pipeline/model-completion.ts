@@ -20,6 +20,7 @@ import type { ToolRegistry } from '../tools/tool-registry';
 import { runCompletionWithTools } from './tool-agent-loop';
 import type { ChatActivityPhase } from '../composer/chat-activity-types';
 import { pickBestEngineeringOutput } from '../engineering/engineering-json';
+import { pickCodeStreamOutput } from '../composer/scaffold-parser';
 import { REASONING_CHAT_ADDON } from '../prompts/reasoning-layer';
 import { MULTI_MODEL_RECAP_ADDON } from '../prompts/multi-model-reasoning-chat';
 
@@ -391,9 +392,12 @@ export async function executeModelCompletion(
       }
 
       const profile = getModelProfile(modelId);
-      const text = input.jsonMode
+      let text = input.jsonMode
         ? pickBestEngineeringOutput(full, reasoningFull)
         : full;
+      if (input.capability === 'code' && !input.jsonMode) {
+        text = pickCodeStreamOutput(full, reasoningFull);
+      }
       return {
         ok: true,
         text,

@@ -20,7 +20,13 @@ const NEON_LOGO_STYLE: React.CSSProperties = {
 };
 
 /** Logo oficial CAVALO — cal neon, fundal transparent. */
-export function CavaloHorseMark({ size = 48 }: { size?: number }) {
+export function CavaloHorseMark({
+  size = 48,
+  glowFilter,
+}: {
+  size?: number;
+  glowFilter?: string;
+}) {
   return (
     <img
       src={cavaloNeonHorseUrl}
@@ -29,7 +35,7 @@ export function CavaloHorseMark({ size = 48 }: { size?: number }) {
       alt=""
       aria-hidden="true"
       draggable={false}
-      style={NEON_LOGO_STYLE}
+      style={glowFilter ? { ...NEON_LOGO_STYLE, filter: glowFilter } : NEON_LOGO_STYLE}
     />
   );
 }
