@@ -18,14 +18,14 @@ describe('cavalo-dev-assistant prompt', () => {
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('CREEAZĂ-L');
   });
 
-  it('covers chat modes including Agentic and MCP auto-start', () => {
+  it('covers chat modes including Agentic and auto verify', () => {
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Ask');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Code');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Agentic');
-    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Architect');
+    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Plan');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Debug');
-    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('mcp.servers');
-    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('ensureMcpServersReady');
+    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('run_command');
+    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('npm run build');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('isScaffoldFragment');
   });
 

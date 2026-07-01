@@ -27,10 +27,7 @@ import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
 import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
 import { CODING_ARENA_SYSTEM_PROMPT } from "../../ai/prompts/coding-arena";
-import {
-  buildMultiModelSystemPrompt,
-  MULTI_MODEL_RECAP_ADDON,
-} from "../../ai/prompts/multi-model-reasoning-chat";
+import { getCavalloSystemPrompt } from "../../ai/modes/mode-router";
 import {
   runCavalloMultiAgentPipeline,
   resumeCavalloMultiAgentPipeline,
@@ -42,6 +39,7 @@ import {
   mergeProjectContextWithBootstrap,
 } from "../../ai/context/workspace-bootstrap";
 import { WORKSPACE_BOOTSTRAP_MARKER } from "../../ai/context/workspace-bootstrap-shared";
+import { runWorkspaceVerify } from "../../ai/tools/workspace-verify";
 
 
 
@@ -61,7 +59,7 @@ export interface CavalChatStreamRequest {
 
   model: string;
 
-  mode?: "ask" | "plan" | "code" | "agentic" | "architect" | "debug";
+  mode?: "ask" | "plan" | "code" | "agentic" | "debug" | "architect";
 
   intent?: RoutingIntent;
 
@@ -179,20 +177,20 @@ function capabilityForMode(mode?: string): CompleteModelTextInput["capability"] 
 
 
 
-function systemPromptForMode(mode?: string): string {
-  switch (mode) {
-    case "agentic":
-      return CODING_ARENA_SYSTEM_PROMPT;
-    case "code":
-      return `${buildMultiModelSystemPrompt({ agentMode: "code" })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: direct coding with the selected model. Apply patches via code fences when needed.`;
-    case "plan":
-    case "architect":
-      return `${buildMultiModelSystemPrompt({ agentMode: mode })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: structured plans before code changes. Use Technical Mode Steps 1–4.`;
-    case "debug":
-      return `${buildMultiModelSystemPrompt({ agentMode: mode })}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: analyze errors, trace root causes, suggest fixes. When workspace is open, emit fixes as \`\`\`lang:relative/path\`\`\` with full file content.`;
-    default:
-      return `${buildMultiModelSystemPrompt({ agentMode: mode ?? "ask" })}${MULTI_MODEL_RECAP_ADDON}`;
+function systemPromptForMode(mode?: string, workspaceRoot?: string): string {
+  if (mode === "agentic") {
+    return CODING_ARENA_SYSTEM_PROMPT;
   }
+
+  const normalized =
+    mode === "architect" ? "plan" : mode === "ask" || mode === "plan" || mode === "code" || mode === "debug"
+      ? mode
+      : "ask";
+
+  return getCavalloSystemPrompt(normalized, {
+    workspaceRoot,
+    includeScaffold: normalized === "code" || normalized === "debug",
+  });
 }
 
 
@@ -301,10 +299,10 @@ function injectProjectContextIntoMessages(
 
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
 
-  let system = systemPromptForMode(request.mode);
-  if (request.mode === "code" && request.workspaceRoot) {
+  let system = systemPromptForMode(request.mode, request.workspaceRoot);
+  if (request.mode === "agentic" && request.workspaceRoot) {
     system += scaffoldSystemAddon();
-  } else if (request.scaffoldMode && request.mode === "code") {
+  } else if (request.scaffoldMode && request.mode === "agentic") {
     system += scaffoldSystemAddon();
   }
 
@@ -801,6 +799,18 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
   ipcMain.handle("caval:workspace-bootstrap", async (_event, workspaceRoot: string) => {
     const bootstrap = buildWorkspaceBootstrap(workspaceRoot);
     return { ok: true, bootstrap };
+  });
+
+  ipcMain.handle("caval:workspace-verify", async (_event, workspaceRoot: string) => {
+    try {
+      const verify = await runWorkspaceVerify(workspaceRoot);
+      return { ok: true, verify };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
 
   ipcMain.handle("caval:models-list", async () => {

@@ -410,6 +410,15 @@ interface CavalBridge {
   workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
   workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
   getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
+  workspaceVerify?: (workspaceRoot: string) => Promise<{
+    ok: boolean;
+    verify?: {
+      ran: boolean;
+      summary: string;
+      commands: Array<{ command: string; ok: boolean; exitCode: number | null; output: string }>;
+    };
+    error?: string;
+  }>;
   zlPrepare?: (signals: {
     workspaceRoot: string;
     objectiveDraft?: string;

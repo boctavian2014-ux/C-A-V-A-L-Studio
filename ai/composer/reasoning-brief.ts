@@ -73,11 +73,18 @@ export function buildFinalRecap(input: RecapInput): string {
     pending.length > 0 ? `Pending: ${pending.slice(0, 2).join('; ')}` : '';
 
   const nextParts: string[] = [];
-  if (input.devTools?.terminal?.testScript) {
+  const verifyFailed = input.devTools?.verify?.commands?.find((c) => !c.ok);
+  if (verifyFailed) {
+    nextParts.push(`verify failed: ${verifyFailed.command}`);
+  } else if (input.devTools?.verify?.ran && input.devTools.verify.commands.every((c) => c.ok)) {
+    nextParts.push(`verify ok (${input.devTools.verify.summary})`);
+  } else if (input.devTools?.terminal?.testScript) {
     nextParts.push('npm test');
-  }
-  if (input.devTools?.terminal?.buildScript) {
+  } else if (input.devTools?.terminal?.buildScript) {
     nextParts.push('npm run build');
+  }
+  if (input.devTools?.git?.isRepo && (input.devTools.git.changedFiles ?? 0) > 0) {
+    nextParts.push('git commit');
   }
   if (input.devTools?.git?.isRepo && (input.devTools.git.changedFiles ?? 0) > 0) {
     nextParts.push('git commit');

@@ -6,9 +6,13 @@
       "ask": "caval-auto/balanced",
       "code": "caval-auto/balanced",
       "agentic": "caval-auto/balanced",
-      "architect": "caval-auto/frontier",
+      "plan": "caval-auto/frontier",
       "debug": "caval-auto/balanced"
     }
+  },
+  "cavalloModes": {
+    "autoModeSwitch": true,
+    "explicitTriggers": true
   },
   "autocomplete": {
     "model": "north-mini-code",

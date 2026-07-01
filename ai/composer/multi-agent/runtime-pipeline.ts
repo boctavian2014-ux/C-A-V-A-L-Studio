@@ -834,15 +834,25 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    pipelineCallbacks.onMultiAgentStatus?.('integrate', 'active', 'Git/MCP/Terminal');
+    pipelineCallbacks.onMultiAgentStatus?.('integrate', 'active', 'Git/verify');
+
+    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
 
     if (config.enableDevToolsIntegration) {
-
-      state.devTools = await runDevToolsIntegration(workspaceRoot);
-
+      state.devTools = await runDevToolsIntegration(workspaceRoot, {
+        verify: writtenFiles.length > 0,
+      });
     }
 
-    pipelineCallbacks.onMultiAgentStatus?.('integrate', 'done', state.devTools?.git?.isRepo ? 'git synced' : 'done');
+    pipelineCallbacks.onMultiAgentStatus?.(
+      'integrate',
+      'done',
+      state.devTools?.verify?.ran
+        ? state.devTools.verify.summary
+        : state.devTools?.git?.isRepo
+          ? 'git synced'
+          : 'done'
+    );
 
 
 
@@ -873,10 +883,6 @@ export async function runCavalloMultiAgentPipeline(
     const chatSummary = buildCompactChatSummary(state);
 
     const stageSummary = buildRuntimeSummary(state);
-
-    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
-
-
 
     return {
 

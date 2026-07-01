@@ -5,6 +5,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ContextEngineApi } from "../../context-engine/api";
+import { runAllowedWorkspaceCommand } from "./workspace-command-runner";
 
 export interface ToolCall {
   name: string;
@@ -47,6 +48,16 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     name: "search_codebase",
     description: "Semantic search across the indexed codebase",
     parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "number" } }, required: ["query"] },
+  },
+  {
+    name: "run_command",
+    description:
+      "Run an allowed npm/git command in the workspace (e.g. npm run build, npm test). Use to verify after writing files — does not require MCP.",
+    parameters: {
+      type: "object",
+      properties: { command: { type: "string", description: "e.g. npm run build" } },
+      required: ["command"],
+    },
   },
 ];
 
@@ -98,6 +109,8 @@ export class ToolRegistry {
         return this.listDir(String(call.arguments.path ?? "."));
       case "search_codebase":
         return this.searchCodebase(String(call.arguments.query ?? ""), Number(call.arguments.limit ?? 8));
+      case "run_command":
+        return this.runCommand(String(call.arguments.command ?? ""));
       default:
         return { ok: false, error: `Unknown tool: ${call.name}` };
     }
@@ -157,6 +170,26 @@ export class ToolRegistry {
     try {
       const results = await this.contextEngine.search(query, limit);
       return { ok: true, output: results };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async runCommand(command: string): Promise<ToolResult> {
+    if (!command.trim()) {
+      return { ok: false, error: "run_command requires command (e.g. npm run build)." };
+    }
+    try {
+      const result = await runAllowedWorkspaceCommand(command, this.workspaceRoot);
+      return {
+        ok: result.ok,
+        output: {
+          command: result.command,
+          exitCode: result.exitCode,
+          output: result.output,
+        },
+        error: result.ok ? undefined : result.output.slice(0, 500),
+      };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }

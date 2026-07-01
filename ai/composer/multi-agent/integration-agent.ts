@@ -136,8 +136,15 @@ function formatDevToolsStatus(devTools?: DevToolsIntegrationResult): string {
   }
   if (devTools.terminal) {
     parts.push(
-      devTools.terminal.testScript ? 'terminal: test script detected' : 'terminal: no test script'
+      devTools.terminal.buildScript
+        ? 'terminal: build script'
+        : devTools.terminal.testScript
+          ? 'terminal: test script'
+          : 'terminal: no npm scripts'
     );
+  }
+  if (devTools.verify?.ran) {
+    parts.push(`verify: ${devTools.verify.summary}`);
   }
   if (devTools.github?.remoteUrl) {
     parts.push(`github: ${devTools.github.remoteUrl}`);

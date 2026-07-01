@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { DevToolsIntegrationResult } from './types';
+import { runWorkspaceVerify } from '../../tools/workspace-verify';
 
 const execAsync = promisify(exec);
 
@@ -64,15 +65,21 @@ function probePackageJson(workspaceRoot: string): DevToolsIntegrationResult['ter
 
 export async function runDevToolsIntegration(
   workspaceRoot: string,
-  options?: { mcpServersReady?: number }
+  options?: { mcpServersReady?: number; verify?: boolean }
 ): Promise<DevToolsIntegrationResult> {
   const git = await probeGit(workspaceRoot);
   const terminal = probePackageJson(workspaceRoot);
 
-  return {
+  const result: DevToolsIntegrationResult = {
     git,
     mcp: { serversReady: options?.mcpServersReady ?? 0 },
     terminal,
     github: git?.remoteUrl ? { remoteUrl: git.remoteUrl } : undefined,
   };
+
+  if (options?.verify) {
+    result.verify = await runWorkspaceVerify(workspaceRoot);
+  }
+
+  return result;
 }

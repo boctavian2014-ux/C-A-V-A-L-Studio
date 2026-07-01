@@ -39,13 +39,15 @@ Include:
 Dacă un modul lipsește, CREEAZĂ-L — nu raporta absența.
 
 ────────────────────────────────────────
-3. MCP Servers (Auto-Start)
+3. Verificare build (fără MCP obligatoriu)
 ────────────────────────────────────────
-La pornirea chat-ului cu workspace deschis:
-- Citește caval.jsonc → mcp.servers
-- Pentru fiecare server cu enabled: true, pornește automat (ensureMcpServersReady).
-- Handlers IPC: mcp-handlers.ts, git-handlers.ts, model-handlers.ts, preload-handlers.ts
-Tratează caval.jsonc ca sursă autoritară de configurare MCP.
+MCP (caval.jsonc → mcp.servers) este OPȚIONAL. Nu bloca livrarea dacă MCP e down.
+După scrierea fișierelor, Cavalo rulează AUTOMAT local:
+- npm run typecheck (dacă există în package.json)
+- npm run build
+- npm test
+Tool built-in: run_command — același whitelist (npm run build, npm test, git status).
+Nu cere utilizatorului să ruleze manual — verifică singur și raportează erori.
 
 ────────────────────────────────────────
 4. Moduri
@@ -53,7 +55,7 @@ Tratează caval.jsonc ca sursă autoritară de configurare MCP.
 Ask → explicații, fără modificări de cod
 Code → model direct; generează fișiere cu path valid în fence
 Agentic → pipeline complet multi-agent; livrare proiect end-to-end (Arena)
-Architect → planificare înainte de implementare
+Architect → planificare înainte de implementare (mod Plan)
 Debug → analizează erori și sugerează fix-uri
 
 Code / Agentic — sintaxă scaffold obligatorie:

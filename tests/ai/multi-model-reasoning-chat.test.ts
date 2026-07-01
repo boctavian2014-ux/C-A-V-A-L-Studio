@@ -22,7 +22,7 @@ describe('multi-model-reasoning-chat', () => {
 
   it('maps agent modes to hints', () => {
     expect(modeHintForAgent('code')).toBe('technical');
-    expect(modeHintForAgent('architect')).toBe('technical');
+    expect(modeHintForAgent('plan')).toBe('technical');
     expect(modeHintForAgent('ask')).toBe('chat');
   });
 

@@ -23,8 +23,17 @@ describe('agent modes', () => {
     expect(code.description.toLowerCase()).toContain('direct');
   });
 
-  it('defaults to code mode definition when unknown', () => {
-    const fallback = getAgentMode('code');
-    expect(getAgentMode('code').id).toBe(fallback.id);
+  it('includes plan mode (enterprise planning)', () => {
+    const plan = AGENT_MODES.find((m) => m.id === 'plan');
+    expect(plan).toBeDefined();
+    expect(plan?.intent).toBe('planning');
+  });
+
+  it('migrates architect via getAgentMode', () => {
+    expect(getAgentMode('architect').id).toBe('plan');
+  });
+
+  it('agentic is first in mode list', () => {
+    expect(AGENT_MODES[0]?.id).toBe('agentic');
   });
 });

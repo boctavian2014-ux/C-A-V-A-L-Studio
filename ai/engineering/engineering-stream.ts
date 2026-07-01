@@ -79,7 +79,7 @@ export async function completeViaChatStream(params: {
       {
         message: userMessage,
         model: params.model,
-        mode: 'architect',
+        mode: 'plan',
         streamId,
         workspaceRoot: params.workspaceRoot ?? undefined,
         intent: 'deep_thinking',

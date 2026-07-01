@@ -483,6 +483,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
     agentMode, strictReview, setStrictReview, modelLabels,
+    modeSwitchNotice, clearModeSwitchNotice,
     deliveryPause, submitUiDeliveryPreferences,
   } = useAIStore();
 
@@ -491,9 +492,15 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const isAgentic = isAgenticPipelineMode(agentMode);
   const inputPlaceholder = isAgentic
     ? 'Descrie proiectul — Agentic livrează end-to-end (Enter = trimite)'
-    : agentMode === 'code'
-      ? `Prompt pentru ${getModelDisplayLabel(selectedModel, modelLabels)} (Enter = trimite)`
-      : `${modeDef.label} — ${modeDef.description.slice(0, 60)}…`;
+    : agentMode === 'plan'
+      ? 'Planificare enterprise — arhitectură, roadmap, KPIs (Enter = trimite)'
+      : agentMode === 'code'
+        ? 'Implementare cod — descrie ce să construiești (Enter = trimite)'
+        : agentMode === 'debug'
+          ? 'Lipește eroarea sau codul de analizat (Enter = trimite)'
+          : agentMode === 'ask'
+            ? 'Întrebare sau explicație (Enter = trimite)'
+            : `${modeDef.label} — ${modeDef.description.slice(0, 60)}…`;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState('');
@@ -799,6 +806,35 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           quickPrompts={QUICK_PROMPTS}
           onQuickPrompt={handleQuickPrompt}
         />
+        {modeSwitchNotice && !isAgentic && (
+          <div
+            style={{
+              fontSize: 10,
+              color: 'var(--caval-accent)',
+              lineHeight: 1.35,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <span>{modeSwitchNotice}</span>
+            <button
+              type="button"
+              onClick={() => clearModeSwitchNotice()}
+              style={{
+                border: 'none',
+                background: 'none',
+                color: 'var(--caval-text-muted)',
+                cursor: 'pointer',
+                fontSize: 10,
+                padding: 0,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {isAgentic && (
           <StrictReviewToggle
             enabled={strictReview}

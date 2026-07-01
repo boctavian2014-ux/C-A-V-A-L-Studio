@@ -38,11 +38,11 @@ export function getModelCodingGuide(
     };
   }
 
-  if (agentMode === 'architect') {
+  if (agentMode === 'plan' || agentMode === 'architect') {
     return {
       canCode: false,
       path: 'fences',
-      requirement: 'Mod Architect — doar planificare',
+      requirement: 'Mod Plan — doar planificare',
       hint: 'Pentru fișiere: Code sau Agentic. Poți adăuga SCAFFOLD în prompt.',
     };
   }

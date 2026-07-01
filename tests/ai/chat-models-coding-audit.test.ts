@@ -23,6 +23,7 @@ describe('chat models coding audit', () => {
     expect(modeSupportsFileApply('debug')).toBe(true);
     expect(modeSupportsFileApply('agentic')).toBe(true);
     expect(modeSupportsFileApply('ask')).toBe(false);
+    expect(modeSupportsFileApply('plan')).toBe(false);
     expect(modeSupportsFileApply('architect')).toBe(false);
   });
 

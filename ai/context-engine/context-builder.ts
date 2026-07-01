@@ -25,7 +25,7 @@ export interface ContextOptions {
   attachments?: Array<{ path: string; name: string; content: string }>;
   /** Nu atașa fișierul activ (întrebări generale fără legătură cu codul deschis) */
   skipActiveFile?: boolean;
-  agentMode?: 'ask' | 'plan' | 'code' | 'agentic' | 'architect' | 'debug';
+  agentMode?: 'ask' | 'plan' | 'code' | 'agentic' | 'debug';
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)

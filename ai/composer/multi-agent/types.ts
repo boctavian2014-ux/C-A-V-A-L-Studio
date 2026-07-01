@@ -154,6 +154,11 @@ export interface DevToolsIntegrationResult {
     testScript?: boolean;
     buildScript?: boolean;
   };
+  verify?: {
+    ran: boolean;
+    summary: string;
+    commands: Array<{ command: string; ok: boolean; exitCode: number | null; output: string }>;
+  };
   github?: { remoteUrl?: string };
 }
 

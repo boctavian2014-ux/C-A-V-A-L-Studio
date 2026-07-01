@@ -1,11 +1,12 @@
 // ──────────────────────────────────────────────
-//  Agent modes — Kilo Code style
+//  Agent modes — Cavallo Enterprise + Agentic
 // ──────────────────────────────────────────────
 
 import type { RoutingIntent } from "../types";
 import type { ModelSelectionId } from "../models/model-catalog";
+import type { CavalloModesConfig } from "./mode-router";
 
-export type AgentModeId = "ask" | "code" | "agentic" | "architect" | "debug";
+export type AgentModeId = "ask" | "code" | "agentic" | "plan" | "debug";
 
 export interface AgentMode {
   id: AgentModeId;
@@ -26,12 +27,12 @@ export const AGENT_MODES: AgentMode[] = [
     description: "Pipeline complet — de la idee la proiect livrat",
   },
   {
-    id: "ask",
-    label: "Ask",
-    shortLabel: "Ask",
-    intent: "fallback",
-    defaultModel: "caval-auto/balanced",
-    description: "Întrebări rapide, explicații, fără modificări de cod",
+    id: "plan",
+    label: "Plan",
+    shortLabel: "Plan",
+    intent: "planning",
+    defaultModel: "caval-auto/frontier",
+    description: "Planificare enterprise — arhitectură, roadmap, KPIs (fără cod)",
   },
   {
     id: "code",
@@ -39,15 +40,15 @@ export const AGENT_MODES: AgentMode[] = [
     shortLabel: "Code",
     intent: "kilocode",
     defaultModel: "caval-auto/balanced",
-    description: "Scrie cod cu modelul ales — direct, fără pipeline multi-agent",
+    description: "Implementare cod — direct, fără pipeline multi-agent",
   },
   {
-    id: "architect",
-    label: "Architect",
-    shortLabel: "Arch",
-    intent: "planning",
-    defaultModel: "caval-auto/frontier",
-    description: "Planifică features complexe înainte de implementare",
+    id: "ask",
+    label: "Ask",
+    shortLabel: "Ask",
+    intent: "fallback",
+    defaultModel: "caval-auto/balanced",
+    description: "Întrebări rapide, explicații, fără modificări de cod",
   },
   {
     id: "debug",
@@ -59,8 +60,9 @@ export const AGENT_MODES: AgentMode[] = [
   },
 ];
 
-export function getAgentMode(id: AgentModeId): AgentMode {
-  return AGENT_MODES.find((m) => m.id === id) ?? AGENT_MODES.find((m) => m.id === "code")!;
+export function getAgentMode(id: AgentModeId | string): AgentMode {
+  const normalized = id === "architect" ? "plan" : id;
+  return AGENT_MODES.find((m) => m.id === normalized) ?? AGENT_MODES.find((m) => m.id === "code")!;
 }
 
 /** Multi-agent pipeline + full delivery — only in Agentic mode. */
@@ -71,8 +73,9 @@ export function isAgenticPipelineMode(mode: string | undefined): boolean {
 export interface CavalConfig {
   models?: {
     default?: ModelSelectionId;
-    perMode?: Partial<Record<AgentModeId, ModelSelectionId>>;
+    perMode?: Partial<Record<AgentModeId | "architect", ModelSelectionId>>;
   };
+  cavalloModes?: CavalloModesConfig;
   mcp?: {
     servers?: Array<{
       id: string;
@@ -96,9 +99,13 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
       ask: "caval-auto/balanced",
       code: "caval-auto/balanced",
       agentic: "caval-auto/balanced",
-      architect: "caval-auto/frontier",
+      plan: "caval-auto/frontier",
       debug: "caval-auto/balanced",
     },
+  },
+  cavalloModes: {
+    autoModeSwitch: true,
+    explicitTriggers: true,
   },
   autocomplete: {
     model: "north-mini-code",

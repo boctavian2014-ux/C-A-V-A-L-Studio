@@ -8,7 +8,9 @@ import {
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
-import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
+import { resolveEffectiveMode } from '../modes/mode-router';
+import { normalizeAgentModeId } from '../modes/intent-detector';
 import {
   buildContextMessages,
   buildFastChatMessages,
@@ -263,6 +265,8 @@ interface AIStore {
   setIncludeMode: (mode: IncludeMode) => void;
   strictReview: boolean;
   setStrictReview: (enabled: boolean) => void;
+  modeSwitchNotice: string | null;
+  clearModeSwitchNotice: () => void;
   attachedFiles: ChatAttachment[];
   addAttachments: (paths: string[]) => Promise<void>;
   removeAttachment: (id: string) => void;
@@ -389,6 +393,7 @@ export const useAIStore = create<AIStore>()(
       activeResolvedModel: null,
       includeMode: 'project',
       strictReview: false,
+      modeSwitchNotice: null,
       attachedFiles: [],
       activeThreadId: initialThread.id,
       threads: [initialThread],
@@ -405,10 +410,12 @@ export const useAIStore = create<AIStore>()(
         void get().refreshResolvedModel();
       },
       setAgentMode: (mode) => {
-        const modeDef = getAgentMode(mode);
-        set({ agentMode: mode, selectedModel: modeDef.defaultModel, activeResolvedModel: null });
+        const normalized = normalizeAgentModeId(mode);
+        const modeDef = getAgentMode(normalized);
+        set({ agentMode: normalized, selectedModel: modeDef.defaultModel, activeResolvedModel: null, modeSwitchNotice: null });
         void get().refreshResolvedModel();
       },
+      clearModeSwitchNotice: () => set({ modeSwitchNotice: null }),
       setIncludeMode: (mode) => set({ includeMode: mode }),
       setStrictReview: (enabled) => set({ strictReview: enabled }),
 
@@ -625,6 +632,31 @@ export const useAIStore = create<AIStore>()(
             prepareState,
             strictReview,
           } = get());
+        }
+
+        const cavalloCfg = DEFAULT_CAVAL_CONFIG.cavalloModes;
+        if (!isAgenticPipelineMode(agentMode)) {
+          const resolved = resolveEffectiveMode(agentMode, userText, {
+            autoSwitch: cavalloCfg?.autoModeSwitch !== false,
+            explicitTriggers: cavalloCfg?.explicitTriggers !== false,
+          });
+          if (resolved.switched && resolved.mode !== agentMode) {
+            get().setAgentMode(resolved.mode);
+            ({
+              selectedModel,
+              apiKeys,
+              messages,
+              includeMode,
+              agentMode,
+              activeThreadId,
+              attachedFiles,
+              prepareState,
+              strictReview,
+            } = get());
+            set({
+              modeSwitchNotice: `Auto → ${getAgentMode(agentMode).label}${resolved.switchReason ? ` (${resolved.switchReason})` : ''}`,
+            });
+          }
         }
 
         const modeDef = getAgentMode(agentMode);
@@ -921,7 +953,23 @@ export const useAIStore = create<AIStore>()(
             }
             useEditorStore.getState().closeAiPreview();
             openWrittenFile(writtenFiles[writtenFiles.length - 1]!);
+
+            let devToolsForRecap = capturedRecapMeta?.devTools;
+            if (!devToolsForRecap?.verify?.ran && window.caval?.workspaceVerify) {
+              const verifyRes = await window.caval.workspaceVerify(projectPath);
+              if (verifyRes.ok && verifyRes.verify) {
+                devToolsForRecap = { ...devToolsForRecap, verify: verifyRes.verify };
+              }
+            }
+
+            const verifyFailed = devToolsForRecap?.verify?.commands?.find((c) => !c.ok);
             const recapPatch: Partial<ChatMessage> = { writtenFiles };
+            if (verifyFailed) {
+              recapPatch.error = `Verificare eșuată: ${verifyFailed.command}\n${verifyFailed.output.slice(0, 500)}`;
+            } else if (devToolsForRecap?.verify?.ran) {
+              recapPatch.content = `✓ Verificare: ${devToolsForRecap.verify.summary}`;
+            }
+
             if (isAgenticPipelineMode(agentMode) && capturedReasoningBrief) {
               const recap = buildFinalRecap({
                 brief: capturedReasoningBrief,
@@ -929,11 +977,14 @@ export const useAIStore = create<AIStore>()(
                 taskCount: capturedRecapMeta?.taskCount ?? 0,
                 supervisor: capturedRecapMeta?.supervisor,
                 pendingIssues: capturedRecapMeta?.pendingIssues,
-                devTools: capturedRecapMeta?.devTools,
+                devTools: devToolsForRecap,
                 fastPipeline: capturedRecapMeta?.fastPipeline,
               });
               recapPatch.recap = recap;
               recapPatch.content = formatArenaReasoning(capturedReasoningBrief, recap, false);
+              if (verifyFailed) {
+                recapPatch.error = `Verificare eșuată: ${verifyFailed.command}\n${verifyFailed.output.slice(0, 500)}`;
+              }
             }
             updateAssistant(recapPatch);
           })();
@@ -1311,7 +1362,7 @@ export const useAIStore = create<AIStore>()(
             assertRendererChatAllowed({
               prompt: apiPrompt,
               workspaceRoot: editorState.projectPath,
-              capability: agentMode === 'architect' ? 'planning' : 'chat',
+              capability: agentMode === 'plan' ? 'planning' : 'chat',
               intent: agentMode === 'debug' ? 'debug' : 'kilocode',
             });
             provider = createProvider(selectedModel as never, apiKeys);
@@ -1524,6 +1575,10 @@ export const useAIStore = create<AIStore>()(
           if (hasPipelineArtifacts) {
             state.agentMode = 'agentic';
           }
+        }
+        const legacyMode = state.agentMode as string;
+        if (legacyMode === 'architect') {
+          state.agentMode = 'plan';
         }
         if (!AGENT_MODES.some((m) => m.id === state.agentMode)) {
           state.agentMode = 'code';
