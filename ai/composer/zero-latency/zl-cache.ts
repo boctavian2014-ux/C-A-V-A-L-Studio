@@ -1,11 +1,18 @@
 import type { ComposerContext } from "../types";
 import type { ZLCacheEntry, ZLPartialPlan } from "./zl-types";
+import { createHash } from "node:crypto";
+
+function hashObjective(objectiveDraft: string): string {
+  const normalized = objectiveDraft.trim().toLowerCase();
+  if (normalized.length <= 512) return normalized;
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+}
 
 export class ZeroLatencyCache {
   private readonly entries = new Map<string, ZLCacheEntry>();
 
   key(workspaceRoot: string, objectiveDraft = ""): string {
-    return `${workspaceRoot}::${objectiveDraft.trim().slice(0, 160).toLowerCase()}`;
+    return `${workspaceRoot}::${hashObjective(objectiveDraft)}`;
   }
 
   get(workspaceRoot: string, objectiveDraft = ""): ZLCacheEntry | undefined {

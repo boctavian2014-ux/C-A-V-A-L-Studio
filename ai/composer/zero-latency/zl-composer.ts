@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { warmCacheManager } from "../../context/warm-cache/warm-cache-manager";
 import { zeroLatencyCache, type ZeroLatencyCache } from "./zl-cache";
 import { loadZeroLatencyConfig } from "./zl-config";
@@ -9,6 +10,9 @@ import type { ZLComposerSnapshot, ZLSignals } from "./zl-types";
 import { ZL_LOG_PREFIX } from "./zl-types";
 
 export class ZeroLatencyComposer {
+  private lastPrepareKey = "";
+  private lastPrepareAt = 0;
+
   constructor(
     private readonly scheduler: ZLScheduler = zlScheduler,
     private readonly contextPreloader: ZLContextPreloader = zlContextPreloader,
@@ -21,6 +25,19 @@ export class ZeroLatencyComposer {
   prepare(signals: ZLSignals): string {
     const cfg = loadZeroLatencyConfig(signals.workspaceRoot);
     if (!cfg.enabled) return this.scheduler.createToken();
+
+    const draft = signals.objectiveDraft?.trim() ?? "";
+    const prepareKey = createHash("sha256")
+      .update(`${signals.workspaceRoot}::${draft}`)
+      .digest("hex")
+      .slice(0, 20);
+    const now = Date.now();
+    const debounceMs = Math.max(cfg.typingDebounceMs, 300);
+    if (prepareKey === this.lastPrepareKey && now - this.lastPrepareAt < debounceMs * 2) {
+      return this.scheduler.createToken();
+    }
+    this.lastPrepareKey = prepareKey;
+    this.lastPrepareAt = now;
 
     const tokenId = this.scheduler.createToken();
     console.log(`${ZL_LOG_PREFIX} prepare ${signals.workspaceRoot}`);

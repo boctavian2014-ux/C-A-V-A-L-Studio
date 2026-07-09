@@ -54,11 +54,33 @@ export function hasOpenRouterKey(
   );
 }
 
+export async function resolveOpenRouterKeyFromClient(): Promise<string | undefined> {
+  if (typeof window === 'undefined') return undefined;
+  const w = window as {
+    caval?: {
+      settingsLoad?: () => Promise<{ settings?: Record<string, string> }>;
+      secretsGet?: () => Promise<{ secrets?: Record<string, string> }>;
+    };
+  };
+  const [settingsRes, secretsRes] = await Promise.all([
+    w.caval?.settingsLoad?.().catch(() => undefined),
+    w.caval?.secretsGet?.().catch(() => undefined),
+  ]);
+  return (
+    settingsRes?.settings?.['openrouter.apiKey']?.trim() ||
+    secretsRes?.secrets?.OPENROUTER_API_KEY?.trim()
+  );
+}
+
 export async function checkModelReadiness(
   modelId: ModelSelectionId,
   apiKeys: ApiKeys,
   options?: { openRouterApiKey?: string }
 ): Promise<ModelReadiness> {
+  const openRouterKey =
+    options?.openRouterApiKey ??
+    (await resolveOpenRouterKeyFromClient()) ??
+    (apiKeys as Record<string, string>).OPENROUTER_API_KEY;
   if (isByokModel(modelId)) {
     if (modelId === 'ollama-local') {
       const reachable = await isOllamaReachable();
@@ -95,7 +117,7 @@ export async function checkModelReadiness(
   }
 
   if (modelId.startsWith('openrouter:') || isAutoTier(modelId)) {
-    if (hasOpenRouterKey(options?.openRouterApiKey)) {
+    if (hasOpenRouterKey(openRouterKey, apiKeys as Record<string, string>)) {
       return { ready: true, reason: 'OpenRouter configurat' };
     }
     const profile = getModelProfile(modelId);
@@ -103,10 +125,14 @@ export async function checkModelReadiness(
       const reachable = await isOllamaReachable();
       if (reachable) return { ready: true, reason: 'Model local via Ollama' };
     }
+    const orHint =
+      modelId.includes('anthropic/') || modelId.includes('claude')
+        ? 'Panoul AI → 🔑 → OpenRouter (sk-or-...). Alternativ: alege „Claude Sonnet” (BYOK) + cheie Anthropic (sk-ant-...).'
+        : 'Panoul AI → 🔑 → OpenRouter API Key (sk-or-...), sau folosește Auto Free cu Ollama.';
     return {
       ready: false,
       reason: 'OpenRouter neconfigurat',
-      hint: 'Panoul AI → 🔑 → OpenRouter API Key (sk-or-...), sau folosește Auto Free cu Ollama.',
+      hint: orHint,
     };
   }
 
@@ -123,7 +149,7 @@ export async function checkModelReadiness(
       }
       return { ready: true, reason: 'Model local' };
     }
-    if (hasOpenRouterKey(options?.openRouterApiKey)) {
+    if (hasOpenRouterKey(openRouterKey, apiKeys as Record<string, string>)) {
       return { ready: true, reason: 'OpenRouter / cloud router' };
     }
     return {
@@ -133,7 +159,7 @@ export async function checkModelReadiness(
     };
   }
 
-  if (hasOpenRouterKey(options?.openRouterApiKey)) {
+  if (hasOpenRouterKey(openRouterKey, apiKeys as Record<string, string>)) {
     return { ready: true, reason: 'OpenRouter' };
   }
 

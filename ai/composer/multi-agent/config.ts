@@ -70,10 +70,42 @@ export function loadReasoningConfig(workspaceRoot?: string) {
 /** UI "Review strict" forces full merge + supervisor (disables fastPipeline). */
 export function applyMultiAgentOverrides(
   config: MultiAgentConfig,
-  overrides?: { strictReview?: boolean }
+  overrides?: { strictReview?: boolean; message?: string }
 ): MultiAgentConfig {
-  if (!overrides?.strictReview) return config;
-  return { ...config, fastPipeline: false };
+  let next = config;
+  if (overrides?.strictReview) {
+    next = { ...next, fastPipeline: false };
+  }
+  if (overrides?.message) {
+    next = applyComplexPromptOverrides(next, overrides.message);
+  }
+  return next;
+}
+
+/** Long multi-module prompts get full pipeline + context synthesis. */
+export function applyComplexPromptOverrides(
+  config: MultiAgentConfig,
+  message: string
+): MultiAgentConfig {
+  const lines = message.split('\n').filter((l) => l.trim()).length;
+  const isComplex =
+    message.length > 600 ||
+    lines >= 8 ||
+    (/\b(module|frontend|backend|dashboard|scraper|api|docker|deploy|forexebug|seap)\b/i.test(message) &&
+      lines >= 4);
+  if (!isComplex) return config;
+  return {
+    ...config,
+    fastPipeline: false,
+    skipContextLlm: false,
+    antiCollapseDecomposition: true,
+    decompositionMaxTokens: Math.max(config.decompositionMaxTokens, 8192),
+    fullDelivery: {
+      ...config.fullDelivery,
+      maxComposeWaves: Math.max(config.fullDelivery.maxComposeWaves, 4),
+      minFencesAbsolute: Math.max(config.fullDelivery.minFencesAbsolute, 6),
+    },
+  };
 }
 
 export function shouldUseMultiAgentPipeline(

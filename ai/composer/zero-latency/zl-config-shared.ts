@@ -11,11 +11,11 @@ export interface ZeroLatencyConfig {
 
 export const DEFAULT_ZERO_LATENCY_CONFIG: ZeroLatencyConfig = {
   enabled: true,
-  typingDebounceMs: 350,
+  typingDebounceMs: 500,
   frontierPrewarm: true,
-  draftPlan: 'fast-then-frontier',
-  maxWarmFiles: 8,
-  maxWarmChars: 2500,
+  draftPlan: 'stub',
+  maxWarmFiles: 16,
+  maxWarmChars: 8000,
 };
 
 export function isFrontierSelection(model: string): boolean {

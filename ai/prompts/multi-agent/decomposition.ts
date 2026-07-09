@@ -27,4 +27,9 @@ Rules:
 - Do NOT generate code.
 - Do NOT chat, apologize, or refuse.
 - Purely structural and technical output.
-- Every task must be small enough for a single model to implement.`;
+- Every task must be small enough for a single model to implement.
+- REQUIRED line format (parser depends on this):
+  - Module 1: Short name — purpose
+  - Task 1.1: Atomic implementable description
+  - Task 1.2: ...
+- Use numeric task ids (1.1, 1.2, 2.1) — do NOT skip the "Task" prefix.`;

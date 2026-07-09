@@ -1,26 +1,31 @@
 import type { PipelineTask } from './types';
 
-const TASK_LINE = /^\s*[-*•]\s*Task\s+(\w+[\w-]*)\s*:\s*(.+)$/i;
-const MODULE_LINE = /^\s*[-*•]\s*Module\s+(\w+[\w-]*)\s*:\s*(.+)$/i;
-const BULLET_TASK = /^\s*[-*•]\s*(?:Task\s+)?(\w[\w-]*)\s*:\s*(.+)$/i;
+const TASK_LINE =
+  /^\s*[-*•]\s*\*{0,2}Task\s+([\w.-]+)\*{0,2}\s*:\s*(.+)$/i;
+const MODULE_LINE =
+  /^\s*[-*•]\s*\*{0,2}Module\s+([\w\s.&-]+?)\*{0,2}\s*:\s*(.+)$/i;
+const BULLET_TASK =
+  /^\s*[-*•]\s*\*{0,2}(?:Task\s+)?([\w.-]+)\*{0,2}\s*:\s*(.+)$/i;
+const BOLD_SECTION =
+  /^\s*[-*•]\s*\*\*(.+?)\*\*\s*:\s*(.+)$/;
+
+const PHASE_UI_TAG = /\[phase:ui\]/i;
+
+const MODULE_HINT_PATTERNS = [
+  /\bModule\s+\d+/gi,
+  /\*\*Module\s+/gi,
+  /^\s*[-*•]\s*Module\s+/gim,
+  /\bTask\s+[\d.]+/gi,
+  /\bLayer\b/gi,
+  /\bIngestion\b/gi,
+  /\bBackend\b/gi,
+  /\bFrontend\b/gi,
+  /\bDeployment\b/gi,
+];
 
 function slugId(prefix: string, index: number): string {
   return `${prefix}-${index + 1}`;
 }
-
-function normalizeModuleName(line: string): { module: string; purpose: string } {
-  const mod = line.match(MODULE_LINE);
-  if (mod) {
-    return { module: mod[1]!, purpose: mod[2]!.trim() };
-  }
-  const generic = line.match(/^\s*[-*•]\s*(.+?)\s*:\s*(.+)$/);
-  if (generic) {
-    return { module: generic[1]!.trim(), purpose: generic[2]!.trim() };
-  }
-  return { module: `module-${Date.now()}`, purpose: line.trim() };
-}
-
-const PHASE_UI_TAG = /\[phase:ui\]/i;
 
 function parseTaskDescription(raw: string): { description: string; phase?: 'ui' | 'core' } {
   let description = raw.trim();
@@ -34,31 +39,77 @@ function parseTaskDescription(raw: string): { description: string; phase?: 'ui' 
   return { description, phase };
 }
 
+function slugModule(name: string): string {
+  return name
+    .trim()
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/gi, '')
+    .toLowerCase()
+    .slice(0, 48) || 'module';
+}
+
+function slugTaskId(rawId: string, index: number): string {
+  const cleaned = rawId.trim().replace(/\*\*/g, '').toLowerCase();
+  if (/^[\w.-]+$/.test(cleaned)) return cleaned.replace(/\./g, '-');
+  return slugId('task', index);
+}
+
+/** Count architecture/module hints in raw decomposition text (for anti-collapse validation). */
+export function countModuleHints(raw: string): number {
+  let hints = 0;
+  for (const pattern of MODULE_HINT_PATTERNS) {
+    const matches = raw.match(pattern);
+    if (matches) hints += matches.length;
+  }
+  return hints;
+}
+
+/** True when parser fell back to single task-1 but raw text suggests multiple modules. */
+export function isDecompositionCollapsed(raw: string, tasks: PipelineTask[]): boolean {
+  if (tasks.length !== 1) return false;
+  if (tasks[0]?.id !== 'task-1' || tasks[0]?.module !== 'core') return false;
+  return countModuleHints(raw) >= 3;
+}
+
 export function parseDecompositionOutput(raw: string, maxTasks = 8): PipelineTask[] {
   const tasks: PipelineTask[] = [];
   let currentModule = 'core';
   let currentPurpose = 'Core module';
+  let taskIndex = 0;
   const lines = raw.split('\n');
 
   for (const line of lines) {
     const modMatch = line.match(MODULE_LINE);
     if (modMatch) {
-      currentModule = modMatch[1]!;
+      currentModule = slugModule(modMatch[1]!);
       currentPurpose = modMatch[2]!.trim();
       continue;
     }
 
-    const altMod = line.match(/^\s*[-*•]\s*Module\s+(.+?)\s*:\s*(.+)$/i);
-    if (altMod && !TASK_LINE.test(line)) {
-      currentModule = altMod[1]!.trim().replace(/\s+/g, '-').toLowerCase();
-      currentPurpose = altMod[2]!.trim();
-      continue;
+    const boldSection = line.match(BOLD_SECTION);
+    if (boldSection && !TASK_LINE.test(line)) {
+      const label = boldSection[1]!.trim();
+      if (/^(project goal|high-level architecture|dependencies|deployment|store)/i.test(label)) {
+        continue;
+      }
+      if (/layer|module|ingestion|processing|api|frontend|deployment|storage/i.test(label)) {
+        currentModule = slugModule(label);
+        currentPurpose = boldSection[2]!.trim();
+        continue;
+      }
     }
 
     const taskMatch = line.match(TASK_LINE) ?? line.match(BULLET_TASK);
     if (taskMatch) {
-      const taskId = taskMatch[1]!.toLowerCase().replace(/\s+/g, '-');
+      const rawId = taskMatch[1]!;
+      if (/^(project|high|dependencies|deployment|store|understood)$/i.test(rawId)) continue;
+
+      const taskId = slugTaskId(rawId, taskIndex);
+      taskIndex += 1;
       const { description, phase } = parseTaskDescription(taskMatch[2]!);
+      if (description.length < 4) continue;
+
       tasks.push({
         id: taskId,
         module: currentModule,

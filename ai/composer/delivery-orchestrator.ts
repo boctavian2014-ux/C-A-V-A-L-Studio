@@ -7,6 +7,7 @@ export interface DeliveryIncompleteInput {
   writtenFiles: string[];
   recap?: string;
   taskCount: number;
+  moduleHintCount?: number;
   parseSource?: string;
 }
 
@@ -15,7 +16,7 @@ function fenceCount(text: string): number {
 }
 
 export function isDeliveryIncomplete(input: DeliveryIncompleteInput): boolean {
-  const { writtenFiles, recap, taskCount, parseSource } = input;
+  const { writtenFiles, recap, taskCount, moduleHintCount, parseSource } = input;
   if (writtenFiles.length === 0) return true;
   if (parseSource && fenceCount(parseSource) === 0 && writtenFiles.length < 2) return true;
 
@@ -24,8 +25,9 @@ export function isDeliveryIncomplete(input: DeliveryIncompleteInput): boolean {
     return true;
   }
 
-  const minExpected = Math.max(2, Math.min(taskCount, 5));
-  if (taskCount > 0 && writtenFiles.length < minExpected) return true;
+  const effectiveTasks = Math.max(taskCount, moduleHintCount ? Math.ceil(moduleHintCount / 3) : 0);
+  const minExpected = Math.max(3, Math.min(Math.max(effectiveTasks, taskCount) * 2, 12));
+  if (effectiveTasks > 0 && writtenFiles.length < minExpected) return true;
 
   return false;
 }

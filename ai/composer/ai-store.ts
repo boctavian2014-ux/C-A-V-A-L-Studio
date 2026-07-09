@@ -747,22 +747,22 @@ export const useAIStore = create<AIStore>()(
 
         let zlWarmContext = '';
         let workspaceBootstrap = '';
-        // Agentic: pipeline multi-agent + bootstrap pe main — fără prefetch blocant în renderer.
-        const skipRendererPrefetch = isAgenticPipelineMode(agentMode);
+        // Agentic: pipeline on main — skip blocking ZL complete, but still fetch bootstrap.
+        const isAgentic = isAgenticPipelineMode(agentMode);
 
-        if (!skipRendererPrefetch && editorState.projectPath && caval) {
+        if (editorState.projectPath && caval) {
           const bootstrapPromise = caval.getWorkspaceBootstrap
             ? withTimeout(
                 caval
                   .getWorkspaceBootstrap(editorState.projectPath)
                   .then((b) => (b?.ok && b.bootstrap ? b.bootstrap : '')),
-                350,
+                isAgentic ? 500 : 350,
                 ''
               )
             : Promise.resolve('');
 
           const zlPromise =
-            !prepWarmReady && caval.zlCompleteChat
+            !isAgentic && !prepWarmReady && caval.zlCompleteChat
               ? withTimeout(
                   caval
                     .zlCompleteChat({
@@ -887,7 +887,7 @@ export const useAIStore = create<AIStore>()(
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
-          if (!appliesScaffold || !projectPath || diff) return;
+          if (!appliesScaffold || !projectPath || diff || extra?.error) return;
 
           void (async () => {
             if (isSessionStale()) {
@@ -1325,10 +1325,7 @@ export const useAIStore = create<AIStore>()(
           updateActivity('prepare', 'done');
         }
 
-        projectContext =
-          isAgenticPipelineMode(agentMode)
-            ? ''
-            : mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
+        projectContext = mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
 
         const mentionFiles =
           uniqueMentions.length > 0 && caval?.fs?.readFile

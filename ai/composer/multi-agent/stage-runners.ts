@@ -12,7 +12,7 @@ import { SCAFFOLD_EMISSION_RULE } from '../../prompts/scaffold-emission-rule';
 import { FULL_DELIVERY_RULE } from '../../prompts/full-delivery-rule';
 import type { ModelSelectionId } from '../../models/model-catalog';
 import { parseSupervisorOutput } from './supervisor-parser';
-import { parseDecomposition } from './decomposition-parser';
+import { parseDecomposition, isDecompositionCollapsed } from './decomposition-parser';
 import { PipelineContextStore } from './pipeline-context-store';
 import { ModelRotator } from './orchestrator';
 import type {
@@ -52,6 +52,8 @@ async function runComplete(
     workspaceRoot?: string;
     requestId?: string;
     callbacks?: MultiAgentPipelineCallbacks;
+    maxTokens?: number;
+    timeoutMs?: number;
   }
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }> {
   const messages: CompletionMessage[] = [
@@ -67,8 +69,8 @@ async function runComplete(
     workspaceRoot: opts.workspaceRoot,
     requestId: opts.requestId,
     useTools: false,
-    maxTokens: opts.capability === 'code' ? 8192 : 2048,
-    timeoutMs: opts.capability === 'planning' ? 90_000 : 120_000,
+    maxTokens: opts.maxTokens ?? (opts.capability === 'code' ? 8192 : 2048),
+    timeoutMs: opts.timeoutMs ?? (opts.capability === 'planning' ? 90_000 : 120_000),
   });
 
   if (!result.ok) {
@@ -91,7 +93,8 @@ export async function runContextCapture(
 
   if (skipLlm) {
     emitStage(callbacks, 'context', 'done', 'instant');
-    return PipelineContextStore.createFallback(userMessage, projectContext);
+    const slice = projectContext ? projectContext.slice(0, 16_000) : undefined;
+    return PipelineContextStore.createFallback(userMessage, slice);
   }
 
   const user = [
@@ -115,6 +118,14 @@ export async function runContextCapture(
   return PipelineContextStore.createFallback(userMessage, projectContext);
 }
 
+const DECOMPOSITION_RETRY_ADDON = `
+
+CRITICAL FORMAT (required for parsing):
+- Use lines exactly like: - Task 1.1: description
+- Use lines exactly like: - Module 1: name + purpose
+- Emit at least 4 Task lines across 2+ modules.
+- Do NOT use only bold bullets without "Task" prefix.`;
+
 export async function runDecomposition(
   model: ModelSelectionId,
   store: PipelineContextStore,
@@ -129,6 +140,8 @@ export async function runDecomposition(
     workspaceRoot,
     requestId: 'ma-decompose',
     callbacks,
+    maxTokens: config.decompositionMaxTokens,
+    timeoutMs: 120_000,
   });
 
   if (!result.ok) {
@@ -136,11 +149,38 @@ export async function runDecomposition(
     return { error: result.error };
   }
 
-  store.setDecompositionRaw(result.text);
-  const tasks = parseDecomposition(result.text, config.maxTasks);
+  let raw = result.text;
+  let tasks = parseDecomposition(raw, config.maxTasks);
+
+  if (config.antiCollapseDecomposition && isDecompositionCollapsed(raw, tasks)) {
+    emitStage(callbacks, 'decompose', 'active', 'retry (anti-collapse)');
+    const retry = await runComplete(
+      model,
+      DECOMPOSITION_AGENT_PROMPT + DECOMPOSITION_RETRY_ADDON,
+      store.buildPromptFor('decompose'),
+      {
+        capability: 'planning',
+        intent: 'planning',
+        workspaceRoot,
+        requestId: 'ma-decompose-retry',
+        callbacks,
+        maxTokens: config.decompositionMaxTokens,
+        timeoutMs: 120_000,
+      }
+    );
+    if (retry.ok) {
+      const retryTasks = parseDecomposition(retry.text, config.maxTasks);
+      if (retryTasks.length > tasks.length) {
+        raw = retry.text;
+        tasks = retryTasks;
+      }
+    }
+  }
+
+  store.setDecompositionRaw(raw);
   store.setTasks(tasks);
   emitStage(callbacks, 'decompose', 'done', `${tasks.length} tasks`);
-  return { tasks, raw: result.text };
+  return { tasks, raw };
 }
 
 async function runOneSubAgent(

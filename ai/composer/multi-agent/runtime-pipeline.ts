@@ -338,6 +338,7 @@ export async function runCavalloMultiAgentPipeline(
 
   const config = applyMultiAgentOverrides(loadMultiAgentConfig(workspaceRoot), {
     strictReview: request.strictReview,
+    message: request.message,
   });
 
   const model = request.model as ModelSelectionId;
@@ -826,7 +827,12 @@ export async function runCavalloMultiAgentPipeline(
       composeWaves += 1;
 
       const fenceCount = Math.floor((compose.text.match(/```/g)?.length ?? 0) / 2);
-      if (fenceCount >= 2) break;
+      const taskCount = store.getTasks().length;
+      const minFences = Math.max(
+        config.fullDelivery.minFencesAbsolute,
+        taskCount * config.fullDelivery.minFencesPerTask
+      );
+      if (fenceCount >= minFences) break;
       if (!config.fullDelivery.enabled) break;
     }
 
@@ -957,6 +963,7 @@ export async function resumeCavalloMultiAgentPipeline(
   const workspaceRoot = input.workspaceRoot;
   const config = applyMultiAgentOverrides(loadMultiAgentConfig(workspaceRoot), {
     strictReview: input.strictReview ?? cp.strictReview,
+    message: cp.userMessage,
   });
   const model = (input.model || cp.model) as ModelSelectionId;
   const runId = cp.runId;

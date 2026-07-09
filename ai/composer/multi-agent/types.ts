@@ -83,6 +83,10 @@ export interface FullDeliveryConfig {
   maxComposeWaves: number;
   autoContinue: boolean;
   uiCheckpoint: boolean;
+  /** Minimum fenced files per compose wave before stopping (scaled by task count). */
+  minFencesPerTask: number;
+  /** Minimum absolute fenced files before a wave can end early. */
+  minFencesAbsolute: number;
 }
 
 export const DEFAULT_FULL_DELIVERY_CONFIG: FullDeliveryConfig = {
@@ -90,6 +94,8 @@ export const DEFAULT_FULL_DELIVERY_CONFIG: FullDeliveryConfig = {
   maxComposeWaves: 3,
   autoContinue: true,
   uiCheckpoint: true,
+  minFencesPerTask: 2,
+  minFencesAbsolute: 4,
 };
 
 export interface PipelineContext {
@@ -184,6 +190,10 @@ export interface MultiAgentConfig {
   skipContextLlm: boolean;
   /** Skip merge + supervisor LLM stages — go to composer after sub-agents */
   fastPipeline: boolean;
+  /** Retry decomposition when parser collapses to single task but raw hints multiple modules */
+  antiCollapseDecomposition: boolean;
+  /** Max output tokens for decomposition stage */
+  decompositionMaxTokens: number;
   /** Post-compose Git/MCP/terminal probes */
   enableDevToolsIntegration: boolean;
   reasoningLayer: ReasoningLayerConfig;
@@ -198,6 +208,8 @@ export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
   persistArtifacts: true,
   skipContextLlm: true,
   fastPipeline: true,
+  antiCollapseDecomposition: true,
+  decompositionMaxTokens: 8192,
   enableDevToolsIntegration: true,
   reasoningLayer: { ...DEFAULT_REASONING_LAYER_CONFIG },
   fullDelivery: { ...DEFAULT_FULL_DELIVERY_CONFIG },

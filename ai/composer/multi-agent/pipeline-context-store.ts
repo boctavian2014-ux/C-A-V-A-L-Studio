@@ -233,7 +233,17 @@ export class PipelineContextStore {
     if (stage === 'compose') {
       sections.push(`## Merged Architecture\n${this.mergeRaw.slice(0, 12000)}`);
       if (this.decompositionRaw) {
-        sections.push(`## Original Decomposition\n${this.decompositionRaw.slice(0, 6000)}`);
+        sections.push(`## Original Decomposition\n${this.decompositionRaw.slice(0, 8000)}`);
+      }
+      const subParts: string[] = [];
+      for (const t of this.tasks) {
+        const out = this.subAgentOutputs.get(t.id);
+        if (out) {
+          subParts.push(`### Sub-Agent: ${t.module} (${t.id})\n${out.slice(0, 10_000)}`);
+        }
+      }
+      if (subParts.length) {
+        sections.push(`## Sub-Agent Outputs (implement ALL)\n${subParts.join('\n\n')}`);
       }
       return sections.join('\n\n');
     }

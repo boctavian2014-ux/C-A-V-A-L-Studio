@@ -613,7 +613,9 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         activeFile: activeTab?.path,
         openFiles: tabs.map((t) => t.path),
       });
-    }, DEFAULT_ZERO_LATENCY_CONFIG.typingDebounceMs);
+    }, input.length > 500
+      ? DEFAULT_ZERO_LATENCY_CONFIG.typingDebounceMs * 2
+      : DEFAULT_ZERO_LATENCY_CONFIG.typingDebounceMs);
     return () => {
       if (prepareTimer.current) clearTimeout(prepareTimer.current);
     };

@@ -8,16 +8,19 @@ const RELATED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.py']
 const STOP_WORDS = new Set([
   'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into', 'your', 'please',
   'este', 'sunt', 'pentru', 'care', 'face', 'unui', 'unei', 'implement', 'implementare',
+  'exact', 'asa', 'astfel', 'prin', 'unde', 'cand', 'sau', 'dar', 'avem', 'face',
 ]);
 
 function keywordsFromObjective(objective?: string): string[] {
   if (!objective?.trim()) return [];
   return objective
     .toLowerCase()
-    .split(/[^a-z0-9_./-]+/i)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9_./\u0103\u00e2\u00ee\u0219\u021b-]+/i)
     .map((w) => w.trim())
     .filter((w) => w.length > 2 && !STOP_WORDS.has(w))
-    .slice(0, 12);
+    .slice(0, 16);
 }
 
 function dependencyNeighbors(activeFile?: string): string[] {
