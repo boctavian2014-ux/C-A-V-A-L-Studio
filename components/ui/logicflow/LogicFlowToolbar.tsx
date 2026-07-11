@@ -34,7 +34,7 @@ export const LogicFlowToolbar = () => {
   };
 
   return (
-    <div className="absolute top-4 left-4 flex flex-wrap gap-2 bg-[var(--pt-surface-3)] border border-[var(--pt-border)] px-3 py-2 rounded-lg shadow-[var(--pt-shadow-cyan)] z-10 max-w-[90%]">
+    <div className="absolute top-4 left-4 flex flex-wrap gap-2 bg-[var(--pt-surface-3)] border border-[var(--pt-border)] px-3 py-2 rounded-lg shadow-[var(--pt-shadow-cyan)] z-20 max-w-[90%]">
       <Button
         variant={liveFlowEnabled ? "primary" : "secondary"}
         size="sm"

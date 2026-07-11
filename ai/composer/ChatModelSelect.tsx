@@ -71,12 +71,12 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
                 width: '100%',
                 minWidth: 0,
                 maxWidth: 200,
-                padding: '4px 22px 4px 8px',
-                borderRadius: 6,
+                padding: '6px 28px 6px 12px',
+                borderRadius: 8,
                 border: '1px solid var(--caval-border)',
                 background: 'var(--caval-bg)',
                 color: 'var(--caval-text)',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 500,
                 cursor: loading ? 'wait' : 'pointer',
                 appearance: 'none',
@@ -126,8 +126,8 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
             onClick={() => setShowKeys(true)}
             title="API Keys (BYOK)"
             style={{
-              width: 22,
-              height: 22,
+              width: 24,
+              height: 24,
               borderRadius: 4,
               border: '1px solid var(--caval-border)',
               background: 'none',

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_MODES,
   getAgentMode,
+  isBuildEngineMode,
   isAgenticPipelineMode,
 } from '../../ai/modes/agent-modes';
 
@@ -10,6 +11,17 @@ describe('agent modes', () => {
     const agentic = AGENT_MODES.find((m) => m.id === 'agentic');
     expect(agentic).toBeDefined();
     expect(agentic?.label).toBe('Agentic');
+  });
+
+  it('includes build mode', () => {
+    const build = AGENT_MODES.find((m) => m.id === 'build');
+    expect(build).toBeDefined();
+    expect(build?.description.toLowerCase()).toContain('autonomous');
+  });
+
+  it('isBuildEngineMode is true only for build', () => {
+    expect(isBuildEngineMode('build')).toBe(true);
+    expect(isBuildEngineMode('code')).toBe(false);
   });
 
   it('isAgenticPipelineMode is true only for agentic', () => {

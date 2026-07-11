@@ -2,12 +2,40 @@ export type MultiAgentStageId =
   | 'memory'
   | 'integrate'
   | 'context'
+  | 'modelOrch'
   | 'orchestrator'
   | 'decompose'
   | 'subagent'
   | 'merge'
   | 'supervisor'
-  | 'compose';
+  | 'compose'
+  | 'userSim'
+  | 'security'
+  | 'performance';
+
+export type ArenaAgentRole =
+  | 'implementer'
+  | 'tester'
+  | 'refactorer'
+  | 'implementer-fix'
+  | 'implementer-perf';
+
+export type ArenaIssueSeverity = 'critical' | 'major' | 'minor';
+
+export interface ArenaIssue {
+  severity: ArenaIssueSeverity;
+  source: string;
+  file?: string;
+  message: string;
+  fix?: string;
+}
+
+export interface ArenaScanSummary {
+  userSim?: string;
+  security?: string;
+  performance?: string;
+  consistency?: string;
+}
 
 export type StageStatus = 'pending' | 'active' | 'done' | 'failed' | 'skipped';
 
@@ -18,6 +46,7 @@ export interface PipelineTask {
   description: string;
   dependencies: string[];
   phase?: 'ui' | 'core';
+  role?: ArenaAgentRole;
 }
 
 export interface SubAgentResult {
@@ -116,6 +145,7 @@ export interface ExecutionPlan {
   runId: string;
   agentOrder: MultiAgentStageId[];
   taskDistributionMap: Record<string, string>;
+  roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
   createdAt: number;
 }
 

@@ -135,7 +135,7 @@ interface CavalStreamChunk {
   toolDetail?: string;
   toolWrittenPath?: string;
   phase?: ChatActivityPhase;
-  multiAgentPhase?: "memory" | "integrate" | "context" | "orchestrator" | "decompose" | "subagent" | "merge" | "supervisor" | "compose";
+  multiAgentPhase?: "memory" | "integrate" | "context" | "modelOrch" | "orchestrator" | "decompose" | "subagent" | "merge" | "supervisor" | "compose" | "userSim" | "security" | "performance";
   status?: "active" | "done";
   label?: string;
   detail?: string;

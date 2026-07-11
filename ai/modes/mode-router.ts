@@ -3,7 +3,7 @@
  * Agentic mode bypasses this module entirely.
  */
 import type { AgentModeId } from './agent-modes';
-import { isAgenticPipelineMode } from './agent-modes';
+import { isAgenticPipelineMode, isBuildEngineMode } from './agent-modes';
 import {
   detectIntent,
   isDirectChatMode,
@@ -15,6 +15,9 @@ import {
   CAVALLO_GLOBAL_RULES,
 } from '../prompts/cavallo-enterprise-modes';
 import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
+import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
+
+const BUILD_MODE_EXPLICIT = /\b(?:BUILD\s+MODE|mod\s+build)\b/i;
 
 export interface CavalloModesConfig {
   autoModeSwitch?: boolean;
@@ -50,6 +53,19 @@ export function resolveEffectiveMode(
 
   if (isAgenticPipelineMode(normalized)) {
     return { mode: 'agentic', switched: false };
+  }
+
+  if (options?.explicitTriggers !== false && BUILD_MODE_EXPLICIT.test(message)) {
+    return {
+      mode: 'build',
+      switched: normalized !== 'build',
+      switchReason: 'explicit build trigger',
+      fromMode: normalized !== 'build' ? normalized : undefined,
+    };
+  }
+
+  if (isBuildEngineMode(normalized)) {
+    return { mode: 'build', switched: false };
   }
 
   const autoSwitch = options?.autoSwitch !== false;
@@ -89,6 +105,17 @@ export function getCavalloSystemPrompt(
     return '';
   }
 
+  if (isBuildEngineMode(normalized)) {
+    let prompt = CAVALO_BUILD_ENGINE_PROMPT;
+    if (opts?.includeScaffold !== false) {
+      prompt += `\n\n${SCAFFOLD_EMISSION_RULE}`;
+    }
+    if (opts?.workspaceRoot?.trim()) {
+      prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
+    }
+    return prompt;
+  }
+
   if (!isDirectChatMode(normalized)) {
     return getCavalloEnterprisePrompt('ask');
   }
@@ -110,12 +137,14 @@ export function getCavalloSystemPrompt(
   return prompt;
 }
 
-export function getModeLabel(mode: DirectChatModeId): string {
+export function getModeLabel(mode: DirectChatModeId | 'build'): string {
   switch (mode) {
     case 'plan':
       return 'Plan';
     case 'code':
       return 'Code';
+    case 'build':
+      return 'Build';
     case 'ask':
       return 'Ask';
     case 'debug':

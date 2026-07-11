@@ -35,7 +35,7 @@ describe('cavalo-dev-assistant prompt', () => {
   });
 
   it('is wired into Code Arena and multi-model chat prompts', () => {
-    expect(CODING_ARENA_SYSTEM_PROMPT).toContain('CAVALO Studio');
+    expect(CODING_ARENA_SYSTEM_PROMPT).toContain('CAVALO CODING ARENA');
     expect(buildMultiModelSystemPrompt({ agentMode: 'ask' })).toContain('Cavalo System AI');
   });
 });

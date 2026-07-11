@@ -34,7 +34,7 @@ export const LogicFlowCanvas = () => {
         className="absolute inset-0"
         style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})`, transformOrigin: "0 0" }}
       >
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ minWidth: 1200, minHeight: 400 }}>
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ minHeight: 400 }}>
           {edges.map((edge) => {
             const fromNode = nodeMap.get(edge.fromId);
             const toNode = nodeMap.get(edge.toId);

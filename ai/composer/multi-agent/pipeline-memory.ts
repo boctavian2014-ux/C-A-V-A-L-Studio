@@ -21,6 +21,20 @@ export interface PipelineMemoryRecord {
   lastUserIntent?: string;
   lastArchitecture?: string;
   preferences: Record<string, string>;
+  lastBuild?: {
+    timestamp: number;
+    files: string[];
+    scanSummary: string;
+  };
+  lastArena?: {
+    timestamp: number;
+    roleCounts: Record<string, number>;
+    files: string[];
+    userSimSummary?: string;
+    securitySummary?: string;
+    performanceSummary?: string;
+    scanSummary: string;
+  };
 }
 
 const MAX_RUNS = 20;
@@ -79,6 +93,9 @@ export class PipelineMemoryEngine {
     if (this.record.lastArchitecture) {
       hints.push(`Previous architecture: ${this.record.lastArchitecture.slice(0, 500)}`);
     }
+    if (this.record.lastBuild) {
+      hints.push(`Last build: ${this.record.lastBuild.scanSummary}`);
+    }
     if (lastRun) {
       hints.push(`Last run (${lastRun.runId}): ${lastRun.taskCount} tasks — ${lastRun.taskModules.join(', ')}`);
     }
@@ -103,6 +120,37 @@ export class PipelineMemoryEngine {
       this.record.lastArchitecture = raw.slice(0, 4000);
     }
     void tasks;
+  }
+
+  recordArenaFinish(input: {
+    files: string[];
+    roleCounts: Record<string, number>;
+    summaries: { userSim?: string; security?: string; performance?: string; scan: string };
+  }): void {
+    this.record.lastArena = {
+      timestamp: Date.now(),
+      roleCounts: input.roleCounts,
+      files: input.files.slice(0, 50),
+      userSimSummary: input.summaries.userSim,
+      securitySummary: input.summaries.security,
+      performanceSummary: input.summaries.performance,
+      scanSummary: input.summaries.scan,
+    };
+  }
+
+  recordBuildFinish(input: { files: string[]; scanSummary: string }): void {
+    this.record.lastBuild = {
+      timestamp: Date.now(),
+      files: input.files.slice(0, 50),
+      scanSummary: input.scanSummary.slice(0, 500),
+    };
+  }
+
+  getBuildHint(): string | undefined {
+    const last = this.record.lastBuild;
+    if (!last) return undefined;
+    const files = last.files.slice(0, 5).join(', ');
+    return `Last build: ${last.scanSummary}. Files: ${files}${last.files.length > 5 ? '…' : ''}`;
   }
 
   recordRun(input: {

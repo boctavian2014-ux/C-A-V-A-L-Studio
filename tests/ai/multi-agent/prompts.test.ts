@@ -18,11 +18,11 @@ describe('multi-agent prompts', () => {
     expect(MEMORY_ENGINE_AGENT_PROMPT).toContain('Memory Engine');
   });
 
-  it('exports all eight core agent prompts', () => {
-    expect(ORCHESTRATOR_AGENT_PROMPT).toContain('Orchestrator');
+  it('exports all core arena agent prompts', () => {
+    expect(ORCHESTRATOR_AGENT_PROMPT).toContain('COORDINATOR');
     expect(PIPELINE_CONTEXT_AGENT_PROMPT).toContain('Context Engine');
     expect(RUNTIME_PIPELINE_PROMPT).toContain('Runtime Pipeline');
-    expect(DECOMPOSITION_AGENT_PROMPT).toContain('Decomposition Agent');
+    expect(DECOMPOSITION_AGENT_PROMPT).toContain('ARCHITECT');
     expect(SUB_AGENT_PROMPT).toContain('Sub-Agent');
     expect(MERGE_AGENT_PROMPT).toContain('Merge Agent');
     expect(SUPERVISOR_AGENT_PROMPT).toContain('Supervisor Agent');
@@ -35,6 +35,6 @@ describe('multi-agent prompts', () => {
   });
 
   it('decomposition forbids code', () => {
-    expect(DECOMPOSITION_AGENT_PROMPT).toContain('Do NOT generate code');
+    expect(DECOMPOSITION_AGENT_PROMPT).toMatch(/NEVER write implementation code/i);
   });
 });

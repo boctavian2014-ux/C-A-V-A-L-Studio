@@ -94,12 +94,16 @@ export type MultiAgentPhase =
   | "memory"
   | "integrate"
   | "context"
+  | "modelOrch"
   | "orchestrator"
   | "decompose"
   | "subagent"
   | "merge"
   | "supervisor"
-  | "compose";
+  | "compose"
+  | "userSim"
+  | "security"
+  | "performance";
 
 export interface CavalStreamChunk {
   streamId: string;

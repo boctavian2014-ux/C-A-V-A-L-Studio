@@ -18,3 +18,10 @@ export * from "./types";
 export { BuildChecker } from "./validation/build-checker";
 export { SyntaxChecker } from "./validation/syntax-checker";
 export { TestRunner } from "./validation/test-runner";
+export {
+  runCavaloConsistencyScan,
+  collectImportIssues,
+  type ConsistencyScanResult,
+  type ImportIssue,
+  type WorkspaceVerifySnapshot,
+} from "./consistency-engine";

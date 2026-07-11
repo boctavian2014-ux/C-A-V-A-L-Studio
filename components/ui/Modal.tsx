@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { zIndex } from "../../themes/tokens/z-index";
 
 export interface ModalProps {
   open: boolean;
@@ -21,7 +22,8 @@ export const Modal = ({ open, onClose, title, children }: ModalProps) => {
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      style={{ zIndex: zIndex.modalOverlay }}
       role="presentation"
       onMouseDown={onClose}
     >
@@ -30,6 +32,7 @@ export const Modal = ({ open, onClose, title, children }: ModalProps) => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="pt-modal-title"
+        style={{ zIndex: zIndex.modal }}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">

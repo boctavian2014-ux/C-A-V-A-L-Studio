@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { CavalThemeProvider } from '../../themes/theme-provider';
 import { FileTree } from './components/sidebar/FileTree';
 import { TabBar } from './components/editor/TabBar';
@@ -27,11 +27,67 @@ import {
   IconSparkle, IconSettings,
 } from './components/brand/CavaloIcons';
 
+type ActivityTab = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
+
+// ──────────────────────────────────────────────
+//  Layout squeeze helpers
+// ──────────────────────────────────────────────
+
+const ENGINEERING_PANEL_WIDTH = 360;
+const AI_PANEL_DEFAULT_WIDTH = 340;
+const NARROW_WINDOW_THRESHOLD = 1100;
+const MIN_EDITOR_WIDTH = 300;
+
+function readAiPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem('caval-ai-panel-width');
+    const n = raw ? Number(raw) : AI_PANEL_DEFAULT_WIDTH;
+    if (!Number.isFinite(n)) return AI_PANEL_DEFAULT_WIDTH;
+    return Math.max(260, Math.min(600, n));
+  } catch {
+    return AI_PANEL_DEFAULT_WIDTH;
+  }
+}
+
+function sidebarWidthFor(activity: ActivityTab, open: boolean): number {
+  if (!open) return 0;
+  switch (activity) {
+    case 'extensions':
+      return 320;
+    case 'settings':
+      return 520;
+    default:
+      return 280;
+  }
+}
+
+const squeezeBtnStyle: React.CSSProperties = {
+  padding: '3px 8px', borderRadius: 4, border: '1px solid var(--caval-border)',
+  background: 'var(--caval-surface-raised)', color: 'var(--caval-accent)',
+  fontSize: 10, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+};
+
+function EditorSqueezeBanner({ onCollapseSidebar, onCloseAi }: { onCollapseSidebar: () => void; onCloseAi: () => void }) {
+  return (
+    <div style={{
+      position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 20, maxWidth: '90%',
+      padding: '6px 12px', borderRadius: 6,
+      background: 'rgba(0,224,255,0.1)', border: '1px solid var(--caval-accent)',
+      fontSize: 11, color: 'var(--caval-text)', lineHeight: 1.4,
+      display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+    }}>
+      <span>Editor îngust — închide un panou lateral pentru mai mult spațiu.</span>
+      <button type="button" onClick={onCollapseSidebar} style={squeezeBtnStyle}>Închide sidebar</button>
+      <button type="button" onClick={onCloseAi} style={squeezeBtnStyle}>Închide AI</button>
+    </div>
+  );
+}
+
 // ──────────────────────────────────────────────
 //  Activity Bar
 // ──────────────────────────────────────────────
-
-type ActivityTab = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
 
 /** 3D PNG icons include a rounded black tile — render larger than line SVG icons. */
 const ACTIVITY_BAR_WIDTH = 48;
@@ -277,7 +333,7 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
   return (
     <div style={{
       height: 22,
-      background: '#111214',
+      background: 'var(--caval-surface)',
       borderTop: '1px solid var(--caval-border)',
       display: 'flex', alignItems: 'center',
       padding: '0 10px', gap: 12,
@@ -343,6 +399,8 @@ export function WorkbenchRoot() {
   const [referenceHits, setReferenceHits] = React.useState<ReferenceHit[]>([]);
   const [referencesLoading, setReferencesLoading] = React.useState(false);
   const [referenceSymbol, setReferenceSymbol] = React.useState('');
+  const [editorSqueezed, setEditorSqueezed] = useState(false);
+  const prevWindowWidthRef = useRef(window.innerWidth);
   const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, tabs, projectPath, activeSymbol } = useEditorStore();
   const { runWorkspaceVerifyAndReport, runBuildAndReport } = useAIStore();
   const gitChangesCount = useGitStore((s) => s.files.length);
@@ -428,6 +486,27 @@ export function WorkbenchRoot() {
     window.addEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
     return () => window.removeEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
   }, []);
+
+  useEffect(() => {
+    const updateLayout = () => {
+      const w = window.innerWidth;
+      if (prevWindowWidthRef.current >= NARROW_WINDOW_THRESHOLD && w < NARROW_WINDOW_THRESHOLD && sidebarOpen) {
+        setSidebarOpen(false);
+      }
+      prevWindowWidthRef.current = w;
+
+      const reserved =
+        ACTIVITY_BAR_WIDTH +
+        sidebarWidthFor(activeActivity, sidebarOpen) +
+        (engineeringOpen ? ENGINEERING_PANEL_WIDTH : 0) +
+        (aiPanelOpen ? readAiPanelWidth() : 0);
+      setEditorSqueezed(w - reserved < MIN_EDITOR_WIDTH);
+    };
+
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    return () => window.removeEventListener('resize', updateLayout);
+  }, [sidebarOpen, activeActivity, engineeringOpen, aiPanelOpen]);
 
   const handleActivityChange = useCallback((tab: ActivityTab) => {
     if (tab === activeActivity && sidebarOpen) {
@@ -814,7 +893,13 @@ export function WorkbenchRoot() {
           )}
 
           {/* Editor + Terminal */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, position: 'relative' }}>
+            {editorSqueezed && (
+              <EditorSqueezeBanner
+                onCollapseSidebar={() => setSidebarOpen(false)}
+                onCloseAi={() => setAiPanelOpen(false)}
+              />
+            )}
             <MonacoEditor />
             <DebugPanel />
             <TerminalPanel />

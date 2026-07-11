@@ -43,7 +43,16 @@ export function getModelCodingGuide(
       canCode: false,
       path: 'fences',
       requirement: 'Mod Plan — doar planificare',
-      hint: 'Pentru fișiere: Code sau Agentic. Poți adăuga SCAFFOLD în prompt.',
+      hint: 'Pentru fișiere: Code, Build sau Agentic. Poți adăuga SCAFFOLD în prompt.',
+    };
+  }
+
+  if (agentMode === 'build') {
+    return {
+      canCode: true,
+      path: 'fences',
+      requirement: 'Build Engine — folder proiect deschis',
+      hint: 'Scriere automată în workspace + consistency scan. Fără cod în chat.',
     };
   }
 
@@ -104,5 +113,5 @@ export function getModelCodingGuide(
 }
 
 export function modeSupportsFileApply(agentMode: string): boolean {
-  return agentMode === 'code' || agentMode === 'agentic' || agentMode === 'debug';
+  return agentMode === 'code' || agentMode === 'build' || agentMode === 'agentic' || agentMode === 'debug';
 }

@@ -21,12 +21,16 @@ export class FullIntegrationAgent {
       'memory',
       'integrate',
       'context',
+      'modelOrch',
       'orchestrator',
       'decompose',
       'subagent',
       'merge',
       'supervisor',
       'compose',
+      'userSim',
+      'security',
+      'performance',
       'integrate',
     ];
 

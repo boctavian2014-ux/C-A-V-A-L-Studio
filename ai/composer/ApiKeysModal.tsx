@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { zIndex } from '../../themes/tokens/z-index';
 import { createPortal } from 'react-dom';
 import { useAIStore } from './ai-store';
 import type { ApiKeys } from '../multi-model/provider';
@@ -70,7 +71,7 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
+        zIndex: zIndex.modalOverlay,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

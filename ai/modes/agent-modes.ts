@@ -6,7 +6,7 @@ import type { RoutingIntent } from "../types";
 import type { ModelSelectionId } from "../models/model-catalog";
 import type { CavalloModesConfig } from "./mode-router";
 
-export type AgentModeId = "ask" | "code" | "agentic" | "plan" | "debug";
+export type AgentModeId = "ask" | "code" | "build" | "agentic" | "plan" | "debug";
 
 export interface AgentMode {
   id: AgentModeId;
@@ -43,6 +43,14 @@ export const AGENT_MODES: AgentMode[] = [
     description: "Implementare cod — direct, fără pipeline multi-agent",
   },
   {
+    id: "build",
+    label: "Build",
+    shortLabel: "Build",
+    intent: "kilocode",
+    defaultModel: "caval-auto/balanced",
+    description: "Autonomous Build Engine — scrie direct în workspace, fără cod în chat",
+  },
+  {
     id: "ask",
     label: "Ask",
     shortLabel: "Ask",
@@ -68,6 +76,11 @@ export function getAgentMode(id: AgentModeId | string): AgentMode {
 /** Multi-agent pipeline + full delivery — only in Agentic mode. */
 export function isAgenticPipelineMode(mode: string | undefined): boolean {
   return mode === "agentic";
+}
+
+/** Autonomous Build Engine — file-first, auto-apply, consistency scan. */
+export function isBuildEngineMode(mode: string | undefined): boolean {
+  return mode === "build";
 }
 
 export interface CavalConfig {
@@ -98,6 +111,7 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
     perMode: {
       ask: "caval-auto/balanced",
       code: "caval-auto/balanced",
+      build: "caval-auto/balanced",
       agentic: "caval-auto/balanced",
       plan: "caval-auto/frontier",
       debug: "caval-auto/balanced",

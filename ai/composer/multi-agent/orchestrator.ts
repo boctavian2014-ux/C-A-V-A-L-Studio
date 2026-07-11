@@ -1,5 +1,6 @@
 import { getAutoBalancedModelCandidates } from '../../models/auto-router';
 import type { ExecutionPlan, PipelineTask } from './types';
+import { applyRoleModelsToPlan, buildArenaModelPlan } from './arena-model-orchestrator';
 
 export class ModelRotator {
   private candidates: string[] = [];
@@ -44,15 +45,31 @@ export function planExecution(
       'memory',
       'integrate',
       'context',
+      'modelOrch',
       'orchestrator',
       'decompose',
       'subagent',
       'merge',
       'supervisor',
       'compose',
+      'userSim',
+      'security',
+      'performance',
       'integrate',
     ],
     taskDistributionMap,
+    roleModelMap: buildArenaModelPlan(rotator.next(), rotator).roleModelMap,
     createdAt: Date.now(),
   };
+}
+
+export function planExecutionWithRoles(
+  runId: string,
+  tasks: PipelineTask[],
+  rotator: ModelRotator,
+  primaryModel: string
+): ExecutionPlan {
+  const base = planExecution(runId, tasks, rotator);
+  const arenaPlan = buildArenaModelPlan(primaryModel as import('../../models/model-catalog').ModelSelectionId, rotator);
+  return applyRoleModelsToPlan(base, tasks, arenaPlan.roleModelMap, rotator);
 }

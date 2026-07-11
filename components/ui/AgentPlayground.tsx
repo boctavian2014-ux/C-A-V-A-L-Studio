@@ -56,15 +56,15 @@ export const AgentPlayground = () => (
         <StartButton />
       </header>
 
-      <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-        <div className="flex-1 min-h-[140px] overflow-hidden flex flex-col rounded-md border border-[var(--pt-border)] bg-[var(--pt-surface-3)] p-2">
+      <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-auto">
+        <div className="flex-1 min-h-[140px] overflow-auto flex flex-col rounded-md border border-[var(--pt-border)] bg-[var(--pt-surface-3)] p-2">
           <h4 className="text-sm font-semibold text-[var(--pt-cyan)] mb-2">AI Debug Panel</h4>
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-auto">
             <AIDebugPanel />
           </div>
         </div>
 
-        <div className="flex-1 min-h-[140px] overflow-hidden flex flex-col rounded-md border border-[var(--pt-border)] bg-[var(--pt-surface-3)] p-2">
+        <div className="flex-1 min-h-[140px] overflow-auto flex flex-col rounded-md border border-[var(--pt-border)] bg-[var(--pt-surface-3)] p-2">
           <SandboxRunnerPanel />
         </div>
       </div>

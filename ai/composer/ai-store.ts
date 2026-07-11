@@ -8,7 +8,7 @@ import {
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
-import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { resolveEffectiveMode } from '../modes/mode-router';
 import { normalizeAgentModeId } from '../modes/intent-detector';
 import {
@@ -21,6 +21,8 @@ import {
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { isScaffoldContinueRequest } from '../prompts/scaffold-emission-rule';
+import { isBuildContinueRequest, buildScaffoldContinueMessage } from '../prompts/build-continue';
+import { isArenaContinueRequest } from '../prompts/arena-continue';
 import {
   buildDeliveryContinueMessage,
   isDeliveryContinueRequest,
@@ -68,7 +70,9 @@ import {
 } from './fashion-matching-seed';
 import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
 import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/manifest';
-import { stripArenaChatNoise, formatArenaReasoning } from './chat-display';
+import { stripArenaChatNoise, formatArenaReasoning, summarizeForChatPanel, formatChatPanelSummary } from './chat-display';
+import { runCavaloConsistencyScan } from './consistency-engine';
+import { loadBuildMemoryRecord, persistLastBuild, buildMemoryHint } from './build-memory-bridge';
 import {
   buildEarlyArenaMessage,
   buildFinalRecap,
@@ -120,6 +124,7 @@ export interface DetectedDiff {
   language: string;
   applied: boolean;
   rejected?: boolean;
+  autoApplied?: boolean;
   /** Snapshot before apply — used for rollback */
   previousContent?: string;
 }
@@ -256,6 +261,7 @@ interface CavalWindow {
     fs?: {
       pickFiles?: () => Promise<string[] | null>;
       readFile?: (filePath: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
+      writeFile?: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
     };
   };
 }
@@ -428,6 +434,33 @@ function detectDiff(content: string, activeTabPath: string | null): DetectedDiff
   };
 }
 
+async function applyDiffToWorkspace(diff: DetectedDiff): Promise<{ ok: boolean; filePath?: string }> {
+  const { tabs, updateTabContent, openFile } = useEditorStore.getState();
+  let tab = tabs.find((t) => t.path === diff.filePath);
+  if (!tab) {
+    await openFile(diff.filePath);
+    tab = useEditorStore.getState().tabs.find((t) => t.path === diff.filePath);
+  }
+  if (!tab) return { ok: false };
+
+  const previousContent = tab.content;
+  const newContent = applyUnifiedDiff(tab.content, diff.patch);
+  updateTabContent(tab.id, newContent);
+
+  const writeResult = await window.caval?.fs?.writeFile?.(tab.path, newContent);
+  if (writeResult && !writeResult.ok) {
+    console.error('[ai-store] applyDiffToWorkspace write failed:', writeResult.error);
+    return { ok: false };
+  }
+  if (writeResult?.ok) {
+    useEditorStore.setState((s) => ({
+      tabs: s.tabs.map((t) => (t.id === tab!.id ? { ...t, isDirty: false } : t)),
+    }));
+  }
+
+  return { ok: true, filePath: diff.filePath };
+}
+
 function attachmentName(filePath: string): string {
   const parts = filePath.replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || filePath;
@@ -466,6 +499,8 @@ let activeStreamId: string | null = null;
 let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
 let deliveryWaveIndex = 0;
+let buildRepairWave = 0;
+const MAX_BUILD_REPAIR_WAVES = 2;
 let resumeAfterUiPrefs: { runId: string; uiPreferences: string } | null = null;
 
 const initialThread = createThread();
@@ -683,8 +718,14 @@ export const useAIStore = create<AIStore>()(
       },
 
       sendMessage: async (userText) => {
-        if (!isDeliveryContinueRequest(userText) && !isScaffoldContinueRequest(userText)) {
+        if (
+          !isDeliveryContinueRequest(userText) &&
+          !isScaffoldContinueRequest(userText) &&
+          !isBuildContinueRequest(userText) &&
+          !isArenaContinueRequest(userText)
+        ) {
           deliveryWaveIndex = 0;
+          buildRepairWave = 0;
         }
         set({ deliveryPause: null });
 
@@ -964,10 +1005,11 @@ export const useAIStore = create<AIStore>()(
           }
 
           const diff = detectDiff(finalContent, tabPath ?? null);
+          const buildMode = isBuildEngineMode(agentMode);
           updateAssistant({
             content: finalContent,
             isStreaming: false,
-            diff,
+            diff: buildMode && diff ? { ...diff, autoApplied: true } : diff,
             reasoningExpanded: false,
             ...extra,
           });
@@ -975,7 +1017,9 @@ export const useAIStore = create<AIStore>()(
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
-          if (!appliesScaffold || !projectPath || diff || extra?.error) return;
+          const skipScaffold = !appliesScaffold || !projectPath || extra?.error;
+          const blockOnDiff = diff && !buildMode;
+          if (skipScaffold || blockOnDiff) return;
 
           void (async () => {
             if (isSessionStale()) {
@@ -985,6 +1029,19 @@ export const useAIStore = create<AIStore>()(
             let writtenFiles = fashionSeeded
               ? getFashionMatchingScaffoldFiles().map((f) => f.path)
               : [...new Set([...toolWrittenPaths, ...pipelineWrittenFiles])];
+
+            if (buildMode && diff) {
+              const applied = await applyDiffToWorkspace(diff);
+              if (applied.ok && applied.filePath) {
+                writtenFiles.push(applied.filePath.replace(/\\/g, '/'));
+                patchMessageInThreads(set, assistantMsgId, (m) =>
+                  m.diff
+                    ? { ...m, diff: { ...m.diff, applied: true, autoApplied: true } }
+                    : m
+                );
+              }
+            }
+
             const parsed = parseScaffoldFiles(parseSource);
             if (parsed.length > 0) {
               writtenFiles = [
@@ -1042,6 +1099,54 @@ export const useAIStore = create<AIStore>()(
             useEditorStore.getState().closeAiPreview();
             openWrittenFile(writtenFiles[writtenFiles.length - 1]!);
 
+            if (buildMode) {
+              const scan = await runCavaloConsistencyScan({
+                projectPath,
+                writtenFiles,
+                readFileContent: async (abs) => {
+                  const res = await window.caval?.fs?.readFile?.(abs);
+                  return res?.ok && res.content != null ? res.content : null;
+                },
+                workspaceVerify: window.caval?.workspaceVerify
+                  ? (root) => window.caval!.workspaceVerify!(root)
+                  : undefined,
+              });
+
+              const statusText = formatChatPanelSummary(summarizeForChatPanel(finalContent)) || scan.summary;
+              const recapPatch: Partial<ChatMessage> = {
+                writtenFiles,
+                content: scan.ok ? statusText : `${statusText}\n${scan.summary}`,
+              };
+              if (!scan.ok) {
+                recapPatch.error = scan.summary;
+              }
+              updateAssistant(recapPatch);
+
+              if (scan.ok && caval?.fs?.readFile && caval?.fs?.writeFile) {
+                await persistLastBuild(
+                  projectPath,
+                  { files: writtenFiles, scanSummary: scan.summary },
+                  {
+                    readFile: (p) => caval.fs!.readFile!(p),
+                    writeFile: (p, content) => caval.fs!.writeFile!(p, content),
+                  }
+                );
+              }
+
+              if (
+                !scan.ok &&
+                buildRepairWave < MAX_BUILD_REPAIR_WAVES &&
+                !isSessionStale()
+              ) {
+                buildRepairWave += 1;
+                updateAssistant({
+                  content: `Consistency repair (${buildRepairWave}/${MAX_BUILD_REPAIR_WAVES})…`,
+                });
+                void get().sendMessage(buildScaffoldContinueMessage(scan));
+              }
+              return;
+            }
+
             let devToolsForRecap = capturedRecapMeta?.devTools;
             if (!devToolsForRecap?.verify?.ran && window.caval?.workspaceVerify) {
               const verifyRes = await window.caval.workspaceVerify(projectPath);
@@ -1082,7 +1187,7 @@ export const useAIStore = create<AIStore>()(
           !fashionSeeded &&
           !isDeliveryContinueRequest(userText) &&
           !isScaffoldContinueRequest(userText) &&
-          (agentMode === 'code' || agentMode === 'debug' || isAgenticPipelineMode(agentMode))
+          (agentMode === 'code' || agentMode === 'build' || agentMode === 'debug' || isAgenticPipelineMode(agentMode))
         ) {
           const readiness = await checkModelReadiness(selectedModel, get().apiKeys);
           if (!readiness.ready) {
@@ -1427,6 +1532,14 @@ export const useAIStore = create<AIStore>()(
         const editorSelection = useEditorStore.getState().editorSelection;
         const selectionText = editorSelection?.text?.trim() || undefined;
 
+        let buildMemoryHintText: string | undefined;
+        if (isBuildEngineMode(agentMode) && editorState.projectPath && caval?.fs?.readFile) {
+          const mem = await loadBuildMemoryRecord(editorState.projectPath, (p) =>
+            caval.fs!.readFile!(p)
+          );
+          buildMemoryHintText = buildMemoryHint(mem);
+        }
+
         const contextMessages: AIMessage[] = buildContextMessages(
           apiPrompt,
           messages.map((m) => ({ role: m.role, content: m.content })),
@@ -1442,6 +1555,7 @@ export const useAIStore = create<AIStore>()(
             mentionFiles,
             attachments: attachmentsSnapshot,
             agentMode,
+            buildMemoryHint: buildMemoryHintText,
           }
         );
 
@@ -1542,32 +1656,21 @@ export const useAIStore = create<AIStore>()(
       applyDiff: async (messageId) => {
         const msg = get().messages.find((m) => m.id === messageId);
         if (!msg?.diff || msg.diff.applied || msg.diff.rejected) return;
-        const { tabs, updateTabContent, openFile } = useEditorStore.getState();
-        let tab = tabs.find((t) => t.path === msg.diff!.filePath);
-        if (!tab) {
-          await openFile(msg.diff.filePath);
-          tab = useEditorStore.getState().tabs.find((t) => t.path === msg.diff!.filePath);
-        }
-        if (!tab) return;
-
-        const previousContent = tab.content;
-        const newContent = applyUnifiedDiff(tab.content, msg.diff.patch);
-        updateTabContent(tab.id, newContent);
-
-        const writeResult = await window.caval?.fs?.writeFile?.(tab.path, newContent);
-        if (writeResult && !writeResult.ok) {
-          console.error('[ai-store] applyDiff write failed:', writeResult.error);
-          return;
-        }
-        if (writeResult?.ok) {
-          useEditorStore.setState((s) => ({
-            tabs: s.tabs.map((t) => (t.id === tab!.id ? { ...t, isDirty: false } : t)),
-          }));
-        }
+        const tabBefore = useEditorStore.getState().tabs.find((t) => t.path === msg.diff!.filePath);
+        const previousContent = tabBefore?.content;
+        const result = await applyDiffToWorkspace(msg.diff);
+        if (!result.ok) return;
 
         patchMessageInThreads(set, messageId, (m) =>
           m.diff
-            ? { ...m, diff: { ...m.diff, applied: true, previousContent } }
+            ? {
+                ...m,
+                diff: {
+                  ...m.diff,
+                  applied: true,
+                  previousContent: m.diff.previousContent ?? previousContent,
+                },
+              }
             : m
         );
       },

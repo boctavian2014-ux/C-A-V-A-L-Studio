@@ -21,6 +21,11 @@ const PHASE_MESSAGES: Record<MultiAgentPhase, string[]> = {
     'Extrag context relevant din proiect…',
     'Pregăt terenul pentru agenți…',
   ],
+  modelOrch: [
+    'Orchestrez modelele AI per agent…',
+    'Selectez modelul optim pentru fiecare task…',
+    'Construiesc pipeline multi-model…',
+  ],
   orchestrator: [
     'Planific ordinea agenților…',
     'Distribui task-urile pe modele…',
@@ -48,6 +53,21 @@ const PHASE_MESSAGES: Record<MultiAgentPhase, string[]> = {
     'Scriu codul în editor…',
     'Asamblez proiectul final…',
     'Generez fișiere complete în workspace…',
+  ],
+  userSim: [
+    'Simulez utilizatorul real…',
+    'Verific fluxuri și UX…',
+    'Testez răspunsul aplicației…',
+  ],
+  security: [
+    'Scanez vulnerabilități…',
+    'Verific pattern-uri nesigure…',
+    'Analizez securitatea codului…',
+  ],
+  performance: [
+    'Profilez performanța…',
+    'Identific bottleneck-uri…',
+    'Planific optimizări…',
   ],
 };
 
@@ -87,7 +107,10 @@ export function resolveWaitPhase(
   if (fromSteps) return fromSteps;
   if (!statusLabel) return undefined;
   const lower = statusLabel.toLowerCase();
-  for (const [phase, label] of Object.entries(MULTI_AGENT_LABELS) as [MultiAgentPhase, string][]) {
+  const entries = (Object.entries(MULTI_AGENT_LABELS) as [MultiAgentPhase, string][]).sort(
+    (a, b) => b[1].length - a[1].length
+  );
+  for (const [phase, label] of entries) {
     if (lower.includes(label.toLowerCase())) return phase;
   }
   return undefined;
@@ -109,24 +132,32 @@ const PHASE_GLOW_RGB: Record<MultiAgentPhase, string> = {
   memory: '168, 85, 247',
   integrate: '217, 70, 239',
   context: '59, 130, 246',
+  modelOrch: '139, 92, 246',
   orchestrator: '245, 158, 11',
   decompose: '251, 146, 60',
   subagent: '34, 211, 238',
   merge: '20, 184, 166',
   supervisor: '234, 179, 8',
   compose: '34, 197, 94',
+  userSim: '56, 189, 248',
+  security: '239, 68, 68',
+  performance: '16, 185, 129',
 };
 
 const PHASE_HUE_ROTATE: Record<MultiAgentPhase, number> = {
   memory: -35,
   integrate: -15,
   context: 0,
+  modelOrch: -25,
   orchestrator: 35,
   decompose: 55,
   subagent: 0,
   merge: 25,
   supervisor: 45,
   compose: 85,
+  userSim: 10,
+  security: 60,
+  performance: 40,
 };
 
 /** CSS filter stack for arena horse glow — tints horse + colored shadow per phase. */

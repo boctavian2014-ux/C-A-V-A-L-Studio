@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useLogicFlowStore } from "./LogicFlowStore";
 
 const MINI_WIDTH = 160;
@@ -7,8 +8,16 @@ export const LogicFlowMiniMap = () => {
   const nodes = useLogicFlowStore((state) => state.nodes);
   const activeNodeId = useLogicFlowStore((state) => state.activeNodeId);
   const selectedNodeId = useLogicFlowStore((state) => state.selectedNodeId);
+  const [canvasWide, setCanvasWide] = useState(true);
 
-  if (nodes.length === 0) return null;
+  useEffect(() => {
+    const update = () => setCanvasWide(window.innerWidth >= 400);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  if (nodes.length === 0 || !canvasWide) return null;
 
   const minX = Math.min(...nodes.map((node) => node.x));
   const maxX = Math.max(...nodes.map((node) => node.x));

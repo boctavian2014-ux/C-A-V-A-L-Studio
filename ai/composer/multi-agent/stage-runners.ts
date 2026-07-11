@@ -7,7 +7,11 @@ import {
   PIPELINE_CONTEXT_AGENT_PROMPT,
   SUB_AGENT_PROMPT,
   SUPERVISOR_AGENT_PROMPT,
+  IMPLEMENTER_AGENT_PROMPT,
+  TESTER_AGENT_PROMPT,
+  REFACTORER_AGENT_PROMPT,
 } from '../../prompts/multi-agent';
+import type { ArenaAgentRole } from './types';
 import { SCAFFOLD_EMISSION_RULE } from '../../prompts/scaffold-emission-rule';
 import { FULL_DELIVERY_RULE } from '../../prompts/full-delivery-rule';
 import type { ModelSelectionId } from '../../models/model-catalog';
@@ -37,6 +41,20 @@ export const SCAFFOLD_SYSTEM_ADDON = [
   FULL_DELIVERY_RULE,
   SCAFFOLD_EMISSION_RULE,
 ].join('\n');
+
+function promptForRole(role?: ArenaAgentRole): string {
+  switch (role) {
+    case 'tester':
+      return TESTER_AGENT_PROMPT;
+    case 'refactorer':
+      return REFACTORER_AGENT_PROMPT;
+    case 'implementer-fix':
+    case 'implementer-perf':
+    case 'implementer':
+    default:
+      return IMPLEMENTER_AGENT_PROMPT;
+  }
+}
 
 function wrapUser(content: string): string {
   return `<<USER_MESSAGE>>\n${content}\n<</USER_MESSAGE>>`;
@@ -191,7 +209,8 @@ async function runOneSubAgent(
   rotator: ModelRotator,
   callbacks?: MultiAgentPipelineCallbacks
 ): Promise<SubAgentResult> {
-  const result = await runComplete(modelId as ModelSelectionId, SUB_AGENT_PROMPT, store.buildPromptFor('subagent-task', task), {
+  const system = `${promptForRole(task.role)}\n\n${SCAFFOLD_SYSTEM_ADDON}`;
+  const result = await runComplete(modelId as ModelSelectionId, system, store.buildPromptFor('subagent-task', task), {
     capability: 'code',
     intent: 'kilocode',
     workspaceRoot,
@@ -205,7 +224,7 @@ async function runOneSubAgent(
   }
 
   const retryModel = rotator.next(modelId);
-  const retry = await runComplete(retryModel as ModelSelectionId, SUB_AGENT_PROMPT, store.buildPromptFor('subagent-task', task), {
+  const retry = await runComplete(retryModel as ModelSelectionId, system, store.buildPromptFor('subagent-task', task), {
     capability: 'code',
     intent: 'kilocode',
     workspaceRoot,
@@ -323,12 +342,17 @@ export async function runFinalComposer(
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks,
   isAborted?: () => boolean,
-  opts?: { waveIndex?: number }
+  opts?: { waveIndex?: number; repairMessage?: string }
 ): Promise<{ ok: true; text: string; model: string; provider: string } | { ok: false; error: string }> {
-  emitStage(callbacks, 'compose', 'active', opts?.waveIndex ? `wave ${opts.waveIndex + 1}` : undefined);
+  emitStage(
+    callbacks,
+    'compose',
+    'active',
+    opts?.repairMessage ? 'arena repair' : opts?.waveIndex ? `wave ${opts.waveIndex + 1}` : undefined
+  );
   const system = `${FINAL_COMPOSER_WITH_REASONING}\n${SCAFFOLD_SYSTEM_ADDON}`;
-  let user = store.buildPromptFor('compose');
-  if (opts?.waveIndex && opts.waveIndex > 0) {
+  let user = opts?.repairMessage ?? store.buildPromptFor('compose');
+  if (!opts?.repairMessage && opts?.waveIndex && opts.waveIndex > 0) {
     user += `\n\n## DELIVERY WAVE ${opts.waveIndex + 1}\nComplete ALL missing files from the plan. Emit every remaining file as \`\`\`lang:path\`\`\` fences with full source. Do not repeat explanations.`;
   }
 

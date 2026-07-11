@@ -9,23 +9,31 @@ export type MultiAgentPhase =
   | 'memory'
   | 'integrate'
   | 'context'
+  | 'modelOrch'
   | 'orchestrator'
   | 'decompose'
   | 'subagent'
   | 'merge'
   | 'supervisor'
-  | 'compose';
+  | 'compose'
+  | 'userSim'
+  | 'security'
+  | 'performance';
 
 export const MULTI_AGENT_LABELS: Record<MultiAgentPhase, string> = {
   memory: 'Memory',
   integrate: 'Integrate',
   context: 'Context',
-  orchestrator: 'Orchestrator',
-  decompose: 'Decompose',
-  subagent: 'Sub-Agents',
+  modelOrch: 'Model Orchestrator',
+  orchestrator: 'Coordinator',
+  decompose: 'Architect',
+  subagent: 'Implementer',
   merge: 'Merge',
   supervisor: 'Review',
   compose: 'Compose',
+  userSim: 'User Simulator',
+  security: 'Security',
+  performance: 'Performance',
 };
 
 export function formatMultiAgentStatus(phase: MultiAgentPhase, detail?: string): string {

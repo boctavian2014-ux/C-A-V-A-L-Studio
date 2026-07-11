@@ -5,7 +5,7 @@ import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
-import { getAgentMode, isAgenticPipelineMode } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode } from '../modes/agent-modes';
 import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
@@ -30,11 +30,14 @@ function readStoredPanelWidth(): number {
     return 340;
   }
 }
-const ARENA_INPUT_ROWS = 4;
+const ARENA_INPUT_MIN_ROWS = 4;
+const ARENA_INPUT_MAX_ROWS = 6;
 const ARENA_LINE_HEIGHT = 1.5;
 const ARENA_FONT_SIZE = 13;
-const ARENA_INPUT_HEIGHT =
-  ARENA_INPUT_ROWS * ARENA_FONT_SIZE * ARENA_LINE_HEIGHT + 14;
+const ARENA_INPUT_LINE_PX = ARENA_FONT_SIZE * ARENA_LINE_HEIGHT;
+const ARENA_INPUT_MIN_HEIGHT = ARENA_INPUT_MIN_ROWS * ARENA_INPUT_LINE_PX + 14;
+const ARENA_INPUT_MAX_HEIGHT = ARENA_INPUT_MAX_ROWS * ARENA_INPUT_LINE_PX + 14;
+const PANEL_PAD_X = 12;
 
 // ──────────────────────────────────────────────
 //  Markdown renderer minimal (fără dependențe externe)
@@ -239,6 +242,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   const { modelLabels, agentMode } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
+  const buildMode = isBuildEngineMode(agentMode);
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
   const resolvedLabel = message.resolvedModel
     ? getModelDisplayLabel(message.resolvedModel, modelLabels)
@@ -248,11 +252,15 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     ? resolvedLabel
       ? `Agentic · ${resolvedLabel}`
       : 'Agentic · multi-model'
-    : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
-      ? `${selectionLabel} → ${resolvedLabel}`
-      : resolvedLabel ?? selectionLabel ?? 'Model';
+    : buildMode
+      ? resolvedLabel
+        ? `Build · ${resolvedLabel}`
+        : 'Build · Autonomous Engine'
+      : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
+        ? `${selectionLabel} → ${resolvedLabel}`
+        : resolvedLabel ?? selectionLabel ?? 'Model';
 
-  const displayText = arenaMode
+  const displayText = arenaMode || buildMode
     ? message.reasoningBrief || message.recap
       ? formatArenaReasoning(message.reasoningBrief, message.recap, Boolean(message.isStreaming))
       : formatChatPanelSummary(
@@ -262,7 +270,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     : message.content;
 
   const arenaStatusText =
-    arenaMode && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
+    (arenaMode || buildMode) && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
       ? message.multiAgentStatus
       : displayText;
 
@@ -317,6 +325,25 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               ) : null}
             </>
           )
+        ) : buildMode && !isUser ? (
+          <>
+            <CompactArenaStatus
+              text={
+                displayText ||
+                (message.writtenFiles?.length
+                  ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
+                  : message.isStreaming
+                    ? '⚡ Scriu în editor…'
+                    : '')
+              }
+            />
+            {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming ? (
+              <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--caval-success)' }}>
+                {message.writtenFiles.slice(0, 3).join(', ')}
+                {message.writtenFiles.length > 3 ? '…' : ''}
+              </div>
+            ) : null}
+          </>
         ) : message.isStreaming && message.activitySteps?.length ? (
           <>
             <ChatActivityTimeline
@@ -340,11 +367,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
 
         {/* Diff block dacă există */}
-        {message.diff && !message.isStreaming && (
+        {message.diff && !message.isStreaming && !message.diff.autoApplied && !buildMode && (
           <DiffBlock message={message} />
         )}
 
-        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && (
+        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && !buildMode && (
           <div style={{
             marginTop: 10, padding: '8px 12px', borderRadius: 6,
             background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
@@ -369,12 +396,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 function CompactArenaStatus({ text }: { text: string }) {
   return (
     <div
+      title={text}
       style={{
         fontSize: 12,
         lineHeight: 1.45,
         color: 'var(--caval-text-muted)',
         maxHeight: '5.8em',
         overflow: 'hidden',
+        display: '-webkit-box',
+        WebkitLineClamp: 4,
+        WebkitBoxOrient: 'vertical',
+        textOverflow: 'ellipsis',
       }}
     >
       {text}
@@ -538,6 +570,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   // ── Resize drag ──
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
+  const [textareaHeight, setTextareaHeight] = useState(ARENA_INPUT_MIN_HEIGHT);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartW = useRef(340);
@@ -674,6 +707,10 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     const text = input.trim();
     if ((!text && attachedFiles.length === 0) || isStreaming) return;
     setInput('');
+    setTextareaHeight(ARENA_INPUT_MIN_HEIGHT);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = `${ARENA_INPUT_MIN_HEIGHT}px`;
+    }
     await sendMessage(text || 'Analizează fișierele atașate.');
   }, [input, isStreaming, sendMessage, attachedFiles.length]);
 
@@ -709,8 +746,18 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     }
   };
 
+  const syncTextareaHeight = useCallback((el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    const next = Math.min(
+      ARENA_INPUT_MAX_HEIGHT,
+      Math.max(ARENA_INPUT_MIN_HEIGHT, el.scrollHeight)
+    );
+    setTextareaHeight(next);
+  }, []);
+
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
+    syncTextareaHeight(e.target);
   };
 
   const QUICK_PROMPTS = [
@@ -723,8 +770,12 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   const handleQuickPrompt = useCallback((text: string) => {
     setInput(text);
-    setTimeout(() => textareaRef.current?.focus(), 50);
-  }, []);
+    setTimeout(() => {
+      const el = textareaRef.current;
+      if (el) syncTextareaHeight(el);
+      el?.focus();
+    }, 50);
+  }, [syncTextareaHeight]);
 
   return (
     <div style={{
@@ -744,7 +795,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
       {/* ── Header ─────────────────────────── */}
       <div style={{
-        padding: '8px 14px', borderBottom: `1px solid ${theme.colors.border}`,
+        padding: `8px ${PANEL_PAD_X}px`, borderBottom: `1px solid ${theme.colors.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexShrink: 0,
       }}>
@@ -772,7 +823,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             onClick={clearChat}
             title="Șterge conversația"
             style={{
-              width: 22, height: 22, borderRadius: 4, border: 'none',
+              width: 24, height: 24, borderRadius: 4, border: 'none',
               background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 14,
@@ -788,7 +839,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             onClick={onClose}
             title="Închide AI Panel (Ctrl+Shift+A)"
             style={{
-              width: 22, height: 22, borderRadius: 4, border: 'none',
+              width: 24, height: 24, borderRadius: 4, border: 'none',
               background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 16, lineHeight: 1,
@@ -804,7 +855,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
       {/* Thread tabs */}
       {threads.length > 1 && (
-        <div style={{ display: 'flex', gap: 4, padding: '4px 10px', borderBottom: `1px solid ${theme.colors.border}`, overflowX: 'auto', flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 4, padding: `4px ${PANEL_PAD_X}px`, borderBottom: `1px solid ${theme.colors.border}`, overflowX: 'auto', flexShrink: 0 }}>
           {threads.slice(0, 5).map((t) => (
             <button
               key={t.id}
@@ -836,7 +887,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
       {/* ── Input ──────────────────────────── */}
       <div style={{
-        padding: '10px', borderTop: `1px solid ${theme.colors.border}`,
+        padding: PANEL_PAD_X, borderTop: `1px solid ${theme.colors.border}`,
         flexShrink: 0,
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
@@ -943,7 +994,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         )}
         <div style={{
           background: 'var(--caval-surface)', border: '2px solid var(--caval-border)',
-          borderRadius: 10, overflow: 'hidden',
+          borderRadius: 10,
           transition: 'border-color 0.15s',
         }}
           onFocusCapture={(e) => (e.currentTarget.style.borderColor = 'var(--caval-accent)')}
@@ -956,13 +1007,14 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             onKeyDown={handleKeyDown}
             placeholder={inputPlaceholder}
             disabled={isStreaming}
-            rows={ARENA_INPUT_ROWS}
+            rows={ARENA_INPUT_MIN_ROWS}
             style={{
               width: '100%', border: 'none', background: 'transparent',
               padding: '10px 12px 4px', fontSize: ARENA_FONT_SIZE, color: 'var(--caval-text)',
               fontFamily: "'Inter', sans-serif", resize: 'none',
-              height: ARENA_INPUT_HEIGHT, maxHeight: ARENA_INPUT_HEIGHT,
+              height: textareaHeight, minHeight: ARENA_INPUT_MIN_HEIGHT, maxHeight: ARENA_INPUT_MAX_HEIGHT,
               lineHeight: ARENA_LINE_HEIGHT, outline: 'none', overflow: 'auto',
+              boxSizing: 'border-box',
             }}
           />
           {attachedFiles.length > 0 && (
@@ -1008,168 +1060,198 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             hidden
             onChange={(e) => void handleFileInputChange(e)}
           />
-          <div style={{
-            display: 'flex', alignItems: 'center', padding: '4px 8px 8px',
-            gap: 6,
-          }}>
-            {/* Attach + refresh */}
-            <IconBtn title="Atașează fișier" onClick={() => void handleAttachClick()}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                <path d="M12.5 8.5L7 14a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54L5.5 11.5a1 1 0 01-1.42-1.42L10 4" strokeLinecap="round" />
-              </svg>
-            </IconBtn>
-            <IconBtn
-              title="Refresh modele OpenRouter"
-              onClick={() => void refreshCatalog()}
+
+          {deliveryPause && (
+            <div
+              style={{
+                margin: '0 8px 8px',
+                padding: 10,
+                borderRadius: 8,
+                border: '1px solid var(--caval-accent)',
+                background: 'rgba(0,224,255,0.06)',
+                fontSize: 11,
+              }}
             >
-              <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span>
-            </IconBtn>
-            {onOpenComposer && (
-              <IconBtn title="Deschide Composer (multi-file)" onClick={onOpenComposer}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Design UI — preferințe</div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                <select
+                  value={uiStyle}
+                  onChange={(e) => setUiStyle(e.target.value)}
+                  style={{ fontSize: 11, padding: '2px 6px' }}
+                >
+                  <option value="modern">Modern</option>
+                  <option value="minimal">Minimal</option>
+                </select>
+                <select
+                  value={uiTheme}
+                  onChange={(e) => setUiTheme(e.target.value as 'light' | 'dark')}
+                  style={{ fontSize: 11, padding: '2px 6px' }}
+                >
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </div>
+              <textarea
+                value={uiNotes}
+                onChange={(e) => setUiNotes(e.target.value)}
+                placeholder="Layout, culori, componente… (opțional)"
+                rows={2}
+                style={{
+                  width: '100%',
+                  fontSize: 11,
+                  marginBottom: 6,
+                  resize: 'vertical',
+                  background: 'var(--caval-bg)',
+                  color: 'var(--caval-text)',
+                  border: '1px solid var(--caval-border)',
+                  borderRadius: 4,
+                  padding: 6,
+                  boxSizing: 'border-box',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const prefs = [
+                    `Stil: ${uiStyle}`,
+                    `Temă: ${uiTheme}`,
+                    uiNotes.trim() ? `Note: ${uiNotes.trim()}` : '',
+                  ]
+                    .filter(Boolean)
+                    .join('\n');
+                  void submitUiDeliveryPreferences(prefs);
+                  setUiNotes('');
+                }}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'var(--caval-accent)',
+                  color: '#0E0E0F',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Continuă delivery UI →
+              </button>
+            </div>
+          )}
+
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 6,
+            padding: '4px 8px 8px',
+          }}>
+            {/* Row 1: actions + status + preview */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              flexWrap: 'wrap', minWidth: 0,
+            }}>
+              <IconBtn title="Atașează fișier" onClick={() => void handleAttachClick()}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
-                  <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
+                  <path d="M12.5 8.5L7 14a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54L5.5 11.5a1 1 0 01-1.42-1.42L10 4" strokeLinecap="round" />
                 </svg>
               </IconBtn>
-            )}
-
-            {(isPrepareReady || (prepareInFlight && input.trim())) && !isStreaming && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  fontSize: 10.5,
-                  color: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-text-muted)',
-                  marginLeft: 2,
-                }}
+              <IconBtn
+                title="Refresh modele OpenRouter"
+                onClick={() => void refreshCatalog()}
               >
+                <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span>
+              </IconBtn>
+              {onOpenComposer && (
+                <IconBtn title="Deschide Composer (multi-file)" onClick={onOpenComposer}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                    <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
+                  </svg>
+                </IconBtn>
+              )}
+
+              {(isPrepareReady || (prepareInFlight && input.trim())) && !isStreaming && (
                 <span
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-accent)',
-                    opacity: isPrepareReady ? 1 : 0.7,
-                    animation: isPrepareReady ? 'none' : 'dot-bounce 1.2s ease-in-out infinite',
-                  }}
-                />
-                {isPrepareReady ? 'Pregătit' : 'Pregătesc…'}
-                {preloadHint && (
-                  <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
-                )}
-              </span>
-            )}
-
-            {deliveryPause && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  padding: 10,
-                  borderRadius: 8,
-                  border: '1px solid var(--caval-accent)',
-                  background: 'rgba(0,224,255,0.06)',
-                  fontSize: 11,
-                }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Design UI — preferințe</div>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-                  <select
-                    value={uiStyle}
-                    onChange={(e) => setUiStyle(e.target.value)}
-                    style={{ fontSize: 11, padding: '2px 6px' }}
-                  >
-                    <option value="modern">Modern</option>
-                    <option value="minimal">Minimal</option>
-                  </select>
-                  <select
-                    value={uiTheme}
-                    onChange={(e) => setUiTheme(e.target.value as 'light' | 'dark')}
-                    style={{ fontSize: 11, padding: '2px 6px' }}
-                  >
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                  </select>
-                </div>
-                <textarea
-                  value={uiNotes}
-                  onChange={(e) => setUiNotes(e.target.value)}
-                  placeholder="Layout, culori, componente… (opțional)"
-                  rows={2}
-                  style={{
-                    width: '100%',
-                    fontSize: 11,
-                    marginBottom: 6,
-                    resize: 'vertical',
-                    background: 'var(--caval-bg)',
-                    color: 'var(--caval-text)',
-                    border: '1px solid var(--caval-border)',
-                    borderRadius: 4,
-                    padding: 6,
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const prefs = [
-                      `Stil: ${uiStyle}`,
-                      `Temă: ${uiTheme}`,
-                      uiNotes.trim() ? `Note: ${uiNotes.trim()}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join('\n');
-                    void submitUiDeliveryPreferences(prefs);
-                    setUiNotes('');
-                  }}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'var(--caval-accent)',
-                    color: '#0E0E0F',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: 10.5,
+                    color: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-text-muted)',
                   }}
                 >
-                  Continuă delivery UI →
-                </button>
-              </div>
-            )}
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-accent)',
+                      opacity: isPrepareReady ? 1 : 0.7,
+                      animation: isPrepareReady ? 'none' : 'dot-bounce 1.2s ease-in-out infinite',
+                    }}
+                  />
+                  {isPrepareReady ? 'Pregătit' : 'Pregătesc…'}
+                  {preloadHint && (
+                    <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
+                  )}
+                </span>
+              )}
 
-            {isPrepareReady && prepareState?.partialPlanPreview && !isStreaming && (
-              <div
-                style={{
-                  fontSize: 10.5,
-                  lineHeight: 1.4,
-                  color: 'var(--caval-text-muted)',
-                  maxWidth: 220,
-                  whiteSpace: 'pre-wrap',
-                  overflow: 'hidden',
-                  maxHeight: '4.2em',
-                }}
-              >
-                {prepareState.partialPlanPreview}
-              </div>
-            )}
+              {isPrepareReady && prepareState?.partialPlanPreview && !isStreaming && (
+                <div
+                  title={prepareState.partialPlanPreview}
+                  style={{
+                    fontSize: 10.5,
+                    lineHeight: 1.4,
+                    color: 'var(--caval-text-muted)',
+                    flex: '1 1 120px',
+                    minWidth: 0,
+                    maxWidth: '100%',
+                    whiteSpace: 'pre-wrap',
+                    overflow: 'hidden',
+                    maxHeight: '4.2em',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: 'vertical',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {prepareState.partialPlanPreview}
+                </div>
+              )}
+            </div>
 
-            {/* Model + Send */}
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Row 2: model + send — always visible */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+              gap: 6, flexShrink: 0, width: '100%', minWidth: 0,
+            }}>
               <ChatModelSelect catalog={catalog} loading={catalogLoading} />
-              <button
-                onClick={isStreaming ? stopStreaming : handleSend}
-                disabled={!isStreaming && !input.trim() && attachedFiles.length === 0}
-                style={{
-                  padding: '5px 14px', borderRadius: 6,
-                  border: 'none', cursor: input.trim() || isStreaming ? 'pointer' : 'default',
-                  background: isStreaming ? 'rgba(239,68,68,0.15)' : 'var(--caval-accent)',
-                  color: isStreaming ? 'var(--caval-error)' : '#0E0E0F',
-                  fontSize: 12, fontWeight: 700, transition: 'all 0.12s',
-                  opacity: !isStreaming && !input.trim() && attachedFiles.length === 0 ? 0.4 : 1,
-                  flexShrink: 0,
-                }}
-              >
-                {isStreaming ? '■ Stop' : 'Trimite ↵'}
-              </button>
+              {(() => {
+                const sendDisabled = !isStreaming && !input.trim() && attachedFiles.length === 0;
+                return (
+                  <button
+                    onClick={isStreaming ? stopStreaming : handleSend}
+                    disabled={sendDisabled}
+                    style={{
+                      padding: '5px 14px', borderRadius: 6,
+                      border: sendDisabled ? '1px solid var(--caval-border)' : 'none',
+                      cursor: input.trim() || isStreaming || attachedFiles.length > 0 ? 'pointer' : 'default',
+                      background: isStreaming
+                        ? 'rgba(239,68,68,0.15)'
+                        : sendDisabled
+                          ? 'var(--caval-surface-raised)'
+                          : 'var(--caval-accent)',
+                      color: isStreaming
+                        ? 'var(--caval-error)'
+                        : sendDisabled
+                          ? 'var(--caval-text-muted)'
+                          : '#0E0E0F',
+                      fontSize: 12, fontWeight: 700, transition: 'all 0.12s',
+                      opacity: sendDisabled ? 0.65 : 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {isStreaming ? '■ Stop' : 'Trimite ↵'}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>

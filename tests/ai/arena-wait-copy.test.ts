@@ -78,7 +78,7 @@ describe('arena-wait-copy', () => {
 
   it('resolveWaitPhase falls back to status label', () => {
     expect(resolveWaitPhase(undefined, 'Compose · streaming')).toBe('compose');
-    expect(resolveWaitPhase(undefined, 'Decompose · 3 tasks')).toBe('decompose');
+    expect(resolveWaitPhase(undefined, 'Architect · 3 tasks')).toBe('decompose');
   });
 
   it('resolveWaitPhase prefers active step over status', () => {

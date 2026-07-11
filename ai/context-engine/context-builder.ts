@@ -12,6 +12,7 @@ import {
   MULTI_MODEL_RECAP_ADDON,
 } from '../prompts/multi-model-reasoning-chat';
 import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
+import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
 
 export interface ContextOptions {
   activeTab:    EditorTab | null;
@@ -25,7 +26,9 @@ export interface ContextOptions {
   attachments?: Array<{ path: string; name: string; content: string }>;
   /** Nu atașa fișierul activ (întrebări generale fără legătură cu codul deschis) */
   skipActiveFile?: boolean;
-  agentMode?: 'ask' | 'plan' | 'code' | 'agentic' | 'debug';
+  agentMode?: 'ask' | 'plan' | 'code' | 'build' | 'agentic' | 'debug';
+  /** Hint from last Build run (.cavalo/memory) */
+  buildMemoryHint?: string;
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)
@@ -167,7 +170,9 @@ export function buildContextMessages(
   const systemContent =
     opts.agentMode === 'agentic'
       ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace activ: ${opts.projectPath}` : ''}`
-      : opts.agentMode === 'debug' && opts.projectPath
+      : opts.agentMode === 'build' && opts.projectPath
+        ? `${CAVALO_BUILD_ENGINE_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
+        : opts.agentMode === 'debug' && opts.projectPath
         ? `${buildLiteSystemPrompt(opts.agentMode)}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: debug errors and apply fixes as \`\`\`lang:path\`\`\` fences.\n${SCAFFOLD_EMISSION_RULE}`
         : attachProject
         ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
@@ -180,6 +185,9 @@ export function buildContextMessages(
   if (attachProject) {
     if (opts.fileTree.length > 0) {
       contextParts.push(`Structura proiectului:\n${buildProjectTreeSummary(opts.fileTree)}`);
+    }
+    if (opts.buildMemoryHint) {
+      contextParts.push(`Build memory:\n${opts.buildMemoryHint}`);
     }
     if (opts.projectContext) {
       contextParts.push(`Fragmente relevante:\n${opts.projectContext}`);

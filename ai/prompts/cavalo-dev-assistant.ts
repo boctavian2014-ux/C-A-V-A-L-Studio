@@ -54,6 +54,7 @@ Nu cere utilizatorului să ruleze manual — verifică singur și raportează er
 ────────────────────────────────────────
 Ask → explicații, fără modificări de cod
 Code → model direct; generează fișiere cu path valid în fence
+Build → Autonomous Build Engine; scriere directă în fișiere, fără cod în chat, consistency scan
 Agentic → pipeline complet multi-agent; livrare proiect end-to-end (Arena)
 Architect → planificare înainte de implementare (mod Plan)
 Debug → analizează erori și sugerează fix-uri

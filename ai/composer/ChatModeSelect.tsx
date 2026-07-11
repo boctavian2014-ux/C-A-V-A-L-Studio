@@ -38,12 +38,12 @@ export function ChatModeSelect({ quickPrompts = [], onQuickPrompt }: ChatModeSel
         title={activeMode.description}
         style={{
           width: '100%',
-          padding: '6px 28px 6px 10px',
+          padding: '6px 28px 6px 12px',
           borderRadius: 8,
           border: '1px solid var(--caval-border)',
           background: 'var(--caval-surface)',
           color: 'var(--caval-text)',
-          fontSize: 11.5,
+          fontSize: 12,
           fontWeight: 500,
           cursor: 'pointer',
           appearance: 'none',

@@ -1,4 +1,4 @@
-import type { PipelineTask } from './types';
+import type { PipelineTask, ArenaAgentRole } from './types';
 
 const TASK_LINE =
   /^\s*[-*•]\s*\*{0,2}Task\s+([\w.-]+)\*{0,2}\s*:\s*(.+)$/i;
@@ -10,6 +10,7 @@ const BOLD_SECTION =
   /^\s*[-*•]\s*\*\*(.+?)\*\*\s*:\s*(.+)$/;
 
 const PHASE_UI_TAG = /\[phase:ui\]/i;
+const ROLE_TAG = /\[role:(implementer|tester|refactorer|implementer-fix|implementer-perf)\]/i;
 
 const MODULE_HINT_PATTERNS = [
   /\bModule\s+\d+/gi,
@@ -27,16 +28,33 @@ function slugId(prefix: string, index: number): string {
   return `${prefix}-${index + 1}`;
 }
 
-function parseTaskDescription(raw: string): { description: string; phase?: 'ui' | 'core' } {
+function parseTaskDescription(raw: string): {
+  description: string;
+  phase?: 'ui' | 'core';
+  role?: ArenaAgentRole;
+} {
   let description = raw.trim();
   let phase: 'ui' | 'core' | undefined;
+  let role: ArenaAgentRole | undefined;
+
+  const roleMatch = ROLE_TAG.exec(description);
+  if (roleMatch) {
+    role = roleMatch[1] as ArenaAgentRole;
+    description = description.replace(ROLE_TAG, '').trim();
+  }
+
   if (PHASE_UI_TAG.test(description)) {
     phase = 'ui';
     description = description.replace(PHASE_UI_TAG, '').trim();
   } else if (/\b(frontend|ui\/ux|user interface|dashboard ui|ui shell)\b/i.test(description)) {
     phase = 'ui';
   }
-  return { description, phase };
+
+  if (!role) {
+    role = 'implementer';
+  }
+
+  return { description, phase, role };
 }
 
 function slugModule(name: string): string {
@@ -107,7 +125,7 @@ export function parseDecompositionOutput(raw: string, maxTasks = 8): PipelineTas
 
       const taskId = slugTaskId(rawId, taskIndex);
       taskIndex += 1;
-      const { description, phase } = parseTaskDescription(taskMatch[2]!);
+      const { description, phase, role } = parseTaskDescription(taskMatch[2]!);
       if (description.length < 4) continue;
 
       tasks.push({
@@ -117,6 +135,7 @@ export function parseDecompositionOutput(raw: string, maxTasks = 8): PipelineTas
         description,
         dependencies: [],
         phase,
+        role,
       });
     }
   }
@@ -130,6 +149,7 @@ export function parseDecompositionOutput(raw: string, maxTasks = 8): PipelineTas
       purpose: 'Main implementation',
       description: goal,
       dependencies: [],
+      role: 'implementer',
     });
   }
 

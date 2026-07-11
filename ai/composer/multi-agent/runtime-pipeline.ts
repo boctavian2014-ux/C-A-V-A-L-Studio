@@ -28,7 +28,10 @@ import { FullIntegrationAgent } from './integration-agent';
 
 import { formatOrchestratorSummary } from './orchestrator-plan';
 
-import { ModelRotator, planExecution } from './orchestrator';
+import { ModelRotator, planExecutionWithRoles } from './orchestrator';
+import { buildArenaModelPlan } from './arena-model-orchestrator';
+import { runArenaConsistencyOnly, runArenaPostCompose } from './arena-post-compose';
+import { buildArenaContinueMessage } from '../../prompts/arena-continue';
 
 import { PipelineContextStore } from './pipeline-context-store';
 
@@ -373,6 +376,8 @@ export async function runCavalloMultiAgentPipeline(
 
     'context',
 
+    'modelOrch',
+
     'orchestrator',
 
     'decompose',
@@ -384,6 +389,12 @@ export async function runCavalloMultiAgentPipeline(
     'supervisor',
 
     'compose',
+
+    'userSim',
+
+    'security',
+
+    'performance',
 
     'integrate',
 
@@ -531,17 +542,18 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
+    markStage(stages, 'modelOrch', 'active');
+    pipelineCallbacks.onMultiAgentStatus?.('modelOrch', 'active');
+
+    const rotator = new ModelRotator();
+    await rotator.init();
+    const arenaModels = buildArenaModelPlan(model, rotator);
+    markStage(stages, 'modelOrch', 'done', arenaModels.summary.slice(0, 80));
+    pipelineCallbacks.onMultiAgentStatus?.('modelOrch', 'done', arenaModels.summary.slice(0, 80));
+
     markStage(stages, 'orchestrator', 'active');
 
     pipelineCallbacks.onMultiAgentStatus?.('orchestrator', 'active');
-
-
-
-    const rotator = new ModelRotator();
-
-    await rotator.init();
-
-
 
     const decomp = await runDecomposition(model, store, config, workspaceRoot, pipelineCallbacks);
 
@@ -579,7 +591,7 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    const plan = planExecution(runId, decomp.tasks, rotator);
+    const plan = planExecutionWithRoles(runId, decomp.tasks, rotator, model);
 
     state.plan = plan;
 
@@ -844,11 +856,84 @@ export async function runCavalloMultiAgentPipeline(
 
     const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
 
+    let finalWrittenFiles = writtenFiles;
+    let arenaPost = await runArenaPostCompose({
+      workspaceRoot,
+      writtenFiles,
+      tasks: decomp.tasks,
+      plan,
+      store,
+      config,
+      model,
+      rotator,
+      callbacks: pipelineCallbacks,
+      isAborted,
+    });
+    finalWrittenFiles = arenaPost.writtenFiles;
+
+    const MAX_ARENA_REPAIR_WAVES = 2;
+    let arenaRepairWave = 0;
+    while (
+      !arenaPost.consistencyOk &&
+      arenaPost.consistencyScan &&
+      arenaRepairWave < MAX_ARENA_REPAIR_WAVES &&
+      !isAborted()
+    ) {
+      arenaRepairWave += 1;
+      pipelineCallbacks.onMultiAgentStatus?.(
+        'compose',
+        'active',
+        `arena repair ${arenaRepairWave}/${MAX_ARENA_REPAIR_WAVES}`
+      );
+      const repair = await runFinalComposer(
+        model,
+        store,
+        workspaceRoot,
+        pipelineCallbacks,
+        isAborted,
+        {
+          waveIndex: composeWaves + arenaRepairWave,
+          repairMessage: buildArenaContinueMessage(arenaPost.consistencyScan),
+        }
+      );
+      if (!repair.ok) break;
+      composeText = `${composeText}\n\n${repair.text}`;
+      const repaired = applyPipelineScaffold(workspaceRoot, repair.text, store);
+      finalWrittenFiles = [...new Set([...finalWrittenFiles, ...repaired])];
+      const scan = await runArenaConsistencyOnly(workspaceRoot, finalWrittenFiles);
+      arenaPost = {
+        ...arenaPost,
+        writtenFiles: finalWrittenFiles,
+        consistencyOk: scan.ok,
+        consistencyScan: scan,
+        summaries: { ...arenaPost.summaries, consistency: scan.summary },
+      };
+      pipelineCallbacks.onMultiAgentStatus?.('compose', 'done', scan.summary.slice(0, 80));
+    }
+
     if (config.enableDevToolsIntegration) {
       state.devTools = await runDevToolsIntegration(workspaceRoot, {
-        verify: writtenFiles.length > 0,
+        verify: finalWrittenFiles.length > 0,
       });
     }
+
+    memoryEngine.recordArenaFinish({
+      files: finalWrittenFiles,
+      roleCounts: decomp.tasks.reduce(
+        (acc, t) => {
+          const r = t.role ?? 'implementer';
+          acc[r] = (acc[r] ?? 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>
+      ),
+      summaries: {
+        userSim: arenaPost.summaries.userSim,
+        security: arenaPost.summaries.security,
+        performance: arenaPost.summaries.performance,
+        scan: arenaPost.summaries.consistency ?? '',
+      },
+    });
 
     pipelineCallbacks.onMultiAgentStatus?.(
       'integrate',
@@ -898,7 +983,7 @@ export async function runCavalloMultiAgentPipeline(
 
       composeText,
 
-      writtenFiles,
+      writtenFiles: finalWrittenFiles,
 
       resolvedModel: composeModel,
 
