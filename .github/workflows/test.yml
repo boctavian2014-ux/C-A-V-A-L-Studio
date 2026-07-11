@@ -18,7 +18,15 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests with coverage gate
+        run: npm run test:coverage
+      - name: Security audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
       - name: Build
         run: npm run build
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/**

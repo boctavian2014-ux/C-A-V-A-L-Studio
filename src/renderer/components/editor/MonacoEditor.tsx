@@ -166,6 +166,14 @@ export function MonacoEditor() {
     }
   }, [monaco]);
 
+  useEffect(() => {
+    if (!monaco || !activeTab) return;
+    const lang = activeTab.language;
+    const lspLanguages = ['typescript', 'javascript', 'typescriptreact', 'javascriptreact', 'python'];
+    if (!lspLanguages.includes(lang)) return;
+    void (window.caval as { lsp?: { start?: (id: string) => Promise<unknown> } })?.lsp?.start?.(lang);
+  }, [monaco, activeTab?.language]);
+
   // ── Salvează viewState când schimbi tab-ul ──
   useEffect(() => {
     return () => {
@@ -198,6 +206,45 @@ export function MonacoEditor() {
     );
 
     editor.focus();
+
+    const syncSelection = () => {
+      const model = editor.getModel();
+      const sel = editor.getSelection();
+      const { activeTabId: tabId, tabs, setEditorSelection, setActiveSymbol } = useEditorStore.getState();
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!model || !sel || sel.isEmpty() || !tab) {
+        setEditorSelection(null);
+        return;
+      }
+      const text = model.getValueInRange(sel).trim();
+      if (!text) {
+        setEditorSelection(null);
+        return;
+      }
+      setEditorSelection({
+        text,
+        path: tab.path,
+        startLine: sel.startLineNumber,
+        endLine: sel.endLineNumber,
+      });
+      const word = model.getWordAtPosition({
+        lineNumber: sel.positionLineNumber,
+        column: sel.positionColumn,
+      });
+      setActiveSymbol(word?.word ?? null);
+      if (text.length > 0 && text.length < 8000) {
+        useAIStore.getState().setIncludeMode('selection');
+      }
+    };
+
+    editor.onDidChangeCursorSelection(syncSelection);
+    editor.onDidChangeCursorPosition(() => {
+      const model = editor.getModel();
+      const pos = editor.getPosition();
+      if (!model || !pos) return;
+      const word = model.getWordAtPosition(pos);
+      useEditorStore.getState().setActiveSymbol(word?.word ?? null);
+    });
 
     const lang = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId)?.language ?? 'typescript';
     const provider = monacoApi.languages.registerInlineCompletionsProvider(lang, {

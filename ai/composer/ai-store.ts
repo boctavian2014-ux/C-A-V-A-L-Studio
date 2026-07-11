@@ -119,6 +119,9 @@ export interface DetectedDiff {
   modified: string;
   language: string;
   applied: boolean;
+  rejected?: boolean;
+  /** Snapshot before apply — used for rollback */
+  previousContent?: string;
 }
 
 export interface ChatThread {
@@ -236,11 +239,90 @@ interface CavalWindow {
     }>;
     secretsGet?: () => Promise<{ ok: boolean; secrets?: Record<string, string> }>;
     secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
+    workspaceVerify?: (workspaceRoot: string) => Promise<{
+      ok: boolean;
+      verify?: {
+        ran: boolean;
+        summary: string;
+        commands: Array<{ command: string; ok: boolean; exitCode: number | null; output: string }>;
+      };
+      error?: string;
+    }>;
+    toolExecute?: (input: { name: string; arguments: Record<string, unknown> }) => Promise<{
+      ok: boolean;
+      output?: unknown;
+      error?: string;
+    }>;
     fs?: {
       pickFiles?: () => Promise<string[] | null>;
       readFile?: (filePath: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
     };
   };
+}
+
+const VERIFY_OUTPUT_MAX = 4096;
+
+function patchMessageInThreads(
+  set: (partial: Partial<AIStore> | ((s: AIStore) => Partial<AIStore>)) => void,
+  messageId: string,
+  patch: (msg: ChatMessage) => ChatMessage
+): void {
+  set((s) => {
+    const messages = s.messages.map((m) => (m.id === messageId ? patch(m) : m));
+    const threads = s.threads.map((t) =>
+      t.id === s.activeThreadId ? { ...t, messages, updatedAt: Date.now() } : t
+    );
+    return { messages, threads };
+  });
+}
+
+function truncateVerifyOutput(text: string): string {
+  if (text.length <= VERIFY_OUTPUT_MAX) return text;
+  return `${text.slice(0, VERIFY_OUTPUT_MAX)}\n\n… (trunchiat, ${text.length - VERIFY_OUTPUT_MAX} caractere omise)`;
+}
+
+function appendChatReportMessage(
+  set: (partial: Partial<AIStore> | ((s: AIStore) => Partial<AIStore>)) => void,
+  content: string,
+  extra?: Partial<ChatMessage>
+): void {
+  const msg: ChatMessage = {
+    id: generateId(),
+    role: 'assistant',
+    content,
+    timestamp: Date.now(),
+    ...extra,
+  };
+  set((s) => {
+    const updated = [...s.messages, msg];
+    const updatedThreads = s.threads.map((t) =>
+      t.id === s.activeThreadId ? { ...t, messages: updated, updatedAt: Date.now() } : t
+    );
+    return { messages: updated, threads: updatedThreads };
+  });
+}
+
+function formatVerifyThreadMessage(
+  verify: {
+    ran: boolean;
+    summary: string;
+    commands: Array<{ command: string; ok: boolean; exitCode: number | null; output: string }>;
+  },
+  allOk: boolean
+): string {
+  if (!verify.ran) {
+    return `**Verificare workspace**\n\n${verify.summary}`;
+  }
+  const sections = verify.commands.map((c) => {
+    const status = c.ok ? '✓ ok' : '✗ fail';
+    const output = truncateVerifyOutput(c.output.trim() || '(fără output)');
+    return `### ${c.command} — ${status} (exit ${c.exitCode ?? 'n/a'})\n\`\`\`\n${output}\n\`\`\``;
+  });
+  let body = `**Verificare workspace**\n\n${verify.summary}\n\n${sections.join('\n\n')}`;
+  if (!allOk) {
+    body += '\n\n_Poți cere: fixează erorile de mai sus_';
+  }
+  return body;
 }
 
 interface AIStore {
@@ -288,11 +370,16 @@ interface AIStore {
   clearChat: () => void;
   applyDiff: (messageId: string) => void;
   rejectDiff: (messageId: string) => void;
+  rollbackDiff: (messageId: string) => Promise<void>;
 
   pendingChatDraft: string | null;
   pendingAutoSend: boolean;
   clearPendingChatDraft: () => void;
   handoffFromEngineering: (input: { project: EngProject; userPrompt: string }) => { ok: true } | { ok: false; error: string };
+
+  runWorkspaceVerifyAndReport: () => Promise<void>;
+  runBuildAndReport: () => Promise<void>;
+  verifyInFlight: 'none' | 'tests' | 'build';
 
   deliveryPause: { runId: string; streamId: string } | null;
   submitUiDeliveryPreferences: (prefs: string) => Promise<void>;
@@ -404,6 +491,7 @@ export const useAIStore = create<AIStore>()(
       pendingChatDraft: null,
       pendingAutoSend: false,
       deliveryPause: null,
+      verifyInFlight: 'none' as const,
 
       setModel: (id) => {
         set({ selectedModel: id, activeResolvedModel: null });
@@ -1336,14 +1424,18 @@ export const useAIStore = create<AIStore>()(
               )
             : [];
 
+        const editorSelection = useEditorStore.getState().editorSelection;
+        const selectionText = editorSelection?.text?.trim() || undefined;
+
         const contextMessages: AIMessage[] = buildContextMessages(
           apiPrompt,
           messages.map((m) => ({ role: m.role, content: m.content })),
           {
             activeTab,
+            selection: selectionText,
             fileTree: attachProject && !isAgenticPipelineMode(agentMode) ? editorState.fileTree : [],
             projectPath: editorState.projectPath,
-            includeMode: attachProject ? includeMode : 'file',
+            includeMode: selectionText && includeMode === 'selection' ? 'selection' : attachProject ? includeMode : 'file',
             skipActiveFile: !attachProject,
             projectContext,
             mentions: uniqueMentions,
@@ -1449,7 +1541,7 @@ export const useAIStore = create<AIStore>()(
 
       applyDiff: async (messageId) => {
         const msg = get().messages.find((m) => m.id === messageId);
-        if (!msg?.diff || msg.diff.applied) return;
+        if (!msg?.diff || msg.diff.applied || msg.diff.rejected) return;
         const { tabs, updateTabContent, openFile } = useEditorStore.getState();
         let tab = tabs.find((t) => t.path === msg.diff!.filePath);
         if (!tab) {
@@ -1458,31 +1550,147 @@ export const useAIStore = create<AIStore>()(
         }
         if (!tab) return;
 
+        const previousContent = tab.content;
         const newContent = applyUnifiedDiff(tab.content, msg.diff.patch);
         updateTabContent(tab.id, newContent);
 
         const writeResult = await window.caval?.fs?.writeFile?.(tab.path, newContent);
         if (writeResult && !writeResult.ok) {
           console.error('[ai-store] applyDiff write failed:', writeResult.error);
-        } else if (writeResult?.ok) {
+          return;
+        }
+        if (writeResult?.ok) {
           useEditorStore.setState((s) => ({
             tabs: s.tabs.map((t) => (t.id === tab!.id ? { ...t, isDirty: false } : t)),
           }));
         }
 
-        set((s) => ({
-          messages: s.messages.map((m) =>
-            m.id === messageId && m.diff ? { ...m, diff: { ...m.diff, applied: true } } : m
-          ),
-        }));
+        patchMessageInThreads(set, messageId, (m) =>
+          m.diff
+            ? { ...m, diff: { ...m.diff, applied: true, previousContent } }
+            : m
+        );
       },
 
       rejectDiff: (messageId) => {
-        set((s) => ({
-          messages: s.messages.map((m) =>
-            m.id === messageId && m.diff ? { ...m, diff: { ...m.diff, applied: false } } : m
-          ),
-        }));
+        patchMessageInThreads(set, messageId, (m) =>
+          m.diff ? { ...m, diff: undefined } : m
+        );
+      },
+
+      rollbackDiff: async (messageId) => {
+        const msg = get().messages.find((m) => m.id === messageId);
+        if (!msg?.diff?.applied || msg.diff.previousContent == null) return;
+        const { tabs, updateTabContent, openFile } = useEditorStore.getState();
+        let tab = tabs.find((t) => t.path === msg.diff!.filePath);
+        if (!tab) {
+          await openFile(msg.diff.filePath);
+          tab = useEditorStore.getState().tabs.find((t) => t.path === msg.diff!.filePath);
+        }
+        if (!tab) return;
+
+        const restored = msg.diff.previousContent;
+        updateTabContent(tab.id, restored);
+        const writeResult = await window.caval?.fs?.writeFile?.(tab.path, restored);
+        if (writeResult && !writeResult.ok) {
+          console.error('[ai-store] rollbackDiff write failed:', writeResult.error);
+          return;
+        }
+        if (writeResult?.ok) {
+          useEditorStore.setState((s) => ({
+            tabs: s.tabs.map((t) => (t.id === tab!.id ? { ...t, isDirty: false } : t)),
+          }));
+        }
+
+        patchMessageInThreads(set, messageId, (m) =>
+          m.diff
+            ? { ...m, diff: { ...m.diff, applied: false, previousContent: undefined } }
+            : m
+        );
+      },
+
+      runWorkspaceVerifyAndReport: async () => {
+        if (get().verifyInFlight !== 'none') return;
+        const projectPath = useEditorStore.getState().projectPath;
+        if (!projectPath) {
+          appendChatReportMessage(set, '**Verificare workspace**\n\nDeschide un folder de proiect înainte de a rula testele.', {
+            error: 'projectPath lipsă',
+          });
+          return;
+        }
+        const caval = getCaval();
+        if (!caval?.workspaceVerify) {
+          appendChatReportMessage(set, '**Verificare workspace**\n\nIPC workspaceVerify indisponibil.', {
+            error: 'workspaceVerify lipsă',
+          });
+          return;
+        }
+
+        set({ verifyInFlight: 'tests' });
+        try {
+          const res = await caval.workspaceVerify(projectPath);
+          if (!res.ok || !res.verify) {
+            appendChatReportMessage(
+              set,
+              `**Verificare workspace**\n\n${res.error ?? 'Verificare eșuată.'}`,
+              { error: res.error ?? 'verify failed' }
+            );
+            set({ pendingChatDraft: 'fixează erorile de mai sus' });
+            return;
+          }
+          const allOk = !res.verify.commands.length || res.verify.commands.every((c) => c.ok);
+          appendChatReportMessage(set, formatVerifyThreadMessage(res.verify, allOk), {
+            error: allOk ? undefined : 'verify failed',
+          });
+          if (!allOk) {
+            set({ pendingChatDraft: 'fixează erorile de mai sus' });
+          }
+        } finally {
+          set({ verifyInFlight: 'none' });
+        }
+      },
+
+      runBuildAndReport: async () => {
+        if (get().verifyInFlight !== 'none') return;
+        const projectPath = useEditorStore.getState().projectPath;
+        if (!projectPath) {
+          appendChatReportMessage(set, '**Build**\n\nDeschide un folder de proiect înainte de a rula build-ul.', {
+            error: 'projectPath lipsă',
+          });
+          return;
+        }
+        const caval = getCaval();
+        if (!caval?.toolExecute) {
+          appendChatReportMessage(set, '**Build**\n\nIPC toolExecute indisponibil.', {
+            error: 'toolExecute lipsă',
+          });
+          return;
+        }
+
+        set({ verifyInFlight: 'build' });
+        try {
+          const res = await caval.toolExecute({
+            name: 'run_command',
+            arguments: { command: 'npm run build' },
+          });
+          const payload = res.output as
+            | { command?: string; exitCode?: number | null; output?: string }
+            | undefined;
+          const command = payload?.command ?? 'npm run build';
+          const exitCode = payload?.exitCode ?? null;
+          const output = truncateVerifyOutput((payload?.output ?? res.error ?? '').trim() || '(fără output)');
+          const ok = res.ok && (payload?.exitCode == null || payload.exitCode === 0);
+          let body = `**Build**\n\n### ${command} — ${ok ? '✓ ok' : '✗ fail'} (exit ${exitCode ?? 'n/a'})\n\`\`\`\n${output}\n\`\`\``;
+          if (!ok) {
+            body += '\n\n_Poți cere: fixează erorile de mai sus_';
+          }
+          appendChatReportMessage(set, body, { error: ok ? undefined : 'build failed' });
+          if (!ok) {
+            set({ pendingChatDraft: 'fixează erorile de mai sus' });
+          }
+        } finally {
+          set({ verifyInFlight: 'none' });
+        }
       },
 
       clearPendingChatDraft: () => set({ pendingChatDraft: null }),

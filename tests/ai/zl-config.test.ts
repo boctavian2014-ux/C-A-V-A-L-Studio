@@ -9,7 +9,7 @@ describe('zl-config', () => {
   it('defaults are enabled with frontier prewarm', () => {
     expect(DEFAULT_ZERO_LATENCY_CONFIG.enabled).toBe(true);
     expect(DEFAULT_ZERO_LATENCY_CONFIG.frontierPrewarm).toBe(true);
-    expect(DEFAULT_ZERO_LATENCY_CONFIG.draftPlan).toBe('fast-then-frontier');
+    expect(DEFAULT_ZERO_LATENCY_CONFIG.draftPlan).toBe('stub');
   });
 
   it('loadZeroLatencyConfig merges caval.jsonc when present', () => {

@@ -465,6 +465,29 @@ interface CavalBridge {
   mcpStart?: (serverId: string) => Promise<{ ok: boolean; status?: McpServerStatus }>;
   mcpStop?: (serverId: string) => Promise<{ ok: boolean }>;
   toolExecute?: (input: { name: string; arguments: Record<string, unknown> }) => Promise<{ ok: boolean; output?: unknown; error?: string }>;
+  search?: {
+    text?: (input: { query: string; caseSensitive?: boolean; maxResults?: number }) => Promise<{
+      ok: boolean;
+      hits?: Array<{ path: string; line: number; column: number; preview: string }>;
+      error?: string;
+    }>;
+    indexSymbols?: () => Promise<{ ok: boolean; count?: number; error?: string }>;
+    gotoDefinition?: (input: { filePath: string; symbol: string }) => Promise<{
+      ok: boolean;
+      location?: { filePath: string; line: number; column: number };
+      error?: string;
+    }>;
+    findReferences?: (input: { filePath: string; symbol: string }) => Promise<{
+      ok: boolean;
+      references?: Array<{ filePath: string; line: number; column: number; preview?: string }>;
+      error?: string;
+    }>;
+  };
+  lsp?: {
+    start?: (languageId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+    stop?: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+    status?: () => Promise<{ ok: boolean; servers?: unknown[] }>;
+  };
   fs: CavalFsApi;
   terminal: CavalTerminalApi;
   git: CavalGitApi;

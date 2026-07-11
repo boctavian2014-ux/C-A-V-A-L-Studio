@@ -1,37 +1,57 @@
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ipcMain, dialog, shell, BrowserWindow } from "electron";
+import * as fs from "fs";
 
-// ──────────────────────────────────────────────
-//  FILE SYSTEM HANDLERS
-// ──────────────────────────────────────────────
+import { readDirTree } from "./fs-tree";
+import { assertPathInWorkspace, resolveWorkspacePath } from "./path-security";
+import { parseIpcInput, fsPathSchema, fsReadFileSchema, fsRenameSchema, fsWriteFileSchema } from "./ipc-schemas";
+import { recordAudit, persistAuditLog } from "./audit-log";
+
+const workspaceForSender = new Map<number, string>();
+
+export function setIpcWorkspaceRoot(senderId: number, root: string): void {
+  workspaceForSender.set(senderId, root);
+}
+
+export function getIpcWorkspaceRoot(senderId: number): string | undefined {
+  return workspaceForSender.get(senderId);
+}
+
+function auditFs(channel: string, senderId: number, targetPath: string, ok: boolean, detail?: string): void {
+  recordAudit({
+    channel,
+    action: "fs",
+    workspaceRoot: workspaceForSender.get(senderId),
+    detail: detail ?? targetPath,
+    ok,
+  });
+}
 
 /** Selectează unul sau mai multe fișiere (atașamente chat, import, etc.) */
-ipcMain.handle('fs:pickFiles', async (event) => {
+ipcMain.handle("fs:pickFiles", async (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   const result = window
     ? await dialog.showOpenDialog(window, {
-        title: 'Selectează fișiere',
-        properties: ['openFile', 'multiSelections'],
+        title: "Selectează fișiere",
+        properties: ["openFile", "multiSelections"],
         filters: [
           {
-            name: 'Code and text',
-            extensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html', 'py', 'go', 'rs', 'java', 'txt', 'xml', 'yaml', 'yml'],
+            name: "Code and text",
+            extensions: ["ts", "tsx", "js", "jsx", "json", "md", "css", "html", "py", "go", "rs", "java", "txt", "xml", "yaml", "yml"],
           },
-          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
-          { name: 'All files', extensions: ['*'] },
+          { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg"] },
+          { name: "All files", extensions: ["*"] },
         ],
       })
     : await dialog.showOpenDialog({
-        title: 'Selectează fișiere',
-        properties: ['openFile', 'multiSelections'],
+        title: "Selectează fișiere",
+        properties: ["openFile", "multiSelections"],
         filters: [
           {
-            name: 'Code and text',
-            extensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'css', 'html', 'py', 'go', 'rs', 'java', 'txt', 'xml', 'yaml', 'yml'],
+            name: "Code and text",
+            extensions: ["ts", "tsx", "js", "jsx", "json", "md", "css", "html", "py", "go", "rs", "java", "txt", "xml", "yaml", "yml"],
           },
-          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
-          { name: 'All files', extensions: ['*'] },
+          { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg"] },
+          { name: "All files", extensions: ["*"] },
         ],
       });
   if (result.canceled || !result.filePaths.length) return null;
@@ -39,91 +59,123 @@ ipcMain.handle('fs:pickFiles', async (event) => {
 });
 
 /** Deschide un dialog de selectare folder și returnează calea */
-ipcMain.handle('fs:openFolder', async () => {
+ipcMain.handle("fs:openFolder", async () => {
   const result = await dialog.showOpenDialog({
-    properties: ['openDirectory'],
-    title: 'Deschide proiect',
+    properties: ["openDirectory"],
+    title: "Deschide proiect",
   });
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
 });
 
 /** Citește recursiv structura unui director și returnează un arbore JSON */
-ipcMain.handle('fs:readTree', async (_event, dirPath: string) => {
+ipcMain.handle("fs:readTree", async (_event, dirPath: string) => {
   return readDirTree(dirPath, dirPath);
 });
 
 /** Citește conținutul unui fișier text */
-ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
+ipcMain.handle("fs:readFile", async (event, filePath: string) => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const { filePath: validated } = parseIpcInput(fsReadFileSchema, { filePath });
+    const root = workspaceForSender.get(event.sender.id);
+    if (root) resolveWorkspacePath(root, validated);
+    const content = fs.readFileSync(validated, "utf-8");
+    auditFs("fs:readFile", event.sender.id, validated, true);
     return { ok: true, content };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    auditFs("fs:readFile", event.sender.id, filePath, false, message);
+    return { ok: false, error: message };
   }
 });
 
 /** Salvează conținut într-un fișier */
-ipcMain.handle('fs:writeFile', async (_event, filePath: string, content: string) => {
+ipcMain.handle("fs:writeFile", async (event, filePath: string, content: string) => {
   try {
-    fs.writeFileSync(filePath, content, 'utf-8');
+    const parsed = parseIpcInput(fsWriteFileSchema, { filePath, content });
+    const root = workspaceForSender.get(event.sender.id);
+    const target = root ? resolveWorkspacePath(root, parsed.filePath) : parsed.filePath;
+    fs.writeFileSync(target, parsed.content, "utf-8");
+    auditFs("fs:writeFile", event.sender.id, target, true);
+    const ws = workspaceForSender.get(event.sender.id);
+    if (ws) void persistAuditLog(ws);
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    auditFs("fs:writeFile", event.sender.id, filePath, false, message);
+    return { ok: false, error: message };
   }
 });
 
 /** Creează un fișier nou gol */
-ipcMain.handle('fs:createFile', async (_event, filePath: string) => {
+ipcMain.handle("fs:createFile", async (event, filePath: string) => {
   try {
-    fs.writeFileSync(filePath, '', 'utf-8');
+    const { targetPath } = parseIpcInput(fsPathSchema, { targetPath: filePath });
+    const root = workspaceForSender.get(event.sender.id);
+    const target = root ? resolveWorkspacePath(root, targetPath) : targetPath;
+    fs.writeFileSync(target, "", "utf-8");
+    auditFs("fs:createFile", event.sender.id, target, true);
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 
 /** Creează un director nou */
-ipcMain.handle('fs:createDir', async (_event, dirPath: string) => {
+ipcMain.handle("fs:createDir", async (event, dirPath: string) => {
   try {
-    fs.mkdirSync(dirPath, { recursive: true });
+    const { targetPath } = parseIpcInput(fsPathSchema, { targetPath: dirPath });
+    const root = workspaceForSender.get(event.sender.id);
+    const target = root ? resolveWorkspacePath(root, targetPath) : targetPath;
+    fs.mkdirSync(target, { recursive: true });
+    auditFs("fs:createDir", event.sender.id, target, true);
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 
 /** Redenumește / mută un fișier sau director */
-ipcMain.handle('fs:rename', async (_event, oldPath: string, newPath: string) => {
+ipcMain.handle("fs:rename", async (event, oldPath: string, newPath: string) => {
   try {
-    fs.renameSync(oldPath, newPath);
+    const parsed = parseIpcInput(fsRenameSchema, { oldPath, newPath });
+    const root = workspaceForSender.get(event.sender.id);
+    const from = root ? resolveWorkspacePath(root, parsed.oldPath) : parsed.oldPath;
+    const to = root ? resolveWorkspacePath(root, parsed.newPath) : parsed.newPath;
+    fs.renameSync(from, to);
+    auditFs("fs:rename", event.sender.id, `${from} -> ${to}`, true);
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 
 /** Șterge un fișier sau director */
-ipcMain.handle('fs:delete', async (_event, targetPath: string) => {
+ipcMain.handle("fs:delete", async (event, targetPath: string) => {
   try {
-    fs.rmSync(targetPath, { recursive: true, force: true });
+    const { targetPath: validated } = parseIpcInput(fsPathSchema, { targetPath });
+    const root = workspaceForSender.get(event.sender.id);
+    const target = root ? resolveWorkspacePath(root, validated) : validated;
+    if (root) assertPathInWorkspace(root, target);
+    fs.rmSync(target, { recursive: true, force: true });
+    auditFs("fs:delete", event.sender.id, target, true);
     return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message };
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 
 /** Deschide fișier în file explorer nativ */
-ipcMain.handle('fs:reveal', async (_event, filePath: string) => {
+ipcMain.handle("fs:reveal", async (_event, filePath: string) => {
   shell.showItemInFolder(filePath);
   return { ok: true };
 });
 
-ipcMain.handle('window:minimize', (event) => {
+ipcMain.handle("window:minimize", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
 });
 
-ipcMain.handle('window:maximize', (event) => {
+ipcMain.handle("window:maximize", (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
   if (win.isMaximized()) {
@@ -133,66 +185,8 @@ ipcMain.handle('window:maximize', (event) => {
   }
 });
 
-ipcMain.handle('window:close', (event) => {
+ipcMain.handle("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-// ──────────────────────────────────────────────
-//  HELPER: citire recursivă director
-// ──────────────────────────────────────────────
-
-const IGNORE = new Set([
-  'node_modules', '.git', 'dist', '.next', '__pycache__',
-  '.DS_Store', 'coverage', '.turbo', '.cache',
-]);
-
-export interface FileNode {
-  id: string;
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  ext?: string;
-  children?: FileNode[];
-}
-
-function readDirTree(dirPath: string, rootPath: string, depth = 0): FileNode[] {
-  if (depth > 8) return []; // protecție împotriva adâncimii excesive
-  try {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    const nodes: FileNode[] = [];
-
-    for (const entry of entries) {
-      if (IGNORE.has(entry.name)) continue;
-
-      const fullPath = path.join(dirPath, entry.name);
-      const relPath = path.relative(rootPath, fullPath);
-
-      if (entry.isDirectory()) {
-        nodes.push({
-          id: relPath,
-          name: entry.name,
-          path: fullPath,
-          type: 'directory',
-          children: readDirTree(fullPath, rootPath, depth + 1),
-        });
-      } else {
-        const ext = path.extname(entry.name).slice(1);
-        nodes.push({
-          id: relPath,
-          name: entry.name,
-          path: fullPath,
-          type: 'file',
-          ext,
-        });
-      }
-    }
-
-    // Sortare: directoare înainte, apoi fișiere, ambele alfabetic
-    return nodes.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-  } catch {
-    return [];
-  }
-}
+export type { FileNode } from "./fs-tree";

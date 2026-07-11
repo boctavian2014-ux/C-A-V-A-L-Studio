@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "../tools/tool-registry";
+import { resolveMcpServerArgs } from "./mcp-workspace-args";
 import { mcpToolId } from "./mcp-tool-names";
 
 export interface McpServerConfig {
@@ -186,7 +187,8 @@ export class McpClientManager {
     entry.stderrTail = "";
 
     try {
-      const spawn = resolveMcpSpawn(entry.config.command, entry.config.args ?? [], {
+      const resolvedArgs = resolveMcpServerArgs(entry.config.args, workdir);
+      const spawn = resolveMcpSpawn(entry.config.command, resolvedArgs, {
         env: entry.config.env,
         cwd: workdir,
       });

@@ -37,6 +37,11 @@ import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { inferPreloadContext } from "../../ai/models/infer-context";
 import "./ipc-handlers";
 import "./terminal-handlers";
+import { registerSearchHandlers } from "./search-handlers";
+import { registerDebugHandlers } from "./debug-handlers";
+import { registerLspHandlers } from "./lsp-handlers";
+import { registerExtensionHandlers } from "./extension-handlers";
+import { setIpcWorkspaceRoot } from "./ipc-handlers";
 
 const loadLocalEnvFile = (): void => {
   const envPath = path.join(process.cwd(), ".env");
@@ -74,6 +79,11 @@ const contextEngine = new ContextEngineApi();
 
 const workspaceFor = (senderId: number): string => workspaceRoots.get(senderId) ?? process.cwd();
 
+function bindWorkspace(senderId: number, folderPath: string): void {
+  workspaceRoots.set(senderId, folderPath);
+  setIpcWorkspaceRoot(senderId, folderPath);
+}
+
 registerGitHandlers();
 registerEngineeringHandlers(workspaceFor);
 registerModelHandlers(workspaceFor);
@@ -82,6 +92,10 @@ registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);
 registerCadHandlers();
 registerSchematicHandlers(workspaceFor);
+registerSearchHandlers(workspaceFor);
+registerDebugHandlers(workspaceFor);
+registerLspHandlers(workspaceFor);
+registerExtensionHandlers(workspaceFor);
 
 const subscribePipelineIpc = (sender: Electron.WebContents): (() => void) => {
   return pipelineEventBus.on((event: PipelineEvent) => {
@@ -232,7 +246,7 @@ const openFile = async (): Promise<void> => {
     path: projectPath,
     files: projectFiles
   });
-  workspaceRoots.set(window.webContents.id, projectPath);
+  bindWorkspace(window.webContents.id, projectPath);
   void contextEngine.indexWorkspace(projectPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(projectPath, projectFiles.map((f) => f.path));
   preloadForContext(inferPreloadContext(projectPath, projectFiles.map((f) => f.path)));
@@ -283,7 +297,7 @@ const openFolder = async (): Promise<void> => {
     path: folderPath,
     files: await listFolderFiles(folderPath)
   });
-  workspaceRoots.set(window.webContents.id, folderPath);
+  bindWorkspace(window.webContents.id, folderPath);
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(folderPath);
   preloadForContext(inferPreloadContext(folderPath));
@@ -295,7 +309,7 @@ const sendMenuCommand = (command: string): void => {
 
 const sendWorkspaceToRenderer = async (webContentsId: number, sender: Electron.WebContents, folderPath: string): Promise<void> => {
   sender.send("caval:workspace-session-reset");
-  workspaceRoots.set(webContentsId, folderPath);
+  bindWorkspace(webContentsId, folderPath);
   const files = await listFolderFiles(folderPath, 240);
   sender.send("caval:folder-opened", {
     path: folderPath,
@@ -1058,7 +1072,7 @@ ipcMain.handle("caval:workspace-open", async (event, folderPath: string) => {
   }
   const current = workspaceRoots.get(event.sender.id);
   if (current === folderPath) {
-    workspaceRoots.set(event.sender.id, folderPath);
+    bindWorkspace(event.sender.id, folderPath);
     return { ok: true, path: folderPath, cached: true };
   }
   await sendWorkspaceToRenderer(event.sender.id, event.sender, folderPath);
@@ -1068,7 +1082,7 @@ ipcMain.handle("caval:workspace-open", async (event, folderPath: string) => {
 /** Lightweight root sync — no re-index, no warm cache storm (used on chat send). */
 ipcMain.handle("caval:workspace-sync", (event, folderPath: string) => {
   if (folderPath && typeof folderPath === "string") {
-    workspaceRoots.set(event.sender.id, folderPath);
+    bindWorkspace(event.sender.id, folderPath);
   }
   return { ok: true, path: folderPath };
 });

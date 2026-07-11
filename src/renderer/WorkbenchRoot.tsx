@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useMemo } from 'react';
 import { CavalThemeProvider } from '../../themes/theme-provider';
 import { FileTree } from './components/sidebar/FileTree';
 import { TabBar } from './components/editor/TabBar';
@@ -13,7 +13,13 @@ import { CAVAL_OPEN_CODING_CHAT_EVENT } from '../../ai/engineering/engineering-h
 import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPanel } from './components/search/SearchPanel';
-import { MCPPanel } from './components/mcp/MCPPanel';
+import { ExtensionsHub } from './components/extensions/ExtensionsHub';
+import { QuickOpen } from './components/navigation/QuickOpen';
+import { CommandPalette } from './components/CommandPalette';
+import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
+import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
+import { buildWorkbenchCommands } from './commands/command-registry';
+import { DebugPanel } from './components/debug/DebugPanel';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import {
@@ -330,13 +336,92 @@ export function WorkbenchRoot() {
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);
   const [engineeringOpen, setEngineeringOpen] = React.useState(false);
-  const { saveTab, activeTabId, setProjectPath, setFileTree, openFile } = useEditorStore();
+  const [quickOpenVisible, setQuickOpenVisible] = React.useState(false);
+  const [paletteVisible, setPaletteVisible] = React.useState(false);
+  const [shortcutsVisible, setShortcutsVisible] = React.useState(false);
+  const [referencesVisible, setReferencesVisible] = React.useState(false);
+  const [referenceHits, setReferenceHits] = React.useState<ReferenceHit[]>([]);
+  const [referencesLoading, setReferencesLoading] = React.useState(false);
+  const [referenceSymbol, setReferenceSymbol] = React.useState('');
+  const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, tabs, projectPath, activeSymbol } = useEditorStore();
+  const { runWorkspaceVerifyAndReport, runBuildAndReport } = useAIStore();
   const gitChangesCount = useGitStore((s) => s.files.length);
 
   const toggleAI = useCallback(() => setAiPanelOpen((v) => !v), []);
   const toggleEngineering = useCallback(() => setEngineeringOpen((v) => !v), []);
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  const openFolderFromPalette = useCallback(async () => {
+    const folderPath = await window.caval.fs.openFolder();
+    if (!folderPath) return;
+    setProjectPath(folderPath);
+    useAIStore.getState().setIncludeMode('project');
+    const tree = await window.caval.fs.readTree(folderPath);
+    setFileTree(tree);
+    await window.caval.workspaceOpen?.(folderPath);
+  }, [setProjectPath, setFileTree]);
+
+  const runVerifyFromPalette = useCallback(async () => {
+    setAiPanelOpen(true);
+    await runWorkspaceVerifyAndReport();
+  }, [runWorkspaceVerifyAndReport]);
+
+  const runBuildFromPalette = useCallback(async () => {
+    setAiPanelOpen(true);
+    await runBuildAndReport();
+  }, [runBuildAndReport]);
+
+  const openReferences = useCallback(async () => {
+    const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId);
+    const symbol = useEditorStore.getState().activeSymbol;
+    if (!tab || !projectPath || !symbol) return;
+    const rel = tab.path.replace(projectPath, '').replace(/^[/\\]+/, '');
+    setReferenceSymbol(symbol);
+    setReferencesVisible(true);
+    setReferencesLoading(true);
+    setReferenceHits([]);
+    try {
+      const res = await window.caval.search?.findReferences?.({ filePath: rel, symbol });
+      if (res?.ok && res.references) {
+        setReferenceHits(res.references);
+      }
+    } finally {
+      setReferencesLoading(false);
+    }
+  }, [projectPath]);
+
+  const openDefinition = useCallback(async () => {
+    const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId);
+    const symbol = useEditorStore.getState().activeSymbol;
+    if (!tab || !projectPath || !symbol) return;
+    const rel = tab.path.replace(projectPath, '').replace(/^[/\\]+/, '');
+    const res = await window.caval.search?.gotoDefinition?.({ filePath: rel, symbol });
+    if (res?.ok && res.location?.filePath) {
+      const full = `${projectPath}/${res.location.filePath}`.replace(/\\/g, '/');
+      await openFile(full);
+    }
+  }, [projectPath, openFile]);
+
+  const workbenchCommands = useMemo(
+    () =>
+      buildWorkbenchCommands({
+        toggleAI,
+        toggleSidebar,
+        setActiveActivity: setActiveActivity,
+        setSidebarOpen,
+        openQuickOpen: () => setQuickOpenVisible(true),
+        saveActiveTab: () => {
+          const tabId = useEditorStore.getState().activeTabId;
+          if (tabId) void saveTab(tabId);
+        },
+        openFolder: openFolderFromPalette,
+        runWorkspaceVerify: runVerifyFromPalette,
+        runBuild: runBuildFromPalette,
+        openShortcuts: () => setShortcutsVisible(true),
+      }),
+    [toggleAI, toggleSidebar, saveTab, openFolderFromPalette, runVerifyFromPalette, runBuildFromPalette]
+  );
 
   useEffect(() => {
     const openCodingChat = () => setAiPanelOpen(true);
@@ -400,6 +485,36 @@ export function WorkbenchRoot() {
         setSidebarOpen(true);
       }
 
+      // Ctrl+P → Quick Open (not Ctrl+Shift+P)
+      if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setQuickOpenVisible(true);
+      }
+
+      // Ctrl+Shift+P → Command Palette
+      if (ctrl && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setPaletteVisible(true);
+      }
+
+      // Ctrl+Shift+/ → Keyboard shortcuts help
+      if (ctrl && e.shiftKey && (e.key === '/' || e.key === '?')) {
+        e.preventDefault();
+        setShortcutsVisible(true);
+      }
+
+      // F12 → Go to Definition (word at cursor)
+      if (e.key === 'F12' && !e.shiftKey) {
+        e.preventDefault();
+        void openDefinition();
+      }
+
+      // Shift+F12 → Find References
+      if (e.key === 'F12' && e.shiftKey) {
+        e.preventDefault();
+        void openReferences();
+      }
+
       // Ctrl+Shift+F → Search
       if (ctrl && e.shiftKey && e.key === 'F') {
         e.preventDefault();
@@ -440,12 +555,15 @@ export function WorkbenchRoot() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTabId, saveTab, toggleAI, toggleSidebar]);
+  }, [activeTabId, saveTab, toggleAI, toggleSidebar, openDefinition, openReferences]);
 
   useEffect(() => {
     const caval = window.caval;
     if (!caval?.onMenuCommand) return;
     return caval.onMenuCommand((command) => {
+      if (command === 'palette') {
+        setPaletteVisible(true);
+      }
       if (command === 'save') {
         const tabId = useEditorStore.getState().activeTabId;
         if (tabId) void saveTab(tabId);
@@ -482,6 +600,23 @@ export function WorkbenchRoot() {
       }
       if (command === 'view-extensions') {
         setActiveActivity('extensions');
+        setSidebarOpen(true);
+      }
+      if (command === 'run-debug' || command === 'run-without-debug') {
+        void (window.caval as { debug?: { launch?: () => Promise<unknown> } })?.debug?.launch?.();
+      }
+      if (command === 'stop-debug') {
+        void (window.caval as {
+          debug?: {
+            list?: () => Promise<{ sessions?: Array<{ id: string }> }>;
+            stop?: (id: string) => Promise<unknown>;
+          };
+        })?.debug?.list?.().then((res) => {
+          const first = res?.sessions?.[0];
+          if (first) void (window.caval as { debug?: { stop?: (id: string) => Promise<unknown> } })?.debug?.stop?.(first.id);
+        });
+      }
+      if (command === 'view-debug-console') {
         setSidebarOpen(true);
       }
       if (command === 'open-settings') {
@@ -661,8 +796,8 @@ export function WorkbenchRoot() {
           )}
 
           {sidebarOpen && activeActivity === 'extensions' && (
-            <SidebarShell width={280} onClose={closeSidebar}>
-              <MCPPanel />
+            <SidebarShell width={320} onClose={closeSidebar}>
+              <ExtensionsHub />
             </SidebarShell>
           )}
 
@@ -681,8 +816,33 @@ export function WorkbenchRoot() {
           {/* Editor + Terminal */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
             <MonacoEditor />
+            <DebugPanel />
             <TerminalPanel />
           </div>
+
+          <QuickOpen open={quickOpenVisible} onClose={() => setQuickOpenVisible(false)} />
+          <CommandPalette
+            open={paletteVisible}
+            commands={workbenchCommands}
+            onClose={() => setPaletteVisible(false)}
+          />
+          <ShortcutsOverlay
+            open={shortcutsVisible}
+            onClose={() => setShortcutsVisible(false)}
+          />
+          <ReferencesOverlay
+            open={referencesVisible}
+            symbol={referenceSymbol || activeSymbol || ''}
+            references={referenceHits}
+            loading={referencesLoading}
+            onClose={() => setReferencesVisible(false)}
+            onOpenReference={(hit) => {
+              if (!projectPath) return;
+              const full = `${projectPath}/${hit.filePath}`.replace(/\\/g, '/');
+              void openFile(full);
+              setReferencesVisible(false);
+            }}
+          />
 
           {/* AI Panel — dreapta, 340px, ascundibil */}
           {aiPanelOpen && (

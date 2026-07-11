@@ -21,11 +21,39 @@ export function MCPPanel() {
 
   const refresh = useCallback(async () => {
     const caval = (window as unknown as {
-      caval?: { mcpList?: () => Promise<{ servers?: McpServerStatus[] }> };
+      caval?: {
+        mcpList?: () => Promise<{ servers?: McpServerStatus[] }>;
+        mcpEnsureReady?: () => Promise<{ ok?: boolean; servers?: McpServerStatus[] }>;
+      };
     }).caval;
     const res = await caval?.mcpList?.();
     if (res?.servers) setServers(res.servers);
   }, []);
+
+  const restart = async (id: string) => {
+    const caval = (window as unknown as {
+      caval?: {
+        mcpStop?: (id: string) => Promise<unknown>;
+        mcpStart?: (id: string) => Promise<{ ok?: boolean; status?: McpServerStatus }>;
+        mcpEnsureReady?: () => Promise<unknown>;
+      };
+    }).caval;
+    setLoading(id);
+    await caval?.mcpStop?.(id);
+    await caval?.mcpStart?.(id);
+    setLoading(null);
+    void refresh();
+  };
+
+  const ensureAll = async () => {
+    const caval = (window as unknown as {
+      caval?: { mcpEnsureReady?: () => Promise<{ servers?: McpServerStatus[] }> };
+    }).caval;
+    setLoading('all');
+    const res = await caval?.mcpEnsureReady?.();
+    if (res?.servers) setServers(res.servers);
+    setLoading(null);
+  };
 
   useEffect(() => {
     void refresh();
@@ -49,6 +77,14 @@ export function MCPPanel() {
     <div style={{ padding: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>MCP Servers</div>
+        <button
+          type="button"
+          onClick={() => void ensureAll()}
+          disabled={loading === 'all'}
+          style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--caval-border)', background: 'none', cursor: 'pointer', color: 'var(--caval-text-muted)' }}
+        >
+          {loading === 'all' ? '…' : 'Health'}
+        </button>
         <button
           type="button"
           onClick={() => void refresh()}
@@ -76,9 +112,22 @@ export function MCPPanel() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ flex: 1, fontWeight: 600 }}>{s.name}</span>
-            <span style={{ fontSize: 10, color: s.running ? 'var(--caval-success)' : 'var(--caval-text-muted)' }}>
-              {s.running ? `${s.tools.length} tools` : 'off'}
+            <span style={{
+              fontSize: 10,
+              color: s.running ? 'var(--caval-success)' : s.error ? '#EF4444' : 'var(--caval-text-muted)',
+            }}>
+              {s.running ? `● ${s.tools.length} tools` : s.error ? '● error' : '○ off'}
             </span>
+            {s.running && (
+              <button
+                type="button"
+                disabled={loading === s.id}
+                onClick={() => void restart(s.id)}
+                style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--caval-border)', background: 'none', cursor: 'pointer', color: 'var(--caval-text-muted)' }}
+              >
+                ↻
+              </button>
+            )}
             <button
               type="button"
               disabled={loading === s.id}

@@ -18,6 +18,18 @@ import { resolveWaitPhase } from './arena-wait-copy';
 import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import { DEFAULT_ZERO_LATENCY_CONFIG } from '../../ai/composer/zero-latency/zl-config-shared';
 
+const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
+
+function readStoredPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem(AI_PANEL_WIDTH_KEY);
+    const n = raw ? Number(raw) : 340;
+    if (!Number.isFinite(n)) return 340;
+    return Math.max(260, Math.min(600, n));
+  } catch {
+    return 340;
+  }
+}
 const ARENA_INPUT_ROWS = 4;
 const ARENA_LINE_HEIGHT = 1.5;
 const ARENA_FONT_SIZE = 13;
@@ -54,7 +66,7 @@ function escHtml(s: string): string {
 // ──────────────────────────────────────────────
 
 function DiffBlock({ message }: { message: ChatMessage }) {
-  const { applyDiff, rejectDiff } = useAIStore();
+  const { applyDiff, rejectDiff, rollbackDiff } = useAIStore();
   const diff = message.diff!;
 
   if (diff.applied) {
@@ -63,9 +75,22 @@ function DiffBlock({ message }: { message: ChatMessage }) {
         marginTop: 10, padding: '8px 12px', borderRadius: 6,
         background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
         fontSize: 11.5, color: 'var(--caval-success)',
-        display: 'flex', alignItems: 'center', gap: 6,
+        display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        ✓ Modificări aplicate în {diff.filePath.split(/[/\\]/).pop()}
+        <span style={{ flex: 1 }}>✓ Modificări aplicate în {diff.filePath.split(/[/\\]/).pop()}</span>
+        {diff.previousContent != null && (
+          <button
+            type="button"
+            onClick={() => void rollbackDiff(message.id)}
+            style={{
+              padding: '3px 10px', borderRadius: 5,
+              border: '1px solid rgba(47,191,113,0.35)', background: 'transparent',
+              color: 'var(--caval-success)', fontSize: 11, cursor: 'pointer',
+            }}
+          >
+            ↩ Anulează
+          </button>
+        )}
       </div>
     );
   }
@@ -485,6 +510,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     agentMode, strictReview, setStrictReview, modelLabels,
     modeSwitchNotice, clearModeSwitchNotice,
     deliveryPause, submitUiDeliveryPreferences,
+    verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
+    includeMode, setIncludeMode,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
@@ -510,7 +537,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const [uiNotes, setUiNotes] = useState('');
 
   // ── Resize drag ──
-  const [panelWidth, setPanelWidth] = useState(340);
+  const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartW = useRef(340);
@@ -520,6 +547,14 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     dragStartX.current = e.clientX;
     dragStartW.current = panelWidth;
     e.preventDefault();
+  }, [panelWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(AI_PANEL_WIDTH_KEY, String(panelWidth));
+    } catch {
+      /* ignore quota */
+    }
   }, [panelWidth]);
 
   useEffect(() => {
@@ -542,6 +577,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prepareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectPath = useEditorStore((s) => s.projectPath);
+  const editorSelection = useEditorStore((s) => s.editorSelection);
   const tabs = useEditorStore((s) => s.tabs);
   const activeTabId = useEditorStore((s) => s.activeTabId);
 
@@ -808,6 +844,62 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           quickPrompts={QUICK_PROMPTS}
           onQuickPrompt={handleQuickPrompt}
         />
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {editorSelection?.text && (
+            <button
+              type="button"
+              onClick={() => setIncludeMode(includeMode === 'selection' ? 'project' : 'selection')}
+              title={includeMode === 'selection' ? 'Context: doar selecția' : 'Include selecția în context'}
+              style={{
+                fontSize: 10,
+                padding: '3px 8px',
+                borderRadius: 999,
+                border: `1px solid ${includeMode === 'selection' ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
+                background: includeMode === 'selection' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
+                color: includeMode === 'selection' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {includeMode === 'selection' ? '◉' : '○'} Selecție ({editorSelection.endLine - editorSelection.startLine + 1}L)
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void runWorkspaceVerifyAndReport()}
+            disabled={verifyInFlight !== 'none' || !projectPath || isStreaming}
+            title={projectPath ? 'Rulează npm test / verify workspace' : 'Deschide un folder de proiect'}
+            style={{
+              fontSize: 10.5,
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: verifyInFlight === 'tests' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
+              color: verifyInFlight === 'tests' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+              cursor: verifyInFlight !== 'none' || !projectPath || isStreaming ? 'default' : 'pointer',
+              opacity: verifyInFlight !== 'none' || !projectPath || isStreaming ? 0.55 : 1,
+            }}
+          >
+            {verifyInFlight === 'tests' ? '⏳ Run tests…' : '▶ Run tests'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runBuildAndReport()}
+            disabled={verifyInFlight !== 'none' || !projectPath || isStreaming}
+            title={projectPath ? 'Rulează npm run build' : 'Deschide un folder de proiect'}
+            style={{
+              fontSize: 10.5,
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: verifyInFlight === 'build' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
+              color: verifyInFlight === 'build' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+              cursor: verifyInFlight !== 'none' || !projectPath || isStreaming ? 'default' : 'pointer',
+              opacity: verifyInFlight !== 'none' || !projectPath || isStreaming ? 0.55 : 1,
+            }}
+          >
+            {verifyInFlight === 'build' ? '⏳ Run build…' : '▶ Run build'}
+          </button>
+        </div>
         {modeSwitchNotice && !isAgentic && (
           <div
             style={{

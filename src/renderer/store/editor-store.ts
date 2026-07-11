@@ -25,6 +25,13 @@ export interface FileNode {
   children?: FileNode[];
 }
 
+export interface EditorSelection {
+  text: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+}
+
 interface EditorStore {
   // ── Proiect ────────────────────────────────
   projectPath: string | null;
@@ -46,6 +53,12 @@ interface EditorStore {
   showAiPreview: (relativePath: string, content: string) => void;
   updateAiPreview: (relativePath: string, content: string) => void;
   closeAiPreview: () => void;
+
+  // ── Editor cursor / selection ──────────────
+  editorSelection: EditorSelection | null;
+  activeSymbol: string | null;
+  setEditorSelection: (selection: EditorSelection | null) => void;
+  setActiveSymbol: (symbol: string | null) => void;
 
   // ── Sidebar ────────────────────────────────
   expandedDirs: Set<string>;
@@ -101,6 +114,11 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   // ── Tabs ───────────────────────────────────
   tabs: [],
   activeTabId: null,
+  editorSelection: null,
+  activeSymbol: null,
+
+  setEditorSelection: (selection) => set({ editorSelection: selection }),
+  setActiveSymbol: (symbol) => set({ activeSymbol: symbol }),
 
   openFile: async (filePath) => {
     const { tabs } = get();

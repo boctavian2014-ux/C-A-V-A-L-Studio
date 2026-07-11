@@ -3,9 +3,18 @@ import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 
-// ──────────────────────────────────────────────
-//  Terminal instance hook
-// ──────────────────────────────────────────────
+const TERMINAL_HEIGHT_KEY = 'caval-terminal-height';
+
+function readStoredTerminalHeight(): number {
+  try {
+    const raw = localStorage.getItem(TERMINAL_HEIGHT_KEY);
+    const n = raw ? Number(raw) : 180;
+    if (!Number.isFinite(n)) return 180;
+    return Math.max(120, Math.min(480, n));
+  } catch {
+    return 180;
+  }
+}
 
 let terminalCounter = 0;
 
@@ -125,7 +134,7 @@ type PanelTab = 'terminal' | 'output' | 'problems' | 'debug';
 
 export function TerminalPanel() {
   const [activeTab, setActiveTab] = useState<PanelTab>('terminal');
-  const [height, setHeight] = useState(180);
+  const [height, setHeight] = useState(readStoredTerminalHeight);
   const [isVisible, setIsVisible] = useState(true);
   const containerId = 'caval-terminal-container';
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -149,6 +158,14 @@ export function TerminalPanel() {
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+  }, [height]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TERMINAL_HEIGHT_KEY, String(height));
+    } catch {
+      /* ignore */
+    }
   }, [height]);
 
   const TABS: { id: PanelTab; label: string }[] = [

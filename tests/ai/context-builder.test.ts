@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildContextMessages,
+  buildFastChatMessages,
+  buildFinalUserMessage,
   buildProjectTreeSummary,
+  formatContextSearchResults,
+  parseMentions,
+  resolveMentionFiles,
   shouldAttachProjectContext,
 } from '../../ai/context-engine/context-builder';
 
@@ -74,5 +79,55 @@ describe('context-builder project attach', () => {
     expect(summary).toContain('package.json');
     expect(summary).toContain('src');
     expect(summary).toContain('main.ts');
+  });
+
+  it('parseMentions extracts @file paths', () => {
+    expect(parseMentions('Check @src/main.ts and @README.md')).toEqual([
+      'src/main.ts',
+      'README.md',
+    ]);
+  });
+
+  it('buildFastChatMessages includes system + user for ask mode', () => {
+    const msgs = buildFastChatMessages('Salut', [], 'ask');
+    expect(msgs[0].role).toBe('system');
+    expect(msgs.at(-1)?.content).toBe('Salut');
+  });
+
+  it('buildFinalUserMessage attaches active file when not skipped', () => {
+    const msg = buildFinalUserMessage(
+      'Fix bug',
+      {
+        id: 'f1',
+        path: '/proj/src/a.ts',
+        name: 'a.ts',
+        content: 'export const x = 1;',
+        language: 'typescript',
+        isDirty: false,
+      },
+      'file'
+    );
+    expect(msg).toContain('Fix bug');
+    expect(msg).toContain('export const x');
+  });
+
+  it('formatContextSearchResults normalizes chunk wrapper', () => {
+    const text = formatContextSearchResults([
+      { chunk: { path: 'src/a.ts', text: 'hello' } },
+      { path: 'src/b.ts', snippet: 'world' },
+    ]);
+    expect(text).toContain('src/a.ts');
+    expect(text).toContain('hello');
+    expect(text).toContain('src/b.ts');
+  });
+
+  it('resolveMentionFiles reads up to 6 mentions', async () => {
+    const readFile = vi.fn(async (p: string) => ({
+      ok: p.endsWith('main.ts'),
+      content: 'export const main = 1;',
+    }));
+    const files = await resolveMentionFiles(['src/main.ts', 'missing.ts'], '/proj', readFile);
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toBe('src/main.ts');
   });
 });

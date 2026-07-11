@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { ContextEngineApi } from "../../context-engine/api";
 import { runAllowedWorkspaceCommand } from "./workspace-command-runner";
+import { runTerminalCommand } from "../../src/main/terminal-bridge";
 
 export interface ToolCall {
   name: string;
@@ -56,6 +57,16 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     parameters: {
       type: "object",
       properties: { command: { type: "string", description: "e.g. npm run build" } },
+      required: ["command"],
+    },
+  },
+  {
+    name: "run_terminal",
+    description:
+      "Run a shell command in the workspace terminal (caval:terminal bridge). Same allowlist as run_command.",
+    parameters: {
+      type: "object",
+      properties: { command: { type: "string", description: "e.g. npm test" } },
       required: ["command"],
     },
   },
@@ -111,6 +122,8 @@ export class ToolRegistry {
         return this.searchCodebase(String(call.arguments.query ?? ""), Number(call.arguments.limit ?? 8));
       case "run_command":
         return this.runCommand(String(call.arguments.command ?? ""));
+      case "run_terminal":
+        return this.runTerminal(String(call.arguments.command ?? ""));
       default:
         return { ok: false, error: `Unknown tool: ${call.name}` };
     }
@@ -173,6 +186,19 @@ export class ToolRegistry {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  private async runTerminal(command: string): Promise<ToolResult> {
+    const result = await runTerminalCommand(this.workspaceRoot, command);
+    return {
+      ok: result.ok,
+      output: {
+        command,
+        exitCode: result.exitCode,
+        output: result.output,
+      },
+      error: result.error ?? (result.ok ? undefined : result.output.slice(0, 500)),
+    };
   }
 
   private async runCommand(command: string): Promise<ToolResult> {

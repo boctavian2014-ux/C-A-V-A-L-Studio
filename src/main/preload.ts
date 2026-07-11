@@ -747,6 +747,49 @@ contextBridge.exposeInMainWorld("caval", {
       }>,
   },
 
+  search: {
+    text: (input: { query: string; caseSensitive?: boolean; maxResults?: number }) =>
+      ipcRenderer.invoke("caval:search-text", {
+        query: input.query,
+        workspaceRoot: "",
+        caseSensitive: input.caseSensitive,
+        maxResults: input.maxResults,
+      }) as Promise<{ ok: boolean; hits?: Array<{ path: string; line: number; column: number; preview: string }>; error?: string }>,
+    indexSymbols: () => ipcRenderer.invoke("caval:symbol-index") as Promise<{ ok: boolean; count?: number; error?: string }>,
+    gotoDefinition: (input: { filePath: string; symbol: string }) =>
+      ipcRenderer.invoke("caval:goto-definition", input) as Promise<{
+        ok: boolean;
+        location?: { filePath: string; line: number; column: number };
+        error?: string;
+      }>,
+    findReferences: (input: { filePath: string; symbol: string }) =>
+      ipcRenderer.invoke("caval:find-references", input) as Promise<{
+        ok: boolean;
+        references?: Array<{ filePath: string; line: number; column: number }>;
+        error?: string;
+      }>,
+  },
+
+  lsp: {
+    start: (languageId: string) => ipcRenderer.invoke("lsp:start", languageId) as Promise<{ ok: boolean; sessionId?: string; error?: string }>,
+    stop: (sessionId: string) => ipcRenderer.invoke("lsp:stop", sessionId) as Promise<{ ok: boolean; error?: string }>,
+    status: () => ipcRenderer.invoke("lsp:status") as Promise<{ ok: boolean; servers?: unknown[] }>,
+  },
+
+  debug: {
+    launch: (input?: { program?: string; args?: string[]; cwd?: string }) =>
+      ipcRenderer.invoke("debug:launch", input) as Promise<{ ok: boolean; session?: { id: string; pid: number }; error?: string }>,
+    stop: (sessionId: string) => ipcRenderer.invoke("debug:stop", sessionId) as Promise<{ ok: boolean; error?: string }>,
+    list: () => ipcRenderer.invoke("debug:list") as Promise<{ ok: boolean; sessions?: unknown[] }>,
+    launchConfig: () => ipcRenderer.invoke("debug:launch-config") as Promise<{ ok: boolean; config?: { program: string; args?: string[] } }>,
+  },
+
+  extensions: {
+    list: () => ipcRenderer.invoke("extensions:list") as Promise<{ ok: boolean; extensions?: unknown[] }>,
+    register: (manifest: { id: string; name: string; version: string }) =>
+      ipcRenderer.invoke("extensions:register", manifest) as Promise<{ ok: boolean; error?: string }>,
+  },
+
   schematic: {
     generateFromCode: (input: {
       workspaceRoot: string;

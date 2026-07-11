@@ -30,7 +30,7 @@ export interface EngSaveResult {
 
 const OUTPUT_DIR = 'caval-engineering';
 
-function sanitizeFileName(name: string): string {
+export function sanitizeFileName(name: string): string {
   const base = (name || 'fisier').trim();
   return base.replace(/[^a-z0-9.\-_]/gi, '_').slice(0, 80) || 'fisier';
 }
@@ -41,7 +41,7 @@ function ensureOutputDir(projectPath: string): string {
   return dir;
 }
 
-function isPathInsideWorkspace(workspaceRoot: string, targetPath: string): boolean {
+export function isPathInsideWorkspace(workspaceRoot: string, targetPath: string): boolean {
   const root = path.resolve(workspaceRoot);
   const resolved = path.resolve(targetPath);
   return resolved === root || resolved.startsWith(root + path.sep);
