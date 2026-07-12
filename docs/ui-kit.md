@@ -14,4 +14,4 @@ flowchart TD
   Components --> AI[AI Panels]
 ```
 
-UI Kit-ul include tokens, componente React, layout helpers, theme provider, iconografie monoline, animatii si best practices pentru Caval Studio.
+UI Kit-ul include tokens, componente React, layout helpers, theme provider, iconografie monoline, animatii si best practices pentru CAVALLO Studio.

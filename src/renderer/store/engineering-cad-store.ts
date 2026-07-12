@@ -106,7 +106,10 @@ async function loadCadCredentials(): Promise<{
   const settings = (settingsResult?.settings ?? {}) as Record<string, string>;
   const secrets = (secretsResult?.secrets ?? {}) as Record<string, string>;
   return {
-    openRouterApiKey: settings['openRouter.apiKey'] || secrets.OPENROUTER_API_KEY,
+    openRouterApiKey:
+      settings['openrouter.apiKey'] ||
+      settings['openRouter.apiKey'] ||
+      secrets.OPENROUTER_API_KEY,
     meshApiKey: settings['mesh.apiKey'] || secrets.MESHY_API_KEY,
     cadApiUrl: settings['cad.apiUrl'],
   };

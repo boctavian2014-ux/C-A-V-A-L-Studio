@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-//  CAVALO — emblema brand (neon horse, fundal transparent)
+//  CAVALLO — emblema brand (neon horse, fundal transparent)
 // ──────────────────────────────────────────────
 
 import React from 'react';
@@ -19,7 +19,7 @@ const NEON_LOGO_STYLE: React.CSSProperties = {
   ].join(' '),
 };
 
-/** Logo oficial CAVALO — cal neon, fundal transparent. */
+/** Logo oficial CAVALLO — cal neon, fundal transparent. */
 export function CavaloHorseMark({
   size = 48,
   glowFilter,
@@ -122,7 +122,7 @@ export function CavaloLogo({ height = 24 }: { height?: number }) {
           lineHeight: 1,
         }}
       >
-        CAVALO
+        CAVALLO
       </span>
     </span>
   );

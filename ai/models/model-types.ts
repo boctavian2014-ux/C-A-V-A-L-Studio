@@ -1,6 +1,6 @@
 import type { ModelCapability } from "../types";
 
-/** Stable identifier for a model in the Caval AI layer. */
+/** Stable identifier for a model in the CAVALLO AI layer. */
 export type AIModelId = string;
 
 /** High-level role of a model in the IDE. */

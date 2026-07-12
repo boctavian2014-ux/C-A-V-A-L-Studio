@@ -11,8 +11,8 @@ export interface CrashReporterOptions {
 export class CavalCrashReporter {
   start(options: CrashReporterOptions): void {
     crashReporter.start({
-      productName: options.productName ?? "Caval Studio",
-      companyName: options.companyName ?? "Caval Studio",
+      productName: options.productName ?? "CAVALLO Studio",
+      companyName: options.companyName ?? "CAVALLO Studio",
       submitURL: options.submitUrl,
       uploadToServer: options.uploadToServer ?? true,
       compress: true,

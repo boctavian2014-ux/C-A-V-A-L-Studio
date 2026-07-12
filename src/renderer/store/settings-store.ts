@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 // ──────────────────────────────────────────────
-//  Settings Store — Caval IDE
+//  Settings Store — CAVALLO Studio
 //  Persisted în localStorage (toate setările)
 // ──────────────────────────────────────────────
 

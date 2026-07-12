@@ -301,7 +301,7 @@ export function buildEngineeringPrompt(input: {
   ].filter(Boolean);
 
   return [
-    'You are Engineering AI, a hardware design assistant integrated in Caval Studio.',
+    'You are Engineering AI, a hardware design assistant integrated in CAVALLO Studio.',
     '',
     buildMasterPromptRules(),
     '',

@@ -1,6 +1,6 @@
-# Caval Studio Brandbook
+# CAVALLO Studio Brandbook
 
-Caval Studio este un IDE romanesc premium pentru dezvoltatori care vor viteza, claritate si AI frontier fara sa piarda controlul asupra codului. Identitatea vizuala este dark tech, cu Cyan Pulse, linii verticale inspirate din caval si radacini romanesti discrete.
+CAVALLO Studio este un IDE romanesc premium pentru dezvoltatori care vor viteza, claritate si AI frontier fara sa piarda controlul asupra codului. Identitatea vizuala este dark tech, cu Cyan Pulse, linii verticale inspirate din caval si radacini romanesti discrete.
 
 ## Identitate
 

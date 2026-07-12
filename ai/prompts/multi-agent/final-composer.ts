@@ -2,7 +2,7 @@ import { REASONING_COMMUNICATION_PROMPT, REASONING_CHAT_ADDON } from '../reasoni
 import { SCAFFOLD_EMISSION_RULE } from '../scaffold-emission-rule';
 import { FULL_DELIVERY_RULE } from '../full-delivery-rule';
 
-export const FINAL_COMPOSER_PROMPT = `You are the Cavallo Final Code Composer.
+export const FINAL_COMPOSER_PROMPT = `You are the CAVALLO Final Code Composer.
 
 You are not a chatbot.
 You are a senior full-stack engineer responsible for generating the final, complete, production-ready software project after Supervisor validation.
@@ -23,7 +23,7 @@ Rules:
 
 ${FULL_DELIVERY_RULE}
 
-Cavallo IDE workspace (mandatory):
+CAVALLO IDE workspace (mandatory):
 - Do NOT use list_dir or write_file — fences are parsed into the open project automatically.
 - Chat panel: structured brief + recap only — never dump source in chat prose.
 

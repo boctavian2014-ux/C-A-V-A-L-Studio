@@ -1,5 +1,9 @@
 import type { ComposerDiagnostic } from "../types";
 
+function isElectronRenderer(): boolean {
+  return typeof window !== "undefined" && typeof process !== "undefined" && process.type === "renderer";
+}
+
 export class SyntaxChecker {
   async check(files: Array<{ path: string; content: string }>): Promise<ComposerDiagnostic[]> {
     const batches = await Promise.all(
@@ -22,6 +26,10 @@ export class SyntaxChecker {
   }
 
   private async checkTypeScript(filePath: string, content: string): Promise<ComposerDiagnostic[]> {
+    if (isElectronRenderer()) {
+      return this.lightweightScriptCheck(filePath, content);
+    }
+
     try {
       const ts = await import("typescript");
       const output = ts.transpileModule(content, {
@@ -36,8 +44,20 @@ export class SyntaxChecker {
         message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
       }));
     } catch {
-      return [];
+      return this.lightweightScriptCheck(filePath, content);
     }
+  }
+
+  private lightweightScriptCheck(filePath: string, content: string): ComposerDiagnostic[] {
+    if (!this.hasBalancedDelimiters(content)) {
+      return [{
+        level: "warning",
+        source: "syntax-checker",
+        file: filePath,
+        message: "Basic delimiter check failed. Full TypeScript validation runs in main process only.",
+      }];
+    }
+    return [];
   }
 
   private hasBalancedDelimiters(content: string): boolean {

@@ -1,4 +1,3 @@
-import { SyntaxChecker } from './validation/syntax-checker';
 import type { ComposerDiagnostic } from './types';
 
 export interface ImportIssue {
@@ -126,6 +125,7 @@ export async function runCavaloConsistencyScan(
 ): Promise<ConsistencyScanResult> {
   const readFile = opts.readFileContent ?? (async () => null);
   const fileExists = opts.fileExists ?? (() => false);
+  const { SyntaxChecker } = await import('./validation/syntax-checker');
   const syntaxChecker = new SyntaxChecker();
 
   const fileContents: Array<{ path: string; content: string }> = [];

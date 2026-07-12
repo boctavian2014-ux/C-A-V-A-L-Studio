@@ -1,6 +1,6 @@
-# Caval Studio UI Kit
+# CAVALLO Studio UI Kit
 
-Caval Studio UI Kit este design system-ul pentru un IDE premium, dens si clar: flow inspirat de Glovo, claritate Cursor, densitate JetBrains, coerenta Figma si identitate Caval cu linii verticale si cyan glow.
+CAVALLO Studio UI Kit este design system-ul pentru un IDE premium, dens si clar: flow inspirat de Glovo, claritate Cursor, densitate JetBrains, coerenta Figma si identitate Caval cu linii verticale si cyan glow.
 
 ## Tokens
 

@@ -11,7 +11,7 @@ export class OpenRouterProvider extends HttpChatProvider {
       apiKeyEnv: "OPENROUTER_API_KEY",
       defaultHeaders: {
         "HTTP-Referer": "https://caval.studio",
-        "X-Title": "Caval Studio"
+        "X-Title": "CAVALLO Studio"
       }
     });
   }

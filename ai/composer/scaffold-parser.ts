@@ -126,6 +126,46 @@ const FRAGMENT_INTERNAL_MARKERS = [
   /\bapplyUnifiedDiff\b/,
 ];
 
+import {
+  FORBIDDEN_USER_WORKSPACE_PATH_RE,
+  FORBIDDEN_USER_PACKAGE_NAMES,
+} from '../scaffolds/workspace-forbidden-paths';
+
+/** Paths that collide with built-in CAVALLO modules — never scaffold here. */
+const BLOCKED_SCAFFOLD_PATH_RE = FORBIDDEN_USER_WORKSPACE_PATH_RE;
+
+const BLOCKED_SCAFFOLD_PACKAGE_NAMES = FORBIDDEN_USER_PACKAGE_NAMES;
+
+export function isBlockedScaffoldPath(path: string): boolean {
+  const normalized = path.trim().replace(/\\/g, '/').replace(/^\.\/+/, '');
+  return BLOCKED_SCAFFOLD_PATH_RE.test(normalized);
+}
+
+/** Ensure `composer.ts` exports `composer` when sibling `server.ts` imports it. */
+export function repairScaffoldComposerExport(path: string, content: string): string {
+  const normalized = path.trim().replace(/\\/g, '/');
+  if (!normalized.endsWith('/composer.ts') && normalized !== 'composer.ts') return content;
+  if (/\bexport\s+const\s+composer\b/.test(content)) return content;
+
+  if (/\bexport\s+const\s+zeroLatencyComposer\b/.test(content)) {
+    return `${content.trimEnd()}\n\nexport const composer = zeroLatencyComposer;\n`;
+  }
+
+  if (/\bexport\s+class\s+ZeroLatencyComposer\b/.test(content)) {
+    const hasInstance = /\bexport\s+const\s+zeroLatencyComposer\b/.test(content);
+    const suffix = hasInstance
+      ? '\nexport const composer = zeroLatencyComposer;\n'
+      : '\nexport const zeroLatencyComposer = new ZeroLatencyComposer();\nexport const composer = zeroLatencyComposer;\n';
+    return `${content.trimEnd()}${suffix}`;
+  }
+
+  return content;
+}
+
+function acceptScaffoldPath(path: string): boolean {
+  return !isBlockedScaffoldPath(path);
+}
+
 /** Reject IDE/chat snippets that are not standalone modules (prevents junk like src/index.ts). */
 export function isScaffoldFragment(content: string): boolean {
   const body = content.trim();
@@ -155,6 +195,44 @@ function acceptScaffoldBody(body: string): boolean {
   return !isScaffoldFragment(body);
 }
 
+/** Reject markdown / prose pasted into code files or internal package names. */
+export function isJunkCodeFileContent(path: string, content: string): boolean {
+  const normalized = path.trim().replace(/\\/g, '/').replace(/^\.\/+/, '');
+  const base = normalized.split('/').pop()?.toLowerCase() ?? '';
+
+  if (base === 'package.json') {
+    try {
+      const pkg = JSON.parse(content) as { name?: string };
+      const name = String(pkg.name ?? '').toLowerCase();
+      if (BLOCKED_SCAFFOLD_PACKAGE_NAMES.has(name)) return true;
+    } catch {
+      return true;
+    }
+    return false;
+  }
+
+  const ext = base.includes('.') ? base.split('.').pop() : '';
+  if (!ext || !['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].includes(ext)) return false;
+
+  const trim = content.trimStart();
+  if (!trim) return true;
+  if (/^#{1,6}\s+\S/m.test(trim)) return true;
+  if (/^```/.test(trim)) return true;
+  if (/^##\s+(PROJECT SUMMARY|COMPONENT LIST|CAD|MECHANICAL|ASSEMBLY)/i.test(content)) return true;
+  if (/^[-*]\s+\S/.test(trim) && !/\b(import|export|const|function|class)\b/.test(content)) return true;
+  // TS1127 — leading invalid characters (markdown bullets, emoji, etc.)
+  if (/^[^\w\s/$`"'@#\[{(]/.test(trim) && !trim.startsWith('//') && !trim.startsWith('/*')) {
+    return true;
+  }
+  return false;
+}
+
+function acceptScaffoldFile(path: string, body: string): boolean {
+  if (!acceptScaffoldBody(body)) return false;
+  if (isJunkCodeFileContent(path, body)) return false;
+  return true;
+}
+
 /** Extract file paths + contents from model output (fallback when tools are unavailable). */
 export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
   const found = new Map<string, string>();
@@ -167,8 +245,8 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
       };
       for (const file of parsed.files ?? []) {
         const rel = normalizeRelativePath(file.path ?? file.name ?? '');
-        if (rel && file.content && acceptScaffoldBody(file.content)) {
-          found.set(rel, file.content);
+        if (rel && file.content && acceptScaffoldPath(rel) && acceptScaffoldFile(rel, file.content)) {
+          found.set(rel, repairScaffoldComposerExport(rel, file.content));
         }
       }
     } catch {
@@ -184,13 +262,15 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
     const pathHint = match[2]?.trim() ?? '';
     const body = match[3]?.trimEnd().trimStart() ?? '';
     if (!body || lang === 'diff' || lang === 'json') continue;
-    if (!acceptScaffoldBody(body)) continue;
 
     const fromHeader = normalizeRelativePath(pathHint);
     if (fromHeader) {
-      found.set(fromHeader, body);
+      if (!acceptScaffoldPath(fromHeader) || !acceptScaffoldFile(fromHeader, body)) continue;
+      found.set(fromHeader, repairScaffoldComposerExport(fromHeader, body));
       continue;
     }
+
+    if (!acceptScaffoldBody(body)) continue;
 
     const fileLine = body.match(
       /^(?:\/\/|#|<!--)\s*(?:file|path)\s*[:=]\s*([^\n*]+)/im
@@ -198,13 +278,14 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
     const fromComment = fileLine ? normalizeRelativePath(fileLine[1]) : null;
     if (fromComment) {
       const stripped = body.replace(fileLine![0], '').trimStart();
-      if (!acceptScaffoldBody(stripped)) continue;
-      found.set(fromComment, stripped);
+      if (!acceptScaffoldPath(fromComment) || !acceptScaffoldFile(fromComment, stripped)) continue;
+      found.set(fromComment, repairScaffoldComposerExport(fromComment, stripped));
       continue;
     }
 
     const fallback = defaultPathForLang(lang, anonIndex++, body);
-    if (!found.has(fallback)) found.set(fallback, body);
+    if (!acceptScaffoldPath(fallback) || !acceptScaffoldFile(fallback, body)) continue;
+    if (!found.has(fallback)) found.set(fallback, repairScaffoldComposerExport(fallback, body));
   }
 
   return [...found.entries()].map(([path, fileContent]) => ({ path, content: fileContent }));
@@ -226,9 +307,11 @@ export function parseStreamingScaffold(content: string): ParsedScaffoldFile | nu
   const rel =
     normalizeRelativePath(pathHint) ??
     (lang || body ? defaultPathForLang(lang, 0, body) : 'generating.ts');
-  if (!body.trim() || isScaffoldFragment(body)) return null;
+  if (!body.trim() || isScaffoldFragment(body) || isBlockedScaffoldPath(rel) || isJunkCodeFileContent(rel, body)) {
+    return null;
+  }
 
-  return { path: rel, content: body };
+  return { path: rel, content: repairScaffoldComposerExport(rel, body) };
 }
 
 export function hasScaffoldFences(text: string): boolean {

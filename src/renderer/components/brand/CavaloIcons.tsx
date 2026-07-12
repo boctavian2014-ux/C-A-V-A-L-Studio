@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-//  CAVALO — set unitar de iconițe UI
+//  CAVALLO — set unitar de iconițe UI
 //  3D PNG glossy pentru activity bar; SVG pentru Git + Engineering.
 //
 //  Folosire:
@@ -72,7 +72,7 @@ export function IconMarketplace(p: IconProps) {
 
 export function IconEngineering(p: IconProps) {
   return (
-    <Svg {...p} label="Engineering AI">
+    <Svg {...p} label="Robotics AI">
       <rect x="7" y="7" width="10" height="10" rx="2.4" />
       <circle cx="12" cy="12" r="2.2" />
       <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
@@ -81,7 +81,7 @@ export function IconEngineering(p: IconProps) {
 }
 
 export function IconSparkle(p: IconProps) {
-  return <PngIcon {...p} name="ai" label="CAVALO AI" />;
+  return <PngIcon {...p} name="ai" label="CAVALLO AI" />;
 }
 
 export function IconSettings(p: IconProps) {
@@ -129,7 +129,7 @@ export function IconBuild(p: IconProps) {
   );
 }
 
-/** Folder line icon — file tree, toolbar (CAVALO style, not Windows). */
+/** Folder line icon — file tree, toolbar (CAVALLO style, not Windows). */
 export function IconFolder(p: IconProps & { open?: boolean }) {
   const { open, size = 18, strokeWidth = 1.6 } = p;
   return (

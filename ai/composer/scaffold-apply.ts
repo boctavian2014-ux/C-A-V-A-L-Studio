@@ -1,4 +1,11 @@
-import { parseScaffoldFiles, isScaffoldFragment, type ParsedScaffoldFile } from './scaffold-parser';
+import {
+  parseScaffoldFiles,
+  isScaffoldFragment,
+  isBlockedScaffoldPath,
+  isJunkCodeFileContent,
+  repairScaffoldComposerExport,
+  type ParsedScaffoldFile,
+} from './scaffold-parser';
 
 function joinWorkspace(root: string, relative: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
@@ -23,14 +30,21 @@ export async function applyScaffoldToWorkspace(
   const mkdirDone = new Set<string>();
 
   for (const file of files) {
-    if (isScaffoldFragment(file.content)) continue;
+    if (
+      isBlockedScaffoldPath(file.path) ||
+      isScaffoldFragment(file.content) ||
+      isJunkCodeFileContent(file.path, file.content)
+    ) {
+      continue;
+    }
+    const content = repairScaffoldComposerExport(file.path, file.content);
     const abs = joinWorkspace(projectPath, file.path);
     const dir = parentDir(abs);
     if (!mkdirDone.has(dir) && caval.fs.createDir) {
       await caval.fs.createDir(dir);
       mkdirDone.add(dir);
     }
-    const res = await caval.fs.writeFile(abs, file.content);
+    const res = await caval.fs.writeFile(abs, content);
     if (res.ok) written.push(file.path);
   }
 

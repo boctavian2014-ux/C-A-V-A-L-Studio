@@ -5,6 +5,9 @@ import {
   pickCodeStreamOutput,
   inferExtensionFromContent,
   isScaffoldFragment,
+  isBlockedScaffoldPath,
+  isJunkCodeFileContent,
+  repairScaffoldComposerExport,
 } from '../../ai/composer/scaffold-parser';
 
 describe('scaffold-parser', () => {
@@ -107,5 +110,59 @@ describe('scaffold-parser', () => {
   it('parseStreamingScaffold returns null for fragment body', () => {
     const text = '```typescript\nreturn ctx;\n```';
     expect(parseStreamingScaffold(text)).toBeNull();
+  });
+
+  it('blocks scaffold under src/zero-latency (built-in module path)', () => {
+    const text = [
+      '```typescript:src/zero-latency/server.ts',
+      "import { composer } from './composer';",
+      'composer.prepare({ workspaceRoot: "/p" });',
+      '```',
+    ].join('\n');
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
+    expect(isBlockedScaffoldPath('src/zero-latency/server.ts')).toBe(true);
+  });
+
+  it('repairs composer.ts to export composer alias', () => {
+    const body = [
+      'export class ZeroLatencyComposer {',
+      '  prepare() { return "ok"; }',
+      '}',
+      'export const zeroLatencyComposer = new ZeroLatencyComposer();',
+    ].join('\n');
+    const fixed = repairScaffoldComposerExport('src/zero-latency/composer.ts', body);
+    expect(fixed).toContain('export const composer = zeroLatencyComposer');
+  });
+
+  it('rejects markdown pasted into anonymous typescript fence (src/index.ts)', () => {
+    const text = [
+      '```typescript',
+      '## PROJECT SUMMARY',
+      'Robot ESP32 pe roti.',
+      '## COMPONENT LIST',
+      '| Name | Qty |',
+      '```',
+    ].join('\n');
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
+    expect(isJunkCodeFileContent('src/index.ts', '## PROJECT SUMMARY\nRobot')).toBe(true);
+  });
+
+  it('rejects zero-latency-composer package.json scaffold', () => {
+    const pkg = JSON.stringify({
+      name: 'zero-latency-composer',
+      version: '1.0.0',
+      scripts: { build: 'tsc' },
+    });
+    const text = `\`\`\`json:package.json\n${pkg}\n\`\`\``;
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
+    expect(isJunkCodeFileContent('package.json', pkg)).toBe(true);
+  });
+
+  it('blocks zero-latency-composer folder paths', () => {
+    expect(isBlockedScaffoldPath('zero-latency-composer/src/index.ts')).toBe(true);
+  });
+
+  it('blocks cavallo_task_generator in user workspace', () => {
+    expect(isBlockedScaffoldPath('cavallo_task_generator/core.py')).toBe(true);
   });
 });

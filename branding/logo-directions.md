@@ -24,7 +24,7 @@ Conceptul central: verticalitate, fluiditate, tehnologie si premium. Logo-ul fol
 
 ## Variante
 
-- **Primary Logo:** simbol + text `Caval Studio`.
+- **Primary Logo:** simbol + text `CAVALLO Studio`.
 - **Secondary Logo:** doar simbol.
 - **App Icon:** simbol intr-un patrat rotunjit.
 - **AI Icon:** simbol cu glow Cyan Pulse.

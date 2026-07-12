@@ -26,7 +26,7 @@ const loadSystemPrompt = (): string => {
       continue;
     }
   }
-  return "Explain Caval Studio Composer pipeline nodes clearly and concisely.";
+  return "Explain CAVALLO Studio Composer pipeline nodes clearly and concisely.";
 };
 
 export class LogicFlowAgent {

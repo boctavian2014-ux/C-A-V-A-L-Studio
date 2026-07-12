@@ -3,10 +3,15 @@ import {
   MULTI_AGENT_LABELS,
   type MultiAgentStepRecord,
 } from './chat-activity-types';
+import { CavaloHorseMark } from '../../src/renderer/components/brand/CavaloHorseMark';
+import { getWaitGlowFilter, getWaitGlowBoxShadow, activePhaseFromSteps } from './arena-wait-copy';
 
 interface MultiAgentTimelineProps {
   steps: MultiAgentStepRecord[];
   collapsed?: boolean;
+  waitMessage?: string;
+  waitStatusLine?: string;
+  waitVisible?: boolean;
 }
 
 function StepIcon({ status }: { status: MultiAgentStepRecord['status'] }) {
@@ -31,7 +36,13 @@ function StepIcon({ status }: { status: MultiAgentStepRecord['status'] }) {
   );
 }
 
-export function MultiAgentTimeline({ steps, collapsed }: MultiAgentTimelineProps) {
+export function MultiAgentTimeline({
+  steps,
+  collapsed,
+  waitMessage,
+  waitStatusLine,
+  waitVisible = true,
+}: MultiAgentTimelineProps) {
   if (!steps.length) return null;
 
   const activeIdx = steps.findIndex((s) => s.status === 'active');
@@ -77,6 +88,66 @@ export function MultiAgentTimeline({ steps, collapsed }: MultiAgentTimelineProps
           )}
         </div>
       ))}
+      {waitMessage ? (
+        <div
+          style={{
+            marginTop: 6,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+          }}
+        >
+          <div
+            className="arena-horse-wait-mark"
+            style={{
+              flexShrink: 0,
+              lineHeight: 0,
+              borderRadius: 8,
+              boxShadow: getWaitGlowBoxShadow(activePhaseFromSteps(steps)),
+              transition: 'box-shadow 0.45s ease',
+            }}
+          >
+            <CavaloHorseMark
+              size={28}
+              glowFilter={getWaitGlowFilter(activePhaseFromSteps(steps))}
+            />
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontSize: 12,
+                lineHeight: 1.45,
+                color: 'var(--caval-text)',
+                opacity: waitVisible ? 1 : 0,
+                transition: 'opacity 0.28s ease',
+              }}
+            >
+              {waitMessage}
+            </div>
+            {waitStatusLine ? (
+              <div
+                style={{
+                  marginTop: 3,
+                  fontSize: 10.5,
+                  color: 'var(--caval-text-muted)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}
+              >
+                {waitStatusLine}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <style>{`
+        .arena-horse-wait-mark img {
+          animation: cavalo-gallop 1.4s ease-in-out infinite;
+        }
+        @keyframes cavalo-gallop {
+          0%, 100% { transform: scale(0.92) translateY(0); }
+          50% { transform: scale(1) translateY(-3px); }
+        }
+      `}</style>
       <style>{`
         @keyframes zl-step-pulse {
           0%, 100% { opacity: 0.45; }

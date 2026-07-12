@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 // ──────────────────────────────────────────────
-//  Prompt Library Store — Caval IDE
+//  Prompt Library Store — CAVALLO Studio
 //  Stiluri predefinite pentru generare imagini.
 //  Fiecare stil are: prefix + suffix + parametri
 //  DALL-E opționali. Compune promptul final automat.

@@ -1,12 +1,12 @@
 // ──────────────────────────────────────────────
-//  Agent modes — Cavallo Enterprise + Agentic
+//  Agent modes — CAVALLO Enterprise + Agentic
 // ──────────────────────────────────────────────
 
 import type { RoutingIntent } from "../types";
 import type { ModelSelectionId } from "../models/model-catalog";
 import type { CavalloModesConfig } from "./mode-router";
 
-export type AgentModeId = "ask" | "code" | "build" | "agentic" | "plan" | "debug";
+export type AgentModeId = "ask" | "code" | "build" | "release" | "agentic" | "plan" | "debug";
 
 export interface AgentMode {
   id: AgentModeId;
@@ -51,6 +51,14 @@ export const AGENT_MODES: AgentMode[] = [
     description: "Autonomous Build Engine — scrie direct în workspace, fără cod în chat",
   },
   {
+    id: "release",
+    label: "Release",
+    shortLabel: "Release",
+    intent: "kilocode",
+    defaultModel: "caval-auto/balanced",
+    description: "Release Engineer — pipeline Windows real (release:win), fără installer fantomă",
+  },
+  {
     id: "ask",
     label: "Ask",
     shortLabel: "Ask",
@@ -83,6 +91,11 @@ export function isBuildEngineMode(mode: string | undefined): boolean {
   return mode === "build";
 }
 
+/** Release Engineer — orchestrates real release scripts, blocks on failed gates. */
+export function isReleaseEngineerMode(mode: string | undefined): boolean {
+  return mode === "release";
+}
+
 export interface CavalConfig {
   models?: {
     default?: ModelSelectionId;
@@ -110,8 +123,9 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
     default: "caval-auto/balanced",
     perMode: {
       ask: "caval-auto/balanced",
-      code: "caval-auto/balanced",
+      code: "caval-auto/free",
       build: "caval-auto/balanced",
+      release: "caval-auto/balanced",
       agentic: "caval-auto/balanced",
       plan: "caval-auto/frontier",
       debug: "caval-auto/balanced",

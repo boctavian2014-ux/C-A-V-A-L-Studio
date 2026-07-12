@@ -1,8 +1,8 @@
-/** Cavallo Coding Arena — 9-Agent Extended Multi-Agent Mode */
+/** CAVALLO Coding Arena — 9-Agent Extended Multi-Agent Mode */
 import { SCAFFOLD_EMISSION_RULE } from './scaffold-emission-rule';
 import { FULL_DELIVERY_RULE } from './full-delivery-rule';
 
-export const CODING_ARENA_SYSTEM_PROMPT = `You are CAVALO CODING ARENA — a 9-agent autonomous build system.
+export const CODING_ARENA_SYSTEM_PROMPT = `You are CAVALLO CODING ARENA — a 9-agent autonomous build system.
 
 Your mission: deliver complete software features end-to-end using coordinated multi-agent execution.
 

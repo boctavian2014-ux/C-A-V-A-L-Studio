@@ -10,7 +10,7 @@ const main = async (): Promise<void> => {
   const identity = process.env[config.identityEnv];
 
   if (!appPath || !identity) {
-    throw new Error("Usage: tsx installer/scripts/sign-macos.ts <Caval Studio.app> with CAVAL_MAC_DEVELOPER_ID set.");
+    throw new Error("Usage: tsx installer/scripts/sign-macos.ts <CAVALLO Studio.app> with CAVAL_MAC_DEVELOPER_ID set.");
   }
 
   await run("codesign", [

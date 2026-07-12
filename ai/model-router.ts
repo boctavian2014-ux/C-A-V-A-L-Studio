@@ -2,6 +2,7 @@ import { FallbackOpenSourceProvider } from "./providers/fallback-open-source";
 import { ModelFallbackPlanner } from "./model-fallback";
 import { ModelLogger } from "./model-logger";
 import { getModelProfile, type ModelProfile, type ModelProviderId } from "./model-profiles";
+import { hasProviderCredentials } from "./models/provider-credentials";
 import { ModelRetryPolicy } from "./model-retry";
 import { ModelScorer, type ModelScoreBreakdown } from "./model-scorer";
 import { ModelTimeouts } from "./model-timeouts";
@@ -79,6 +80,7 @@ export class ModelRouter {
     const preferred = request.metadata?.preferredModel as string | undefined;
     const ranked = this.fallback.candidatesFor(request).candidates
       .filter((model) => model.capabilities.includes(request.capability))
+      .filter((model) => hasProviderCredentials(model.provider))
       .filter((model) => this.options.fallbackEnabled || model.provider !== "open_source")
       .map((model) => {
         const breakdown = this.scorer.score(model, request);
@@ -264,7 +266,7 @@ export class ModelRouter {
       }
     }
 
-    throw new AggregateError(errors, `No Caval AI model could satisfy capability: ${request.capability}`);
+    throw new AggregateError(errors, `No CAVALLO AI model could satisfy capability: ${request.capability}`);
   }
 
   async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {

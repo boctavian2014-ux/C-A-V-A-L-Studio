@@ -6,6 +6,8 @@ import {
   getWaitGlowBoxShadow,
   resolveWaitPhase,
   activePhaseFromSteps,
+  createWaitMessagePicker,
+  formatWaitElapsed,
 } from '../../ai/composer/arena-wait-copy';
 import type { MultiAgentPhase } from '../../ai/composer/chat-activity-types';
 
@@ -37,7 +39,7 @@ describe('arena-wait-copy', () => {
   it('fallback when phase undefined', () => {
     const msg = getWaitMessage(undefined, 0);
     expect(msg.length).toBeGreaterThan(5);
-    expect(msg).toContain('Cavallo');
+    expect(msg).toContain('CAVALLO');
   });
 
   it('activePhaseFromSteps returns last active step', () => {
@@ -88,5 +90,51 @@ describe('arena-wait-copy', () => {
         'Compose · streaming'
       )
     ).toBe('subagent');
+  });
+
+  it('createWaitMessagePicker never repeats consecutive messages', () => {
+    const picker = createWaitMessagePicker('decompose');
+    let prev = picker.next();
+    for (let i = 0; i < 20; i++) {
+      const next = picker.next();
+      expect(next).not.toBe(prev);
+      prev = next;
+    }
+  });
+
+  it('createWaitMessagePicker resets bag on phase change', () => {
+    const picker = createWaitMessagePicker('memory');
+    const first = picker.next();
+    picker.reset('decompose');
+    const afterReset = picker.next();
+    expect(getWaitMessagesForPhase('decompose')).toContain(afterReset);
+    expect(first.length).toBeGreaterThan(0);
+  });
+
+  it('formatWaitElapsed includes phase label', () => {
+    expect(formatWaitElapsed(12, 'compose')).toBe('12s · Compose');
+    expect(formatWaitElapsed(3)).toBe('3s · Pipeline');
+  });
+
+  it('expanded phases have at least six messages', () => {
+    for (const phase of ['context', 'decompose', 'subagent', 'compose'] as const) {
+      expect(getWaitMessagesForPhase(phase).length).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it('phase pools contain only unique messages', () => {
+    for (const phase of ALL_PHASES) {
+      const pool = getWaitMessagesForPhase(phase);
+      expect(new Set(pool).size).toBe(pool.length);
+    }
+  });
+
+  it('default picker exhausts a full unique bag before reshuffling', () => {
+    const picker = createWaitMessagePicker();
+    const seen = new Set<string>();
+    for (let i = 0; i < 16; i++) {
+      seen.add(picker.next());
+    }
+    expect(seen.size).toBe(16);
   });
 });

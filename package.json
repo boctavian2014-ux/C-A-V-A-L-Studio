@@ -2,8 +2,8 @@
   "name": "caval-studio",
   "version": "0.1.0",
   "private": true,
-  "productName": "CAVALO",
-  "description": "CAVALO — IDE romanesc premium cu AI frontier, Context Engine si Romania Layer.",
+  "productName": "CAVALLO",
+  "description": "CAVALLO — IDE romanesc premium cu AI frontier, Context Engine si Romania Layer.",
   "main": "dist/main/electron-main.js",
   "type": "commonjs",
   "engines": {
@@ -27,6 +27,8 @@
     "cicd:sign": "tsx .cicd/scripts/sign-artifacts.ts",
     "cicd:publish-release": "tsx .cicd/scripts/publish-release.ts",
     "cicd:publish-marketplace": "tsx .cicd/scripts/publish-marketplace.ts",
+    "release:preflight": "tsx .cicd/scripts/release-preflight.ts",
+    "release:win": "tsx .cicd/scripts/release-windows.ts",
     "dev": "webpack --mode development --watch",
     "dev:all": "npx concurrently -k \"npm run dev\" \"npm start\"",
     "start": "node scripts/ensure-built.js && electron .",
@@ -50,10 +52,10 @@
     "romania",
     "vscode-fork"
   ],
-  "author": "CAVALO",
+  "author": "CAVALLO",
   "license": "UNLICENSED",
   "build": {
-    "productName": "CAVALO",
+    "productName": "CAVALLO",
     "mac": {
       "icon": "build-icons/icon.icns"
     },
@@ -81,6 +83,7 @@
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
     "eslint": "^10.5.0",
+    "monaco-editor-webpack-plugin": "^7.1.1",
     "png-to-ico": "^2.1.8",
     "png2icons": "^2.0.1",
     "postcss": "^8.5.15",

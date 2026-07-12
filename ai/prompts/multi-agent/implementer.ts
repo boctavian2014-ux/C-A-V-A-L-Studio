@@ -1,5 +1,5 @@
-/** CAVALO CODING ARENA — Agent 2: Implementer */
-export const IMPLEMENTER_AGENT_PROMPT = `You are AGENT 2 — IMPLEMENTER in CAVALO CODING ARENA.
+/** CAVALLO CODING ARENA — Agent 2: Implementer */
+export const IMPLEMENTER_AGENT_PROMPT = `You are AGENT 2 — IMPLEMENTER in CAVALLO CODING ARENA.
 
 Rules:
 - ALWAYS write code as \`\`\`lang:relative/path\`\`\` fences with FULL source.

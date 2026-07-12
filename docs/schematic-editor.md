@@ -1,6 +1,6 @@
 # Schematic Editor
 
-Caval Studio Schematic Editor is a KiCad-inspired, bidirectional system visualization tool for code: functions, classes, modules, API endpoints, state, events, data structures, AI agents, and external dependencies.
+CAVALLO Studio Schematic Editor is a KiCad-inspired, bidirectional system visualization tool for code: functions, classes, modules, API endpoints, state, events, data structures, AI agents, and external dependencies.
 
 ## Architecture
 
@@ -56,7 +56,7 @@ flowchart LR
 
 ### 1. Code → Schematic
 
-Engineering AI → **Generează schematic din cod** or toolbar **C→S**.
+Robotics AI → **Generează schematic din cod** or toolbar **C→S**.
 
 IPC: `schematic:generateFromCode` → `SchematicAI.generateFromCode()` uses Context Engine + `schematic-transform.md` → dagre layout.
 
@@ -85,4 +85,4 @@ Toolbar **S→C** → `schematic:generateCode` → patches → **AI Suggestions 
 
 ## Entry point
 
-Activity bar → **Engineering AI** → tab **Schematic**.
+Activity bar → **Robotics AI** → tab **Schematic**.

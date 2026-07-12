@@ -33,6 +33,13 @@ import { buildArenaModelPlan } from './arena-model-orchestrator';
 import { runArenaConsistencyOnly, runArenaPostCompose } from './arena-post-compose';
 import { buildArenaContinueMessage } from '../../prompts/arena-continue';
 
+import { evaluateCompletionGate } from '../project-completion-gate';
+import {
+  pendingFastPipelineSupervisor,
+  runProgrammaticSupervisor,
+} from './programmatic-supervisor';
+import { detectFashionArchetype } from '../../scaffolds/fashion-matching/archetype';
+
 import { PipelineContextStore } from './pipeline-context-store';
 
 import { PipelineMemoryEngine } from './pipeline-memory';
@@ -221,7 +228,7 @@ function buildRuntimeSummary(state: PipelineState): string {
 
   const lines = [
 
-    RUNTIME_PIPELINE_PROMPT.split('\n')[0] ?? 'Cavallo Runtime Summary',
+    RUNTIME_PIPELINE_PROMPT.split('\n')[0] ?? 'CAVALLO Runtime Summary',
 
     '',
 
@@ -713,17 +720,7 @@ export async function runCavalloMultiAgentPipeline(
 
       pipelineCallbacks.onMultiAgentStatus?.('supervisor', 'done', 'skipped');
 
-      state.supervisor = {
-
-        approved: true,
-
-        raw: 'FAST_PIPELINE',
-
-        issues: [],
-
-        summary: 'fast path ok',
-
-      };
+      state.supervisor = pendingFastPipelineSupervisor();
 
     } else {
 
@@ -917,6 +914,37 @@ export async function runCavalloMultiAgentPipeline(
       });
     }
 
+    const gateResult = evaluateCompletionGate({
+      workspaceRoot,
+      writtenFiles: finalWrittenFiles,
+      userMessage: request.message,
+      recap: state.supervisor?.summary,
+      taskCount: decomp.tasks.length,
+      verify: state.devTools?.verify,
+      consistencyOk: arenaPost.consistencyOk,
+    });
+
+    state.supervisor = runProgrammaticSupervisor(gateResult);
+
+    if (!gateResult.ok) {
+      memoryEngine.recordFailure({
+        runId,
+        userMessage: request.message,
+        issues: gateResult.issues,
+        archetype: gateResult.archetype,
+      });
+      const archetype = detectFashionArchetype(request.message);
+      if (archetype) memoryEngine.setProjectArchetype(archetype);
+    } else if (gateResult.archetype) {
+      memoryEngine.setProjectArchetype(gateResult.archetype);
+    }
+
+    pipelineCallbacks.onMultiAgentStatus?.(
+      'supervisor',
+      'done',
+      state.supervisor.summary.slice(0, 80)
+    );
+
     memoryEngine.recordArenaFinish({
       files: finalWrittenFiles,
       roleCounts: decomp.tasks.reduce(
@@ -971,15 +999,24 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
+    const deliveryBlocked = !gateResult.ok;
+
     const chatSummary = buildCompactChatSummary(state);
 
     const stageSummary = buildRuntimeSummary(state);
+
+    const gateNotice = deliveryBlocked
+      ? `\n\n⚠️ **Poarta finalizare** — proiect incomplet:\n${gateResult.issues
+          .slice(0, 5)
+          .map((i) => `- ${i.message}`)
+          .join('\n')}`
+      : '';
 
     return {
 
       ok: true,
 
-      text: composeText.trim() ? composeText : chatSummary,
+      text: (composeText.trim() ? composeText : chatSummary) + gateNotice,
 
       composeText,
 
@@ -995,6 +1032,10 @@ export async function runCavalloMultiAgentPipeline(
 
       reasoningBrief: state.reasoningBrief,
 
+      completionGate: gateResult,
+
+      deliveryBlocked,
+
       pipelineRecapMeta: config.reasoningLayer.enabled
 
         ? {
@@ -1003,13 +1044,20 @@ export async function runCavalloMultiAgentPipeline(
 
             fastPipeline: config.fastPipeline,
 
-            pendingIssues: state.context.pendingIssues,
+            pendingIssues: [
+              ...state.context.pendingIssues,
+              ...gateResult.issues.map((i) => i.message),
+            ],
 
             composeWaves,
 
             devTools: state.devTools,
 
             supervisor: state.supervisor,
+
+            completionGate: gateResult,
+
+            deliveryBlocked,
 
           }
 
@@ -1101,12 +1149,7 @@ export async function resumeCavalloMultiAgentPipeline(
     if (config.fastPipeline) {
       const synth = buildSyntheticMerge(store);
       store.setMergeRaw(synth);
-      supervisor = {
-        approved: true,
-        raw: 'FAST_PIPELINE',
-        issues: [],
-        summary: 'fast path ok',
-      };
+      supervisor = pendingFastPipelineSupervisor();
     } else {
       const mergeResult = await runMerge(model, store, workspaceRoot, pipelineCallbacks);
       if ('error' in mergeResult) {
@@ -1146,8 +1189,28 @@ export async function resumeCavalloMultiAgentPipeline(
       if (!config.fullDelivery.enabled) break;
     }
 
-    if (config.enableDevToolsIntegration) {
-      await runDevToolsIntegration(workspaceRoot);
+    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
+
+    const devTools = config.enableDevToolsIntegration
+      ? await runDevToolsIntegration(workspaceRoot, { verify: writtenFiles.length > 0 })
+      : undefined;
+
+    const gateResult = evaluateCompletionGate({
+      workspaceRoot,
+      writtenFiles,
+      userMessage: cp.userMessage,
+      recap: supervisor.summary,
+      taskCount: cp.tasks.length,
+      verify: devTools?.verify,
+    });
+    supervisor = runProgrammaticSupervisor(gateResult);
+    if (!gateResult.ok) {
+      memoryEngine.recordFailure({
+        runId,
+        userMessage: cp.userMessage,
+        issues: gateResult.issues,
+        archetype: gateResult.archetype,
+      });
     }
 
     memoryEngine.recordRun({
@@ -1159,7 +1222,7 @@ export async function resumeCavalloMultiAgentPipeline(
     memoryEngine.save(workspaceRoot);
     clearCheckpoint(runId);
 
-    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
+    const deliveryBlocked = !gateResult.ok;
 
     return {
       ok: true,
@@ -1170,12 +1233,19 @@ export async function resumeCavalloMultiAgentPipeline(
       provider: composeProvider,
       runId,
       reasoningBrief: cp.reasoningBrief,
+      completionGate: gateResult,
+      deliveryBlocked,
       pipelineRecapMeta: {
         taskCount: cp.tasks.length,
         fastPipeline: config.fastPipeline,
-        pendingIssues: store.getContext().pendingIssues,
+        pendingIssues: [
+          ...store.getContext().pendingIssues,
+          ...gateResult.issues.map((i) => i.message),
+        ],
         composeWaves,
         supervisor,
+        completionGate: gateResult,
+        deliveryBlocked,
       },
     };
   } finally {

@@ -19,9 +19,11 @@ import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
 import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
 import { buildWorkbenchCommands } from './commands/command-registry';
-import { DebugPanel } from './components/debug/DebugPanel';
+import { handleMenuCommand, type MenuCommandContext } from './commands/menu-command-router';
+import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
+import { useSettingsStore } from './store/settings-store';
 import {
   IconExplorer, IconSearch, IconGit, IconMarketplace,
   IconSparkle, IconSettings,
@@ -100,12 +102,14 @@ function ActivityBar({
   aiPanelOpen,
   onToggleAI,
   gitChangesCount,
+  onOpenAccount,
 }: {
   active: ActivityTab;
   onChange: (tab: ActivityTab) => void;
   aiPanelOpen: boolean;
   onToggleAI: () => void;
   gitChangesCount: number;
+  onOpenAccount: () => void;
 }) {
   const ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
     {
@@ -274,7 +278,8 @@ function ActivityBar({
           )}
         </button>
         <button
-          title="Cont"
+          title="Cont & credite"
+          onClick={onOpenAccount}
           style={{
             width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: '50%', border: 'none',
             background: 'rgba(212,168,87,0.15)', color: '#D4A857',
@@ -329,6 +334,9 @@ function SidebarShell({
 function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggleAI: () => void }) {
   const { tabs, activeTabId } = useEditorStore();
   const activeTab = tabs.find((t) => t.id === activeTabId);
+  const { isRepo, branch } = useGitStore();
+  const errorCount = useProblemsStore((s) => s.errorCount());
+  const warningCount = useProblemsStore((s) => s.warningCount());
 
   return (
     <div style={{
@@ -342,9 +350,14 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
     }}>
       <StatusItem>
         <IconGit size={11} strokeWidth={1.8} />
-        main
+        {isRepo ? branch || '—' : 'fără git'}
       </StatusItem>
-      <StatusItem>✓ 0 erori &nbsp;⚠ 0</StatusItem>
+      <StatusItem
+        onClick={() => document.dispatchEvent(new CustomEvent('caval:terminal-panel-tab', { detail: { tab: 'problems' } }))}
+        style={{ cursor: 'pointer' }}
+      >
+        {errorCount === 0 ? '✓' : '✕'} {errorCount} erori &nbsp;⚠ {warningCount}
+      </StatusItem>
 
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
         {activeTab && (
@@ -375,9 +388,9 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
   );
 }
 
-function StatusItem({ children }: { children: React.ReactNode }) {
+function StatusItem({ children, ...props }: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', opacity: 0.85 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', opacity: 0.85 }} {...props}>
       {children}
     </div>
   );
@@ -401,6 +414,8 @@ export function WorkbenchRoot() {
   const [referenceSymbol, setReferenceSymbol] = React.useState('');
   const [editorSqueezed, setEditorSqueezed] = useState(false);
   const prevWindowWidthRef = useRef(window.innerWidth);
+  const navStackRef = useRef<string[]>([]);
+  const navIndexRef = useRef(-1);
   const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, tabs, projectPath, activeSymbol } = useEditorStore();
   const { runWorkspaceVerifyAndReport, runBuildAndReport } = useAIStore();
   const gitChangesCount = useGitStore((s) => s.files.length);
@@ -430,6 +445,36 @@ export function WorkbenchRoot() {
     await runBuildAndReport();
   }, [runBuildAndReport]);
 
+  const openFileWithNav = useCallback(async (path: string) => {
+    const stack = navStackRef.current;
+    const idx = navIndexRef.current;
+    const nextStack = [...stack.slice(0, idx + 1), path];
+    navStackRef.current = nextStack;
+    navIndexRef.current = nextStack.length - 1;
+    await openFile(path);
+  }, [openFile]);
+
+  const pushNavLocation = useCallback((path: string) => {
+    const stack = navStackRef.current;
+    const idx = navIndexRef.current;
+    navStackRef.current = [...stack.slice(0, idx + 1), path];
+    navIndexRef.current = navStackRef.current.length - 1;
+  }, []);
+
+  const navBack = useCallback(() => {
+    if (navIndexRef.current <= 0) return;
+    navIndexRef.current -= 1;
+    const path = navStackRef.current[navIndexRef.current];
+    if (path) void openFile(path);
+  }, [openFile]);
+
+  const navForward = useCallback(() => {
+    if (navIndexRef.current >= navStackRef.current.length - 1) return;
+    navIndexRef.current += 1;
+    const path = navStackRef.current[navIndexRef.current];
+    if (path) void openFile(path);
+  }, [openFile]);
+
   const openReferences = useCallback(async () => {
     const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId);
     const symbol = useEditorStore.getState().activeSymbol;
@@ -457,9 +502,51 @@ export function WorkbenchRoot() {
     const res = await window.caval.search?.gotoDefinition?.({ filePath: rel, symbol });
     if (res?.ok && res.location?.filePath) {
       const full = `${projectPath}/${res.location.filePath}`.replace(/\\/g, '/');
-      await openFile(full);
+      await openFileWithNav(full);
     }
-  }, [projectPath, openFile]);
+  }, [projectPath, openFileWithNav]);
+
+  const openComposer = useCallback(() => {
+    setAiPanelOpen(true);
+    useAIStore.getState().setAgentMode('build');
+  }, []);
+
+  const menuCommandCtx = useMemo<MenuCommandContext>(() => ({
+    toggleAI,
+    toggleSidebar,
+    setActiveActivity: setActiveActivity,
+    setSidebarOpen,
+    openQuickOpen: () => setQuickOpenVisible(true),
+    saveActiveTab: () => {
+      const tabId = useEditorStore.getState().activeTabId;
+      if (tabId) void saveTab(tabId);
+    },
+    openFolder: openFolderFromPalette,
+    runWorkspaceVerify: runVerifyFromPalette,
+    runBuild: runBuildFromPalette,
+    openShortcuts: () => setShortcutsVisible(true),
+    setPaletteVisible,
+    openReferences,
+    openDefinition,
+    setAgentModeBuild: () => useAIStore.getState().setAgentMode('build'),
+    openComposer,
+    pushNavLocation,
+    navBack,
+    navForward,
+  }), [
+    toggleAI,
+    toggleSidebar,
+    saveTab,
+    openFolderFromPalette,
+    runVerifyFromPalette,
+    runBuildFromPalette,
+    openReferences,
+    openDefinition,
+    openComposer,
+    pushNavLocation,
+    navBack,
+    navForward,
+  ]);
 
   const workbenchCommands = useMemo(
     () =>
@@ -508,6 +595,21 @@ export function WorkbenchRoot() {
     return () => window.removeEventListener('resize', updateLayout);
   }, [sidebarOpen, activeActivity, engineeringOpen, aiPanelOpen]);
 
+  const openAccountSettings = useCallback(() => {
+    useSettingsStore.getState().setActiveSection('safety');
+    setActiveActivity('settings');
+    setSidebarOpen(true);
+  }, []);
+
+  // Contor generări AI pentru usage meter
+  useEffect(() => {
+    const onGeneration = () => {
+      useSettingsStore.getState().incrementGenerations();
+    };
+    document.addEventListener('caval:ai-generation-complete', onGeneration);
+    return () => document.removeEventListener('caval:ai-generation-complete', onGeneration);
+  }, []);
+
   const handleActivityChange = useCallback((tab: ActivityTab) => {
     if (tab === activeActivity && sidebarOpen) {
       setSidebarOpen(false);
@@ -525,6 +627,7 @@ export function WorkbenchRoot() {
     const offFolder = caval.onFolderOpened((folder) => {
       setProjectPath(folder.path);
       void window.caval.fs.readTree(folder.path).then((tree) => setFileTree(tree));
+      void useGitStore.getState().refresh();
       useAIStore.getState().setIncludeMode('project');
       const first = folder.files?.[0];
       if (first?.path) void openFile(first.path);
@@ -640,70 +743,9 @@ export function WorkbenchRoot() {
     const caval = window.caval;
     if (!caval?.onMenuCommand) return;
     return caval.onMenuCommand((command) => {
-      if (command === 'palette') {
-        setPaletteVisible(true);
-      }
-      if (command === 'save') {
-        const tabId = useEditorStore.getState().activeTabId;
-        if (tabId) void saveTab(tabId);
-      }
-      if (command === 'save-as') {
-        const { activeTabId: tabId, tabs } = useEditorStore.getState();
-        const tab = tabs.find((t) => t.id === tabId);
-        if (tab && caval.saveFile) {
-          void caval.saveFile({ path: tab.path, content: tab.content, saveAs: true }).then((res) => {
-            if (res.canceled || !res.path) return;
-            useEditorStore.setState((s) => ({
-              tabs: s.tabs.map((t) =>
-                t.id === tab.id
-                  ? { ...t, id: res.path!, path: res.path!, name: res.label ?? t.name, isDirty: false }
-                  : t
-              ),
-              activeTabId: res.path!,
-            }));
-          });
-        }
-      }
-      if (command === 'toggle-sidebar') toggleSidebar();
-      if (command === 'view-explorer') {
-        setActiveActivity('explorer');
-        setSidebarOpen(true);
-      }
-      if (command === 'view-search' || command === 'find-in-files') {
-        setActiveActivity('search');
-        setSidebarOpen(true);
-      }
-      if (command === 'view-source-control') {
-        setActiveActivity('git');
-        setSidebarOpen(true);
-      }
-      if (command === 'view-extensions') {
-        setActiveActivity('extensions');
-        setSidebarOpen(true);
-      }
-      if (command === 'run-debug' || command === 'run-without-debug') {
-        void (window.caval as { debug?: { launch?: () => Promise<unknown> } })?.debug?.launch?.();
-      }
-      if (command === 'stop-debug') {
-        void (window.caval as {
-          debug?: {
-            list?: () => Promise<{ sessions?: Array<{ id: string }> }>;
-            stop?: (id: string) => Promise<unknown>;
-          };
-        })?.debug?.list?.().then((res) => {
-          const first = res?.sessions?.[0];
-          if (first) void (window.caval as { debug?: { stop?: (id: string) => Promise<unknown> } })?.debug?.stop?.(first.id);
-        });
-      }
-      if (command === 'view-debug-console') {
-        setSidebarOpen(true);
-      }
-      if (command === 'open-settings') {
-        setActiveActivity('settings');
-        setSidebarOpen(true);
-      }
+      handleMenuCommand(command, menuCommandCtx);
     });
-  }, [toggleSidebar, saveTab]);
+  }, [menuCommandCtx]);
 
   return (
     <CavalThemeProvider defaultMode="dark">
@@ -855,6 +897,7 @@ export function WorkbenchRoot() {
             aiPanelOpen={aiPanelOpen}
             onToggleAI={toggleAI}
             gitChangesCount={gitChangesCount}
+            onOpenAccount={openAccountSettings}
           />
 
           {/* Primary sidebar — Cursor order */}
@@ -901,7 +944,6 @@ export function WorkbenchRoot() {
               />
             )}
             <MonacoEditor />
-            <DebugPanel />
             <TerminalPanel />
           </div>
 
@@ -931,7 +973,7 @@ export function WorkbenchRoot() {
 
           {/* AI Panel — dreapta, 340px, ascundibil */}
           {aiPanelOpen && (
-            <AIPanel onClose={() => setAiPanelOpen(false)} />
+            <AIPanel onClose={() => setAiPanelOpen(false)} onOpenComposer={openComposer} />
           )}
         </div>
 

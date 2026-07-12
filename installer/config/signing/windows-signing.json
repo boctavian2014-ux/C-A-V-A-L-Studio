@@ -6,6 +6,6 @@
   "certificatePasswordEnv": "CAVAL_WIN_CERT_PASSWORD",
   "timestampServer": "http://timestamp.digicert.com",
   "digestAlgorithm": "sha256",
-  "description": "Caval Studio",
+  "description": "CAVALLO Studio",
   "url": "https://caval.studio"
 }

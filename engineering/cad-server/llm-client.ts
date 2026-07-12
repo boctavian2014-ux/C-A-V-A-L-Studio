@@ -46,7 +46,7 @@ async function callOpenRouter(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.CAD_PUBLIC_URL ?? "https://caval.studio",
-        "X-Title": "Caval Studio CAD",
+        "X-Title": "CAVALLO Studio CAD",
       },
       body: JSON.stringify({
         model,

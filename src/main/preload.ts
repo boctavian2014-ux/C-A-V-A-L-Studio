@@ -134,7 +134,11 @@ export interface CavalStreamChunk {
     pendingIssues: string[];
     devTools?: Record<string, unknown>;
     supervisor?: { approved: boolean; summary: string; issues: unknown[] };
+    completionGate?: { ok: boolean; issues: Array<{ code: string; message: string }>; suggestedContinueMessage: string };
+    deliveryBlocked?: boolean;
   };
+  completionGate?: { ok: boolean; issues: Array<{ code: string; message: string }>; suggestedContinueMessage: string };
+  deliveryBlocked?: boolean;
   composeText?: string;
   writtenFiles?: string[];
   pauseReason?: "ui-design";
@@ -241,7 +245,7 @@ export interface CavalPipelineEvent {
 
 contextBridge.exposeInMainWorld("caval", {
   version: "0.1.0",
-  productName: "Caval Studio",
+  productName: "CAVALLO Studio",
   ready: () => ipcRenderer.send("caval:renderer-ready"),
   onMenuCommand: (callback: (command: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, command: string) => callback(command);
@@ -284,6 +288,13 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.invoke("caval:models-list") as Promise<{ ok: boolean; catalog?: CavalModelCatalog }>,
   modelsRefresh: () =>
     ipcRenderer.invoke("caval:models-refresh") as Promise<{ ok: boolean; catalog?: CavalModelCatalog }>,
+  modelsHealth: () =>
+    ipcRenderer.invoke("caval:models-health") as Promise<{
+      ok: boolean;
+      summary?: string;
+      models?: Record<string, string>;
+      providers?: Record<string, { ok: boolean; error?: string; installed?: string[] }>;
+    }>,
   chatStream: (request: CavalChatStreamRequest, onChunk: (chunk: CavalStreamChunk) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, chunk: CavalStreamChunk) => {
       if (chunk.streamId === request.streamId) {
@@ -549,7 +560,7 @@ contextBridge.exposeInMainWorld("caval", {
   },
 
   terminal: {
-    create: (id: string) => ipcRenderer.invoke("terminal:create", id),
+    create: (id: string, options?: { cwd?: string }) => ipcRenderer.invoke("terminal:create", id, options),
     write: (id: string, data: string) => ipcRenderer.invoke("terminal:write", id, data),
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke("terminal:resize", id, cols, rows),
     destroy: (id: string) => ipcRenderer.invoke("terminal:destroy", id),
@@ -588,6 +599,7 @@ contextBridge.exposeInMainWorld("caval", {
     branches: (projectPath: string) => ipcRenderer.invoke("git:branches", projectPath),
     checkout: (projectPath: string, branch: string) => ipcRenderer.invoke("git:checkout", projectPath, branch),
     createBranch: (projectPath: string, name: string) => ipcRenderer.invoke("git:createBranch", projectPath, name),
+    init: (projectPath: string) => ipcRenderer.invoke("git:init", projectPath),
     stash: (projectPath: string, message?: string) => ipcRenderer.invoke("git:stash", projectPath, message),
     stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath)
   },
@@ -792,6 +804,8 @@ contextBridge.exposeInMainWorld("caval", {
     list: () => ipcRenderer.invoke("extensions:list") as Promise<{ ok: boolean; extensions?: unknown[] }>,
     register: (manifest: { id: string; name: string; version: string }) =>
       ipcRenderer.invoke("extensions:register", manifest) as Promise<{ ok: boolean; error?: string }>,
+    install: (input: { extensionId: string; baseUrl: string }) =>
+      ipcRenderer.invoke("extensions:install", input) as Promise<{ ok: boolean; error?: string }>,
   },
 
   schematic: {

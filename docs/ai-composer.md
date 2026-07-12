@@ -1,6 +1,6 @@
 # AI Composer
 
-AI Composer-ul Caval Studio este motorul enterprise pentru modificari complexe in cod: context gathering, planificare, patch-uri multi-file, validare, aplicare atomica si rollback.
+AI Composer-ul CAVALLO Studio este motorul enterprise pentru modificari complexe in cod: context gathering, planificare, patch-uri multi-file, validare, aplicare atomica si rollback.
 
 ## Structura
 

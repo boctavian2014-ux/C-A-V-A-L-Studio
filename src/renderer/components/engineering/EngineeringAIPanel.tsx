@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { useEditorStore } from '../../store/editor-store';
-import { useAIStore, getModelDisplayLabel } from '../../../../ai/composer/ai-store';
+import { useAIStore } from '../../../../ai/composer/ai-store';
 import { ChatModelSelect } from '../../../../ai/composer/ChatModelSelect';
 import { useModelCatalog } from '../../../../ai/composer/use-model-catalog';
 import {
@@ -13,22 +13,31 @@ import {
   type BuildFile,
   type EngProject,
 } from '../../../../ai/engineering/engineering-generator';
+import {
+  ROBOTICS_TAB_GROUPS,
+  extractScadBlock,
+  markdownToSimpleHtml,
+  partsListToCsv,
+  roboticsPlanToMarkdown,
+  tabGroupMarkdown,
+  type ParsedRoboticsPlan,
+} from '../../../../ai/engineering/robotics-format';
 import { checkModelReadiness, type ModelReadiness } from '../../../../ai/models/model-readiness';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
-import { IconSpec, IconSchema, IconParts, IconBuild } from '../brand/CavaloIcons';
 import { CavaloAiMark } from '../brand/CavaloHorseMark';
 
 // ──────────────────────────────────────────────────────────────
-//  EngineeringAIPanel — hardware / electronică / CAD (NU chat coding)
+//  Robotics AI ULTRA — roboți, vehicule, mecanisme, PCB, CAD
 // ──────────────────────────────────────────────────────────────
 
-type EngTab = 'spec' | 'schema' | 'parts' | 'build';
+type RoboticsTabId = (typeof ROBOTICS_TAB_GROUPS)[number]['id'];
 
 const EXAMPLE_PROMPTS = [
-  'Suport telefon cu încărcare wireless, ESP32, integrare Home Assistant',
-  'Senzor de calitate a aerului cu ecran OLED și alertă pe WiFi',
-  'Robot mic pe roți controlat prin Bluetooth de pe telefon',
-  'Stație meteo solară cu log pe card SD',
+  'Robot mic pe roți cu ESP32, senzor ultrasonic și control Bluetooth',
+  'Tren modular cu șasiu printat 3D și motor DC',
+  'Braț robotic simplu cu 2 servo-uri și gripper',
+  'Vehicul RC cu diferențial, baterie LiPo și receiver',
+  'Jucărie mecanică cu angrenaje printate și manivelă',
 ];
 
 const NODE_COLORS: Record<SchemaNode['role'], string> = {
@@ -53,50 +62,28 @@ export function EngineeringAIPanel() {
 
   const selectedModel = useAIStore((s) => s.selectedModel);
   const apiKeys = useAIStore((s) => s.apiKeys);
-  const modelLabels = useAIStore((s) => s.modelLabels);
   const loadModelLabels = useAIStore((s) => s.loadModelLabels);
-  const chatPrepareDraft = useAIStore((s) => s.chatPrepareDraft);
-  const prepareState = useAIStore((s) => s.prepareState);
   const handoffFromEngineering = useAIStore((s) => s.handoffFromEngineering);
-  const modelLabel = getModelDisplayLabel(selectedModel, modelLabels);
 
   const { catalog, loading: catalogLoading } = useModelCatalog();
 
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [readinessHint, setReadinessHint] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<ModelReadiness | null>(null);
   const [project, setProject] = useState<EngProject | null>(null);
-  const [activeTab, setActiveTab] = useState<EngTab>('spec');
+  const [plan, setPlan] = useState<ParsedRoboticsPlan | null>(null);
+  const [activeTab, setActiveTab] = useState<RoboticsTabId>('overview');
   const [openRouterKey, setOpenRouterKey] = useState<string | undefined>();
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const prepareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tabs = useEditorStore((s) => s.tabs);
-  const activeTabId = useEditorStore((s) => s.activeTabId);
 
   useEffect(() => {
     void loadModelLabels();
   }, [loadModelLabels]);
-
-  useEffect(() => {
-    if (!prompt.trim() || !projectPath) return;
-    if (prepareTimer.current) clearTimeout(prepareTimer.current);
-    prepareTimer.current = setTimeout(() => {
-      const activeTab = tabs.find((t) => t.id === activeTabId);
-      void chatPrepareDraft({
-        text: prompt,
-        projectPath,
-        activeFile: activeTab?.path,
-        openFiles: tabs.map((t) => t.path),
-      });
-    }, 350);
-    return () => {
-      if (prepareTimer.current) clearTimeout(prepareTimer.current);
-    };
-  }, [prompt, projectPath, tabs, activeTabId, chatPrepareDraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +123,7 @@ export function EngineeringAIPanel() {
     useEngineeringCadStore.getState().clearCadPreview();
     setLoading(true);
     setError(null);
+    setWarning(null);
     setReadinessHint(null);
 
     const controller = new AbortController();
@@ -154,8 +142,11 @@ export function EngineeringAIPanel() {
 
     if (result.ok && result.project) {
       setProject(result.project);
-      setActiveTab('spec');
+      setPlan(result.plan ?? null);
+      setWarning(result.warning ?? null);
+      setActiveTab('overview');
     } else {
+      setWarning(null);
       setError(result.error ?? 'Generare eșuată.');
     }
     abortRef.current = null;
@@ -211,26 +202,24 @@ export function EngineeringAIPanel() {
           </div>
           <div>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)' }}>
-              Engineering AI
+              Robotics AI
+              <span style={{
+                marginLeft: 6, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                padding: '1px 5px', borderRadius: 4,
+                background: 'rgba(124,58,237,0.25)', color: '#A78BFA',
+                verticalAlign: 'middle',
+              }}>
+                ULTRA
+              </span>
             </div>
             <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
-              Hardware · schemă · BOM · CAD · firmware (nu aplicații software)
+              Roboți · vehicule · mecanisme · componente · CAD · fabricare
             </div>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
             <ChatModelSelect catalog={catalog} loading={catalogLoading} />
           </div>
         </div>
-
-        {prepareState?.ready && prompt.trim() && !loading && (
-          <div style={{
-            fontSize: 10, color: 'var(--caval-success)', marginBottom: 6,
-            display: 'flex', alignItems: 'center', gap: 5,
-          }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--caval-success)' }} />
-            Pregătit · {modelLabel}
-          </div>
-        )}
 
         <div style={{
           display: 'flex', gap: 4, flexWrap: 'nowrap',
@@ -281,6 +270,16 @@ export function EngineeringAIPanel() {
           onFocus={(e) => { e.target.style.borderColor = 'rgba(0,224,255,0.4)'; }}
           onBlur={(e) => { e.target.style.borderColor = 'var(--caval-border)'; }}
         />
+
+        {warning && (
+          <div style={{
+            marginTop: 5, padding: '5px 8px', borderRadius: 5,
+            background: 'rgba(212,168,87,0.08)', border: '1px solid rgba(212,168,87,0.2)',
+            color: '#D4A857', fontSize: 11.5,
+          }}>
+            {warning}
+          </div>
+        )}
 
         {error && (
           <div style={{
@@ -343,7 +342,7 @@ export function EngineeringAIPanel() {
         </button>
       </div>
 
-      {!project ? (
+      {!project || !plan ? (
         <EmptyState />
       ) : (
         <>
@@ -352,17 +351,11 @@ export function EngineeringAIPanel() {
             borderBottom: '1px solid var(--caval-border)', flexShrink: 0,
             flexDirection: 'column',
           }}>
-            <div style={{ display: 'flex', gap: 2 }}>
-            {([
-              ['spec', 'Spec', <IconSpec key="i" size={14} />],
-              ['schema', 'Schemă', <IconSchema key="i" size={14} />],
-              ['parts', 'Componente', <IconParts key="i" size={14} />],
-              ['build', 'Build', <IconBuild key="i" size={14} />],
-            ] as [EngTab, string, React.ReactNode][]).map(([id, label, icon]) => (
+            <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            {ROBOTICS_TAB_GROUPS.map(({ id, label }) => (
               <ResultTab
                 key={id}
                 label={label}
-                icon={icon}
                 active={activeTab === id}
                 onClick={() => setActiveTab(id)}
               />
@@ -371,7 +364,7 @@ export function EngineeringAIPanel() {
             <button
               type="button"
               onClick={handleSoftwareHandoff}
-              title="Deschide Coding Chat cu tot contextul Engineering (spec, schemă, BOM, build)"
+              title="Deschide Coding Chat cu contextul Robotics AI"
               style={{
                 margin: '6px 0 8px',
                 width: '100%',
@@ -397,15 +390,174 @@ export function EngineeringAIPanel() {
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 16px' }}
             className="ai-messages-scroll"
           >
-            {activeTab === 'spec' && <SpecView spec={project.spec} />}
-            {activeTab === 'schema' && <SchemaView schema={project.schema} />}
-            {activeTab === 'parts' && <PartsView parts={project.parts} projectPath={projectPath} />}
-            {activeTab === 'build' && (
-              <BuildView project={project} projectPath={projectPath} userPrompt={prompt} />
-            )}
+            <RoboticsTabContent
+              tabId={activeTab}
+              plan={plan}
+              project={project}
+              projectPath={projectPath}
+              userPrompt={prompt}
+            />
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function RoboticsTabContent({
+  tabId,
+  plan,
+  project,
+  projectPath,
+  userPrompt,
+}: {
+  tabId: RoboticsTabId;
+  plan: ParsedRoboticsPlan;
+  project: EngProject;
+  projectPath: string | null;
+  userPrompt: string;
+}) {
+  const group = ROBOTICS_TAB_GROUPS.find((g) => g.id === tabId);
+  const md = group ? tabGroupMarkdown(plan, group.sections) : '';
+
+  if (tabId === 'parts') {
+    return (
+      <>
+        <MarkdownSection html={markdownToSimpleHtml(md)} />
+        <PartsView parts={project.parts} projectPath={projectPath} />
+      </>
+    );
+  }
+
+  if (tabId === 'cad') {
+    return (
+      <>
+        <MarkdownSection html={markdownToSimpleHtml(md)} />
+        <CadActions project={project} projectPath={projectPath} userPrompt={userPrompt} plan={plan} />
+      </>
+    );
+  }
+
+  if (tabId === 'docs') {
+    return (
+      <>
+        <MarkdownSection html={markdownToSimpleHtml(md)} />
+        <ExportPlanButton plan={plan} title={project.spec.title} projectPath={projectPath} />
+      </>
+    );
+  }
+
+  return <MarkdownSection html={markdownToSimpleHtml(md)} />;
+}
+
+function MarkdownSection({ html }: { html: string }) {
+  if (!html.trim()) {
+    return (
+      <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', fontStyle: 'italic' }}>
+        Secțiunea nu a fost generată încă.
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--caval-text)' }}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function ExportPlanButton({
+  plan,
+  title,
+  projectPath,
+}: {
+  plan: ParsedRoboticsPlan;
+  title: string;
+  projectPath: string | null;
+}) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const handleExport = async () => {
+    const content = roboticsPlanToMarkdown(plan, title);
+    if (!projectPath) {
+      setMsg('Deschide un folder de proiect pentru export.');
+      return;
+    }
+    const res = await window.caval.engineering.saveFile(projectPath, {
+      name: 'robotics-plan.md',
+      content,
+    });
+    setMsg(res.ok ? `Salvat: ${res.savedPath}` : `Eroare: ${res.error}`);
+  };
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        type="button"
+        onClick={() => void handleExport()}
+        style={{
+          padding: '8px 14px', borderRadius: 6, border: 'none',
+          background: 'var(--caval-accent)', color: '#0E0E0F',
+          fontWeight: 700, fontSize: 12, cursor: 'pointer',
+        }}
+      >
+        Export plan MD
+      </button>
+      {msg && <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 6 }}>{msg}</div>}
+    </div>
+  );
+}
+
+function CadActions({
+  project,
+  projectPath,
+  userPrompt,
+  plan,
+}: {
+  project: EngProject;
+  projectPath: string | null;
+  userPrompt: string;
+  plan: ParsedRoboticsPlan;
+}) {
+  const phase = useEngineeringCadStore((s) => s.phase);
+  const cadBusy = useEngineeringCadStore((s) => s.cadBusy);
+  const cadStatus = useEngineeringCadStore((s) => s.serverStatus);
+  const createCadJob = useEngineeringCadStore((s) => s.createCadJob);
+  const scad = extractScadBlock(plan.rawMarkdown);
+
+  const saveScad = async () => {
+    if (!scad || !projectPath) return;
+    await window.caval.engineering.saveFile(projectPath, { name: 'model.scad', content: scad });
+  };
+
+  return (
+    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {scad && projectPath && (
+        <button
+          type="button"
+          onClick={() => void saveScad()}
+          style={{
+            padding: '8px 0', borderRadius: 6, border: '1px solid var(--caval-border)',
+            background: 'var(--caval-surface)', color: 'var(--caval-text)',
+            fontWeight: 600, fontSize: 12, cursor: 'pointer',
+          }}
+        >
+          Salvează model.scad în proiect
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => void createCadJob({ project, userPrompt, projectPath })}
+        disabled={cadBusy}
+        style={{
+          padding: '9px 0', borderRadius: 6, border: 'none',
+          background: cadBusy ? 'rgba(0,224,255,0.25)' : 'rgba(124,58,237,0.85)',
+          color: '#fff', fontWeight: 700, fontSize: 12.5,
+          cursor: cadBusy ? 'wait' : 'pointer',
+        }}
+      >
+        {cadBusy
+          ? `Generez STL… (${phase}${cadStatus ? ` / ${cadStatus}` : ''})`
+          : 'Generează STL 3D (cloud)'}
+      </button>
     </div>
   );
 }
@@ -698,7 +850,7 @@ function PartsView({ parts, projectPath }: { parts: PartItem[]; projectPath: str
               <circle cx="6.5" cy="14" r="1" /><circle cx="12.5" cy="14" r="1" />
             </svg>
           )}
-          {exported ? 'Exportat ✓' : 'Export coș'}
+          {exported ? 'Exportat ✓' : 'Export listă componente'}
         </button>
       </div>
 
@@ -725,7 +877,7 @@ function buildFilePayload(f: BuildFile): { name: string; content: string } {
   const content =
     f.content && f.content.trim().length > 0
       ? f.content
-      : `# ${f.name}\n# ${f.note}\n# (generat de Caval Engineering AI — completează conținutul)\n`;
+      : `# ${f.name}\n# ${f.note}\n# (generat de RoboticsAI ULTRA — completează conținutul)\n`;
   return { name: f.name, content };
 }
 

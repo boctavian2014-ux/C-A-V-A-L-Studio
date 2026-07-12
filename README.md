@@ -1,4 +1,4 @@
-# CAVALO Studio
+# CAVALLO Studio
 
 IDE românesc premium cu AI frontier, Context Engine, Coding Arena multi-agent și straturi pentru billing, CAD și marketplace.
 

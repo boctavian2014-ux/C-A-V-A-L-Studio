@@ -2,6 +2,7 @@ import React from 'react';
 import { useEditorStore } from '../../store/editor-store';
 import { SidebarToggleButton } from './SidebarCloseButton';
 import { CavaloLogo } from '../brand/CavaloHorseMark';
+import { dispatchTerminalNew, dispatchTerminalToggle } from '../../terminal/terminal-events';
 
 export interface WorkbenchHeaderProps {
   engineeringOpen: boolean;
@@ -70,8 +71,36 @@ export function WorkbenchHeader({
         <SidebarToggleButton sidebarOpen={sidebarOpen} onClick={onToggleSidebar} />
         <button
           type="button"
-          title="Engineering AI"
-          aria-label="Engineering AI"
+          title="Terminal nou (Ctrl+Shift+`)"
+          aria-label="Terminal nou"
+          onClick={() => dispatchTerminalNew()}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            dispatchTerminalToggle();
+          }}
+          style={{
+            height: 30,
+            width: 30,
+            padding: 0,
+            border: '1px solid var(--caval-border)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--caval-surface)',
+            color: 'var(--caval-text-muted)',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          title="Robotics AI ULTRA"
+          aria-label="Robotics AI ULTRA"
           aria-pressed={engineeringOpen}
           onClick={onToggleEngineering}
           style={{
@@ -95,7 +124,7 @@ export function WorkbenchHeader({
             <rect x="3" y="8" width="18" height="12" rx="2" />
             <path d="M7 8V5a2 2 0 012-2h6a2 2 0 012 2v3" />
           </svg>
-          Engineering AI
+          Robotics AI
         </button>
       </nav>
     </header>

@@ -4,7 +4,7 @@ Placeholder video for the Mobile Build Panel. Target duration: **30–45 seconds
 
 ## Scene 1 (0:00–0:03)
 
-- **Visual:** Caval Studio IDE, activity bar
+- **Visual:** CAVALLO Studio IDE, activity bar
 - **Action:** User clicks **Build Mobile App** (phone icon)
 - **VO:** „Publică aplicația mobilă direct din IDE.”
 
@@ -46,7 +46,7 @@ Placeholder video for the Mobile Build Panel. Target duration: **30–45 seconds
 ## Scene 8 (0:36–0:45)
 
 - **Visual:** AI error explanation in panel + Fix with AI button
-- **End card:** „Caval Studio — Build. Ship. Publish.”
+- **End card:** „CAVALLO Studio — Build. Ship. Publish.”
 - **VO:** „AI Agent îți explică erorile și propune fix-uri.”
 
 ## Production notes

@@ -1,6 +1,6 @@
 # Pulse Tech UI Kit
 
-Pulse Tech is Caval Studio's Tailwind-based React component layer in `components/ui/`. It runs **in parallel** with the legacy `ui-kit/` (`caval-*` CSS classes) — use Pulse Tech for new React modules; keep `ui-kit` for marketplace and existing surfaces until migrated.
+Pulse Tech is CAVALLO Studio's Tailwind-based React component layer in `components/ui/`. It runs **in parallel** with the legacy `ui-kit/` (`caval-*` CSS classes) — use Pulse Tech for new React modules; keep `ui-kit` for marketplace and existing surfaces until migrated.
 
 ## Architecture
 

@@ -1,4 +1,4 @@
-/** Caval Studio Schematic Editor — core data model */
+/** CAVALLO Studio Schematic Editor — core data model */
 
 export const SCHEMATIC_VERSION = "caval-schematic-v1" as const;
 

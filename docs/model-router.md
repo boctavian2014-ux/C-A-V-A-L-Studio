@@ -1,6 +1,6 @@
 # Model Router
 
-Model Router-ul Caval Studio este creierul AI Layer-ului. Alege modelul optim pentru fiecare task folosind profile centralizate, mapping de capabilities, scoring ponderat, fallback, retry, timeout si logging.
+Model Router-ul CAVALLO Studio este creierul AI Layer-ului. Alege modelul optim pentru fiecare task folosind profile centralizate, mapping de capabilities, scoring ponderat, fallback, retry, timeout si logging.
 
 ## Fisiere
 

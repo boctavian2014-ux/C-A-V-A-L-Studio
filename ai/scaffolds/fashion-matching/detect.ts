@@ -8,6 +8,10 @@ export function isFashionMatchingEngineRequest(text: string): boolean {
     return true;
   }
   if (t.includes('normalizare') && t.includes('matching') && t.includes('produs')) return true;
+  if (/\bhaine\b/.test(t) && /\b(matching|fashion|mobil|web)\b/.test(t)) return true;
+  if (/\b(fashion|haine)\b/.test(t) && /\b(web|ui|mobil|mobile|expo|react|production|prod)\b/.test(t)) {
+    return true;
+  }
   return false;
 }
 

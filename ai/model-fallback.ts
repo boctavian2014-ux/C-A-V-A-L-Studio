@@ -37,7 +37,7 @@ export class ModelFallbackPlanner {
     const failed = [failedModelId];
 
     if (request.intent === "autocomplete" || request.intent === "fast") {
-      return ["north-mini-code", "qwen2.5-coder:32b"]
+      return ["north-mini-code", "qwen2.5-coder:7b"]
         .flatMap((id) => {
           const profile = getModelProfile(id);
           return profile && !failed.includes(profile.id) ? [profile] : [];

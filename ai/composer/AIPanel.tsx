@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAIStore, getModelDisplayLabel, type ChatMessage } from './ai-store';
+import { useAIStore, getModelDisplayLabel, isChatStopIntent, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
 import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
-import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode } from '../modes/agent-modes';
 import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
@@ -13,10 +13,11 @@ import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
 import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning, sanitizeLiveReasoning } from './chat-display';
 import { MultiAgentTimeline } from './MultiAgentTimeline';
-import { ArenaHorseWait } from './ArenaHorseWait';
 import { resolveWaitPhase } from './arena-wait-copy';
 import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import { DEFAULT_ZERO_LATENCY_CONFIG } from '../../ai/composer/zero-latency/zl-config-shared';
+import { useArenaWaitMessage } from './use-arena-wait-message';
+import { checkModelReadiness } from '../models/model-readiness';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -158,8 +159,22 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 // ──────────────────────────────────────────────
 
 function ArenaWorkPanel({ message }: { message: ChatMessage }) {
-  const isStreaming = Boolean(message.isStreaming);
+  const globalStreaming = useAIStore((s) => s.isStreaming);
   const cfg = DEFAULT_REASONING_LAYER_CONFIG;
+  const messageStreaming = Boolean(message.isStreaming);
+  const pipelineActive = Boolean(
+    message.multiAgentSteps?.some((step) => step.status === 'active')
+  );
+  const wasStopped = message.multiAgentStatus === 'Oprit';
+  const isStreaming = messageStreaming || globalStreaming;
+  const showWait =
+    cfg.showHorseWaitAnimation &&
+    !message.recap &&
+    !wasStopped &&
+    (isStreaming || pipelineActive);
+  const waitPhase = resolveWaitPhase(message.multiAgentSteps, message.multiAgentStatus);
+  const { message: waitMessage, statusLine: waitStatusLine, visible: waitVisible } =
+    useArenaWaitMessage(waitPhase, showWait, cfg.waitMessageRotateMs, message.multiAgentStatus);
   const composePhase =
     isStreaming && Boolean(message.multiAgentStatus?.toLowerCase().includes('compose'));
   const planText = formatArenaReasoning(
@@ -175,7 +190,19 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {cfg.showPipelineTimeline && (message.multiAgentSteps?.length ?? 0) > 0 && (
-        <MultiAgentTimeline steps={message.multiAgentSteps!} collapsed={Boolean(message.recap)} />
+        <MultiAgentTimeline
+          steps={message.multiAgentSteps!}
+          collapsed={Boolean(message.recap)}
+          waitMessage={showWait ? waitMessage : undefined}
+          waitStatusLine={showWait ? waitStatusLine : undefined}
+          waitVisible={waitVisible}
+        />
+      )}
+      {isStreaming && (message.activitySteps?.length ?? 0) > 0 && (
+        <ChatActivityTimeline
+          steps={message.activitySteps!}
+          collapsed={Boolean(message.recap || message.reasoningBrief)}
+        />
       )}
       {cfg.showLiveReasoning && liveReasoning && (
         <ChatReasoningBlock
@@ -187,14 +214,6 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
       {message.reasoningBrief && !message.recap && (
         <CompactArenaStatus
           text={planText || formatArenaReasoning(message.reasoningBrief, undefined, isStreaming)}
-        />
-      )}
-      {cfg.showHorseWaitAnimation && isStreaming && !message.recap && (
-        <ArenaHorseWait
-          phase={resolveWaitPhase(message.multiAgentSteps, message.multiAgentStatus)}
-          detail={message.multiAgentStatus}
-          isStreaming={isStreaming}
-          rotateMs={cfg.waitMessageRotateMs}
         />
       )}
       {message.recap && <CompactArenaStatus text={planText} />}
@@ -243,6 +262,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const { modelLabels, agentMode } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
   const buildMode = isBuildEngineMode(agentMode);
+  const releaseMode = isReleaseEngineerMode(agentMode);
+  const engineMode = buildMode || releaseMode;
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
   const resolvedLabel = message.resolvedModel
     ? getModelDisplayLabel(message.resolvedModel, modelLabels)
@@ -252,15 +273,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     ? resolvedLabel
       ? `Agentic · ${resolvedLabel}`
       : 'Agentic · multi-model'
-    : buildMode
+    : engineMode
       ? resolvedLabel
-        ? `Build · ${resolvedLabel}`
-        : 'Build · Autonomous Engine'
+        ? `${releaseMode ? 'Release' : 'Build'} · ${resolvedLabel}`
+        : releaseMode
+          ? 'Release · Engineer'
+          : 'Build · Autonomous Engine'
       : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
         ? `${selectionLabel} → ${resolvedLabel}`
         : resolvedLabel ?? selectionLabel ?? 'Model';
 
-  const displayText = arenaMode || buildMode
+  const displayText = arenaMode || engineMode
     ? message.reasoningBrief || message.recap
       ? formatArenaReasoning(message.reasoningBrief, message.recap, Boolean(message.isStreaming))
       : formatChatPanelSummary(
@@ -270,7 +293,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     : message.content;
 
   const arenaStatusText =
-    (arenaMode || buildMode) && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
+    (arenaMode || engineMode) && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
       ? message.multiAgentStatus
       : displayText;
 
@@ -325,7 +348,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               ) : null}
             </>
           )
-        ) : buildMode && !isUser ? (
+        ) : engineMode && !isUser ? (
           <>
             <CompactArenaStatus
               text={
@@ -367,11 +390,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
 
         {/* Diff block dacă există */}
-        {message.diff && !message.isStreaming && !message.diff.autoApplied && !buildMode && (
+        {message.diff && !message.isStreaming && !message.diff.autoApplied && !engineMode && (
           <DiffBlock message={message} />
         )}
 
-        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && !buildMode && (
+        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && !engineMode && (
           <div style={{
             marginTop: 10, padding: '8px 12px', borderRadius: 6,
             background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
@@ -414,7 +437,9 @@ function CompactArenaStatus({ text }: { text: string }) {
   );
 }
 
-function StreamingDots() {
+function StreamingDots({ rotateMs = DEFAULT_REASONING_LAYER_CONFIG.waitMessageRotateMs }: { rotateMs?: number }) {
+  const { message, visible } = useArenaWaitMessage(undefined, true, rotateMs);
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
       <div style={{ display: 'flex', gap: 4 }}>
@@ -429,7 +454,16 @@ function StreamingDots() {
           />
         ))}
       </div>
-      <span style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>Scriu…</span>
+      <span
+        style={{
+          fontSize: 11.5,
+          color: 'var(--caval-text-muted)',
+          opacity: visible ? 1 : 0,
+          transition: 'opacity 0.28s ease',
+        }}
+      >
+        {message}
+      </span>
       <style>{`
         @keyframes dot-bounce {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
@@ -539,7 +573,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     attachedFiles, addAttachments, removeAttachment,
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
-    agentMode, strictReview, setStrictReview, modelLabels,
+    agentMode, strictReview, setStrictReview, modelLabels, apiKeys,
     modeSwitchNotice, clearModeSwitchNotice,
     deliveryPause, submitUiDeliveryPreferences,
     verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
@@ -549,12 +583,16 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
   const modeDef = getAgentMode(agentMode);
   const isAgentic = isAgenticPipelineMode(agentMode);
-  const inputPlaceholder = isAgentic
+  const inputPlaceholder = isStreaming
+    ? 'Scrie stop / oprește pentru a opri (contextul rămâne în chat)'
+    : isAgentic
     ? 'Descrie proiectul — Agentic livrează end-to-end (Enter = trimite)'
     : agentMode === 'plan'
       ? 'Planificare enterprise — arhitectură, roadmap, KPIs (Enter = trimite)'
       : agentMode === 'code'
         ? 'Implementare cod — descrie ce să construiești (Enter = trimite)'
+        : agentMode === 'release'
+          ? 'Release Engineer — rulează release:win și raportează release-report.json (Enter = trimite)'
         : agentMode === 'debug'
           ? 'Lipește eroarea sau codul de analizat (Enter = trimite)'
           : agentMode === 'ask'
@@ -567,6 +605,20 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const [uiTheme, setUiTheme] = useState<'light' | 'dark'>('dark');
   const [uiStyle, setUiStyle] = useState('modern');
   const [uiNotes, setUiNotes] = useState('');
+  const [readinessHint, setReadinessHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const result = await checkModelReadiness(selectedModel, apiKeys);
+      if (!cancelled) {
+        setReadinessHint(result.ready ? null : result.hint);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedModel, apiKeys]);
 
   // ── Resize drag ──
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
@@ -705,14 +757,25 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if ((!text && attachedFiles.length === 0) || isStreaming) return;
+    if (isStreaming) {
+      if (isChatStopIntent(text)) {
+        stopStreaming();
+        setInput('');
+        setTextareaHeight(ARENA_INPUT_MIN_HEIGHT);
+        if (textareaRef.current) {
+          textareaRef.current.style.height = `${ARENA_INPUT_MIN_HEIGHT}px`;
+        }
+      }
+      return;
+    }
+    if (!text && attachedFiles.length === 0) return;
     setInput('');
     setTextareaHeight(ARENA_INPUT_MIN_HEIGHT);
     if (textareaRef.current) {
       textareaRef.current.style.height = `${ARENA_INPUT_MIN_HEIGHT}px`;
     }
     await sendMessage(text || 'Analizează fișierele atașate.');
-  }, [input, isStreaming, sendMessage, attachedFiles.length]);
+  }, [input, isStreaming, sendMessage, stopStreaming, attachedFiles.length]);
 
   const handleAttachClick = useCallback(async () => {
     const caval = (window as unknown as { caval?: { fs?: { pickFiles?: () => Promise<string[] | null> } } }).caval;
@@ -1006,7 +1069,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
             placeholder={inputPlaceholder}
-            disabled={isStreaming}
             rows={ARENA_INPUT_MIN_ROWS}
             style={{
               width: '100%', border: 'none', background: 'transparent',
@@ -1216,6 +1278,21 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                 </div>
               )}
             </div>
+
+            {readinessHint && (
+              <div style={{
+                marginBottom: 6,
+                padding: '6px 10px',
+                borderRadius: 6,
+                fontSize: 11,
+                lineHeight: 1.45,
+                color: '#F59E0B',
+                background: 'rgba(245,158,11,0.08)',
+                border: '1px solid rgba(245,158,11,0.2)',
+              }}>
+                {readinessHint}
+              </div>
+            )}
 
             {/* Row 2: model + send — always visible */}
             <div style={{

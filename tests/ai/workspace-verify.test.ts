@@ -5,7 +5,7 @@ vi.mock('../../ai/tools/workspace-command-runner', () => ({
 }));
 
 import { runAllowedWorkspaceCommand } from '../../ai/tools/workspace-command-runner';
-import { detectVerifyCommands, runWorkspaceVerify } from '../../ai/tools/workspace-verify';
+import { detectVerifyCommands, isAiJunkWorkspacePackage, runWorkspaceVerify } from '../../ai/tools/workspace-verify';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -28,6 +28,24 @@ describe('workspace-verify', () => {
       'npm run build',
       'npm test',
     ]);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('skips verify for AI junk zero-latency-composer package', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'caval-verify-junk-'));
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'package.json'),
+      JSON.stringify({ name: 'zero-latency-composer', version: '1.0.0', scripts: { build: 'tsc' } })
+    );
+    fs.writeFileSync(path.join(root, 'src', 'index.ts'), '## PROJECT SUMMARY\nBroken');
+
+    expect(isAiJunkWorkspacePackage(root)).toBe(true);
+    const result = await runWorkspaceVerify(root);
+    expect(result.ran).toBe(false);
+    expect(result.summary).toContain('skipped verify');
+    expect(runAllowedWorkspaceCommand).not.toHaveBeenCalled();
+
     fs.rmSync(root, { recursive: true, force: true });
   });
 

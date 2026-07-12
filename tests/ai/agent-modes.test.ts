@@ -3,6 +3,7 @@ import {
   AGENT_MODES,
   getAgentMode,
   isBuildEngineMode,
+  isReleaseEngineerMode,
   isAgenticPipelineMode,
 } from '../../ai/modes/agent-modes';
 
@@ -22,6 +23,18 @@ describe('agent modes', () => {
   it('isBuildEngineMode is true only for build', () => {
     expect(isBuildEngineMode('build')).toBe(true);
     expect(isBuildEngineMode('code')).toBe(false);
+    expect(isBuildEngineMode('release')).toBe(false);
+  });
+
+  it('isReleaseEngineerMode is true only for release', () => {
+    expect(isReleaseEngineerMode('release')).toBe(true);
+    expect(isReleaseEngineerMode('build')).toBe(false);
+  });
+
+  it('includes release mode', () => {
+    const release = AGENT_MODES.find((m) => m.id === 'release');
+    expect(release).toBeDefined();
+    expect(release?.description.toLowerCase()).toContain('release');
   });
 
   it('isAgenticPipelineMode is true only for agentic', () => {

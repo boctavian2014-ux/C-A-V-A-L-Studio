@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron';
+import fs from 'node:fs';
 import * as pty from 'node-pty';
 import * as os from 'os';
 
@@ -9,7 +10,15 @@ const SHELL = os.platform() === 'win32'
   ? 'powershell.exe'
   : process.env.SHELL || '/bin/bash';
 
-ipcMain.handle('terminal:create', async (event, id: string) => {
+function resolveTerminalCwd(cwd?: string): string {
+  const trimmed = cwd?.trim();
+  if (trimmed && fs.existsSync(trimmed)) {
+    return trimmed;
+  }
+  return os.homedir();
+}
+
+ipcMain.handle('terminal:create', async (event, id: string, options?: { cwd?: string }) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return { ok: false, error: 'No window' };
 
@@ -17,7 +26,7 @@ ipcMain.handle('terminal:create', async (event, id: string) => {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
-    cwd: os.homedir(),
+    cwd: resolveTerminalCwd(options?.cwd),
     env: { ...process.env } as Record<string, string>,
   });
 

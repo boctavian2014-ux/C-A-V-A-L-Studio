@@ -1,9 +1,9 @@
 /**
- * Cavallo mode router — resolves effective mode and system prompt for direct chat.
+ * CAVALLO mode router — resolves effective mode and system prompt for direct chat.
  * Agentic mode bypasses this module entirely.
  */
 import type { AgentModeId } from './agent-modes';
-import { isAgenticPipelineMode, isBuildEngineMode } from './agent-modes';
+import { isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode } from './agent-modes';
 import {
   detectIntent,
   isDirectChatMode,
@@ -16,8 +16,10 @@ import {
 } from '../prompts/cavallo-enterprise-modes';
 import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
 import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
+import { CAVALO_RELEASE_ENGINEER_PROMPT } from '../prompts/cavalo-release-engineer';
 
 const BUILD_MODE_EXPLICIT = /\b(?:BUILD\s+MODE|mod\s+build)\b/i;
+const RELEASE_MODE_EXPLICIT = /\b(?:RELEASE\s+MODE|mod\s+release|release\s+engineer)\b/i;
 
 export interface CavalloModesConfig {
   autoModeSwitch?: boolean;
@@ -55,6 +57,15 @@ export function resolveEffectiveMode(
     return { mode: 'agentic', switched: false };
   }
 
+  if (options?.explicitTriggers !== false && RELEASE_MODE_EXPLICIT.test(message)) {
+    return {
+      mode: 'release',
+      switched: normalized !== 'release',
+      switchReason: 'explicit release trigger',
+      fromMode: normalized !== 'release' ? normalized : undefined,
+    };
+  }
+
   if (options?.explicitTriggers !== false && BUILD_MODE_EXPLICIT.test(message)) {
     return {
       mode: 'build',
@@ -66,6 +77,10 @@ export function resolveEffectiveMode(
 
   if (isBuildEngineMode(normalized)) {
     return { mode: 'build', switched: false };
+  }
+
+  if (isReleaseEngineerMode(normalized)) {
+    return { mode: 'release', switched: false };
   }
 
   const autoSwitch = options?.autoSwitch !== false;
@@ -94,7 +109,7 @@ export function resolveEffectiveMode(
   };
 }
 
-/** Build strict Cavallo system prompt for direct modes. Agentic uses CODING_ARENA separately. */
+/** Build strict CAVALLO system prompt for direct modes. Agentic uses CODING_ARENA separately. */
 export function getCavalloSystemPrompt(
   mode: string,
   opts?: { includeScaffold?: boolean; workspaceRoot?: string }
@@ -103,6 +118,14 @@ export function getCavalloSystemPrompt(
 
   if (isAgenticPipelineMode(normalized)) {
     return '';
+  }
+
+  if (isReleaseEngineerMode(normalized)) {
+    let prompt = CAVALO_RELEASE_ENGINEER_PROMPT;
+    if (opts?.workspaceRoot?.trim()) {
+      prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
+    }
+    return prompt;
   }
 
   if (isBuildEngineMode(normalized)) {
@@ -137,7 +160,7 @@ export function getCavalloSystemPrompt(
   return prompt;
 }
 
-export function getModeLabel(mode: DirectChatModeId | 'build'): string {
+export function getModeLabel(mode: DirectChatModeId | 'build' | 'release'): string {
   switch (mode) {
     case 'plan':
       return 'Plan';
@@ -145,6 +168,8 @@ export function getModeLabel(mode: DirectChatModeId | 'build'): string {
       return 'Code';
     case 'build':
       return 'Build';
+    case 'release':
+      return 'Release';
     case 'ask':
       return 'Ask';
     case 'debug':

@@ -140,7 +140,7 @@ async function callPlannerLlm(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.CAD_PUBLIC_URL ?? "https://caval.studio",
-        "X-Title": "Caval Studio Print3D Planner",
+        "X-Title": "CAVALLO Studio Print3D Planner",
       },
       body: JSON.stringify({
         model: PLANNER_MODEL,

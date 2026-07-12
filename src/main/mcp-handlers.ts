@@ -1,30 +1,16 @@
 import { ipcMain } from "electron";
 import { mcpManager } from "../../ai/mcp/mcp-client";
-import { DEFAULT_CAVAL_CONFIG, type CavalConfig } from "../../ai/modes/agent-modes";
 import {
   ensureMcpServersReady,
   getOrCreateToolRegistry,
   syncRegistryMcpTools,
 } from "../../ai/tools/tool-runtime";
 import { AIClient } from "../../ai/ai-client";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { loadCavalConfig, resolveAutocompleteModel } from "../../ai/config/caval-config";
 
 const autocompleteClient = new AIClient();
 
-async function loadCavalConfig(workspaceRoot: string): Promise<CavalConfig> {
-  try {
-    const configPath = path.join(workspaceRoot, "caval.jsonc");
-    const raw = await fs.readFile(configPath, "utf8");
-    const json = raw.replace(/\/\/.*$/gm, "").replace(/,\s*}/g, "}");
-    return { ...DEFAULT_CAVAL_CONFIG, ...JSON.parse(json) };
-  } catch {
-    return DEFAULT_CAVAL_CONFIG;
-  }
-}
-
-export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => string): void {
-  ipcMain.handle("caval:mcp-ensure", async (event) => {
+export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => string): void {  ipcMain.handle("caval:mcp-ensure", async (event) => {
     const root = getWorkspaceRoot(event.sender.id);
     if (!root?.trim()) {
       return { ok: true, servers: [] };
@@ -68,7 +54,7 @@ export function registerMcpHandlers(getWorkspaceRoot: (senderId: number) => stri
   ipcMain.handle("caval:autocomplete", async (event, input: { prefix: string; filePath: string; language: string }) => {
     const root = getWorkspaceRoot(event.sender.id);
     const config = await loadCavalConfig(root);
-    const model = config.autocomplete?.model ?? "north-mini-code";
+    const model = resolveAutocompleteModel(config);
     if (config.autocomplete?.enabled === false) {
       return { ok: true, suggestion: "" };
     }

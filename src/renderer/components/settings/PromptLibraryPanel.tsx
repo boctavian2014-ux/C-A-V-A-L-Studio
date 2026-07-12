@@ -8,7 +8,7 @@ import {
 } from '../../store/prompt-library-store';
 
 // ──────────────────────────────────────────────
-//  PromptLibraryPanel — Caval IDE
+//  PromptLibraryPanel — CAVALLO Studio
 //  Editor stiluri predefinite pentru Image Generator.
 //  Afișat ca secțiune în SettingsPanel.
 // ──────────────────────────────────────────────

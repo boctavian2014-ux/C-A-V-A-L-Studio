@@ -1,5 +1,6 @@
 const path = require("path");
 const webpack = require("webpack");
+const MonacoWebpackPlugin = require("monaco-editor-webpack-plugin");
 
 const shared = {
   mode: process.env.NODE_ENV === "production" ? "production" : "development",
@@ -56,9 +57,39 @@ module.exports = [
     ...shared,
     name: "renderer",
     target: "electron-renderer",
+    resolve: {
+      ...shared.resolve,
+      alias: {
+        "monaco-editor": path.resolve(
+          __dirname,
+          "node_modules/monaco-editor/esm/vs/editor/editor.api.js"
+        ),
+      },
+    },
+    module: {
+      ...shared.module,
+      rules: [
+        ...shared.module.rules,
+        {
+          test: /\.ttf$/,
+          type: "asset/resource",
+          generator: {
+            filename: "renderer/assets/[name][ext][query]",
+          },
+        },
+      ],
+    },
     plugins: [
       new webpack.ProvidePlugin({
         global: "globalThis",
+      }),
+      new MonacoWebpackPlugin({
+        languages: ["typescript", "javascript", "json", "css", "html", "markdown", "python", "shell"],
+        publicPath: "renderer/",
+      }),
+      // TypeScript compiler is main-process only — bundling it in renderer causes OOM / black screen.
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^typescript$/,
       }),
     ],
     entry: {

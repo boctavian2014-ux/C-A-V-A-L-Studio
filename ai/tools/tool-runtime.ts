@@ -1,23 +1,10 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { ContextEngineApi } from "../../context-engine/api";
 import { mcpManager } from "../mcp/mcp-client";
-import { DEFAULT_CAVAL_CONFIG, type CavalConfig } from "../modes/agent-modes";
+import { loadCavalConfig } from "../config/caval-config";
 import { ToolRegistry, type ToolDefinition } from "./tool-registry";
 
 const contextEngine = new ContextEngineApi();
 const registries = new Map<number, ToolRegistry>();
-
-async function loadCavalConfig(workspaceRoot: string): Promise<CavalConfig> {
-  try {
-    const configPath = path.join(workspaceRoot, "caval.jsonc");
-    const raw = await fs.readFile(configPath, "utf8");
-    const json = raw.replace(/\/\/.*$/gm, "").replace(/,\s*}/g, "}");
-    return { ...DEFAULT_CAVAL_CONFIG, ...JSON.parse(json) };
-  } catch {
-    return DEFAULT_CAVAL_CONFIG;
-  }
-}
 
 export function syncRegistryMcpTools(registry: ToolRegistry): void {
   registry.setMcpToolDefinitions(mcpManager.getToolDefinitions());

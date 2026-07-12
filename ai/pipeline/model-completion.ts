@@ -4,6 +4,7 @@ import {
   resolveModelSelection,
   getAutoFreeModelCandidates,
   getAutoBalancedModelCandidates,
+  getInstalledLocalModelCandidates,
   isOllamaReachable,
 } from '../models/auto-router';
 import { isAutoTier, type ModelSelectionId } from '../models/model-catalog';
@@ -149,24 +150,33 @@ async function getModelsToTry(
   resolvedModelId: string,
   intent: RoutingIntent = 'kilocode'
 ): Promise<string[]> {
+  let ids: string[];
   if (selectionId === 'caval-auto/free') {
-    return getAutoFreeModelCandidates();
-  }
-  if (selectionId === 'caval-auto/balanced') {
+    ids = await getAutoFreeModelCandidates();
+  } else if (selectionId === 'caval-auto/balanced') {
     const candidates = getAutoBalancedModelCandidates(intent);
-    if (!candidates.includes(resolvedModelId)) {
-      return [resolvedModelId, ...candidates];
-    }
-    return candidates;
-  }
-  if (
+    ids = !candidates.includes(resolvedModelId)
+      ? [resolvedModelId, ...candidates]
+      : candidates;
+  } else if (
     isAutoTier(selectionId) &&
     getModelProfile(resolvedModelId)?.provider === 'open_source'
   ) {
     const candidates = await getAutoFreeModelCandidates();
-    return [resolvedModelId, ...candidates.filter((id) => id !== resolvedModelId)];
+    ids = [resolvedModelId, ...candidates.filter((id) => id !== resolvedModelId)];
+  } else {
+    ids = [resolvedModelId];
   }
-  return [resolvedModelId];
+
+  const local = await getInstalledLocalModelCandidates();
+  const seen = new Set(ids);
+  for (const id of local) {
+    if (!seen.has(id)) {
+      ids.push(id);
+      seen.add(id);
+    }
+  }
+  return ids;
 }
 
 function formatCompletionError(
@@ -210,6 +220,11 @@ function formatCompletionError(
       'Modelul nu este disponibil la furnizor.',
       '',
       errors.join('\n'),
+      '',
+      'Soluții rapide:',
+      '• Selectează „Auto Free” în panoul AI (folosește Ollama local)',
+      '• Sau: ollama pull qwen2.5-coder:7b (ai deja instalat — repornește app)',
+      '• Sau: adaugă OpenRouter API Key valid (🔑 în panoul AI)',
     ].join('\n');
   }
 
@@ -279,7 +294,9 @@ export async function executeModelCompletion(
   }
 
   if (
-    (isAutoTier(input.model) || input.model.startsWith('openrouter:')) &&
+    (input.model === 'caval-auto/balanced' ||
+      input.model === 'caval-auto/frontier' ||
+      input.model.startsWith('openrouter:')) &&
     !hasOpenRouterKey()
   ) {
     return {
@@ -293,12 +310,22 @@ export async function executeModelCompletion(
     };
   }
 
-  const modelIdsToTry = isChat
-    ? [resolved.modelId]
-    : (await getModelsToTry(input.model, resolved.modelId, intent)).slice(
+  if (input.model === 'caval-auto/free' && !hasOpenRouterKey() && !(await isOllamaReachable())) {
+    return { ok: false, error: OLLAMA_SETUP_ERROR };
+  }
+
+  const needsModelFallback =
+    input.capability === 'code' ||
+    input.capability === 'planning' ||
+    input.capability === 'debug' ||
+    !isChat;
+
+  const modelIdsToTry = needsModelFallback
+    ? (await getModelsToTry(input.model, resolved.modelId, intent)).slice(
         0,
-        input.jsonMode ? 3 : 2
-      );
+        input.jsonMode ? 6 : 5
+      )
+    : [resolved.modelId];
   const errors: string[] = [];
 
   for (const modelId of modelIdsToTry) {

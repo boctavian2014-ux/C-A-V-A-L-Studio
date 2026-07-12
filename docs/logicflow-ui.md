@@ -1,6 +1,6 @@
 # LogicFlow Pipeline UI
 
-Cursor-style visualization of the Caval Studio AI Composer pipeline: sidebar (stages), canvas (connected nodes), and AI inspector (right panel).
+Cursor-style visualization of the CAVALLO Studio AI Composer pipeline: sidebar (stages), canvas (connected nodes), and AI inspector (right panel).
 
 ## Architecture
 

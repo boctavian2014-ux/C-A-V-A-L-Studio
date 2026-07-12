@@ -1,6 +1,6 @@
-# Caval Studio CI/CD
+# CAVALLO Studio CI/CD
 
-CI/CD-ul Caval Studio este gandit pentru build si release multi-platforma, cu testare, packaging, signing, auto-update, release channels, Marketplace si observability.
+CI/CD-ul CAVALLO Studio este gandit pentru build si release multi-platforma, cu testare, packaging, signing, auto-update, release channels, Marketplace si observability.
 
 ## Arhitectura
 

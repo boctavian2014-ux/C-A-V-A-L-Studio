@@ -79,16 +79,26 @@ function rankLocalFree(installed: string[]): ModelProfile[] {
   return default7b ? [default7b] : sortForAutoFree(locals);
 }
 
+/** Modele locale instalate în Ollama (pentru fallback) */
+export async function getInstalledLocalModelCandidates(): Promise<string[]> {
+  const installed = await getInstalledOllamaModels();
+  return rankLocalFree(installed).map((p) => p.id);
+}
+
 /** Lista ordonată de încercat pentru Auto Free (cu fallback) */
 export async function getAutoFreeModelCandidates(): Promise<string[]> {
+  const installed = await getInstalledOllamaModels();
+  const local = rankLocalFree(installed).map((p) => p.id);
+  if (local.length > 0) {
+    return local;
+  }
   if (hasOpenRouterKey()) {
     return [
       "stepfun-step-3-7-flash",
       ...getAutoBalancedModelCandidates().filter((id) => id !== "stepfun-step-3-7-flash"),
     ];
   }
-  const installed = await getInstalledOllamaModels();
-  return rankLocalFree(installed).map((p) => p.id);
+  return ["qwen2.5-coder:7b"];
 }
 
 /** Lista ordonată de fallback pentru Auto Balanced (cloud, non-premium) */

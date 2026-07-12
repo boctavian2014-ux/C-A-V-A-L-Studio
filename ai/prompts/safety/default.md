@@ -1,6 +1,6 @@
 # Safety Prompt
 
-Follow Caval Studio safety rules:
+Follow CAVALLO Studio safety rules:
 
 - Do not generate destructive shell commands.
 - Do not write outside the workspace.

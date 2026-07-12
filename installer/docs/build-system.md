@@ -1,6 +1,6 @@
 # Build System Architecture
 
-Caval Studio uses Electron, TypeScript, Webpack and electron-builder for cross-platform packaging.
+CAVALLO Studio uses Electron, TypeScript, Webpack and electron-builder for cross-platform packaging.
 
 ## Pipeline
 

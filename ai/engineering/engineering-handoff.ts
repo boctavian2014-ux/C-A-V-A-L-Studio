@@ -38,7 +38,7 @@ export function formatEngineeringContextForCoding(
   ].join('\n');
 
   const partsBlock = [
-    '## BOM / Componente',
+    '## Lista de componente',
     '',
     '| Componentă | Qty | Preț | Magazin | Substitut |',
     '| --- | ---: | ---: | --- | --- |',
@@ -58,7 +58,7 @@ export function formatEngineeringContextForCoding(
   ].join('\n\n');
 
   return [
-    '# Context Engineering AI — proiect hardware',
+    '# Context Robotics AI — proiect hardware',
     '',
     'Folosește acest context pentru a genera software (app, dashboard, firmware complet, API) compatibil cu hardware-ul descris.',
     '',
@@ -79,9 +79,9 @@ export function formatEngineeringContextForCoding(
 export function buildSoftwareHandoffPrompt(project: EngProject): string {
   const title = project.spec.title.trim() || 'proiectul hardware';
   return [
-    `SCAFFOLD: creează proiectul software pentru „${title}” folosind contextul Engineering atașat.`,
-    'Folosește write_file pentru fiecare fișier (app, API, firmware .ino dacă e cazul).',
-    'Cod complet rulabil — zero arhitectură lungă.',
+    `Creează proiectul software pentru „${title}” folosind contextul Robotics AI atașat (hardware, componente, conexiuni).`,
+    'Emite IMEDIAT fișiere complete ca ```typescript:src/...``` sau ```cpp:firmware/...``` — fiecare fișier = un bloc cu path relativ.',
+    'Include firmware (.ino/.cpp) dacă e cazul, plus app/API după nevoie. Cod rulabil, fără plan lung fără fișiere.',
   ].join(' ');
 }
 

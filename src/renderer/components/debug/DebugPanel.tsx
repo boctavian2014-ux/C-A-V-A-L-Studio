@@ -43,7 +43,7 @@ export function DebugPanel() {
   };
 
   return (
-    <div style={{ padding: 10, fontSize: 12, borderTop: '1px solid var(--caval-border)' }}>
+    <div style={{ padding: 10, fontSize: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ fontWeight: 700, flex: 1 }}>DEBUG</span>
         <button

@@ -154,7 +154,7 @@ const createWindow = (): BrowserWindow => {
     minHeight: 650,
     resizable: true,
     maximizable: true,
-    title: "CAVALO",
+    title: "CAVALLO",
     ...(fsSync.existsSync(iconPath) ? { icon: iconPath } : {}),
     backgroundColor: "#090B12",
     webPreferences: {
@@ -493,7 +493,7 @@ const installApplicationMenu = (): void => {
         { label: "Open Process Explorer", click: () => sendMenuCommand("process-explorer") },
         { type: "separator" },
         { label: "Check for Updates...", click: () => sendMenuCommand("check-updates") },
-        { label: "Caval Studio Docs", click: () => void shell.openExternal("https://caval.studio") },
+        { label: "CAVALLO Studio Docs", click: () => void shell.openExternal("https://caval.studio") },
         { label: "About", click: () => sendMenuCommand("about") }
       ]
     }
@@ -542,8 +542,8 @@ const withTimeout = async <T>(operation: (signal: AbortSignal) => Promise<T>, ti
 
 const systemPromptForMode = (mode: "ask" | "plan"): string =>
   mode === "plan"
-    ? "Esti Caval Studio AI in modul Plan. Raspunde cu pasi clari, fisiere relevante, riscuri si validari. Nu modifica direct codul."
-    : "Esti Caval Studio AI in modul Ask. Raspunde concis si practic, folosind contextul fisierului activ cand exista.";
+    ? "Esti CAVALLO Studio AI in modul Plan. Raspunde cu pasi clari, fisiere relevante, riscuri si validari. Nu modifica direct codul."
+    : "Esti CAVALLO Studio AI in modul Ask. Raspunde concis si practic, folosind contextul fisierului activ cand exista.";
 
 const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatResponse> => {
   const endpoint = process.env.CAVAL_CLOUD_AI_URL;
@@ -1254,7 +1254,11 @@ ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) =>
   if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
   if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
   if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
+  if (secrets.NVIDIA_API_KEY) process.env.NVIDIA_API_KEY = secrets.NVIDIA_API_KEY;
   if (secrets.MESHY_API_KEY) process.env.MESHY_API_KEY = secrets.MESHY_API_KEY;
+  if (secrets.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = secrets.ANTHROPIC_API_KEY;
+  if (secrets.OPENAI_API_KEY) process.env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
+  if (secrets.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = secrets.GOOGLE_API_KEY;
   return { ok: true };
 });
 
@@ -1263,11 +1267,15 @@ const applyStoredSecretsToEnv = (): void => {
   if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
   if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
   if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
+  if (secrets.NVIDIA_API_KEY) process.env.NVIDIA_API_KEY = secrets.NVIDIA_API_KEY;
   if (secrets.MESHY_API_KEY) process.env.MESHY_API_KEY = secrets.MESHY_API_KEY;
+  if (secrets.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = secrets.ANTHROPIC_API_KEY;
+  if (secrets.OPENAI_API_KEY) process.env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
+  if (secrets.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = secrets.GOOGLE_API_KEY;
 };
 
 app.whenReady().then(() => {
-  app.setName("CAVALO");
+  app.setName("CAVALLO");
   installApplicationMenu();
   applyStoredSecretsToEnv();
   applyCadCloudEnvDefaults();

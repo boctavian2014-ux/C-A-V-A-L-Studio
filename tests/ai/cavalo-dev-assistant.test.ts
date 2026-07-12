@@ -4,9 +4,9 @@ import { CODING_ARENA_SYSTEM_PROMPT } from '../../ai/prompts/coding-arena';
 import { buildMultiModelSystemPrompt } from '../../ai/prompts/multi-model-reasoning-chat';
 
 describe('cavalo-dev-assistant prompt', () => {
-  it('defines Cavalo System AI identity and layers', () => {
-    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Cavalo System AI');
-    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('CAVALO Studio');
+  it('defines CAVALLO System AI identity and layers', () => {
+    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('CAVALLO System AI');
+    expect(CAVALO_DEV_ASSISTANT_CORE).toContain('CAVALLO Studio');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('Context Engine');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('caval.jsonc');
     expect(CAVALO_DEV_ASSISTANT_CORE).toContain('README.md');
@@ -35,7 +35,7 @@ describe('cavalo-dev-assistant prompt', () => {
   });
 
   it('is wired into Code Arena and multi-model chat prompts', () => {
-    expect(CODING_ARENA_SYSTEM_PROMPT).toContain('CAVALO CODING ARENA');
-    expect(buildMultiModelSystemPrompt({ agentMode: 'ask' })).toContain('Cavalo System AI');
+    expect(CODING_ARENA_SYSTEM_PROMPT).toContain('CAVALLO CODING ARENA');
+    expect(buildMultiModelSystemPrompt({ agentMode: 'ask' })).toContain('CAVALLO System AI');
   });
 });

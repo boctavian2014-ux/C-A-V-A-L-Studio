@@ -19,7 +19,7 @@ interface CavalFsApi {
 }
 
 interface CavalTerminalApi {
-  create: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  create: (id: string, options?: { cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
   write: (id: string, data: string) => Promise<{ ok: boolean; error?: string }>;
   resize: (id: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
   destroy: (id: string) => Promise<{ ok: boolean }>;
@@ -81,6 +81,7 @@ interface CavalGitApi {
   branches: (projectPath: string) => Promise<string[]>;
   checkout: (projectPath: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
   createBranch: (projectPath: string, name: string) => Promise<{ ok: boolean; error?: string }>;
+  init: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
   stash: (projectPath: string, message?: string) => Promise<{ ok: boolean; error?: string }>;
   stashPop: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -405,6 +406,12 @@ interface CavalBridge {
   secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean }>;
+  modelsHealth?: () => Promise<{
+    ok: boolean;
+    summary?: string;
+    models?: Record<string, 'ready' | 'missing_key' | 'not_installed' | 'ollama_down' | 'unknown'>;
+    providers?: Record<string, { ok: boolean; error?: string; installed?: string[] }>;
+  }>;
   contextIndex?: () => Promise<{ ok: boolean; documentCount?: number; error?: string }>;
   contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: unknown[]; error?: string }>;
   workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
@@ -490,6 +497,11 @@ interface CavalBridge {
   };
   fs: CavalFsApi;
   terminal: CavalTerminalApi;
+  extensions?: {
+    list: () => Promise<{ ok: boolean; extensions?: unknown[] }>;
+    register: (manifest: { id: string; name: string; version: string }) => Promise<{ ok: boolean; error?: string }>;
+    install: (input: { extensionId: string; baseUrl: string }) => Promise<{ ok: boolean; error?: string }>;
+  };
   git: CavalGitApi;
   preload: CavalPreloadApi;
   cad: CavalCadApi;

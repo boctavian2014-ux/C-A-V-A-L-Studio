@@ -38,6 +38,20 @@ describe("SafetyPolicyEnforcer", () => {
     expect(violations.some((v) => v.code === "dangerous_operation")).toBe(true);
   });
 
+  it("blocks OS shutdown commands but allows code method names", () => {
+    const blocked = enforcer.validateRequest({
+      prompt: "please run shutdown /s /t 0 on the server",
+      capability: "chat",
+    });
+    expect(blocked.some((v) => v.code === "dangerous_operation")).toBe(true);
+
+    const codeContext = enforcer.validateRequest({
+      prompt: `fix this\n\n---\nCod din fișierul activ \`ai/preload/preload-manager.ts\`:\n\`\`\`ts\nasync shutdown(): Promise<void> {\n  this.postToWorker({ type: "shutdown" });\n}\n\`\`\``,
+      capability: "code",
+    });
+    expect(codeContext.some((v) => v.code === "dangerous_operation")).toBe(false);
+  });
+
   it("rejects patch sets exceeding file count", () => {
     const files = Array.from({ length: 100 }, (_, i) => ({
       path: `file-${i}.ts`,

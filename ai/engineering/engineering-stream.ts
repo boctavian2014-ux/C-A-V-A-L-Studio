@@ -1,6 +1,6 @@
 import type { CavalStreamChunk } from '../../src/main/preload';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { pickBestEngineeringOutput } from './engineering-json';
+import { pickBestRoboticsMarkdown } from './robotics-format';
 
 function generateStreamId(): string {
   return `eng-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -79,15 +79,15 @@ export async function completeViaChatStream(params: {
       {
         message: userMessage,
         model: params.model,
-        mode: 'plan',
+        mode: 'ask',
         streamId,
         workspaceRoot: params.workspaceRoot ?? undefined,
         intent: 'deep_thinking',
         messages: params.messages,
-        jsonMode: true,
-        maxTokens: 8192,
-        temperature: 0.15,
-        timeoutMs: 120_000,
+        jsonMode: false,
+        maxTokens: 16_384,
+        temperature: 0.2,
+        timeoutMs: 180_000,
       },
       (chunk: CavalStreamChunk) => {
         if (params.signal?.aborted) {
@@ -107,7 +107,7 @@ export async function completeViaChatStream(params: {
           finish({ ok: false, error: chunk.error ?? 'Eroare necunoscută' });
         }
         if (chunk.type === 'done') {
-          const text = pickBestEngineeringOutput(buffer, reasoningBuffer);
+          const text = pickBestRoboticsMarkdown(buffer, reasoningBuffer);
           finish({
             ok: true,
             text,

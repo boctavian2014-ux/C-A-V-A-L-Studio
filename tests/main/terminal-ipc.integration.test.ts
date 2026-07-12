@@ -130,4 +130,27 @@ describe("Terminal IPC integration", () => {
     expect(created.ok).toBe(false);
     expect(created.error).toMatch(/window/i);
   });
+
+  it("terminal:create uses workspace cwd when provided", async () => {
+    const workspaceCwd = process.cwd();
+    const created = await harness.invoke<{ ok: boolean }>("terminal:create", "term-cwd", {
+      cwd: workspaceCwd,
+    });
+    expect(created.ok).toBe(true);
+    expect(terminalMocks.spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      [],
+      expect.objectContaining({ cwd: workspaceCwd })
+    );
+  });
+
+  it("terminal:create falls back to homedir for invalid cwd", async () => {
+    const os = await import("os");
+    await harness.invoke("terminal:create", "term-bad-cwd", { cwd: "Z:\\nonexistent\\path" });
+    expect(terminalMocks.spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      [],
+      expect.objectContaining({ cwd: os.homedir() })
+    );
+  });
 });

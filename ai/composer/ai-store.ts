@@ -8,7 +8,8 @@ import {
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
-import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
+import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
 import { resolveEffectiveMode } from '../modes/mode-router';
 import { normalizeAgentModeId } from '../modes/intent-detector';
 import {
@@ -29,7 +30,7 @@ import {
 } from '../prompts/full-delivery-rule';
 import {
   canAutoContinueDelivery,
-  isDeliveryIncomplete,
+  isDeliveryBlocked,
 } from './delivery-orchestrator';
 import { DEFAULT_FULL_DELIVERY_CONFIG } from './multi-agent/types';
 import {
@@ -40,6 +41,11 @@ import {
 import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { useOutputStore } from '../../src/renderer/store/output-store';
+import { parseProblemsFromOutput } from '../../src/renderer/store/parse-problems';
+import { useProblemsStore } from '../../src/renderer/store/problems-store';
+import { dispatchTerminalPanelTab } from '../../src/renderer/terminal/terminal-events';
+import { CAVAL_OPEN_CODING_CHAT_EVENT } from '../engineering/engineering-handoff';
 import { applyUnifiedDiff } from '../../src/shared/diff-utils';
 import type { CavalStreamChunk } from '../../src/main/preload';
 import {
@@ -64,14 +70,15 @@ import { applyScaffoldToWorkspace, parseScaffoldFiles } from './scaffold-apply';
 import { parseStreamingScaffold } from './scaffold-parser';
 import {
   buildFashionMatchingAssistantReply,
+  detectFashionArchetype,
   fashionMatchingSeedPrompt,
   isFashionMatchingEngineRequest,
-  seedFashionMatchingEngine,
+  seedFashionForRequest,
 } from './fashion-matching-seed';
-import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
+import { getFashionFullStackScaffoldFiles } from '../scaffolds/fashion-matching/fullstack-manifest';
 import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/manifest';
+import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
 import { stripArenaChatNoise, formatArenaReasoning, summarizeForChatPanel, formatChatPanelSummary } from './chat-display';
-import { runCavaloConsistencyScan } from './consistency-engine';
 import { loadBuildMemoryRecord, persistLastBuild, buildMemoryHint } from './build-memory-bridge';
 import {
   buildEarlyArenaMessage,
@@ -282,6 +289,41 @@ function patchMessageInThreads(
   });
 }
 
+const STOPPED_ASSISTANT_COPY =
+  '■ Oprit. Conversația de mai sus rămâne ca context — poți continua sau reformula cererea.';
+
+export function isChatStopIntent(text: string): boolean {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return /^(stop|opreste|nu mai|oprit|anuleaza|cancel|abort|stai|gata|■\s*stop)$/.test(normalized);
+}
+
+function finalizeStoppedAssistantMessage(message: ChatMessage): ChatMessage {
+  return {
+    ...message,
+    isStreaming: false,
+    content: STOPPED_ASSISTANT_COPY,
+    multiAgentStatus: 'Oprit',
+    multiAgentSteps: message.multiAgentSteps?.map((step) => ({
+      ...step,
+      status: 'done' as const,
+      detail: step.status === 'active' ? 'oprit' : step.detail,
+    })),
+    activitySteps: message.activitySteps
+      ? markAllActivityDone(message.activitySteps)
+      : message.activitySteps,
+  };
+}
+
+function assertSendNotAborted(signal: AbortSignal): void {
+  if (signal.aborted || userStoppedStream) {
+    throw new DOMException('User stopped send', 'AbortError');
+  }
+}
+
 function truncateVerifyOutput(text: string): string {
   if (text.length <= VERIFY_OUTPUT_MAX) return text;
   return `${text.slice(0, VERIFY_OUTPUT_MAX)}\n\n… (trunchiat, ${text.length - VERIFY_OUTPUT_MAX} caractere omise)`;
@@ -381,6 +423,7 @@ interface AIStore {
   pendingChatDraft: string | null;
   pendingAutoSend: boolean;
   clearPendingChatDraft: () => void;
+  queueChatFromPanel: (text: string, options?: { autoSend?: boolean }) => void;
   handoffFromEngineering: (input: { project: EngProject; userPrompt: string }) => { ok: true } | { ok: false; error: string };
 
   runWorkspaceVerifyAndReport: () => Promise<void>;
@@ -496,6 +539,9 @@ const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
 let abortController: AbortController | null = null;
 let streamCleanup: (() => void) | null = null;
 let activeStreamId: string | null = null;
+let pendingStreamId: string | null = null;
+let sendAbortController: AbortController | null = null;
+let userStoppedStream = false;
 let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
 let deliveryWaveIndex = 0;
@@ -534,9 +580,18 @@ export const useAIStore = create<AIStore>()(
       },
       setAgentMode: (mode) => {
         const normalized = normalizeAgentModeId(mode);
-        const modeDef = getAgentMode(normalized);
-        set({ agentMode: normalized, selectedModel: modeDef.defaultModel, activeResolvedModel: null, modeSwitchNotice: null });
-        void get().refreshResolvedModel();
+        void (async () => {
+          const projectPath = useEditorStore.getState().projectPath;
+          const config = await loadCavalConfigFromClient(projectPath);
+          const modelId = resolveModelForMode(normalized, config);
+          set({
+            agentMode: normalized,
+            selectedModel: modelId,
+            activeResolvedModel: null,
+            modeSwitchNotice: null,
+          });
+          void get().refreshResolvedModel();
+        })();
       },
       clearModeSwitchNotice: () => set({ modeSwitchNotice: null }),
       setIncludeMode: (mode) => set({ includeMode: mode }),
@@ -718,6 +773,10 @@ export const useAIStore = create<AIStore>()(
       },
 
       sendMessage: async (userText) => {
+        if (get().isStreaming && isChatStopIntent(userText)) {
+          get().stopStreaming();
+          return;
+        }
         if (
           !isDeliveryContinueRequest(userText) &&
           !isScaffoldContinueRequest(userText) &&
@@ -795,7 +854,8 @@ export const useAIStore = create<AIStore>()(
         let fashionSeedCount = 0;
 
         if (isFashionMatchingEngineRequest(userText) && editorState.projectPath) {
-          const written = await seedFashionMatchingEngine(editorState.projectPath);
+          const fashionArchetype = detectFashionArchetype(userText);
+          const written = await seedFashionForRequest(editorState.projectPath, userText);
           if (written.length > 0) {
             fashionSeeded = true;
             fashionSeedCount = written.length;
@@ -803,7 +863,7 @@ export const useAIStore = create<AIStore>()(
             const sep = editorState.projectPath.includes('\\') ? '\\' : '/';
             const pipelinePath = `${editorState.projectPath}${sep}fashion-matching-engine${sep}src${sep}fashion_matching${sep}pipeline.py`;
             void editorState.openFile(pipelinePath);
-            apiPrompt = `${fashionMatchingSeedPrompt()}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
+            apiPrompt = `${fashionMatchingSeedPrompt(fashionArchetype)}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
             set({ agentMode: 'agentic', includeMode: 'project' });
           }
         }
@@ -838,8 +898,15 @@ export const useAIStore = create<AIStore>()(
         };
 
         const nextMessages = [...messages, userMsg, assistantMsg];
+        sendAbortController?.abort();
+        sendAbortController = new AbortController();
+        userStoppedStream = false;
+        pendingStreamId = generateId();
+        activeStreamId = pendingStreamId;
+        const sendSignal = sendAbortController.signal;
         set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
 
+        try {
         const caval = (window as unknown as CavalWindow).caval;
 
         const mentionPaths = [
@@ -908,6 +975,7 @@ export const useAIStore = create<AIStore>()(
               : Promise.resolve(null);
 
           const [boot, zlPrep] = await Promise.all([bootstrapPromise, zlPromise]);
+          assertSendNotAborted(sendSignal);
           workspaceBootstrap = boot;
           if (zlPrep) {
             zlWarmContext = zlPrep.warmContext ?? '';
@@ -977,6 +1045,7 @@ export const useAIStore = create<AIStore>()(
         };
 
         const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
+          if (userStoppedStream) return;
           if (isSessionStale()) {
             updateAssistant({
               content: 'Workspace schimbat — răspuns ignorat.',
@@ -1005,7 +1074,7 @@ export const useAIStore = create<AIStore>()(
           }
 
           const diff = detectDiff(finalContent, tabPath ?? null);
-          const buildMode = isBuildEngineMode(agentMode);
+          const buildMode = isBuildEngineMode(agentMode) || isReleaseEngineerMode(agentMode);
           updateAssistant({
             content: finalContent,
             isStreaming: false,
@@ -1014,6 +1083,9 @@ export const useAIStore = create<AIStore>()(
             ...extra,
           });
           set({ isStreaming: false });
+          if (!extra?.error) {
+            document.dispatchEvent(new CustomEvent('caval:ai-generation-complete'));
+          }
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
@@ -1053,12 +1125,16 @@ export const useAIStore = create<AIStore>()(
             await useEditorStore.getState().refreshTree();
 
             const recapText = msgForParse?.recap ?? capturedRecapMeta?.pendingIssues?.join(' ');
-            const incomplete = isDeliveryIncomplete({
-              writtenFiles,
-              recap: recapText,
-              taskCount: capturedRecapMeta?.taskCount ?? 0,
-              parseSource,
-            });
+            const gate = capturedRecapMeta?.completionGate;
+            const incomplete = isDeliveryBlocked(
+              {
+                writtenFiles,
+                recap: recapText,
+                taskCount: capturedRecapMeta?.taskCount ?? 0,
+                parseSource,
+              },
+              gate
+            );
 
             if (
               isAgenticPipelineMode(agentMode) &&
@@ -1067,7 +1143,9 @@ export const useAIStore = create<AIStore>()(
               !isSessionStale()
             ) {
               deliveryWaveIndex += 1;
+              const gateMessage = gate?.suggestedContinueMessage?.trim();
               const planContext =
+                gateMessage ||
                 reasoningWithFences ||
                 msgForParse?.reasoning ||
                 (capturedReasoningBrief
@@ -1100,6 +1178,7 @@ export const useAIStore = create<AIStore>()(
             openWrittenFile(writtenFiles[writtenFiles.length - 1]!);
 
             if (buildMode) {
+              const { runCavaloConsistencyScan } = await import('./consistency-engine');
               const scan = await runCavaloConsistencyScan({
                 projectPath,
                 writtenFiles,
@@ -1186,10 +1265,10 @@ export const useAIStore = create<AIStore>()(
         if (
           !fashionSeeded &&
           !isDeliveryContinueRequest(userText) &&
-          !isScaffoldContinueRequest(userText) &&
-          (agentMode === 'code' || agentMode === 'build' || agentMode === 'debug' || isAgenticPipelineMode(agentMode))
+          !isScaffoldContinueRequest(userText)
         ) {
           const readiness = await checkModelReadiness(selectedModel, get().apiKeys);
+          assertSendNotAborted(sendSignal);
           if (!readiness.ready) {
             finish(`${readiness.reason}\n\n${readiness.hint}`, { error: readiness.reason });
             return;
@@ -1222,6 +1301,7 @@ export const useAIStore = create<AIStore>()(
         }
 
         const handleStreamChunk = (chunk: CavalStreamChunk) => {
+          if (userStoppedStream) return;
           if (chunk.type === 'delivery-pause' && chunk.runId) {
             updateAssistant({
               content:
@@ -1314,6 +1394,7 @@ export const useAIStore = create<AIStore>()(
             });
           }
           if (chunk.type === 'error') {
+            if (userStoppedStream || chunk.error === 'Aborted') return;
             finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error }, activeTabPath);
             streamCleanup?.();
             streamCleanup = null;
@@ -1323,7 +1404,15 @@ export const useAIStore = create<AIStore>()(
             if (resolved) set({ activeResolvedModel: resolved });
             if (chunk.reasoningBrief) capturedReasoningBrief = chunk.reasoningBrief;
             if (chunk.pipelineRecapMeta) {
-              capturedRecapMeta = chunk.pipelineRecapMeta as PipelineRecapMeta;
+              capturedRecapMeta = {
+                ...(chunk.pipelineRecapMeta as PipelineRecapMeta),
+                completionGate:
+                  (chunk as { completionGate?: PipelineRecapMeta['completionGate'] }).completionGate ??
+                  (chunk.pipelineRecapMeta as PipelineRecapMeta).completionGate,
+                deliveryBlocked:
+                  (chunk as { deliveryBlocked?: boolean }).deliveryBlocked ??
+                  (chunk.pipelineRecapMeta as PipelineRecapMeta).deliveryBlocked,
+              };
             }
             if (chunk.composeText?.trim()) {
               capturedComposeText = chunk.composeText;
@@ -1370,12 +1459,14 @@ export const useAIStore = create<AIStore>()(
           },
           scaffoldMode: boolean
         ) => {
+          if (userStoppedStream || sendSignal.aborted) return;
           const uiResume = resumeAfterUiPrefs;
           if (uiResume) {
             resumeAfterUiPrefs = null;
           }
 
-          const streamId = generateId();
+          const streamId = pendingStreamId ?? generateId();
+          pendingStreamId = null;
           activeStreamId = streamId;
           abortController = new AbortController();
           activeStreamBuffer = '';
@@ -1486,6 +1577,7 @@ export const useAIStore = create<AIStore>()(
         if (activeTab?.path && activeTab.isDirty && caval?.fs?.readFile) {
           try {
             const fresh = await caval.fs.readFile(activeTab.path);
+            assertSendNotAborted(sendSignal);
             if (fresh.ok && fresh.content != null) {
               activeTab = { ...activeTab, content: fresh.content };
             }
@@ -1518,6 +1610,7 @@ export const useAIStore = create<AIStore>()(
           updateActivity('prepare', 'done');
         }
 
+        assertSendNotAborted(sendSignal);
         projectContext = mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
 
         const mentionFiles =
@@ -1529,16 +1622,20 @@ export const useAIStore = create<AIStore>()(
               )
             : [];
 
+        assertSendNotAborted(sendSignal);
+
         const editorSelection = useEditorStore.getState().editorSelection;
         const selectionText = editorSelection?.text?.trim() || undefined;
 
         let buildMemoryHintText: string | undefined;
-        if (isBuildEngineMode(agentMode) && editorState.projectPath && caval?.fs?.readFile) {
+        if ((isBuildEngineMode(agentMode) || isReleaseEngineerMode(agentMode)) && editorState.projectPath && caval?.fs?.readFile) {
           const mem = await loadBuildMemoryRecord(editorState.projectPath, (p) =>
             caval.fs!.readFile!(p)
           );
           buildMemoryHintText = buildMemoryHint(mem);
         }
+
+        assertSendNotAborted(sendSignal);
 
         const contextMessages: AIMessage[] = buildContextMessages(
           apiPrompt,
@@ -1624,10 +1721,17 @@ export const useAIStore = create<AIStore>()(
           fileContent: attachProject ? activeTab?.content : undefined,
           projectContext,
         }, scaffoldMode);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        throw err;
+      }
       },
 
       stopStreaming: () => {
-        const sid = activeStreamId;
+        userStoppedStream = true;
+        sendAbortController?.abort();
+        sendAbortController = null;
+        const sid = activeStreamId ?? pendingStreamId;
         abortController?.abort();
         if (sid) {
           void getCaval()?.abortChatStream?.(sid);
@@ -1635,13 +1739,17 @@ export const useAIStore = create<AIStore>()(
         streamCleanup?.();
         streamCleanup = null;
         activeStreamId = null;
+        pendingStreamId = null;
         useEditorStore.getState().closeAiPreview();
-        set((s) => ({
-          isStreaming: false,
-          messages: s.messages.map((m) =>
-            m.isStreaming ? { ...m, isStreaming: false } : m
-          ),
-        }));
+        set((s) => {
+          const messages = s.messages.map((m) =>
+            m.isStreaming ? finalizeStoppedAssistantMessage(m) : m
+          );
+          const threads = s.threads.map((t) =>
+            t.id === s.activeThreadId ? { ...t, messages, updatedAt: Date.now() } : t
+          );
+          return { isStreaming: false, messages, threads };
+        });
       },
 
       clearChat: () => {
@@ -1730,18 +1838,35 @@ export const useAIStore = create<AIStore>()(
         }
 
         set({ verifyInFlight: 'tests' });
+        const outputStore = useOutputStore.getState();
+        outputStore.append('CAVAL', `▶ Verificare workspace: ${projectPath}`);
         try {
           const res = await caval.workspaceVerify(projectPath);
           if (!res.ok || !res.verify) {
+            outputStore.append('CAVAL', `✗ ${res.error ?? 'Verificare eșuată.'}`);
             appendChatReportMessage(
               set,
               `**Verificare workspace**\n\n${res.error ?? 'Verificare eșuată.'}`,
               { error: res.error ?? 'verify failed' }
             );
             set({ pendingChatDraft: 'fixează erorile de mai sus' });
+            dispatchTerminalPanelTab('output');
             return;
           }
           const allOk = !res.verify.commands.length || res.verify.commands.every((c) => c.ok);
+          for (const c of res.verify.commands) {
+            const status = c.ok ? '✓' : '✗';
+            outputStore.appendBlock('CAVAL', `${status} ${c.command} (exit ${c.exitCode ?? 'n/a'})\n${c.output}`);
+            const parsed = parseProblemsFromOutput(c.output, c.command);
+            if (parsed.length) {
+              useProblemsStore.getState().mergeProblems(parsed, c.command);
+            }
+          }
+          if (!allOk) {
+            dispatchTerminalPanelTab('problems');
+          } else {
+            dispatchTerminalPanelTab('output');
+          }
           appendChatReportMessage(set, formatVerifyThreadMessage(res.verify, allOk), {
             error: allOk ? undefined : 'verify failed',
           });
@@ -1771,6 +1896,8 @@ export const useAIStore = create<AIStore>()(
         }
 
         set({ verifyInFlight: 'build' });
+        const outputStore = useOutputStore.getState();
+        outputStore.append('CAVAL', `▶ Build: npm run build @ ${projectPath}`);
         try {
           const res = await caval.toolExecute({
             name: 'run_command',
@@ -1783,6 +1910,17 @@ export const useAIStore = create<AIStore>()(
           const exitCode = payload?.exitCode ?? null;
           const output = truncateVerifyOutput((payload?.output ?? res.error ?? '').trim() || '(fără output)');
           const ok = res.ok && (payload?.exitCode == null || payload.exitCode === 0);
+          outputStore.appendBlock(
+            'CAVAL',
+            `${ok ? '✓' : '✗'} ${command} (exit ${exitCode ?? 'n/a'})\n${output}`
+          );
+          const parsed = parseProblemsFromOutput(output, 'build');
+          if (parsed.length) {
+            useProblemsStore.getState().mergeProblems(parsed, 'build');
+            dispatchTerminalPanelTab('problems');
+          } else {
+            dispatchTerminalPanelTab('output');
+          }
           let body = `**Build**\n\n### ${command} — ${ok ? '✓ ok' : '✗ fail'} (exit ${exitCode ?? 'n/a'})\n\`\`\`\n${output}\n\`\`\``;
           if (!ok) {
             body += '\n\n_Poți cere: fixează erorile de mai sus_';
@@ -1797,6 +1935,16 @@ export const useAIStore = create<AIStore>()(
       },
 
       clearPendingChatDraft: () => set({ pendingChatDraft: null }),
+
+      queueChatFromPanel: (text, options) => {
+        const draft = text.trim();
+        if (!draft) return;
+        set({
+          pendingChatDraft: draft,
+          pendingAutoSend: options?.autoSend ?? false,
+        });
+        window.dispatchEvent(new CustomEvent(CAVAL_OPEN_CODING_CHAT_EVENT));
+      },
 
       submitUiDeliveryPreferences: async (prefs) => {
         const pause = get().deliveryPause;
@@ -1833,7 +1981,7 @@ export const useAIStore = create<AIStore>()(
             {
               id: generateId(),
               path: 'engineering://context',
-              name: `Engineering — ${project.spec.title.slice(0, 40)}`,
+              name: `Robotics AI — ${project.spec.title.slice(0, 40)}`,
               content: contextMarkdown,
             },
           ],
@@ -1870,6 +2018,16 @@ export const useAIStore = create<AIStore>()(
         }
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
         if (thread) state.messages = thread.messages;
+        state.isStreaming = false;
+        state.messages = state.messages.map((m) =>
+          m.isStreaming ? { ...m, isStreaming: false } : m
+        );
+        state.threads = state.threads.map((t) => ({
+          ...t,
+          messages: t.messages.map((m) =>
+            m.isStreaming ? { ...m, isStreaming: false } : m
+          ),
+        }));
         // Migrate legacy Code threads that used the multi-agent pipeline
         if (state.agentMode === 'code') {
           const hasPipelineArtifacts = state.threads.some((t) =>

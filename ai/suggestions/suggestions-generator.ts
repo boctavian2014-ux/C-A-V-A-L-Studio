@@ -23,7 +23,7 @@ export class SuggestionsGenerator {
       const response = await this.ai.complete({
         capability: "reasoning",
         intent: "deep_thinking",
-        system: "You are the Caval Studio AI Suggestions Engine. Analyze the request and codebase BEFORE generating patches. Provide suggestions, risks, alternatives, and estimated impact. Never generate code or patches.",
+        system: "You are the CAVALLO Studio AI Suggestions Engine. Analyze the request and codebase BEFORE generating patches. Provide suggestions, risks, alternatives, and estimated impact. Never generate code or patches.",
         prompt: [
           `User request: ${input.request}`,
           `Summary: ${analysis.summary.headline}`,

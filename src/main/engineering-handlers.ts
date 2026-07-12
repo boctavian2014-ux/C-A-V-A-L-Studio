@@ -3,7 +3,7 @@ import * as path from 'path';
 import { ipcMain, dialog, shell } from 'electron';
 
 // ──────────────────────────────────────────────
-//  Engineering AI — IPC Handlers (Caval IDE)
+//  Robotics AI — IPC Handlers (CAVALLO Studio)
 // ──────────────────────────────────────────────
 
 export interface EngFileInput {
@@ -117,7 +117,7 @@ export function registerEngineeringHandlers(getWorkspaceRoot: (senderId: number)
       let total = 0;
 
       const lines: string[] = [];
-      lines.push('# Listă de componente — Caval Engineering AI');
+      lines.push('# Listă de componente — Robotics AI ULTRA');
       lines.push('');
       lines.push('| Componentă | Cant. | Preț/buc | Subtotal | Magazin | Alternativă |');
       lines.push('|---|---|---|---|---|---|');

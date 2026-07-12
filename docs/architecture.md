@@ -1,6 +1,6 @@
 # Architecture Overview
 
-CAVALO is an Electron IDE with AI, Context Engine indexing, and a Marketplace for extensions.
+CAVALLO is an Electron IDE with AI, Context Engine indexing, and a Marketplace for extensions.
 
 ## Major layers
 

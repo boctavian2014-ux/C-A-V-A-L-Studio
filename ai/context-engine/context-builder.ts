@@ -13,6 +13,8 @@ import {
 } from '../prompts/multi-model-reasoning-chat';
 import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
 import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
+import { CAVALO_RELEASE_ENGINEER_PROMPT } from '../prompts/cavalo-release-engineer';
+import type { AgentModeId } from '../modes/agent-modes';
 
 export interface ContextOptions {
   activeTab:    EditorTab | null;
@@ -26,7 +28,7 @@ export interface ContextOptions {
   attachments?: Array<{ path: string; name: string; content: string }>;
   /** Nu atașa fișierul activ (întrebări generale fără legătură cu codul deschis) */
   skipActiveFile?: boolean;
-  agentMode?: 'ask' | 'plan' | 'code' | 'build' | 'agentic' | 'debug';
+  agentMode?: AgentModeId;
   /** Hint from last Build run (.cavalo/memory) */
   buildMemoryHint?: string;
 }
@@ -66,7 +68,7 @@ export function buildProjectTreeSummary(nodes: FileNode[], maxItems = 40): strin
 }
 
 // ──────────────────────────────────────────────
-//  System prompt — personalitatea Caval AI
+//  System prompt — personalitatea CAVALLO AI
 // ──────────────────────────────────────────────
 
 export function buildLiteSystemPrompt(agentMode?: ContextOptions['agentMode']): string {
@@ -82,7 +84,11 @@ export function buildFastChatMessages(
   const system =
     agentMode === 'agentic'
       ? CODING_ARENA_SYSTEM_PROMPT
-      : buildLiteSystemPrompt(agentMode);
+      : agentMode === 'release'
+        ? CAVALO_RELEASE_ENGINEER_PROMPT
+        : agentMode === 'build'
+          ? CAVALO_BUILD_ENGINE_PROMPT
+          : buildLiteSystemPrompt(agentMode);
   const msgs: AIMessage[] = [{ role: 'system', content: system }];
   for (const m of history.slice(-2)) {
     if (m.role === 'user' || m.role === 'assistant') {
@@ -95,7 +101,7 @@ export function buildFastChatMessages(
 
 export function buildSystemPrompt(projectName: string | null, projectPath?: string | null): string {
   const pathLine = projectPath ? `\nCale proiect: ${projectPath}` : '';
-  return `Ești Caval AI, asistentul de cod integrat în Caval IDE (CAVALO).
+  return `Ești CAVALLO AI, asistentul de cod integrat în CAVALLO Studio (CAVALLO).
 Proiect curent: ${projectName ?? 'necunoscut'}${pathLine}
 Stack principal IDE: TypeScript, React, Electron, Node.js
 
@@ -172,7 +178,9 @@ export function buildContextMessages(
       ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace activ: ${opts.projectPath}` : ''}`
       : opts.agentMode === 'build' && opts.projectPath
         ? `${CAVALO_BUILD_ENGINE_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
-        : opts.agentMode === 'debug' && opts.projectPath
+        : opts.agentMode === 'release' && opts.projectPath
+          ? `${CAVALO_RELEASE_ENGINEER_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
+          : opts.agentMode === 'debug' && opts.projectPath
         ? `${buildLiteSystemPrompt(opts.agentMode)}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: debug errors and apply fixes as \`\`\`lang:path\`\`\` fences.\n${SCAFFOLD_EMISSION_RULE}`
         : attachProject
         ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`

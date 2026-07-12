@@ -2,11 +2,11 @@
 
 ## Identitate
 
-Caval Studio foloseste o identitate dark tech cu linii verticale inspirate din caval, Cyan Pulse si accente rare Carpathian Gold.
+CAVALLO Studio foloseste o identitate dark tech cu linii verticale inspirate din caval, Cyan Pulse si accente rare Carpathian Gold.
 
 ## Variante Logo
 
-- `logo-primary.svg`: simbol + text `Caval Studio`, folosit in splash, landing si documentatie.
+- `logo-primary.svg`: simbol + text `CAVALLO Studio`, folosit in splash, landing si documentatie.
 - `logo-secondary.svg`: doar simbol, folosit in sidebar, toolbar si locuri compacte.
 - `app-icon.svg`: icon principal in patrat rotunjit.
 - `logo-grid.svg`: constructie pe grid de 8px si proportii.

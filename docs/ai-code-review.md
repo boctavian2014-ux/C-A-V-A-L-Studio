@@ -1,6 +1,6 @@
 # AI Code Review Panel
 
-Caval Studio's **AI Code Review Panel** is a dedicated workspace for reviewing AI Composer patches before they touch the project. It supports multi-file diffs, granular accept/reject, threaded comments, AI revision, and safe apply with rollback.
+CAVALLO Studio's **AI Code Review Panel** is a dedicated workspace for reviewing AI Composer patches before they touch the project. It supports multi-file diffs, granular accept/reject, threaded comments, AI revision, and safe apply with rollback.
 
 ## Architecture
 

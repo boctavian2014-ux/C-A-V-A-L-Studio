@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import Editor, { useMonaco, type OnMount, type OnChange } from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
 import { useEditorStore } from '../../store/editor-store';
+import { useSettingsStore } from '../../store/settings-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
+import { registerMonacoEditor } from '../../store/editor-command-store';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 
 // ──────────────────────────────────────────────
@@ -122,6 +124,8 @@ export function MonacoEditor() {
     saveViewState,
   } = useEditorStore();
 
+  const { fontSize, tabSize, wordWrap, minimap } = useSettingsStore((s) => s.app);
+
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const isStreaming = useAIStore((s) => s.isStreaming);
   const isAiLive = Boolean(activeTab?.isAiPreview);
@@ -134,6 +138,17 @@ export function MonacoEditor() {
     const lastLine = model.getLineCount();
     editorRef.current.revealLine(lastLine);
   }, [activeTab?.content, isAiLive]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.updateOptions({
+      fontSize,
+      tabSize,
+      wordWrap: wordWrap ? 'on' : 'off',
+      minimap: { enabled: minimap },
+    });
+  }, [fontSize, tabSize, wordWrap, minimap]);
 
   // ── Înregistrează tema când Monaco e gata ──
   useEffect(() => {
@@ -195,6 +210,7 @@ export function MonacoEditor() {
 
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
+    registerMonacoEditor(editor);
 
     const monacoApi = monaco as typeof MonacoType;
     editor.addCommand(
@@ -276,8 +292,40 @@ export function MonacoEditor() {
       disposeInlineCompletions: () => undefined,
     });
 
-    editor.onDidDispose(() => provider.dispose());
+    editor.onDidDispose(() => {
+      provider.dispose();
+      registerMonacoEditor(null);
+    });
   }, [monaco, saveTab]);
+
+  useEffect(() => {
+    const onRevealLine = (e: Event) => {
+      const detail = (e as CustomEvent<{ path: string; line: number; col?: number }>).detail;
+      if (!detail?.path || !editorRef.current) return;
+      const { tabs, activeTabId, openFile, setActiveTab } = useEditorStore.getState();
+      const normalized = detail.path.replace(/\\/g, '/');
+      const tab = tabs.find((t) => t.path.replace(/\\/g, '/') === normalized);
+      if (tab) {
+        if (activeTabId !== tab.id) setActiveTab(tab.id);
+      } else {
+        void openFile(detail.path).then(() => {
+          window.setTimeout(() => {
+            const ed = editorRef.current;
+            if (!ed) return;
+            ed.revealLineInCenter(detail.line);
+            ed.setPosition({ lineNumber: detail.line, column: detail.col ?? 1 });
+            ed.focus();
+          }, 50);
+        });
+        return;
+      }
+      editorRef.current.revealLineInCenter(detail.line);
+      editorRef.current.setPosition({ lineNumber: detail.line, column: detail.col ?? 1 });
+      editorRef.current.focus();
+    };
+    document.addEventListener('caval:reveal-line', onRevealLine);
+    return () => document.removeEventListener('caval:reveal-line', onRevealLine);
+  }, [activeTabId]);
 
   const handleChange: OnChange = useCallback((value) => {
     if (activeTabId && value !== undefined) {
@@ -303,7 +351,7 @@ export function MonacoEditor() {
           <div style={{
             color: '#F5F7FA', fontWeight: 800, marginBottom: 6,
             fontFamily: "'Sora', sans-serif", letterSpacing: '0.12em', fontSize: 14,
-          }}>CAVALO</div>
+          }}>CAVALLO</div>
           Deschide un fișier din sidebar
           <br />
           sau apasă <kbd style={{
@@ -376,6 +424,10 @@ export function MonacoEditor() {
         theme="caval-dark"
         options={{
           ...EDITOR_OPTIONS,
+          fontSize,
+          tabSize,
+          wordWrap: wordWrap ? 'on' : 'off',
+          minimap: { enabled: minimap },
           readOnly: isAiLive && isStreaming,
         }}
         onMount={handleMount}

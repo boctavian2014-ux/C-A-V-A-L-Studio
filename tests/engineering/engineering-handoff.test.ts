@@ -45,7 +45,9 @@ describe('engineering-handoff', () => {
     expect(ctx).toContain('Senzor aer ESP32');
     expect(ctx).toContain('ESP32-WROOM');
     expect(ctx).toContain('BME680');
+    expect(ctx).toContain('Lista de componente');
     expect(ctx).toContain('Optimus Digital');
+    expect(ctx).toContain('Context Robotics AI');
     expect(ctx).toContain('enclosure.stl');
     expect(ctx).toContain('Vreau senzor aer');
   });
@@ -53,6 +55,6 @@ describe('engineering-handoff', () => {
   it('builds a software prompt from project title', () => {
     const prompt = buildSoftwareHandoffPrompt(sampleProject);
     expect(prompt).toContain('Senzor aer ESP32');
-    expect(prompt).toContain('contextul Engineering');
+    expect(prompt).toContain('Robotics AI');
   });
 });

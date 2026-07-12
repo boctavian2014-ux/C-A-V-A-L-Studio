@@ -122,7 +122,7 @@ export const createBillingServer = () => {
   });
 
   app.get("/checkout/success", (_request, response) => {
-    response.type("html").send("<h1>Plată reușită</h1><p>Poți închide această fereastră și reveni în Caval Studio.</p>");
+    response.type("html").send("<h1>Plată reușită</h1><p>Poți închide această fereastră și reveni în CAVALLO Studio.</p>");
   });
 
   app.get("/checkout/cancel", (_request, response) => {

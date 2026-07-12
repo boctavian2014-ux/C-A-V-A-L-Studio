@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { useEditorStore } from './editor-store';
 
 // ──────────────────────────────────────────────
-//  Git Store — Caval IDE
+//  Git Store — CAVALLO Studio
 //  Gestionează starea Git: branch, fișiere modificate,
 //  staged, diff activ, commit history, operații async.
 // ──────────────────────────────────────────────
@@ -74,6 +74,7 @@ export interface GitState {
   loadBranches: () => Promise<void>;
   checkout:     (branch: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
+  initRepo:     () => Promise<void>;
   stash:        () => Promise<void>;
   stashPop:     () => Promise<void>;
 
@@ -353,6 +354,21 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ showBranchPicker: false, newBranchName: '' });
       await get().refresh();
     }
+  },
+
+  // ──────────────────────────────────────────
+  //  Init repo
+  // ──────────────────────────────────────────
+  initRepo: async () => {
+    const projectPath = getProjectPath();
+    if (!projectPath) return;
+    set({ opLoading: true, error: null });
+    const result = await window.caval.git.init(projectPath);
+    setOpResult(set, {
+      ok: result.ok,
+      message: result.ok ? 'Repository Git inițializat.' : (result.error || 'git init eșuat.'),
+    });
+    if (result.ok) await get().refresh();
   },
 
   // ──────────────────────────────────────────

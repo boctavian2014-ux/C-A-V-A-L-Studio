@@ -11,7 +11,7 @@ import { useEditorStore } from '../../store/editor-store';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 
 // ──────────────────────────────────────────────
-//  SettingsPanel — Caval IDE
+//  SettingsPanel — CAVALLO Studio
 //  Secțiuni: Image Generator · Asset Manager ·
 //            Context Bridge · Safety & Credits ·
 //            Editor · App · Shortcuts · About
@@ -1181,7 +1181,7 @@ function SectionAbout() {
         </div>
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', fontFamily: "'Sora', sans-serif", letterSpacing: '0.06em' }}>
-            CAVALO
+            CAVALLO
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginTop: 2 }}>
             Version 0.1.0 · Build 2026.06

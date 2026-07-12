@@ -1,5 +1,5 @@
 /**
- * CAVALO Fast Pipeline — registry și rezolvare mod pipeline.
+ * CAVALLO Fast Pipeline — registry și rezolvare mod pipeline.
  * Modulul există mereu; runtime-pipeline folosește fastPipeline din caval.jsonc
  * (sau Review strict din UI → full pipeline cu Merge + Supervisor).
  */
@@ -36,7 +36,7 @@ export function isFastPipelineAvailable(): boolean {
 
 export function describeFastPipeline(): string {
   return [
-    'CAVALO Fast Pipeline',
+    'CAVALLO Fast Pipeline',
     'Memory → Context → Decompose → Sub-agents → [Merge → Supervisor] → Compose',
     'Fast path: sare Merge + Supervisor (2 apeluri LLM).',
     'Full path: Review strict sau fastPipeline: false în caval.jsonc.',

@@ -1,4 +1,43 @@
-# Caval Studio Installer
+# CAVALLO Studio Installer
+
+## Release local Windows (recommended)
+
+From the Cavallo Studio repo root (`caval studio`):
+
+```bash
+# Full pipeline: preflight → typecheck → test → build → dist:win → sign (optional) → report
+CAVAL_RELEASE_CHANNEL=stable npm run release:win
+```
+
+Preflight only:
+
+```bash
+npm run release:preflight
+npm run release:preflight -- --phase=post-build
+```
+
+### Output
+
+Artifacts land in `release/<channel>/`:
+
+- `CAVALLO-<version>-win-x64.exe` (NSIS wizard installer)
+- `CAVALLO-<version>-win-x64.msi`
+- `release-report.json` — step timings, SHA256 hashes, signed flag
+
+### Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `CAVAL_RELEASE_CHANNEL` | `stable` (default), `beta`, or `nightly` |
+| `CAVAL_WIN_CERT_SHA1` | Thumbprint for `signtool` (preferred) |
+| `CAVAL_WIN_CERT_FILE` | `.pfx` path when SHA1 not used |
+| `CAVAL_WIN_CERT_PASSWORD` | PFX password |
+
+Unsigned builds are valid for local development. Configure a certificate for production releases.
+
+### Cavallo Release mode
+
+In the IDE, select **Release** mode (or type `RELEASE MODE`). The agent orchestrates real scripts (`release:win`, `release:preflight`) and reads `release-report.json` — it does not generate installers from chat.
 
 ## Build Commands
 
@@ -44,7 +83,7 @@ Configure:
 Manual signing:
 
 ```bash
-tsx installer/scripts/sign-macos.ts "release/stable/mac/Caval Studio.app"
+tsx installer/scripts/sign-macos.ts "release/stable/mac/CAVALLO Studio.app"
 tsx installer/scripts/notarize-macos.ts release/stable/Caval-Studio.dmg
 ```
 

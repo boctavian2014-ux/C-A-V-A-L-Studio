@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-export const CavalIcon = ({ title = "Caval Studio", ...props }: SVGProps<SVGSVGElement> & { title?: string }) => (
+export const CavalIcon = ({ title = "CAVALLO Studio", ...props }: SVGProps<SVGSVGElement> & { title?: string }) => (
   <svg viewBox="0 0 48 48" role="img" aria-label={title} {...props}>
     <title>{title}</title>
     <defs>

@@ -1,10 +1,10 @@
-# Engineering AI — Text-to-CAD
+# Robotics AI ULTRA — Text-to-CAD
 
-Pipeline complet pentru generarea de modele 3D din limbaj natural în Caval Studio Engineering AI.
+Pipeline complet pentru generarea de modele 3D din limbaj natural în CAVALLO Studio Robotics AI.
 
 ## Arhitectură
 
-1. **Caval Studio** (Electron) trimite promptul via IPC → `CAD_API_URL`
+1. **CAVALLO Studio** (Electron) trimite promptul via IPC → `CAD_API_URL`
 2. **CAD server** (Railway / local) generează OpenSCAD cu LLM
 3. **OpenSCAD CLI** compilează STL
 4. **Supabase** persistă metadata (`cad_generations`) și STL în bucket `cad-models`
@@ -105,7 +105,7 @@ curl https://<subdomeniu>.railway.app/health
 
 ## UI
 
-În **Engineering AI**:
+În **Robotics AI**:
 
 - Tab **Plan hardware** — plan markdown existent
 - Tab **Model 3D** — viewer STL + sursă OpenSCAD

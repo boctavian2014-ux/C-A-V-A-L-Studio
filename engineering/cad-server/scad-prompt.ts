@@ -119,7 +119,7 @@ export function buildCadLlmPrompt(input: {
   const historyBlock = formatConversationHistory(input.conversationHistory);
 
   const system = [
-    "You are an expert OpenSCAD mechanical CAD engineer for Caval Studio.",
+    "You are an expert OpenSCAD mechanical CAD engineer for CAVALLO Studio.",
     "Return ONLY valid OpenSCAD source code — no markdown fences, no explanations.",
     "Units: millimeters. Use $fn = 64 or higher for curved parts.",
     "Start with parametric variables (dimensions, counts, thicknesses).",
@@ -164,7 +164,7 @@ export function buildScadRepairPrompt(input: {
   renderError: string;
 }): { system: string; user: string } {
   const system = [
-    "You fix broken OpenSCAD scripts for Caval Studio.",
+    "You fix broken OpenSCAD scripts for CAVALLO Studio.",
     "Return ONLY corrected OpenSCAD source — no markdown, no commentary.",
     "Fix syntax errors, undefined variables, non-manifold geometry, and zero-thickness walls.",
     "Keep the design intent from the original request.",

@@ -24,7 +24,7 @@ export class CavalAutoUpdater {
         type: "info",
         buttons: ["Download", "Later"],
         defaultId: 0,
-        message: `Caval Studio ${info.version} is available.`,
+        message: `CAVALLO Studio ${info.version} is available.`,
         detail: "Download the update now?"
       });
       if (result.response === 0) {
@@ -38,7 +38,7 @@ export class CavalAutoUpdater {
         buttons: ["Restart", "Later"],
         defaultId: 0,
         message: "Update downloaded.",
-        detail: "Restart Caval Studio to apply the update."
+        detail: "Restart CAVALLO Studio to apply the update."
       });
       if (result.response === 0) {
         autoUpdater.quitAndInstall();

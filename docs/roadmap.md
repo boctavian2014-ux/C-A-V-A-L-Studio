@@ -4,7 +4,7 @@
 
 - Stabilizare Electron, TypeScript, Webpack si Node 20+.
 - Integrare initiala cu structura fork VS Code.
-- Product configuration Caval Studio.
+- Product configuration CAVALLO Studio.
 - Workbench shell, command palette si extension host skeleton.
 - CI pentru typecheck, lint si build.
 

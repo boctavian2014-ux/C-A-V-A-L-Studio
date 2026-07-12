@@ -1,7 +1,21 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Terminal as XTerm } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import { WebLinksAddon } from 'xterm-addon-web-links';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { DebugPanel } from '../debug/DebugPanel';
+import { useEditorStore } from '../../store/editor-store';
+import { useOutputStore, formatOutputForChat } from '../../store/output-store';
+import {
+  formatProblemForChat,
+  formatProblemsForChat,
+  revealProblem,
+  useProblemsStore,
+} from '../../store/problems-store';
+import { useAIStore } from '../../../../ai/composer/ai-store';
+import {
+  createInitialTerminalSession,
+  createTerminalSessionMeta,
+  type TerminalSessionMeta,
+} from '../../terminal/terminal-sessions';
+import type { TerminalPanelTab } from '../../terminal/terminal-events';
+import { TerminalSession } from './TerminalSession';
 
 const TERMINAL_HEIGHT_KEY = 'caval-terminal-height';
 
@@ -16,132 +30,89 @@ function readStoredTerminalHeight(): number {
   }
 }
 
-let terminalCounter = 0;
-
-function useTerminal(containerId: string) {
-  const termRef = useRef<XTerm | null>(null);
-  const fitRef  = useRef<FitAddon | null>(null);
-  const idRef   = useRef<string>(`terminal-${++terminalCounter}`);
-  const cleanupRef = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    const id = idRef.current;
-
-    const term = new XTerm({
-      fontFamily: "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace",
-      fontSize: 12,
-      lineHeight: 1.5,
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      theme: {
-        background:   '#09090A',
-        foreground:   '#F5F7FA',
-        cursor:       '#00E0FF',
-        cursorAccent: '#0E0E0F',
-        black:        '#3B4658',
-        red:          '#EF4444',
-        green:        '#2FBF71',
-        yellow:       '#F59E0B',
-        blue:         '#61AFEF',
-        magenta:      '#C678DD',
-        cyan:         '#00E0FF',
-        white:        '#F5F7FA',
-        brightBlack:  '#8A95A6',
-        brightRed:    '#FF6B6B',
-        brightGreen:  '#4ADE80',
-        brightYellow: '#FCD34D',
-        brightBlue:   '#7DD3FC',
-        brightMagenta:'#E879F9',
-        brightCyan:   '#7CEBFF',
-        brightWhite:  '#FFFFFF',
-      },
-      scrollback: 5000,
-      allowProposedApi: true,
-    });
-
-    const fitAddon      = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(webLinksAddon);
-    termRef.current = term;
-    fitRef.current  = fitAddon;
-
-    const container = document.getElementById(containerId);
-    const onContextMenu = (e: MouseEvent) => {
-      const selection = term.getSelection();
-      if (!selection) return;
-      e.preventDefault();
-      void navigator.clipboard.writeText(selection);
-    };
-
-    if (container) {
-      term.open(container);
-      fitAddon.fit();
-      container.addEventListener('contextmenu', onContextMenu);
-    }
-
-    // Creare sesiune PTY
-    const caval = window.caval;
-    if (!caval?.terminal) {
-      term.writeln('\r\n\x1b[33mTerminal indisponibil — repornește aplicația.\x1b[0m');
-      return () => {
-        resizeObserver.disconnect();
-        if (container) container.removeEventListener('contextmenu', onContextMenu);
-        cleanupRef.current?.();
-        term.dispose();
-      };
-    }
-
-    caval.terminal.create(id).then(() => {
-      // Trimite input utilizator → PTY
-      term.onData((data) => {
-        void caval.terminal.write(id, data);
-      });
-
-      // Primește output PTY → terminal
-      cleanupRef.current = caval.terminal.onData(id, (data: string) => {
-        term.write(data);
-      });
-    });
-
-    // Resize observer
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      const dims = fitAddon.proposeDimensions();
-      if (dims && dims.cols > 0 && dims.rows > 0) {
-        void caval.terminal.resize(id, dims.cols, dims.rows);
-      }
-    });
-    if (container) resizeObserver.observe(container);
-
-    return () => {
-      resizeObserver.disconnect();
-      if (container) container.removeEventListener('contextmenu', onContextMenu);
-      cleanupRef.current?.();
-      void caval.terminal.destroy(id);
-      term.dispose();
-    };
-  }, [containerId]);
-
-  return { termRef, fitRef };
-}
-
-// ──────────────────────────────────────────────
-//  Component
-// ──────────────────────────────────────────────
-
-type PanelTab = 'terminal' | 'output' | 'problems' | 'debug';
-
 export function TerminalPanel() {
-  const [activeTab, setActiveTab] = useState<PanelTab>('terminal');
+  const projectPath = useEditorStore((s) => s.projectPath);
+  const initialSessionRef = useRef(createInitialTerminalSession());
+  const [sessions, setSessions] = useState<TerminalSessionMeta[]>(() => [initialSessionRef.current]);
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => initialSessionRef.current.id);
+  const [activeTab, setActiveTab] = useState<TerminalPanelTab>('terminal');
   const [height, setHeight] = useState(readStoredTerminalHeight);
   const [isVisible, setIsVisible] = useState(true);
-  const containerId = 'caval-terminal-container';
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
-  useTerminal(containerId);
+  const outputChannels = useOutputStore((s) => s.channels);
+  const activeOutputChannel = useOutputStore((s) => s.activeChannel);
+  const problems = useProblemsStore((s) => s.problems);
+  const focusedIndex = useProblemsStore((s) => s.focusedIndex);
+  const queueChatFromPanel = useAIStore((s) => s.queueChatFromPanel);
 
-  // ── Resize panel cu drag ───────────────────
+  const sendAllProblemsToChat = useCallback(() => {
+    const text = formatProblemsForChat(problems);
+    if (!text) return;
+    queueChatFromPanel(text);
+  }, [problems, queueChatFromPanel]);
+
+  const sendProblemToChat = useCallback((problem: typeof problems[number]) => {
+    queueChatFromPanel(formatProblemForChat(problem));
+  }, [queueChatFromPanel]);
+
+  const sendOutputToChat = useCallback(() => {
+    const channel = useOutputStore.getState().channels.find(
+      (c) => c.name === useOutputStore.getState().activeChannel
+    );
+    const lines = channel?.lines ?? [];
+    const text = formatOutputForChat(lines, channel?.name ?? 'CAVAL');
+    if (!text) return;
+    queueChatFromPanel(text);
+  }, [queueChatFromPanel]);
+
+  const createSession = useCallback(() => {
+    const meta = createTerminalSessionMeta(sessions.length);
+    setSessions((prev) => [...prev, meta]);
+    setActiveSessionId(meta.id);
+    setIsVisible(true);
+    setActiveTab('terminal');
+  }, [sessions.length]);
+
+  const closeSession = useCallback((id: string) => {
+    setSessions((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((s) => s.id !== id);
+      if (activeSessionId === id) {
+        setActiveSessionId(next[next.length - 1]?.id ?? '');
+      }
+      return next;
+    });
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    const showPanel = (e: Event) => {
+      const detail = (e as CustomEvent<{ tab?: TerminalPanelTab }>).detail;
+      setIsVisible(true);
+      if (detail?.tab) setActiveTab(detail.tab);
+    };
+    const onRunInTerminal = () => {
+      setIsVisible(true);
+      setActiveTab('terminal');
+    };
+    const onNew = () => createSession();
+    const onSplit = () => createSession();
+    const onToggle = () => setIsVisible((v) => !v);
+
+    document.addEventListener('caval:terminal-panel-tab', showPanel);
+    document.addEventListener('caval:run-in-terminal', onRunInTerminal);
+    document.addEventListener('caval:terminal-new', onNew);
+    document.addEventListener('caval:terminal-split', onSplit);
+    document.addEventListener('caval:terminal-toggle', onToggle);
+    return () => {
+      document.removeEventListener('caval:terminal-panel-tab', showPanel);
+      document.removeEventListener('caval:run-in-terminal', onRunInTerminal);
+      document.removeEventListener('caval:terminal-new', onNew);
+      document.removeEventListener('caval:terminal-split', onSplit);
+      document.removeEventListener('caval:terminal-toggle', onToggle);
+    };
+  }, [createSession]);
+
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragRef.current = { startY: e.clientY, startH: height };
@@ -168,12 +139,14 @@ export function TerminalPanel() {
     }
   }, [height]);
 
-  const TABS: { id: PanelTab; label: string }[] = [
+  const TABS: { id: TerminalPanelTab; label: string }[] = [
     { id: 'terminal', label: 'TERMINAL' },
-    { id: 'output',   label: 'OUTPUT'   },
+    { id: 'output', label: 'OUTPUT' },
     { id: 'problems', label: 'PROBLEME' },
-    { id: 'debug',    label: 'DEBUG'    },
+    { id: 'debug', label: 'DEBUG' },
   ];
+
+  const activeChannel = outputChannels.find((c) => c.name === activeOutputChannel) ?? outputChannels[0];
 
   if (!isVisible) {
     return (
@@ -207,7 +180,6 @@ export function TerminalPanel() {
       display: 'flex', flexDirection: 'column',
       flexShrink: 0,
     }}>
-      {/* Drag resize handle */}
       <div
         onMouseDown={startResize}
         style={{
@@ -215,11 +187,10 @@ export function TerminalPanel() {
           background: 'transparent',
           transition: 'background 0.15s',
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,224,255,0.2)')}
-        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,224,255,0.2)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
       />
 
-      {/* Tabs header */}
       <div style={{
         display: 'flex', alignItems: 'center', height: 30,
         borderBottom: '1px solid var(--caval-border)',
@@ -240,53 +211,186 @@ export function TerminalPanel() {
             }}
           >
             {t.label}
+            {t.id === 'problems' && problems.length > 0 && (
+              <span style={{ marginLeft: 6, color: 'var(--caval-danger)', fontSize: 10 }}>
+                {problems.length}
+              </span>
+            )}
           </span>
         ))}
 
-        {/* Butoane dreapta */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, padding: '0 8px' }}>
-          <PanelBtn title="Terminal nou" onClick={() => {}}>+</PanelBtn>
+        {activeTab === 'terminal' && sessions.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', marginLeft: 8, gap: 2, overflow: 'auto' }}>
+            {sessions.map((s) => (
+              <span
+                key={s.id}
+                onClick={() => setActiveSessionId(s.id)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
+                  fontSize: 10, fontFamily: 'var(--font-mono)',
+                  background: activeSessionId === s.id ? 'rgba(0,224,255,0.12)' : 'transparent',
+                  color: activeSessionId === s.id ? 'var(--caval-text)' : 'var(--caval-text-muted)',
+                }}
+              >
+                {s.title}
+                {sessions.length > 1 && (
+                  <button
+                    type="button"
+                    title="Închide terminal"
+                    onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}
+                    style={{
+                      border: 'none', background: 'none', color: 'inherit',
+                      cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, padding: '0 8px', alignItems: 'center' }}>
+          {activeTab === 'problems' && problems.length > 0 && (
+            <ChatActionBtn title="Trimite toate erorile în chat" onClick={sendAllProblemsToChat}>
+              → Chat
+            </ChatActionBtn>
+          )}
+          {activeTab === 'output' && (activeChannel?.lines.length ?? 0) > 0 && (
+            <ChatActionBtn title="Trimite output-ul în chat" onClick={sendOutputToChat}>
+              → Chat
+            </ChatActionBtn>
+          )}
+          <PanelBtn title="Terminal nou" onClick={createSession}>+</PanelBtn>
           <PanelBtn title="Minimizează" onClick={() => setIsVisible(false)}>⌄</PanelBtn>
         </div>
       </div>
 
-      {/* Conținut */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {/* Terminal xterm.js */}
-        <div
-          id={containerId}
-          style={{
-            width: '100%', height: '100%',
-            padding: '4px 6px',
-            display: activeTab === 'terminal' ? 'block' : 'none',
-          }}
-        />
+        {sessions.map((s) => (
+          <TerminalSession
+            key={s.id}
+            sessionId={s.id}
+            containerId={s.containerId}
+            cwd={projectPath}
+            isActive={activeTab === 'terminal' && activeSessionId === s.id}
+          />
+        ))}
 
-        {/* Output tab placeholder */}
         {activeTab === 'output' && (
-          <div style={{ padding: '8px 14px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.7 }}>
-            <span style={{ color: 'var(--caval-accent)' }}>▶</span> webpack: compilare finalizată<br />
-            <span style={{ color: 'var(--caval-text-muted)' }}>  main/electron-main     12.4 kB</span><br />
-            <span style={{ color: 'var(--caval-text-muted)' }}>  renderer/workbench    284.1 kB</span><br />
-            <span style={{ color: 'var(--caval-success)' }}>✓ Gata în 1842ms</span>
+          <div style={{
+            padding: '8px 14px', height: '100%', overflow: 'auto',
+            fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
+            color: 'var(--caval-text-muted)', lineHeight: 1.7,
+          }}>
+            <div style={{ marginBottom: 8, fontSize: 10, color: 'var(--caval-accent)' }}>
+              Channel: {activeChannel?.name ?? 'CAVAL'}
+            </div>
+            {(activeChannel?.lines ?? []).length === 0 ? (
+              <span>Output gol — rulează build sau verify pentru a vedea loguri.</span>
+            ) : (
+              activeChannel?.lines.map((line, i) => (
+                <div key={`${i}-${line.slice(0, 24)}`}>{line || '\u00a0'}</div>
+              ))
+            )}
           </div>
         )}
 
-        {/* Problems tab placeholder */}
         {activeTab === 'problems' && (
-          <div style={{ padding: '8px 14px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, color: 'var(--caval-text-muted)' }}>
-            Nu există probleme detectate.
+          <div style={{
+            padding: '4px 0', height: '100%', overflow: 'auto',
+            fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
+          }}>
+            {problems.length === 0 ? (
+              <div style={{ padding: '8px 14px', color: 'var(--caval-text-muted)' }}>
+                Nu există probleme detectate.
+              </div>
+            ) : (
+              problems.map((p, i) => (
+                <div
+                  key={p.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: i === focusedIndex ? 'rgba(0,224,255,0.08)' : 'transparent',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => revealProblem(p, projectPath)}
+                    style={{
+                      display: 'flex', flex: 1, minWidth: 0, textAlign: 'left',
+                      gap: 8, padding: '6px 14px', border: 'none',
+                      background: 'transparent',
+                      color: p.severity === 'error' ? '#EF4444' : '#F59E0B',
+                      cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit',
+                    }}
+                  >
+                    <span style={{ flexShrink: 0 }}>{p.severity === 'error' ? '✕' : '⚠'}</span>
+                    <span style={{ color: 'var(--caval-text-muted)', flexShrink: 0 }}>
+                      {p.file}:{p.line}:{p.col}
+                    </span>
+                    <span style={{ color: 'var(--caval-text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {p.message}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Trimite în chat"
+                    onClick={() => sendProblemToChat(p)}
+                    style={{
+                      flexShrink: 0,
+                      marginRight: 8,
+                      border: '1px solid var(--caval-border)',
+                      borderRadius: 4,
+                      background: 'rgba(0,224,255,0.06)',
+                      color: 'var(--caval-accent)',
+                      cursor: 'pointer',
+                      fontSize: 10,
+                      fontFamily: 'var(--font-mono)',
+                      padding: '2px 8px',
+                    }}
+                  >
+                    Chat
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         )}
 
-        {/* Debug tab placeholder */}
         {activeTab === 'debug' && (
-          <div style={{ padding: '8px 14px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, color: 'var(--caval-text-muted)' }}>
-            Nicio sesiune de debug activă.
+          <div style={{ height: '100%', overflow: 'auto' }}>
+            <DebugPanel />
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function ChatActionBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      style={{
+        height: 22,
+        padding: '0 8px',
+        border: '1px solid rgba(0,224,255,0.35)',
+        borderRadius: 4,
+        background: 'rgba(0,224,255,0.08)',
+        color: 'var(--caval-accent)',
+        cursor: 'pointer',
+        fontSize: 10,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

@@ -11,25 +11,25 @@ export const capabilityRoutes: Record<RoutingIntent, CapabilityRoute> = {
   kilocode: {
     intent: "kilocode",
     primaryModel: "poolside-laguna-m-1",
-    fallbackModels: ["qwen2.5-coder:32b", "stepfun-step-3-7-flash"],
+    fallbackModels: ["qwen2.5-coder:7b", "stepfun-step-3-7-flash"],
     reason: "Large codebase edits route to Laguna first, with Qwen and StepFun as resilient fallbacks."
   },
   multi_file: {
     intent: "multi_file",
     primaryModel: "poolside-laguna-m-1",
-    fallbackModels: ["qwen2.5-coder:32b", "stepfun-step-3-7-flash"],
+    fallbackModels: ["qwen2.5-coder:7b", "stepfun-step-3-7-flash"],
     reason: "Multi-file edits need codebase-scale planning and patch discipline."
   },
   codebase: {
     intent: "codebase",
     primaryModel: "poolside-laguna-m-1",
-    fallbackModels: ["qwen2.5-coder:32b", "llama3.1:70b"],
+    fallbackModels: ["qwen2.5-coder:7b", "llama3.1:70b"],
     reason: "Codebase understanding benefits from the largest coding context profile."
   },
   agent: {
     intent: "agent",
     primaryModel: "stepfun-step-3-7-flash",
-    fallbackModels: ["nex-n2-pro", "qwen2.5-coder:32b"],
+    fallbackModels: ["nex-n2-pro", "qwen2.5-coder:7b"],
     reason: "Agent workflows prefer fast tool-aware planning."
   },
   tool_use: {
@@ -71,13 +71,13 @@ export const capabilityRoutes: Record<RoutingIntent, CapabilityRoute> = {
   autocomplete: {
     intent: "autocomplete",
     primaryModel: "north-mini-code",
-    fallbackModels: ["qwen2.5-coder:32b", "stepfun-step-3-7-flash"],
+    fallbackModels: ["qwen2.5-coder:7b", "stepfun-step-3-7-flash"],
     reason: "Autocomplete prioritizes low latency, with North as the fast path."
   },
   fast: {
     intent: "fast",
     primaryModel: "north-mini-code",
-    fallbackModels: ["stepfun-step-3-7-flash", "qwen2.5-coder:32b"],
+    fallbackModels: ["stepfun-step-3-7-flash", "qwen2.5-coder:7b"],
     reason: "Fast tasks route to the lowest-latency code model."
   },
   documentation: {
@@ -88,7 +88,7 @@ export const capabilityRoutes: Record<RoutingIntent, CapabilityRoute> = {
   },
   fallback: {
     intent: "fallback",
-    primaryModel: "qwen2.5-coder:32b",
+    primaryModel: "qwen2.5-coder:7b",
     fallbackModels: ["llama3.1:70b", "north-mini-code"],
     reason: "Fallback stays local first and uses North for fast coding rescue."
   }

@@ -2,7 +2,7 @@
   "name": "caval-cad-server",
   "version": "0.1.0",
   "private": true,
-  "description": "Caval Studio Text-to-CAD API (OpenSCAD + Supabase)",
+  "description": "CAVALLO Studio Text-to-CAD API (OpenSCAD + Supabase)",
   "type": "commonjs",
   "engines": {
     "node": ">=20.0.0"

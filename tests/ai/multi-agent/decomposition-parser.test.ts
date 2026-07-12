@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { parseDecomposition, parseDecompositionOutput } from '../../../ai/composer/multi-agent/decomposition-parser';
 
+describe('decomposition-parser forbidden tasks', () => {
+  it('strips zero-latency tasks from parseDecomposition', () => {
+    const raw = `
+**Modules & Tasks:**
+- Module 3: Bad
+  - Task 3.1: Implement src/zero-latency/server.ts with Bun HTTP server
+- Module 2: Good
+  - Task 2.1: Implement fashion-matching-engine/api/main.py
+`;
+    const tasks = parseDecomposition(raw, 8);
+    expect(tasks.some((t) => /zero-latency/i.test(t.description))).toBe(false);
+    expect(tasks.some((t) => /fashion-matching-engine/i.test(t.description))).toBe(true);
+  });
+});
+
 const SAMPLE = `
 **Project Goal:** Build a todo API
 

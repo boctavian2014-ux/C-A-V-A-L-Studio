@@ -105,6 +105,8 @@ export interface PipelineRecapMeta {
   composeWaves?: number;
   devTools?: DevToolsIntegrationResult;
   supervisor?: SupervisorResult;
+  completionGate?: import('../project-completion-gate').CompletionGateResult;
+  deliveryBlocked?: boolean;
 }
 
 export interface FullDeliveryConfig {
@@ -269,6 +271,8 @@ export type MultiAgentPipelineResult =
       /** Raw final composer output (may differ from chat summary text) */
       composeText?: string;
       writtenFiles?: string[];
+      completionGate?: import('../project-completion-gate').CompletionGateResult;
+      deliveryBlocked?: boolean;
     }
   | {
       ok: false;

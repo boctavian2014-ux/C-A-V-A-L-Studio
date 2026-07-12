@@ -44,7 +44,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
-          name: Caval Studio ${{ inputs.version }} (${{ inputs.channel }})
+          name: CAVALLO Studio ${{ inputs.version }} (${{ inputs.channel }})
           body_path: RELEASE_NOTES.md
           prerelease: ${{ inputs.channel != 'stable' }}
           files: release/${{ inputs.channel }}/**

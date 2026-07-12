@@ -1,4 +1,5 @@
 import type { PipelineTask, ArenaAgentRole } from './types';
+import { filterForbiddenTasks } from '../../scaffolds/workspace-forbidden-paths';
 
 const TASK_LINE =
   /^\s*[-*•]\s*\*{0,2}Task\s+([\w.-]+)\*{0,2}\s*:\s*(.+)$/i;
@@ -188,5 +189,7 @@ export function parseDependencies(raw: string, tasks: PipelineTask[]): PipelineT
 
 export function parseDecomposition(raw: string, maxTasks = 8): PipelineTask[] {
   const tasks = parseDecompositionOutput(raw, maxTasks);
-  return parseDependencies(raw, tasks);
+  const withDeps = parseDependencies(raw, tasks);
+  const { kept } = filterForbiddenTasks(withDeps);
+  return kept;
 }

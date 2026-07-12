@@ -113,5 +113,5 @@ export function getModelCodingGuide(
 }
 
 export function modeSupportsFileApply(agentMode: string): boolean {
-  return agentMode === 'code' || agentMode === 'build' || agentMode === 'agentic' || agentMode === 'debug';
+  return agentMode === 'code' || agentMode === 'build' || agentMode === 'release' || agentMode === 'agentic' || agentMode === 'debug';
 }

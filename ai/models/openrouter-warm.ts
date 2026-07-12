@@ -23,7 +23,7 @@ export function warmOpenRouterConnection(force = false, modelId = 'stepfun-step-
           authorization: `Bearer ${apiKey}`,
           "content-type": "application/json",
           "HTTP-Referer": "https://caval.studio",
-          "X-Title": "Caval Studio",
+          "X-Title": "CAVALLO Studio",
         },
         body: JSON.stringify({
           model,

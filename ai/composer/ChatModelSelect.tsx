@@ -1,17 +1,39 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAIStore, getModelDisplayLabel } from './ai-store';
 import { ApiKeysModal } from './ApiKeysModal';
 import { getChatModelGroups } from '../models/model-catalog';
 import { getModelProfileSummary, formatProfileChips } from '../models/model-profile-ui';
 import { getModelCodingGuide } from '../models/model-coding-guide';
+import {
+  modelHealthColor,
+  modelHealthLabel,
+  type ModelHealthStatus,
+} from '../models/model-health';
 import type { CavalModelCatalog, CavalModelCatalogEntry } from '../../src/main/preload';
 
-function renderOptions(entries: CavalModelCatalogEntry[]) {
-  return entries.map((entry) => (
-    <option key={entry.id} value={entry.id} title={entry.description ?? entry.label}>
-      {entry.label}
-    </option>
-  ));
+function healthPrefix(status: ModelHealthStatus | undefined): string {
+  if (!status || status === 'ready') return '● ';
+  if (status === 'missing_key') return '○ ';
+  return '◌ ';
+}
+
+function renderOptions(
+  entries: CavalModelCatalogEntry[],
+  health: Record<string, ModelHealthStatus>
+) {
+  return entries.map((entry) => {
+    const status = health[entry.id];
+    const healthNote = status && status !== 'ready' ? ` — ${modelHealthLabel(status)}` : '';
+    return (
+      <option
+        key={entry.id}
+        value={entry.id}
+        title={`${entry.description ?? entry.label}${healthNote}`}
+      >
+        {healthPrefix(status)}{entry.label}
+      </option>
+    );
+  });
 }
 
 interface ChatModelSelectProps {
@@ -22,6 +44,17 @@ interface ChatModelSelectProps {
 export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
   const { selectedModel, setModel, activeResolvedModel, modelLabels, agentMode } = useAIStore();
   const [showKeys, setShowKeys] = useState(false);
+  const [modelHealth, setModelHealth] = useState<Record<string, ModelHealthStatus>>({});
+
+  useEffect(() => {
+    void window.caval?.modelsHealth?.().then((res: {
+      models?: Record<string, ModelHealthStatus>;
+    } | undefined) => {
+      if (res?.models) {
+        setModelHealth(res.models);
+      }
+    });
+  }, [catalog]);
 
   const groups = useMemo(
     () => (catalog ? getChatModelGroups(catalog) : { auto: [], free: [], paid: [], coding: [] }),
@@ -57,10 +90,25 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
     ? getModelDisplayLabel(activeResolvedModel, modelLabels)
     : null;
 
+  const selectedHealth = modelHealth[activeResolvedModel ?? selectedModel];
+  const healthColor = modelHealthColor(selectedHealth ?? 'unknown');
+
   return (
     <>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 0, maxWidth: 240 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', minWidth: 0 }}>
+          {selectedHealth && (
+            <span
+              title={modelHealthLabel(selectedHealth)}
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: healthColor,
+                flexShrink: 0,
+              }}
+            />
+          )}
           <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
             <select
               value={selectValue}
@@ -87,22 +135,22 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
             >
               {groups.auto.length > 0 && (
                 <optgroup label="Auto">
-                  {renderOptions(groups.auto)}
+                  {renderOptions(groups.auto, modelHealth)}
                 </optgroup>
               )}
               {groups.free.length > 0 && (
                 <optgroup label="Free">
-                  {renderOptions(groups.free)}
+                  {renderOptions(groups.free, modelHealth)}
                 </optgroup>
               )}
               {groups.paid.length > 0 && (
                 <optgroup label="Paid">
-                  {renderOptions(groups.paid)}
+                  {renderOptions(groups.paid, modelHealth)}
                 </optgroup>
               )}
               {groups.coding.length > 0 && (
                 <optgroup label="Coding">
-                  {renderOptions(groups.coding)}
+                  {renderOptions(groups.coding, modelHealth)}
                 </optgroup>
               )}
             </select>
@@ -143,6 +191,12 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
             🔑
           </button>
         </div>
+
+        {selectedHealth && selectedHealth !== 'ready' && (
+          <div style={{ fontSize: 9, color: healthColor, marginTop: 2, textAlign: 'right', maxWidth: 220 }}>
+            {modelHealthLabel(selectedHealth)}
+          </div>
+        )}
 
         {codingGuide.canCode && (
           <div

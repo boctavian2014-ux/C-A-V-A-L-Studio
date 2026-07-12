@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import { applyHunkToContent } from '../shared/diff-utils';
 
 // ──────────────────────────────────────────────
-//  Git IPC Handlers — Caval IDE
+//  Git IPC Handlers — CAVALLO Studio
 //  Toate comenzile git rulează în directorul
 //  proiectului activ (projectPath trimis din renderer).
 // ──────────────────────────────────────────────
@@ -456,6 +456,19 @@ export function registerGitHandlers() {
       try {
         const escaped = name.replace(/"/g, '\\"');
         await execAsync(`git checkout -b "${escaped}"`, { cwd: projectPath });
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err.stderr || err.message };
+      }
+    }
+  );
+
+  // ── git:init ──────────────────────────────
+  ipcMain.handle(
+    'git:init',
+    async (_e, projectPath: string): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        await execAsync('git init', { cwd: projectPath });
         return { ok: true };
       } catch (err: any) {
         return { ok: false, error: err.stderr || err.message };

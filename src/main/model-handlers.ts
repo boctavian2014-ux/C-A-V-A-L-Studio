@@ -1,6 +1,7 @@
 import { ipcMain, type WebContents } from "electron";
 
 import { buildModelCatalog, invalidateCatalogCache } from "../../ai/models/model-catalog";
+import { buildModelsHealthSnapshot } from "../../ai/models/model-health";
 import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 
 import { clearOpenRouterCache } from "../../ai/models/openrouter-catalog";
@@ -601,6 +602,8 @@ async function streamToRenderer(
         pipelineRecapMeta: result.pipelineRecapMeta,
         composeText: result.composeText ?? result.text,
         writtenFiles: result.writtenFiles,
+        completionGate: result.completionGate,
+        deliveryBlocked: result.deliveryBlocked,
       });
       return;
     }
@@ -778,6 +781,8 @@ async function streamResumeToRenderer(
         pipelineRecapMeta: result.pipelineRecapMeta,
         composeText: result.composeText ?? result.text,
         writtenFiles: result.writtenFiles,
+        completionGate: result.completionGate,
+        deliveryBlocked: result.deliveryBlocked,
       });
       return;
     }
@@ -833,6 +838,20 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
 
     return { ok: true, catalog };
 
+  });
+
+  ipcMain.handle("caval:models-health", async () => {
+    try {
+      const snapshot = await buildModelsHealthSnapshot();
+      return { ...snapshot };
+    } catch (error) {
+      return {
+        ok: false,
+        summary: error instanceof Error ? error.message : String(error),
+        providers: {},
+        models: {},
+      };
+    }
   });
 
 

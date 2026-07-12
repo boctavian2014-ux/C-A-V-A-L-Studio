@@ -1,3 +1,9 @@
+import {
+  dispatchTerminalNew,
+  dispatchTerminalPanelTab,
+  dispatchTerminalToggle,
+} from '../terminal/terminal-events';
+
 export type WorkbenchActivity = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
 
 export interface WorkbenchCommandContext {
@@ -74,9 +80,40 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       run: () => ctx.openShortcuts?.(),
     },
     view('search', 'View: Search'),
+    view('explorer', 'View: Explorer'),
     view('git', 'View: Source Control'),
     view('extensions', 'View: Extensions'),
     view('settings', 'View: Settings'),
+    {
+      id: 'terminal:new',
+      label: 'Terminal: New',
+      category: 'Terminal',
+      shortcut: 'Ctrl+Shift+`',
+      keywords: ['terminal', 'shell', 'powershell'],
+      run: () => dispatchTerminalNew(),
+    },
+    {
+      id: 'terminal:toggle',
+      label: 'Terminal: Toggle Panel',
+      category: 'Terminal',
+      keywords: ['terminal', 'panel', 'bottom'],
+      run: () => dispatchTerminalToggle(),
+    },
+    {
+      id: 'view:output',
+      label: 'View: Output',
+      category: 'View',
+      shortcut: 'Ctrl+Shift+U',
+      keywords: ['output', 'log', 'build'],
+      run: () => dispatchTerminalPanelTab('output'),
+    },
+    {
+      id: 'view:problems',
+      label: 'View: Problems',
+      category: 'View',
+      keywords: ['problems', 'errors', 'diagnostics'],
+      run: () => dispatchTerminalPanelTab('problems'),
+    },
     {
       id: 'view:toggle-sidebar',
       label: 'View: Toggle Sidebar',

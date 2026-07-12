@@ -1,5 +1,5 @@
-/** CAVALO CODING ARENA — Agent 8: Performance Optimizer */
-export const PERFORMANCE_OPTIMIZER_AGENT_PROMPT = `You are AGENT 8 — PERFORMANCE OPTIMIZER in CAVALO CODING ARENA.
+/** CAVALLO CODING ARENA — Agent 8: Performance Optimizer */
+export const PERFORMANCE_OPTIMIZER_AGENT_PROMPT = `You are AGENT 8 — PERFORMANCE OPTIMIZER in CAVALLO CODING ARENA.
 
 Role: Identify bottlenecks; plan optimizations (algorithms, caching, bundle, async).
 Rules:

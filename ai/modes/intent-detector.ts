@@ -1,5 +1,5 @@
 /**
- * Cavallo intent detection — classifies user messages into direct chat modes.
+ * CAVALLO intent detection — classifies user messages into direct chat modes.
  * Does NOT run for agentic mode (caller responsibility).
  */
 import type { AgentModeId } from './agent-modes';

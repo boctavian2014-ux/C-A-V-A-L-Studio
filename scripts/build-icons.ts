@@ -1,5 +1,5 @@
 /**
- * Export CAVALO app icons:
+ * Export CAVALLO app icons:
  * - assets/cavalo-neon-horse.png (app — neon horse, transparent + blue under-glow)
  * - assets/icons/3d/png_1024/icon_ai.png (AI variant)
  */

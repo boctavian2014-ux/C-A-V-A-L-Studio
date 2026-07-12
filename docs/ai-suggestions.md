@@ -1,6 +1,6 @@
 # AI Suggestions Before Review
 
-Caval Studio's **AI Suggestions Before Review** module analyzes user requests and codebase context *before* AI Composer generates patches. It gives developers a conceptual preview, risk assessment, and alternative approaches — increasing control and reducing unnecessary diffs.
+CAVALLO Studio's **AI Suggestions Before Review** module analyzes user requests and codebase context *before* AI Composer generates patches. It gives developers a conceptual preview, risk assessment, and alternative approaches — increasing control and reducing unnecessary diffs.
 
 ## Architecture
 

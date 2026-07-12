@@ -44,6 +44,8 @@ interface EditorStore {
   tabs: EditorTab[];
   activeTabId: string | null;
   openFile: (path: string) => Promise<void>;
+  createUntitledTab: () => void;
+  closeActiveTab: () => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTabContent: (id: string, content: string) => void;
@@ -85,6 +87,8 @@ function detectLanguage(filename: string): string {
 }
 
 export const AI_PREVIEW_TAB_ID = 'caval-ai-live-preview';
+
+let untitledCounter = 0;
 
 // ──────────────────────────────────────────────
 //  Store
@@ -150,6 +154,28 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       tabs: [...withoutPreview, tab],
       activeTabId: filePath,
     });
+  },
+
+  createUntitledTab: () => {
+    untitledCounter += 1;
+    const path = `untitled:${untitledCounter}.txt`;
+    const tab: EditorTab = {
+      id: path,
+      name: `Untitled-${untitledCounter}.txt`,
+      path,
+      content: '',
+      language: 'plaintext',
+      isDirty: false,
+    };
+    set((state) => ({
+      tabs: [...state.tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID), tab],
+      activeTabId: path,
+    }));
+  },
+
+  closeActiveTab: () => {
+    const { activeTabId } = get();
+    if (activeTabId) get().closeTab(activeTabId);
   },
 
   closeTab: (id) => {

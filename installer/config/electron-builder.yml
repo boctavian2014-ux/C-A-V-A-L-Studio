@@ -1,5 +1,5 @@
 appId: com.caval.studio
-productName: CAVALO
+productName: CAVALLO
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 directories:
   output: release/${channel}
@@ -13,6 +13,7 @@ files:
   - installer/assets/**
 asar: true
 compression: maximum
+license: installer/assets/license.rtf
 publish:
   - provider: github
     owner: caval-studio
@@ -26,7 +27,7 @@ publish:
 extraMetadata:
   main: dist/main/electron-main.js
 protocols:
-  - name: Caval Studio
+  - name: CAVALLO Studio
     schemes:
       - caval
 win:
@@ -39,7 +40,7 @@ win:
     - target: msi
       arch:
         - x64
-  publisherName: Caval Studio
+  publisherName: CAVALLO Studio
   verifyUpdateCodeSignature: true
 nsis:
   oneClick: false
@@ -48,7 +49,10 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: CAVALO
+  shortcutName: CAVALLO
+  installerIcon: build-icons/icon.ico
+  uninstallerIcon: build-icons/icon.ico
+  include: installer/assets/nsis/custom.nsh
 mac:
   icon: build-icons/icon.icns
   category: public.app-category.developer-tools

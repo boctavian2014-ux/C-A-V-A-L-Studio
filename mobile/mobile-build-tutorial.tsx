@@ -21,7 +21,7 @@ export const MobileBuildTutorial = ({ open, onClose }: MobileBuildTutorialProps)
     <div className="cs-tutorial-video-placeholder pt-pulse mb-4">
       <div className="pulse-icon" />
       <p>Tutorial video coming soon</p>
-      <small>Caval Studio — Build. Ship. Publish.</small>
+      <small>CAVALLO Studio — Build. Ship. Publish.</small>
     </div>
 
     <ol className="cs-tutorial-steps">
@@ -35,7 +35,7 @@ export const MobileBuildTutorial = ({ open, onClose }: MobileBuildTutorialProps)
     </ol>
 
     <div className="cs-tutorial-note mt-4">
-      Caval Studio AI Agent explains build errors and can suggest fixes automatically.
+      CAVALLO Studio AI Agent explains build errors and can suggest fixes automatically.
     </div>
 
     <div className="mt-4 flex justify-end">

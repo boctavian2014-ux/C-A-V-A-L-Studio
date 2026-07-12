@@ -1,6 +1,6 @@
 # AI Intelligent Preload Engine
 
-Modulul **AI Intelligent Preload Engine** încarcă modelele AI înainte ca utilizatorul să le ceară explicit, reducând latența percepută în pipeline-ul Caval Studio (Suggestions → Composer → Review).
+Modulul **AI Intelligent Preload Engine** încarcă modelele AI înainte ca utilizatorul să le ceară explicit, reducând latența percepută în pipeline-ul CAVALLO Studio (Suggestions → Composer → Review).
 
 ## Structură
 

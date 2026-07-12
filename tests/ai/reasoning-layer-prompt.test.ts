@@ -13,7 +13,7 @@ describe('reasoning-layer prompt', () => {
     expect(REASONING_COMMUNICATION_PROMPT).toContain('Step 4');
   });
 
-  it('includes Cavalo IDE constraints', () => {
+  it('includes CAVALLO Studio constraints', () => {
     expect(REASONING_COMMUNICATION_PROMPT).toContain('fenced blocks');
     expect(REASONING_CHAT_ADDON).toContain('Recap');
   });

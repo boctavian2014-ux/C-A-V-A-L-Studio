@@ -9,7 +9,7 @@ export const MobileBuildHeader = ({ onShowTutorial }: MobileBuildHeaderProps) =>
   <header className="cs-mobile-header">
     <div>
       <h2>Build Mobile App</h2>
-      <p>Android and iOS using Expo EAS, directly from Caval Studio.</p>
+      <p>Android and iOS using Expo EAS, directly from CAVALLO Studio.</p>
     </div>
     <Button variant="secondary" size="sm" onClick={onShowTutorial}>
       Watch tutorial

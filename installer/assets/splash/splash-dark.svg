@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="Caval Studio dark splash">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="CAVALLO Studio dark splash">
   <defs>
     <radialGradient id="bg" cx="50%" cy="42%" r="70%">
       <stop offset="0%" stop-color="#0A1A2F"/>
@@ -17,6 +17,6 @@
     <path d="M90 76V164" stroke="#F5F7FA" stroke-width="10" stroke-linecap="round" opacity="0.78"/>
     <path d="M28 96C46 76 82 76 100 96" fill="none" stroke="#D4A857" stroke-width="5" stroke-linecap="round"/>
   </g>
-  <text x="800" y="590" text-anchor="middle" fill="#F5F7FA" font-family="Sora, Inter, sans-serif" font-size="48" font-weight="700">Caval Studio</text>
+  <text x="800" y="590" text-anchor="middle" fill="#F5F7FA" font-family="Sora, Inter, sans-serif" font-size="48" font-weight="700">CAVALLO Studio</text>
   <text x="800" y="632" text-anchor="middle" fill="#8A95A6" font-family="Inter, sans-serif" font-size="18" letter-spacing="4">FLOW NATURAL IN COD</text>
 </svg>

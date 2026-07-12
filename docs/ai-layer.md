@@ -1,6 +1,6 @@
 # AI Layer
 
-AI Layer-ul Caval Studio este modular, scalabil si pregatit pentru modele frontier, fallback local si integrare directa cu Context Engine.
+AI Layer-ul CAVALLO Studio este modular, scalabil si pregatit pentru modele frontier, fallback local si integrare directa cu Context Engine.
 
 ## Structura
 

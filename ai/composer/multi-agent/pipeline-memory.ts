@@ -2,6 +2,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { PipelineContext, PipelineTask, SupervisorResult } from './types';
+import type { FashionProjectArchetype } from '../../scaffolds/fashion-matching/archetype';
+import type { CompletionGateIssue } from '../completion-gate-types';
+
+export interface PipelineFailureMemory {
+  runId: string;
+  timestamp: number;
+  issues: CompletionGateIssue[];
+  archetype?: FashionProjectArchetype;
+  userMessage?: string;
+}
+
+export interface RecoveryPattern {
+  pattern: string;
+  fix: string;
+}
+
+export const DEFAULT_RECOVERY_PATTERNS: RecoveryPattern[] = [
+  {
+    pattern: 'junk zero-latency in user workspace',
+    fix: 'Delete src/zero-latency/, restore package.json name to project (not zero-latency-composer), use fashion-fullstack archetype.',
+  },
+  {
+    pattern: 'fashion project missing web/mobile',
+    fix: 'Seed web/ (Vite React upload UI) and mobile/ (Expo standalone) with fashion-matching-engine API routes.',
+  },
+];
 
 export interface PipelineRunMemory {
   runId: string;
@@ -35,6 +61,9 @@ export interface PipelineMemoryRecord {
     performanceSummary?: string;
     scanSummary: string;
   };
+  lastFailure?: PipelineFailureMemory;
+  recoveryPatterns?: RecoveryPattern[];
+  projectArchetype?: FashionProjectArchetype;
 }
 
 const MAX_RUNS = 20;
@@ -73,6 +102,7 @@ export class PipelineMemoryEngine {
       updatedAt: Date.now(),
       runs: [],
       preferences: {},
+      recoveryPatterns: [...DEFAULT_RECOVERY_PATTERNS],
     });
   }
 
@@ -95,6 +125,23 @@ export class PipelineMemoryEngine {
     }
     if (this.record.lastBuild) {
       hints.push(`Last build: ${this.record.lastBuild.scanSummary}`);
+    }
+    if (this.record.lastFailure) {
+      const lf = this.record.lastFailure;
+      const issueSummary = lf.issues
+        .slice(0, 3)
+        .map((i) => i.message)
+        .join('; ');
+      hints.push(
+        `Previous failure (${lf.runId}): ${issueSummary}. Use archetype ${lf.archetype ?? 'n/a'} — never Cavallo-internal paths in user workspace.`
+      );
+    }
+    if (this.record.recoveryPatterns?.length) {
+      const top = this.record.recoveryPatterns[0]!;
+      hints.push(`Recovery hint: ${top.pattern} → ${top.fix}`);
+    }
+    if (this.record.projectArchetype) {
+      hints.push(`Project archetype: ${this.record.projectArchetype}`);
     }
     if (lastRun) {
       hints.push(`Last run (${lastRun.runId}): ${lastRun.taskCount} tasks — ${lastRun.taskModules.join(', ')}`);
@@ -173,6 +220,31 @@ export class PipelineMemoryEngine {
       this.record.runs = this.record.runs.slice(-MAX_RUNS);
     }
     this.record.lastUserIntent = input.userMessage.slice(0, 500);
+  }
+
+  recordFailure(input: {
+    runId: string;
+    userMessage: string;
+    issues: CompletionGateIssue[];
+    archetype?: FashionProjectArchetype;
+  }): void {
+    this.record.lastFailure = {
+      runId: input.runId,
+      timestamp: Date.now(),
+      issues: input.issues,
+      archetype: input.archetype,
+      userMessage: input.userMessage.slice(0, 500),
+    };
+    if (input.archetype) {
+      this.record.projectArchetype = input.archetype;
+    }
+    if (!this.record.recoveryPatterns?.length) {
+      this.record.recoveryPatterns = [...DEFAULT_RECOVERY_PATTERNS];
+    }
+  }
+
+  setProjectArchetype(archetype: FashionProjectArchetype): void {
+    this.record.projectArchetype = archetype;
   }
 
   getRecentRuns(limit = 5): PipelineRunMemory[] {

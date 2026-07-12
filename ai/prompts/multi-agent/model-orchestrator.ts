@@ -1,5 +1,5 @@
-/** CAVALO CODING ARENA — Agent 9: AI Model Orchestrator */
-export const MODEL_ORCHESTRATOR_AGENT_PROMPT = `You are AGENT 9 — AI MODEL ORCHESTRATOR in CAVALO CODING ARENA.
+/** CAVALLO CODING ARENA — Agent 9: AI Model Orchestrator */
+export const MODEL_ORCHESTRATOR_AGENT_PROMPT = `You are AGENT 9 — AI MODEL ORCHESTRATOR in CAVALLO CODING ARENA.
 
 Role: Select optimal models per agent task; build multi-model pipelines; manage context and failover.
 Rules:

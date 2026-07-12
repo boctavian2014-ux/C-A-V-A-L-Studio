@@ -440,10 +440,7 @@ export function GitPanel() {
         icon={<GitIcon />}
         title="Nu este un repo Git"
         desc="Directorul curent nu are un repo Git inițializat."
-        action={{ label: 'git init', onClick: async () => {
-          // Rulăm prin terminal — user va vedea outputul
-          document.dispatchEvent(new CustomEvent('caval:run-in-terminal', { detail: { cmd: 'git init' } }));
-        }}}
+        action={{ label: 'git init', onClick: () => void useGitStore.getState().initRepo() }}
       />
     );
   }
@@ -550,6 +547,23 @@ export function GitPanel() {
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 1L1 5v2l7 4 7-4V5L8 1zm0 2.2L13 6l-5 2.8L3 6l5-2.8zM1 9v2l7 4 7-4V9l-7 4-7-4z"/>
+            </svg>
+          </button>
+          <button
+            onClick={stashPop}
+            disabled={opLoading}
+            title="Stash pop"
+            style={{
+              width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
+              background: 'var(--caval-surface)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--caval-text-muted)',
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 14L1 10V8l7 4 7-4v2L8 14z" />
+              <path d="M8 10L1 6V4l7 4 7-4v2L8 10z" />
+              <path d="M8 6L1 2v2l7 4 7-4V2L8 6z" />
             </svg>
           </button>
         </div>

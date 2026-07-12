@@ -1,5 +1,6 @@
 import type { FullDeliveryConfig } from './multi-agent/types';
 import { DEFAULT_FULL_DELIVERY_CONFIG } from './multi-agent/types';
+import type { CompletionGateResult } from './completion-gate-types';
 
 export const DEFAULT_FULL_DELIVERY: FullDeliveryConfig = DEFAULT_FULL_DELIVERY_CONFIG;
 
@@ -30,6 +31,18 @@ export function isDeliveryIncomplete(input: DeliveryIncompleteInput): boolean {
   if (effectiveTasks > 0 && writtenFiles.length < minExpected) return true;
 
   return false;
+}
+
+export function isDeliveryIncompleteFromGate(gate: CompletionGateResult | undefined): boolean {
+  return gate != null && !gate.ok;
+}
+
+export function isDeliveryBlocked(
+  input: DeliveryIncompleteInput,
+  gate?: CompletionGateResult
+): boolean {
+  if (isDeliveryIncompleteFromGate(gate)) return true;
+  return isDeliveryIncomplete(input);
 }
 
 export function canAutoContinueDelivery(

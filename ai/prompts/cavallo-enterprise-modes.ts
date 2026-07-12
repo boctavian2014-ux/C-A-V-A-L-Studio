@@ -1,5 +1,5 @@
 /**
- * Cavallo Enterprise Multi-Mode prompts — PLAN, CODE, BUILD, ASK, DEBUG.
+ * CAVALLO Enterprise Multi-Mode prompts — PLAN, CODE, BUILD, ASK, DEBUG.
  * Agentic mode uses CODING_ARENA_SYSTEM_PROMPT separately (unchanged).
  */
 import { CAVALO_BUILD_ENGINE_PROMPT } from './cavalo-build-engine';

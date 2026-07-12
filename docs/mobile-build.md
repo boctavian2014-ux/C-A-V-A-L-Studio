@@ -1,6 +1,6 @@
 # Mobile Build Panel
 
-Caval Studio's **Mobile Build Panel** lets developers publish Android and iOS apps via Expo EAS directly from the IDE — with live terminal output, step tracking, tutorial guidance, and AI-powered build error explanation.
+CAVALLO Studio's **Mobile Build Panel** lets developers publish Android and iOS apps via Expo EAS directly from the IDE — with live terminal output, step tracking, tutorial guidance, and AI-powered build error explanation.
 
 ## Architecture
 

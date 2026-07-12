@@ -26,4 +26,30 @@ describe('pipeline-memory', () => {
     expect(enriched.architectureContext).toContain('Previous intent');
     expect(enriched.architectureContext).toContain('api');
   });
+
+  it('enriches context after completion gate failure', () => {
+    const engine = PipelineMemoryEngine.load('/tmp/haine-proj');
+    engine.recordFailure({
+      runId: 'ma-haine',
+      userMessage: 'verifica proiectul',
+      archetype: 'fashion-fullstack',
+      issues: [{ code: 'junk_workspace', message: 'zero-latency junk in workspace' }],
+    });
+    const enriched = engine.enrichContext({
+      userIntent: 'fashion haine',
+      normalizedRequirements: '',
+      functionalRequirements: [],
+      nonFunctionalRequirements: [],
+      platformConstraints: [],
+      storeCompliance: [],
+      architectureContext: '',
+      moduleContext: '',
+      interfaceContext: '',
+      dependencyMap: '',
+      pendingIssues: [],
+    });
+    expect(enriched.architectureContext).toContain('Previous failure');
+    expect(enriched.architectureContext).toContain('fashion-fullstack');
+    expect(enriched.architectureContext).toContain('Recovery hint');
+  });
 });

@@ -1,3 +1,4 @@
+import "./monaco-setup";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "xterm/css/xterm.css";
@@ -27,7 +28,7 @@ class WorkbenchErrorBoundary extends React.Component<
           color: "#F5F7FA",
           fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
         }}>
-          <h1 style={{ margin: "0 0 12px", fontSize: 18 }}>Caval Studio — eroare UI</h1>
+          <h1 style={{ margin: "0 0 12px", fontSize: 18 }}>CAVALLO Studio — eroare UI</h1>
           <pre style={{
             whiteSpace: "pre-wrap",
             background: "#15171A",

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   canAutoContinueDelivery,
+  isDeliveryBlocked,
   isDeliveryIncomplete,
   DEFAULT_FULL_DELIVERY,
 } from '../../ai/composer/delivery-orchestrator';
+import type { CompletionGateResult } from '../../ai/composer/project-completion-gate';
 
 describe('delivery-orchestrator', () => {
   it('isDeliveryIncomplete when no files written', () => {
@@ -33,5 +35,16 @@ describe('delivery-orchestrator', () => {
     expect(canAutoContinueDelivery(0, DEFAULT_FULL_DELIVERY)).toBe(true);
     expect(canAutoContinueDelivery(2, DEFAULT_FULL_DELIVERY)).toBe(true);
     expect(canAutoContinueDelivery(3, DEFAULT_FULL_DELIVERY)).toBe(false);
+  });
+
+  it('isDeliveryBlocked when completion gate fails', () => {
+    const gate: CompletionGateResult = {
+      ok: false,
+      issues: [{ code: 'verify_failed', message: 'build failed' }],
+      suggestedContinueMessage: 'DELIVERY_CONTINUE\nfix build',
+    };
+    expect(
+      isDeliveryBlocked({ writtenFiles: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], taskCount: 2 }, gate)
+    ).toBe(true);
   });
 });

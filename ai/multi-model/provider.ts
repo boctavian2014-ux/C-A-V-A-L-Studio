@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-//  Caval AI — Provider abstraction
+//  CAVALLO AI — Provider abstraction
 //  Interfață unică pentru Claude, GPT-4o, Gemini, Ollama local
 // ──────────────────────────────────────────────
 
