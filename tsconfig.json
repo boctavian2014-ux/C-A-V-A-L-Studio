@@ -3,7 +3,10 @@
     "target": "ES2022",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "rootDir": ".",
     "outDir": "dist",
     "strict": true,
@@ -14,7 +17,9 @@
     "sourceMap": true,
     "declaration": true,
     "jsx": "react-jsx",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/**/*.ts",
@@ -44,5 +49,12 @@
     "themes/**/*.tsx",
     "types/**/*.d.ts"
   ],
-  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts", "src/renderer/components/image/**"]
+  "exclude": [
+    "dist",
+    "node_modules",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "src/renderer/components/image/**"
+  ],
+  "extends": "expo/tsconfig.base"
 }

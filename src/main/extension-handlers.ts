@@ -1,10 +1,15 @@
 import { ipcMain } from "electron";
 import path from "node:path";
 import fs from "node:fs";
+import AdmZip from "adm-zip";
 
+import { ExtensionCompatibility } from "../../marketplace/extensions/compatibility";
+import type { ExtensionManifest as MarketplaceExtensionManifest } from "../../marketplace/extensions/manifest-validator";
 import { CavalExtensionHost, type ExtensionManifest } from "../extensions/extension-host";
+import { downloadOpenVsxVsix, listPopularOpenVsx, searchOpenVsx } from "./open-vsx-client";
 
 const extensionHost = new CavalExtensionHost();
+const compatibility = new ExtensionCompatibility();
 
 function loadExtensionsFromDisk(workspaceRoot: string): void {
   const extDir = path.join(workspaceRoot, ".cavalo", "extensions");
@@ -31,6 +36,30 @@ function loadExtensionsFromDisk(workspaceRoot: string): void {
     } catch {
       /* skip invalid manifests */
     }
+  }
+}
+
+function extractVsixToDirectory(vsixBuffer: Buffer, targetDir: string): void {
+  if (fs.existsSync(targetDir)) {
+    fs.rmSync(targetDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  const zip = new AdmZip(vsixBuffer);
+  const entries = zip.getEntries();
+  const packageEntry = entries.find((e) => e.entryName === "extension/package.json" || e.entryName.endsWith("/package.json"));
+  if (!packageEntry) {
+    throw new Error("VSIX invalid — package.json lipsește.");
+  }
+
+  const prefix = packageEntry.entryName.replace(/package\.json$/, "");
+  for (const entry of entries) {
+    if (!entry.entryName.startsWith(prefix) || entry.isDirectory) continue;
+    const relative = entry.entryName.slice(prefix.length);
+    if (!relative) continue;
+    const outPath = path.join(targetDir, relative);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, entry.getData());
   }
 }
 
@@ -99,6 +128,78 @@ export function registerExtensionHandlers(getWorkspaceRoot: (senderId: number) =
       };
       extensionHost.register(manifest);
       return { ok: true, extension: manifest };
+    }
+  );
+
+  ipcMain.handle("openvsx:search", async (_event, query: string) => {
+    try {
+      const results = await searchOpenVsx(String(query ?? ""), 30);
+      return { ok: true, extensions: results };
+    } catch (cause: unknown) {
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      return { ok: false, error: msg, extensions: [] };
+    }
+  });
+
+  ipcMain.handle("openvsx:popular", async () => {
+    try {
+      const results = await listPopularOpenVsx(30);
+      return { ok: true, extensions: results };
+    } catch (cause: unknown) {
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      return { ok: false, error: msg, extensions: [] };
+    }
+  });
+
+  ipcMain.handle(
+    "openvsx:install",
+    async (event, input: { namespace: string; name: string }) => {
+      const root = getWorkspaceRoot(event.sender.id);
+      if (!root?.trim()) return { ok: false, error: "Deschide un folder de proiect." };
+      if (!input?.namespace?.trim() || !input?.name?.trim()) {
+        return { ok: false, error: "namespace și name sunt obligatorii." };
+      }
+
+      try {
+        const { buffer, version } = await downloadOpenVsxVsix(input.namespace.trim(), input.name.trim());
+        const publisher = input.namespace.trim();
+        const extName = input.name.trim();
+        const folderId = `${publisher}.${extName}-${version.version}`;
+        const extDir = path.join(root, ".cavalo", "extensions", folderId);
+
+        extractVsixToDirectory(buffer, extDir);
+
+        const manifestPath = path.join(extDir, "package.json");
+        if (!fs.existsSync(manifestPath)) {
+          return { ok: false, error: "VSIX extras fără package.json." };
+        }
+
+        const pkg = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as MarketplaceExtensionManifest;
+        const report = compatibility.analyze({
+          ...pkg,
+          publisher: pkg.publisher ?? publisher,
+          name: pkg.name ?? extName,
+          version: pkg.version ?? version.version,
+          engines: pkg.engines ?? version.engines ?? {},
+        });
+
+        if (!report.compatible) {
+          fs.rmSync(extDir, { recursive: true, force: true });
+          return { ok: false, error: "Extensie incompatibilă cu CAVALLO." };
+        }
+
+        const manifest: ExtensionManifest = {
+          id: folderId,
+          name: pkg.name ?? extName,
+          version: pkg.version ?? version.version,
+          engines: report.convertedManifest.engines,
+        };
+        extensionHost.register(manifest);
+        return { ok: true, extension: manifest };
+      } catch (cause: unknown) {
+        const msg = cause instanceof Error ? cause.message : String(cause);
+        return { ok: false, error: msg };
+      }
     }
   );
 }

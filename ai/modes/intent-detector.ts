@@ -3,6 +3,7 @@
  * Does NOT run for agentic mode (caller responsibility).
  */
 import type { AgentModeId } from './agent-modes';
+import { isCavalloModesTestRequest } from '../prompts/cavallo-mode-protocol';
 
 export type DirectChatModeId = 'plan' | 'code' | 'ask' | 'debug';
 
@@ -57,6 +58,10 @@ export function detectIntent(message: string, options?: { explicitTriggers?: boo
   const text = message.trim();
   if (!text) {
     return { mode: 'ask', confidence: 'low', reason: 'empty message' };
+  }
+
+  if (isCavalloModesTestRequest(text)) {
+    return { mode: 'ask', confidence: 'low', reason: 'cavallo modes test — no auto-switch' };
   }
 
   if (options?.explicitTriggers !== false) {

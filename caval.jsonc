@@ -12,7 +12,9 @@
   },
   "cavalloModes": {
     "autoModeSwitch": true,
-    "explicitTriggers": true
+    "explicitTriggers": true,
+    "modesTestUseLlm": false,
+    "enforceEndLabels": true
   },
   "autocomplete": {
     "model": "north-mini-code",
@@ -30,15 +32,15 @@
       {
         "id": "git",
         "name": "Git",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-git", "--repository", "."],
+        "command": "uvx",
+        "args": ["mcp-server-git", "--repository", "."],
         "enabled": true
       },
       {
         "id": "fetch",
         "name": "Fetch",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-fetch"],
+        "command": "uvx",
+        "args": ["mcp-server-fetch"],
         "enabled": true
       },
       {
@@ -53,20 +55,46 @@
         "name": "Firecrawl",
         "command": "npx",
         "args": ["-y", "firecrawl-mcp"],
-        "env": {
-          "FIRECRAWL_API_KEY": ""
-        },
         "enabled": false
       },
       {
         "id": "postgres",
         "name": "Postgres (Supabase / Neon)",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-postgres"],
-        "env": {
-          "POSTGRES_CONNECTION_STRING": ""
-        },
+        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://USER:PASS@HOST/DB"],
         "enabled": false
+      },
+      {
+        "id": "github",
+        "name": "GitHub (read-only)",
+        "command": "docker",
+        "args": [
+          "run", "-i", "--rm",
+          "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "-e", "GITHUB_READ_ONLY",
+          "-e", "GITHUB_TOOLSETS",
+          "ghcr.io/github/github-mcp-server"
+        ],
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "",
+          "GITHUB_READ_ONLY": "1",
+          "GITHUB_TOOLSETS": "context,repos,issues,pull_requests,code_security"
+        },
+        "enabled": true
+      },
+      {
+        "id": "semgrep",
+        "name": "Semgrep Security",
+        "command": "uvx",
+        "args": ["--from", "semgrep", "semgrep", "mcp"],
+        "enabled": true
+      },
+      {
+        "id": "trivy",
+        "name": "Trivy Supply Chain",
+        "command": "trivy",
+        "args": ["mcp"],
+        "enabled": true
       }
     ]
   },
@@ -82,16 +110,24 @@
     "persistArtifacts": true,
     "skipContextLlm": true,
     "fastPipeline": true,
+    "supervisorFallback": true,
+    "applyComplexPromptOverrides": true,
+    "devtoolsAsyncVerify": true,
     "antiCollapseDecomposition": true,
     "decompositionMaxTokens": 8192,
     "enableDevToolsIntegration": true,
     "fullDelivery": {
       "enabled": true,
-      "maxComposeWaves": 4,
+      "maxComposeWaves": 3,
       "autoContinue": true,
-      "uiCheckpoint": true,
+      "uiCheckpoint": false,
       "minFencesPerTask": 2,
-      "minFencesAbsolute": 6
+      "minFencesAbsolute": 4,
+      "autonomousFinish": true,
+      "maxRepairWaves": 4,
+      "maxArenaRepairWaves": 1,
+      "maxGateRepairWaves": 1,
+      "autoInstallDependencies": true
     },
     "reasoningLayer": {
       "enabled": true,
@@ -100,7 +136,7 @@
       "showPipelineTimeline": true,
       "showLiveReasoning": true,
       "showHorseWaitAnimation": true,
-      "waitMessageRotateMs": 3500
+      "waitMessageRotateMs": 4800
     }
   },
   "fullAudit": {

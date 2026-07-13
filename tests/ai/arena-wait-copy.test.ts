@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import {
   getWaitMessage,
   getWaitMessagesForPhase,
@@ -8,25 +8,64 @@ import {
   activePhaseFromSteps,
   createWaitMessagePicker,
   formatWaitElapsed,
+  __testOnly,
 } from '../../ai/composer/arena-wait-copy';
 import type { MultiAgentPhase } from '../../ai/composer/chat-activity-types';
+
+function mockSessionStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    get length() {
+      return store.size;
+    },
+    clear() {
+      store.clear();
+    },
+    getItem(key: string) {
+      return store.get(key) ?? null;
+    },
+    key(index: number) {
+      return [...store.keys()][index] ?? null;
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+    setItem(key: string, value: string) {
+      store.set(key, value);
+    },
+  };
+}
 
 const ALL_PHASES: MultiAgentPhase[] = [
   'memory',
   'integrate',
   'context',
+  'modelOrch',
   'orchestrator',
   'decompose',
   'subagent',
   'merge',
   'supervisor',
   'compose',
+  'userSim',
+  'security',
+  'performance',
 ];
 
 describe('arena-wait-copy', () => {
-  it('each phase has at least two rotating messages', () => {
+  beforeEach(() => {
+    vi.stubGlobal('sessionStorage', mockSessionStorage());
+    sessionStorage.removeItem(__testOnly.SESSION_KEY);
+  });
+
+  afterEach(() => {
+    sessionStorage.removeItem(__testOnly.SESSION_KEY);
+    vi.unstubAllGlobals();
+  });
+
+  it('each phase has at least twelve rotating messages', () => {
     for (const phase of ALL_PHASES) {
-      expect(getWaitMessagesForPhase(phase).length).toBeGreaterThanOrEqual(2);
+      expect(getWaitMessagesForPhase(phase).length).toBeGreaterThanOrEqual(12);
     }
   });
 
@@ -39,7 +78,7 @@ describe('arena-wait-copy', () => {
   it('fallback when phase undefined', () => {
     const msg = getWaitMessage(undefined, 0);
     expect(msg.length).toBeGreaterThan(5);
-    expect(msg).toContain('CAVALLO');
+    expect(msg).toMatch(/CAVALLO|Pipeline|Procesez|Loading/i);
   });
 
   it('activePhaseFromSteps returns last active step', () => {
@@ -116,9 +155,9 @@ describe('arena-wait-copy', () => {
     expect(formatWaitElapsed(3)).toBe('3s · Pipeline');
   });
 
-  it('expanded phases have at least six messages', () => {
+  it('expanded phases have at least eighteen messages', () => {
     for (const phase of ['context', 'decompose', 'subagent', 'compose'] as const) {
-      expect(getWaitMessagesForPhase(phase).length).toBeGreaterThanOrEqual(6);
+      expect(getWaitMessagesForPhase(phase).length).toBeGreaterThanOrEqual(18);
     }
   });
 
@@ -132,9 +171,44 @@ describe('arena-wait-copy', () => {
   it('default picker exhausts a full unique bag before reshuffling', () => {
     const picker = createWaitMessagePicker();
     const seen = new Set<string>();
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < __testOnly.DEFAULT_MESSAGES.length; i++) {
       seen.add(picker.next());
     }
-    expect(seen.size).toBe(16);
+    expect(seen.size).toBe(__testOnly.DEFAULT_MESSAGES.length);
+  });
+
+  it('picker avoids sessionStorage recent messages when possible', () => {
+    const recent = getWaitMessagesForPhase('decompose').slice(0, 5);
+    __testOnly.writeSessionRecent(recent);
+
+    const picker = createWaitMessagePicker('decompose');
+    const firstFive = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      firstFive.add(picker.next());
+    }
+    for (const msg of recent) {
+      expect(firstFive.has(msg)).toBe(false);
+    }
+  });
+
+  it('picker trims session history when pool is nearly exhausted', () => {
+    const pool = getWaitMessagesForPhase('merge');
+    __testOnly.writeSessionRecent(pool.slice(0, pool.length - 2));
+
+    const picker = createWaitMessagePicker('merge');
+    const seen = new Set<string>();
+    for (let i = 0; i < 10; i++) {
+      seen.add(picker.next());
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(8);
+  });
+
+  it('buildShuffledBag respects exclude set', () => {
+    const pool = getWaitMessagesForPhase('context');
+    const exclude = new Set(pool.slice(0, 10));
+    const bag = __testOnly.buildShuffledBag(pool, exclude);
+    for (const msg of bag) {
+      expect(exclude.has(msg)).toBe(false);
+    }
   });
 });

@@ -77,7 +77,19 @@ export const CavalThemeProvider = ({
   children: React.ReactNode;
   defaultMode?: CavalThemeMode;
 }) => {
-  const [mode, setMode] = useState<CavalThemeMode>(defaultMode);
+  const readStoredMode = (): CavalThemeMode => {
+    try {
+      const raw = localStorage.getItem("caval-settings");
+      if (!raw) return defaultMode;
+      const parsed = JSON.parse(raw) as { state?: { app?: { theme?: string } } };
+      const theme = parsed?.state?.app?.theme;
+      return theme === "light" ? "light" : "dark";
+    } catch {
+      return defaultMode;
+    }
+  };
+
+  const [mode, setMode] = useState<CavalThemeMode>(readStoredMode);
   const theme = mode === "light" ? LIGHT_THEME : DARK_THEME;
 
   useEffect(() => {

@@ -1,9 +1,11 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import { applyHunkToContent } from '../shared/diff-utils';
+import { normalizeGithubRepoUrl, repoTargetPath } from './github-clone';
 
 // ──────────────────────────────────────────────
 //  Git IPC Handlers — CAVALLO Studio
@@ -499,6 +501,64 @@ export function registerGitHandlers() {
         return { ok: true };
       } catch (err: any) {
         return { ok: false, error: err.stderr || err.message };
+      }
+    }
+  );
+
+  // ── git:clone ─────────────────────────────
+  ipcMain.handle(
+    'git:clone',
+    async (
+      _e,
+      input: { url: string; parentDir?: string }
+    ): Promise<{ ok: boolean; path?: string; error?: string }> => {
+      const normalized = normalizeGithubRepoUrl(input.url);
+      if (!normalized) {
+        return { ok: false, error: 'URL GitHub invalid. Folosește owner/repo sau https://github.com/owner/repo' };
+      }
+
+      let parentDir = input.parentDir?.trim();
+      if (!parentDir) {
+        const win = BrowserWindow.getFocusedWindow();
+        const picked = win
+          ? await dialog.showOpenDialog(win, {
+              title: 'Alege folderul unde se clonează repo-ul',
+              properties: ['openDirectory', 'createDirectory'],
+            })
+          : await dialog.showOpenDialog({
+              title: 'Alege folderul unde se clonează repo-ul',
+              properties: ['openDirectory', 'createDirectory'],
+            });
+        if (picked.canceled || !picked.filePaths[0]) {
+          return { ok: false, error: 'Clone anulat' };
+        }
+        parentDir = picked.filePaths[0];
+      }
+
+      const target = repoTargetPath(parentDir, normalized.repo);
+      const resolvedParent = path.resolve(parentDir);
+      const resolvedTarget = path.resolve(target);
+      if (!resolvedTarget.startsWith(resolvedParent + path.sep) && resolvedTarget !== resolvedParent) {
+        return { ok: false, error: 'Cale destinație invalidă' };
+      }
+      if (fsSync.existsSync(resolvedTarget)) {
+        return { ok: false, error: `Folderul există deja: ${resolvedTarget}` };
+      }
+
+      try {
+        await execAsync('git --version');
+      } catch {
+        return { ok: false, error: 'Git nu este instalat sau nu e în PATH' };
+      }
+
+      try {
+        await execAsync(`git clone --depth 1 "${normalized.cloneUrl}" "${resolvedTarget}"`, {
+          maxBuffer: 1024 * 1024 * 20,
+        });
+        return { ok: true, path: resolvedTarget };
+      } catch (err: unknown) {
+        const e = err as { stderr?: string; message?: string };
+        return { ok: false, error: (e.stderr || e.message || 'git clone failed').trim() };
       }
     }
   );

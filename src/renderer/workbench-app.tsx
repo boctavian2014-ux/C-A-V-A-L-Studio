@@ -29,6 +29,22 @@ class WorkbenchErrorBoundary extends React.Component<
           fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
         }}>
           <h1 style={{ margin: "0 0 12px", fontSize: 18 }}>CAVALLO Studio — eroare UI</h1>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              marginBottom: 12,
+              padding: "8px 14px",
+              background: "#1a1d24",
+              color: "#f5f7fa",
+              border: "1px solid rgba(0,224,255,0.35)",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            Reîncarcă interfața
+          </button>
           <pre style={{
             whiteSpace: "pre-wrap",
             background: "#15171A",
@@ -51,6 +67,9 @@ class WorkbenchErrorBoundary extends React.Component<
 
 const rootElement = document.getElementById("root");
 if (rootElement) {
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[caval] Unhandled promise rejection:", event.reason);
+  });
   createRoot(rootElement).render(
     <WorkbenchErrorBoundary>
       <WorkbenchRoot />

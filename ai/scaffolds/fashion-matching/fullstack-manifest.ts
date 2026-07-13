@@ -303,6 +303,52 @@ export default function App() {
 `,
     },
     {
+      path: 'web/src/types.ts',
+      content: `export type { MatchItem, MatchResponse } from './api/matching';
+
+export interface ImageUpload {
+  file: File;
+  previewUrl: string;
+}
+
+export type MatchResult = import('./api/matching').MatchItem;
+
+export interface UploadResponse {
+  request_id: string;
+  matches: MatchResult[];
+}
+
+export interface Product {
+  item_id: string;
+  label: string;
+  image_url?: string | null;
+  brand?: string | null;
+  price?: number | null;
+}
+
+export interface Outfit {
+  id: string;
+  items: Product[];
+}
+
+export interface OutfitMatch {
+  score: number;
+  reasons: string[];
+}
+
+export interface MatchingRequest {
+  image_url: string;
+  top_k?: number;
+  threshold?: number;
+}
+
+export interface ApiError {
+  message: string;
+  code?: string;
+}
+`,
+    },
+    {
       path: 'web/src/api/matching.ts',
       content: `export type MatchItem = {
   item_id: string;

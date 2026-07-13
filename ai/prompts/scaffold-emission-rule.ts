@@ -6,10 +6,24 @@ import { FULL_DELIVERY_RULE } from './full-delivery-rule';
 
 export const SCAFFOLD_CONTINUE_MARKER = 'SCAFFOLD_CONTINUE';
 
+export const SCAFFOLD_FOLDER_ORDER_RULE = `
+FOLDER ORDER (emite în această ordine):
+1) package.json / configs
+2) types / schemas
+3) api / services
+4) components / hooks
+5) App / screens
+6) entry (main/index)
+7) tests + README
+Path-uri relative; un fence = un fișier; părinții înaintea copiilor.
+`.trim();
+
 export const SCAFFOLD_EMISSION_RULE = `
 ${SINGLE_PROJECT_FOCUS_RULE}
 
 ${FULL_DELIVERY_RULE}
+
+${SCAFFOLD_FOLDER_ORDER_RULE}
 
 SCAFFOLD EMISSION (obligatoriu în Code Mode):
 - După orice Reasoning/Plan, emite IMEDIAT fișiere ca \`\`\`lang:relative/path\`\`\` cu sursă COMPLETĂ.

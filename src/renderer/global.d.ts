@@ -84,6 +84,7 @@ interface CavalGitApi {
   init: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
   stash: (projectPath: string, message?: string) => Promise<{ ok: boolean; error?: string }>;
   stashPop: (projectPath: string) => Promise<{ ok: boolean; error?: string }>;
+  clone: (input: { url: string; parentDir?: string }) => Promise<{ ok: boolean; path?: string; error?: string }>;
 }
 
 interface EngFileInput {
@@ -140,6 +141,8 @@ interface CavalStreamChunk {
   status?: "active" | "done";
   label?: string;
   detail?: string;
+  multiAgentModel?: string;
+  multiAgentStepId?: string;
   goal?: string;
   approach?: string;
   modules?: string[];
@@ -150,11 +153,18 @@ interface CavalStreamChunk {
     pendingIssues: string[];
     devTools?: Record<string, unknown>;
     supervisor?: { approved: boolean; summary: string; issues: unknown[] };
+    deliveryBlocked?: boolean;
+    needsReview?: boolean;
+    verifyPending?: boolean;
   };
       composeText?: string;
       writtenFiles?: string[];
       pauseReason?: "ui-design";
   runId?: string;
+  deliveryBlocked?: boolean;
+  needsReview?: boolean;
+  verifyPending?: boolean;
+  completionGate?: { ok: boolean; issues: Array<{ code: string; message: string }> };
 }
 
 interface CavalChatPrepareResult {
@@ -363,8 +373,36 @@ interface CavalBridge {
     onChunk: (chunk: CavalStreamChunk) => void
   ) => () => void;
   abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
+  onPipelineVerifyStatus?: (
+    callback: (payload: {
+      runId: string;
+      streamId?: string;
+      workspaceRoot: string;
+      ok: boolean;
+      summary: string;
+      issues: Array<{ code: string; message: string }>;
+      verifyRan: boolean;
+    }) => void
+  ) => () => void;
+  getReasoningLayerConfig?: (workspaceRoot?: string) => Promise<{
+    ok: boolean;
+    config?: import('../../ai/composer/multi-agent/types').ReasoningLayerConfig;
+  }>;
   workspaceSessionReset?: () => Promise<{ ok: boolean }>;
   onWorkspaceSessionReset?: (callback: () => void) => () => void;
+  onRendererRecovered?: (
+    callback: (payload: { reason: string; recoveredAt: string }) => void
+  ) => () => void;
+  getRecentPipelineCompletion?: (workspaceRoot: string) => Promise<{
+    ok: boolean;
+    completion?: {
+      runId: string;
+      writtenFiles: string[];
+      composeText?: string;
+      pipelineRecapMeta?: unknown;
+      finishedAt: string;
+    } | null;
+  }>;
   pipelineResumeStream?: (
     input: {
       runId: string;
@@ -414,10 +452,38 @@ interface CavalBridge {
   }>;
   contextIndex?: () => Promise<{ ok: boolean; documentCount?: number; error?: string }>;
   contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: unknown[]; error?: string }>;
-  workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
+  workspaceOpen?: (
+    folderPath: string,
+    options?: { source?: 'folder' | 'clone' }
+  ) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
   workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+  workspace?: {
+    listRecent: () => Promise<{
+      ok: boolean;
+      entries?: Array<{
+        path: string;
+        name: string;
+        lastOpened: string;
+        source: 'folder' | 'clone';
+      }>;
+      error?: string;
+    }>;
+    removeRecent: (folderPath: string) => Promise<{
+      ok: boolean;
+      entries?: Array<{
+        path: string;
+        name: string;
+        lastOpened: string;
+        source: 'folder' | 'clone';
+      }>;
+      error?: string;
+    }>;
+  };
   getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
-  workspaceVerify?: (workspaceRoot: string) => Promise<{
+  workspaceVerify?: (
+    workspaceRoot: string,
+    options?: { autoInstall?: boolean; writtenFiles?: string[] }
+  ) => Promise<{
     ok: boolean;
     verify?: {
       ran: boolean;
@@ -501,6 +567,22 @@ interface CavalBridge {
     list: () => Promise<{ ok: boolean; extensions?: unknown[] }>;
     register: (manifest: { id: string; name: string; version: string }) => Promise<{ ok: boolean; error?: string }>;
     install: (input: { extensionId: string; baseUrl: string }) => Promise<{ ok: boolean; error?: string }>;
+  };
+  openvsx?: {
+    search: (query: string) => Promise<{ ok: boolean; extensions?: unknown[]; error?: string }>;
+    popular: () => Promise<{ ok: boolean; extensions?: unknown[]; error?: string }>;
+    install: (input: { namespace: string; name: string }) => Promise<{ ok: boolean; error?: string; extension?: unknown }>;
+  };
+  marketplace?: {
+    health: () => Promise<{ ok: boolean; url?: string }>;
+    search: (query: {
+      text?: string;
+      category?: string;
+      sortBy?: string;
+      limit?: number;
+    }) => Promise<unknown[]>;
+    autocomplete: (input: { q: string; mode?: string }) => Promise<string[]>;
+    categories: () => Promise<string[]>;
   };
   git: CavalGitApi;
   preload: CavalPreloadApi;

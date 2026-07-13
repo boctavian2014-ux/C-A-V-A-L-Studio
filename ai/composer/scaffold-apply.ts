@@ -6,6 +6,7 @@ import {
   repairScaffoldComposerExport,
   type ParsedScaffoldFile,
 } from './scaffold-parser';
+import { sortScaffoldFiles } from './scaffold-order';
 
 function joinWorkspace(root: string, relative: string): string {
   const sep = root.includes('\\') ? '\\' : '/';
@@ -29,7 +30,7 @@ export async function applyScaffoldToWorkspace(
   const written: string[] = [];
   const mkdirDone = new Set<string>();
 
-  for (const file of files) {
+  for (const file of sortScaffoldFiles(files)) {
     if (
       isBlockedScaffoldPath(file.path) ||
       isScaffoldFragment(file.content) ||

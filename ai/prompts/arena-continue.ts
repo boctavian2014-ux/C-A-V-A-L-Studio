@@ -23,3 +23,27 @@ export function buildArenaContinueMessage(scan: ConsistencyScanResult): string {
   const diagnostics = (lines.length ? lines.join('\n') : scan.summary).slice(0, 4000);
   return [ARENA_CONTINUE_USER_MESSAGE, '', '--- Diagnostics ---', diagnostics].join('\n');
 }
+
+export const GATE_REPAIR_MARKER = 'GATE_REPAIR';
+
+export const GATE_REPAIR_USER_MESSAGE = [
+  GATE_REPAIR_MARKER,
+  '',
+  'Gate verify failed (npm run typecheck/build). Fix ALL TypeScript errors automatically.',
+  '',
+  'Use canonical fashion-web modules: web/src/types.ts, web/src/api/matching.ts, MatchResults.tsx.',
+  'Do NOT create types/index.ts, web/src/api.ts, or MatchingResults.tsx.',
+  'Emit corrected files as complete ```lang:relative/path``` blocks with full source.',
+].join('\n');
+
+export function buildGateRepairMessage(verifyOutput: string, wave: number): string {
+  const diagnostics = verifyOutput.slice(0, 4000);
+  return [
+    GATE_REPAIR_USER_MESSAGE,
+    '',
+    `--- Gate repair wave ${wave} ---`,
+    '',
+    '--- Typecheck / verify output ---',
+    diagnostics,
+  ].join('\n');
+}

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAIStore, getModelDisplayLabel, isChatStopIntent, type ChatMessage } from './ai-store';
+import { useAIStore, getModelDisplayLabel, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
 import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
@@ -14,10 +14,12 @@ import { hashChatDraft } from './chat-prepare';
 import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning, sanitizeLiveReasoning } from './chat-display';
 import { MultiAgentTimeline } from './MultiAgentTimeline';
 import { resolveWaitPhase } from './arena-wait-copy';
-import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
+import { DEFAULT_REASONING_LAYER_CONFIG, type ReasoningLayerConfig } from './multi-agent/types';
 import { DEFAULT_ZERO_LATENCY_CONFIG } from '../../ai/composer/zero-latency/zl-config-shared';
 import { useArenaWaitMessage } from './use-arena-wait-message';
 import { checkModelReadiness } from '../models/model-readiness';
+import { workspaceFolderTitle } from './workspace-session';
+import { formatProjectCompletionWaitMessage } from './project-completion-announce';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -160,7 +162,22 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 
 function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   const globalStreaming = useAIStore((s) => s.isStreaming);
-  const cfg = DEFAULT_REASONING_LAYER_CONFIG;
+  const projectPath = useEditorStore((s) => s.projectPath);
+  const [cfg, setCfg] = useState<ReasoningLayerConfig>(DEFAULT_REASONING_LAYER_CONFIG);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await window.caval?.getReasoningLayerConfig?.(projectPath ?? undefined);
+      if (!cancelled && res?.ok && res.config) {
+        setCfg(res.config);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPath]);
+
   const messageStreaming = Boolean(message.isStreaming);
   const pipelineActive = Boolean(
     message.multiAgentSteps?.some((step) => step.status === 'active')
@@ -172,6 +189,21 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
     !message.recap &&
     !wasStopped &&
     (isStreaming || pipelineActive);
+  const projectTitle = workspaceFolderTitle(message.workspacePath ?? projectPath);
+  const fileCount = message.writtenFiles?.length ?? 0;
+  const needsReview = Boolean(
+    message.multiAgentStatus?.includes('NEEDS_REVIEW') ||
+      message.content?.includes('[NEEDS_REVIEW]')
+  );
+  const showCompletionHorse = Boolean(
+    cfg.showHorseWaitAnimation &&
+    message.recap &&
+    !isStreaming &&
+    (message.workspacePath == null || message.workspacePath === projectPath)
+  );
+  const completionMessage = showCompletionHorse
+    ? formatProjectCompletionWaitMessage(projectTitle, fileCount, needsReview)
+    : undefined;
   const waitPhase = resolveWaitPhase(message.multiAgentSteps, message.multiAgentStatus);
   const { message: waitMessage, statusLine: waitStatusLine, visible: waitVisible } =
     useArenaWaitMessage(waitPhase, showWait, cfg.waitMessageRotateMs, message.multiAgentStatus);
@@ -196,6 +228,9 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
           waitMessage={showWait ? waitMessage : undefined}
           waitStatusLine={showWait ? waitStatusLine : undefined}
           waitVisible={waitVisible}
+          completionMessage={completionMessage}
+          showCompletionHorse={showCompletionHorse}
+          completionNeedsReview={needsReview}
         />
       )}
       {isStreaming && (message.activitySteps?.length ?? 0) > 0 && (
@@ -492,71 +527,28 @@ function StreamingText({ content }: { content: string }) {
   );
 }
 
-function StrictReviewToggle({
-  enabled,
-  onChange,
-  disabled,
-}: {
-  enabled: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-}) {
+function MandatoryReviewBadge() {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      disabled={disabled}
-      title="Review strict: pornește Merge + Supervisor LLM înainte de Compose (mai lent, mai sigur)"
-      onClick={() => onChange(!enabled)}
+    <div
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 8,
         padding: '5px 10px',
         borderRadius: 8,
-        border: `1px solid ${enabled ? 'var(--caval-accent-ring)' : 'var(--caval-border)'}`,
-        background: enabled ? 'var(--caval-accent-glow)' : 'var(--caval-surface)',
-        color: enabled ? 'var(--caval-text)' : 'var(--caval-text-muted)',
+        border: '1px solid var(--caval-accent-ring)',
+        background: 'var(--caval-accent-glow)',
+        color: 'var(--caval-text)',
         fontSize: 11,
         fontWeight: 500,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.55 : 1,
         width: '100%',
-        textAlign: 'left',
       }}
+      title="Review obligatoriu: Merge + Supervisor + Test + Verify înainte de livrare ready-to-use"
     >
-      <span
-        aria-hidden
-        style={{
-          width: 28,
-          height: 16,
-          borderRadius: 999,
-          background: enabled ? 'var(--caval-accent)' : 'var(--caval-surface-raised)',
-          border: `1px solid ${enabled ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
-          position: 'relative',
-          flexShrink: 0,
-          transition: 'background 0.15s ease',
-        }}
-      >
-        <span
-          style={{
-            position: 'absolute',
-            top: 2,
-            left: enabled ? 14 : 2,
-            width: 10,
-            height: 10,
-            borderRadius: '50%',
-            background: enabled ? '#0E0E0F' : 'var(--caval-text-muted)',
-            transition: 'left 0.15s ease',
-          }}
-        />
-      </span>
-      <span>Review strict</span>
-      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>
-        {enabled ? 'Merge + Supervisor' : 'Fast pipeline'}
-      </span>
-    </button>
+      <span aria-hidden style={{ color: 'var(--caval-accent)' }}>●</span>
+      <span>Review obligatoriu (activ)</span>
+      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>Ready-to-use gate</span>
+    </div>
   );
 }
 
@@ -569,13 +561,12 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const {
     messages, isStreaming,
     sendMessage, stopStreaming, clearChat, loadModelLabels,
-    threads, activeThreadId, newThread, selectThread,
+    newThread,
     attachedFiles, addAttachments, removeAttachment,
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
-    agentMode, strictReview, setStrictReview, modelLabels, apiKeys,
+    agentMode, modelLabels, apiKeys,
     modeSwitchNotice, clearModeSwitchNotice,
-    deliveryPause, submitUiDeliveryPreferences,
     verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
     includeMode, setIncludeMode,
   } = useAIStore();
@@ -602,10 +593,11 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   const [input, setInput] = useState('');
   const [preloadHint, setPreloadHint] = useState('');
-  const [uiTheme, setUiTheme] = useState<'light' | 'dark'>('dark');
-  const [uiStyle, setUiStyle] = useState('modern');
-  const [uiNotes, setUiNotes] = useState('');
   const [readinessHint, setReadinessHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    ensurePipelineVerifyListener();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -916,28 +908,50 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </div>
       </div>
 
-      {/* Thread tabs */}
-      {threads.length > 1 && (
-        <div style={{ display: 'flex', gap: 4, padding: `4px ${PANEL_PAD_X}px`, borderBottom: `1px solid ${theme.colors.border}`, overflowX: 'auto', flexShrink: 0 }}>
-          {threads.slice(0, 5).map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => selectThread(t.id)}
-              style={{
-                padding: '2px 8px', fontSize: 10, borderRadius: 4, border: '1px solid',
-                borderColor: t.id === activeThreadId ? 'var(--caval-accent-ring)' : 'var(--caval-border)',
-                background: t.id === activeThreadId ? 'var(--caval-accent-glow)' : 'transparent',
-                color: t.id === activeThreadId ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-                cursor: 'pointer', whiteSpace: 'nowrap',
-              }}
-            >
-              {t.title.slice(0, 20)}
-            </button>
-          ))}
-          <button type="button" onClick={() => newThread()} title="Chat nou" style={{ padding: '2px 8px', fontSize: 10, border: '1px dashed var(--caval-border)', borderRadius: 4, background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer' }}>+</button>
-        </div>
-      )}
+      {/* Workspace bar — folder deschis + Chat nou (fără tab-uri vechi) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: `4px ${PANEL_PAD_X}px`,
+          borderBottom: `1px solid ${theme.colors.border}`,
+          flexShrink: 0,
+        }}
+      >
+        <span
+          title="Folder activ — istoricul vechi e păstrat local"
+          style={{
+            fontSize: 10,
+            color: 'var(--caval-text-muted)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          {workspaceFolderTitle(projectPath)}
+        </span>
+        <button
+          type="button"
+          onClick={() => newThread()}
+          title="Chat nou"
+          style={{
+            padding: '2px 10px',
+            fontSize: 10,
+            borderRadius: 4,
+            border: '1px solid var(--caval-accent-ring)',
+            background: 'var(--caval-accent-glow)',
+            color: 'var(--caval-accent)',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          Chat nou
+        </button>
+      </div>
 
       {/* ── Messages ───────────────────────── */}
       <div ref={messagesScrollRef} className="ai-messages-scroll caval-selectable" style={{
@@ -1043,13 +1057,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             </button>
           </div>
         )}
-        {isAgentic && (
-          <StrictReviewToggle
-            enabled={strictReview}
-            onChange={setStrictReview}
-            disabled={isStreaming}
-          />
-        )}
+        {isAgentic && <MandatoryReviewBadge />}
         {agentMode === 'code' && selectedModel.startsWith('caval-auto/') && (
           <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', lineHeight: 1.35 }}>
             Auto routează modelul — alege un model explicit pentru a testa puterea lui.
@@ -1122,83 +1130,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             hidden
             onChange={(e) => void handleFileInputChange(e)}
           />
-
-          {deliveryPause && (
-            <div
-              style={{
-                margin: '0 8px 8px',
-                padding: 10,
-                borderRadius: 8,
-                border: '1px solid var(--caval-accent)',
-                background: 'rgba(0,224,255,0.06)',
-                fontSize: 11,
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Design UI — preferințe</div>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-                <select
-                  value={uiStyle}
-                  onChange={(e) => setUiStyle(e.target.value)}
-                  style={{ fontSize: 11, padding: '2px 6px' }}
-                >
-                  <option value="modern">Modern</option>
-                  <option value="minimal">Minimal</option>
-                </select>
-                <select
-                  value={uiTheme}
-                  onChange={(e) => setUiTheme(e.target.value as 'light' | 'dark')}
-                  style={{ fontSize: 11, padding: '2px 6px' }}
-                >
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                </select>
-              </div>
-              <textarea
-                value={uiNotes}
-                onChange={(e) => setUiNotes(e.target.value)}
-                placeholder="Layout, culori, componente… (opțional)"
-                rows={2}
-                style={{
-                  width: '100%',
-                  fontSize: 11,
-                  marginBottom: 6,
-                  resize: 'vertical',
-                  background: 'var(--caval-bg)',
-                  color: 'var(--caval-text)',
-                  border: '1px solid var(--caval-border)',
-                  borderRadius: 4,
-                  padding: 6,
-                  boxSizing: 'border-box',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const prefs = [
-                    `Stil: ${uiStyle}`,
-                    `Temă: ${uiTheme}`,
-                    uiNotes.trim() ? `Note: ${uiNotes.trim()}` : '',
-                  ]
-                    .filter(Boolean)
-                    .join('\n');
-                  void submitUiDeliveryPreferences(prefs);
-                  setUiNotes('');
-                }}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  border: 'none',
-                  background: 'var(--caval-accent)',
-                  color: '#0E0E0F',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                Continuă delivery UI →
-              </button>
-            </div>
-          )}
 
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 6,

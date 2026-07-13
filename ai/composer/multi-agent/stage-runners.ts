@@ -10,7 +10,15 @@ import {
   IMPLEMENTER_AGENT_PROMPT,
   TESTER_AGENT_PROMPT,
   REFACTORER_AGENT_PROMPT,
+  MODEL_ORCHESTRATOR_AGENT_PROMPT,
 } from '../../prompts/multi-agent';
+import type { ArenaModelPlan } from './arena-model-orchestrator';
+import { buildArenaModelPlan } from './arena-model-orchestrator';
+import {
+  mergeArenaModelPlans,
+  parseModelOrchestratorOutput,
+} from './model-orchestrator-parser';
+import { getAutoBalancedModelCandidates } from '../../models/auto-router';
 import type { ArenaAgentRole } from './types';
 import { SCAFFOLD_EMISSION_RULE } from '../../prompts/scaffold-emission-rule';
 import { FULL_DELIVERY_RULE } from '../../prompts/full-delivery-rule';
@@ -38,6 +46,7 @@ export const SCAFFOLD_SYSTEM_ADDON = [
   '- Include tests, CI/CD configs (Dockerfile, .github/workflows), deployment notes when relevant.',
   '- Emit ALL modules from the plan — do not stop after the first batch of files.',
   '- Each sub-agent output must use ```lang:relative/path``` fences with FULL source.',
+  '- Emit files bottom-up: configs → types → api/services → components/hooks → App/screens → entry → tests/README.',
   FULL_DELIVERY_RULE,
   SCAFFOLD_EMISSION_RULE,
 ].join('\n');
@@ -99,6 +108,97 @@ async function runComplete(
   return { ok: true, text: result.text, model: result.resolvedModel };
 }
 
+export async function runModelOrchestrator(
+  primaryModel: ModelSelectionId,
+  userMessage: string,
+  taskHint: string,
+  rotator: ModelRotator,
+  workspaceRoot: string,
+  callbacks?: MultiAgentPipelineCallbacks
+): Promise<{ plan: ArenaModelPlan; orchestratorModel: string }> {
+  emitStage(callbacks, 'modelOrch', 'active', undefined, undefined, 'modelOrch');
+
+  const planningPool = getAutoBalancedModelCandidates('planning').slice(0, 8);
+  const codingPool = getAutoBalancedModelCandidates('kilocode').slice(0, 8);
+  const analysisPool = getAutoBalancedModelCandidates('analysis').slice(0, 6);
+  const allowed = new Set([
+    primaryModel,
+    ...planningPool,
+    ...codingPool,
+    ...analysisPool,
+    ...planningPool.map((id) => id.split('/').pop() ?? id),
+  ]);
+
+  const heuristic = buildArenaModelPlan(primaryModel, rotator);
+  const orchModel = (heuristic.roleModelMap.coordinator ?? planningPool[0] ?? primaryModel) as ModelSelectionId;
+
+  const user = [
+    `User request:\n${userMessage.slice(0, 2_000)}`,
+    taskHint ? `\nPipeline hint:\n${taskHint.slice(0, 800)}` : '',
+    '\n**Available models**',
+    `Planning: ${[...new Set(planningPool)].join(', ')}`,
+    `Coding: ${[...new Set(codingPool)].join(', ')}`,
+    `Analysis: ${[...new Set(analysisPool)].join(', ')}`,
+    `Primary (user selection): ${primaryModel}`,
+    '\nAssign distinct models per role when possible.',
+  ].join('\n');
+
+  const result = await runComplete(orchModel, MODEL_ORCHESTRATOR_AGENT_PROMPT, user, {
+    capability: 'planning',
+    intent: 'planning',
+    workspaceRoot,
+    requestId: 'ma-model-orch',
+    callbacks,
+    maxTokens: 1024,
+    timeoutMs: 60_000,
+  });
+
+  if (!result.ok) {
+    emitStage(callbacks, 'modelOrch', 'done', heuristic.summary, orchModel, 'modelOrch');
+    return { plan: heuristic, orchestratorModel: orchModel };
+  }
+
+  const llmMap = parseModelOrchestratorOutput(result.text, allowed, primaryModel);
+  const merged = mergeArenaModelPlans(heuristic, llmMap);
+
+  emitStage(callbacks, 'modelOrch', 'done', merged.summary, result.model, 'modelOrch');
+
+  for (const [role, mid] of Object.entries(merged.roleModelMap)) {
+    if (!mid) continue;
+    callbacks?.onMultiAgentStatus?.(
+      'modelOrch',
+      'done',
+      role,
+      mid,
+      `modelOrch-${role}`
+    );
+  }
+
+  return { plan: merged, orchestratorModel: result.model };
+}
+
+export function stageModelForRole(
+  role: 'architect' | 'coordinator' | 'implementer' | 'merge' | 'supervisor' | 'compose' | 'decompose',
+  arenaPlan: ArenaModelPlan,
+  fallback: ModelSelectionId
+): ModelSelectionId {
+  const map = arenaPlan.roleModelMap;
+  switch (role) {
+    case 'architect':
+    case 'decompose':
+      return (map.architect ?? map.coordinator ?? fallback) as ModelSelectionId;
+    case 'merge':
+    case 'supervisor':
+    case 'coordinator':
+      return (map.coordinator ?? map.architect ?? fallback) as ModelSelectionId;
+    case 'compose':
+    case 'implementer':
+      return (map.implementer ?? fallback) as ModelSelectionId;
+    default:
+      return fallback;
+  }
+}
+
 export async function runContextCapture(
   model: ModelSelectionId,
   userMessage: string,
@@ -151,7 +251,7 @@ export async function runDecomposition(
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks
 ): Promise<{ tasks: PipelineTask[]; raw: string } | { error: string }> {
-  emitStage(callbacks, 'decompose', 'active');
+  emitStage(callbacks, 'decompose', 'active', undefined, model, 'decompose');
   const result = await runComplete(model, DECOMPOSITION_AGENT_PROMPT, store.buildPromptFor('decompose'), {
     capability: 'planning',
     intent: 'planning',
@@ -163,7 +263,7 @@ export async function runDecomposition(
   });
 
   if (!result.ok) {
-    emitStage(callbacks, 'decompose', 'done', 'failed');
+    emitStage(callbacks, 'decompose', 'done', 'failed', model, 'decompose');
     return { error: result.error };
   }
 
@@ -197,7 +297,7 @@ export async function runDecomposition(
 
   store.setDecompositionRaw(raw);
   store.setTasks(tasks);
-  emitStage(callbacks, 'decompose', 'done', `${tasks.length} tasks`);
+  emitStage(callbacks, 'decompose', 'done', `${tasks.length} tasks`, result.model, 'decompose');
   return { tasks, raw };
 }
 
@@ -262,17 +362,28 @@ export async function runSubAgents(
       const task = queue.shift();
       if (!task) return;
 
+      const modelId = plan.taskDistributionMap[task.id] ?? rotator.next();
+      const stepId = `subagent-${task.id}`;
       emitStage(
         callbacks,
         'subagent',
         'active',
-        `${completed + 1}/${tasks.length} · ${task.module}`
+        `${completed + 1}/${tasks.length} · ${task.module}`,
+        modelId,
+        stepId
       );
 
-      const modelId = plan.taskDistributionMap[task.id] ?? rotator.next();
       const result = await runOneSubAgent(task, modelId, store, workspaceRoot, rotator, callbacks);
       results.push(result);
       completed += 1;
+      emitStage(
+        callbacks,
+        'subagent',
+        'done',
+        result.ok ? task.module : `${task.module} · failed`,
+        result.modelId,
+        stepId
+      );
     }
   };
 
@@ -281,7 +392,6 @@ export async function runSubAgents(
   );
   await Promise.all(workers);
 
-  emitStage(callbacks, 'subagent', 'done', `${results.filter((r) => r.ok).length}/${tasks.length} ok`);
   return results;
 }
 
@@ -291,7 +401,7 @@ export async function runMerge(
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks
 ): Promise<{ raw: string } | { error: string }> {
-  emitStage(callbacks, 'merge', 'active');
+  emitStage(callbacks, 'merge', 'active', undefined, model, 'merge');
   const result = await runComplete(model, MERGE_AGENT_PROMPT, store.buildPromptFor('merge'), {
     capability: 'planning',
     intent: 'planning',
@@ -301,12 +411,12 @@ export async function runMerge(
   });
 
   if (!result.ok) {
-    emitStage(callbacks, 'merge', 'done', 'failed');
+    emitStage(callbacks, 'merge', 'done', 'failed', model, 'merge');
     return { error: result.error };
   }
 
   store.setMergeRaw(result.text);
-  emitStage(callbacks, 'merge', 'done');
+  emitStage(callbacks, 'merge', 'done', undefined, result.model, 'merge');
   return { raw: result.text };
 }
 
@@ -316,7 +426,7 @@ export async function runSupervisor(
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks
 ): Promise<SupervisorResult | { error: string }> {
-  emitStage(callbacks, 'supervisor', 'active');
+  emitStage(callbacks, 'supervisor', 'active', undefined, model, 'supervisor');
   const result = await runComplete(model, SUPERVISOR_AGENT_PROMPT, store.buildPromptFor('supervisor'), {
     capability: 'debug',
     intent: 'debug',
@@ -326,13 +436,20 @@ export async function runSupervisor(
   });
 
   if (!result.ok) {
-    emitStage(callbacks, 'supervisor', 'done', 'failed');
+    emitStage(callbacks, 'supervisor', 'done', 'failed', model, 'supervisor');
     return { error: result.error };
   }
 
   const parsed = parseSupervisorOutput(result.text);
   store.setSupervisorIssues(parsed.issues.map((i) => `[${i.severity}] ${i.message}`));
-  emitStage(callbacks, 'supervisor', 'done', parsed.approved ? 'approved' : 'rejected');
+  emitStage(
+    callbacks,
+    'supervisor',
+    'done',
+    parsed.approved ? 'approved' : 'rejected',
+    result.model,
+    'supervisor'
+  );
   return parsed;
 }
 
@@ -348,7 +465,9 @@ export async function runFinalComposer(
     callbacks,
     'compose',
     'active',
-    opts?.repairMessage ? 'arena repair' : opts?.waveIndex ? `wave ${opts.waveIndex + 1}` : undefined
+    opts?.repairMessage ? 'arena repair' : opts?.waveIndex ? `wave ${opts.waveIndex + 1}` : undefined,
+    model,
+    opts?.waveIndex != null ? `compose-w${opts.waveIndex}` : 'compose'
   );
   const system = `${FINAL_COMPOSER_WITH_REASONING}\n${SCAFFOLD_SYSTEM_ADDON}`;
   let user = opts?.repairMessage ?? store.buildPromptFor('compose');
@@ -382,11 +501,11 @@ export async function runFinalComposer(
     }
   );
 
-  emitStage(callbacks, 'compose', 'done');
-
   if (!result.ok) {
+    emitStage(callbacks, 'compose', 'done', 'failed', model, 'compose');
     return { ok: false, error: result.error };
   }
+  emitStage(callbacks, 'compose', 'done', undefined, result.resolvedModel, 'compose');
   return {
     ok: true,
     text: result.text,
@@ -428,7 +547,9 @@ function emitStage(
   callbacks: MultiAgentPipelineCallbacks | undefined,
   stage: MultiAgentStageId,
   status: 'active' | 'done',
-  detail?: string
+  detail?: string,
+  modelId?: string,
+  stepId?: string
 ): void {
-  callbacks?.onMultiAgentStatus?.(stage, status, detail);
+  callbacks?.onMultiAgentStatus?.(stage, status, detail, modelId, stepId);
 }

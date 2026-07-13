@@ -67,7 +67,7 @@ export function loadReasoningConfig(workspaceRoot?: string) {
   return loadMultiAgentConfig(workspaceRoot).reasoningLayer;
 }
 
-/** UI "Review strict" forces full merge + supervisor (disables fastPipeline). */
+/** UI "Review strict" forces merge + supervisor (disables fastPipeline). */
 export function applyMultiAgentOverrides(
   config: MultiAgentConfig,
   overrides?: { strictReview?: boolean; message?: string }
@@ -76,7 +76,7 @@ export function applyMultiAgentOverrides(
   if (overrides?.strictReview) {
     next = { ...next, fastPipeline: false };
   }
-  if (overrides?.message) {
+  if (overrides?.message && next.applyComplexPromptOverrides !== false) {
     next = applyComplexPromptOverrides(next, overrides.message);
   }
   return next;
@@ -87,6 +87,7 @@ export function applyComplexPromptOverrides(
   config: MultiAgentConfig,
   message: string
 ): MultiAgentConfig {
+  if (config.applyComplexPromptOverrides === false) return config;
   const lines = message.split('\n').filter((l) => l.trim()).length;
   const isComplex =
     message.length > 600 ||
@@ -102,8 +103,9 @@ export function applyComplexPromptOverrides(
     decompositionMaxTokens: Math.max(config.decompositionMaxTokens, 8192),
     fullDelivery: {
       ...config.fullDelivery,
-      maxComposeWaves: Math.max(config.fullDelivery.maxComposeWaves, 4),
+      maxComposeWaves: Math.max(config.fullDelivery.maxComposeWaves, 6),
       minFencesAbsolute: Math.max(config.fullDelivery.minFencesAbsolute, 6),
+      maxRepairWaves: Math.max(config.fullDelivery.maxRepairWaves, 8),
     },
   };
 }

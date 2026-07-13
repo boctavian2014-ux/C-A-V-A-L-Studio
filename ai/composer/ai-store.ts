@@ -7,10 +7,12 @@ import {
 } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
+import { apiKeysToSecrets, secretsToApiKeys, BYOK_TO_SECRET } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
-import { resolveEffectiveMode } from '../modes/mode-router';
+import { resolveEffectiveMode, isCavalloModesTestRequest } from '../modes/mode-router';
+import { CAVALLO_MODES_TEST_FIXTURE } from '../prompts/cavallo-mode-protocol';
 import { normalizeAgentModeId } from '../modes/intent-detector';
 import {
   buildContextMessages,
@@ -21,18 +23,20 @@ import {
   shouldAttachProjectContext,
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
-import { isScaffoldContinueRequest } from '../prompts/scaffold-emission-rule';
+import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
 import { isBuildContinueRequest, buildScaffoldContinueMessage } from '../prompts/build-continue';
 import { isArenaContinueRequest } from '../prompts/arena-continue';
+import { isAgenticRepairRequest, buildAgenticRepairMessage } from '../prompts/agentic-repair';
 import {
   buildDeliveryContinueMessage,
   isDeliveryContinueRequest,
 } from '../prompts/full-delivery-rule';
 import {
   canAutoContinueDelivery,
+  canAutoContinueRepair,
   isDeliveryBlocked,
 } from './delivery-orchestrator';
-import { DEFAULT_FULL_DELIVERY_CONFIG } from './multi-agent/types';
+import { DEFAULT_FULL_DELIVERY_CONFIG, type FullDeliveryConfig } from './multi-agent/types';
 import {
   DEFAULT_SESSION_FOCUS,
   isStaleWorkspace,
@@ -83,9 +87,17 @@ import { loadBuildMemoryRecord, persistLastBuild, buildMemoryHint } from './buil
 import {
   buildEarlyArenaMessage,
   buildFinalRecap,
+  briefFromContext,
   type ReasoningBrief,
 } from './reasoning-brief';
+import {
+  buildProjectCompletionRecap,
+  buildProjectCompletionToast,
+  findPipelineVerifyTargetMessage,
+} from './project-completion-announce';
+import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import type { PipelineRecapMeta } from './multi-agent/types';
+import { showWorkbenchToast } from '../../src/renderer/commands/workbench-toast';
 
 export interface ChatAttachment {
   id: string;
@@ -112,6 +124,9 @@ export interface ChatMessage {
   multiAgentSteps?: MultiAgentStepRecord[];
   reasoningBrief?: ReasoningBrief;
   recap?: string;
+  workspacePath?: string;
+  pipelineRunId?: string;
+  streamId?: string;
 }
 
 export interface ChatPrepareState {
@@ -143,6 +158,57 @@ export interface ChatThread {
   createdAt: number;
   updatedAt: number;
   workspacePath?: string | null;
+  /** Hidden from Arena chat bar; messages retained in localStorage. */
+  archived?: boolean;
+}
+
+/** Mark one thread archived; optionally persist current messages into it. */
+export function archiveThreadInList(
+  threads: ChatThread[],
+  threadId: string,
+  messages?: ChatMessage[]
+): ChatThread[] {
+  return threads.map((t) =>
+    t.id === threadId
+      ? { ...t, archived: true, messages: messages ?? t.messages, updatedAt: Date.now() }
+      : t
+  );
+}
+
+/** Archive non-archived threads that do not belong to the given workspace. */
+export function archiveThreadsForWorkspaceSwitch(
+  threads: ChatThread[],
+  workspacePath: string | null,
+  activeThreadId: string,
+  activeMessages: ChatMessage[]
+): ChatThread[] {
+  return threads.map((t) => {
+    const withMessages = t.id === activeThreadId ? { ...t, messages: activeMessages } : t;
+    if (withMessages.archived) return withMessages;
+    if (withMessages.workspacePath !== workspacePath) {
+      return { ...withMessages, archived: true, updatedAt: Date.now() };
+    }
+    return withMessages;
+  });
+}
+
+/** Non-archived thread for workspace (at most one visible). */
+export function visibleThreadForWorkspace(
+  threads: ChatThread[],
+  workspacePath: string | null
+): ChatThread | undefined {
+  return threads.find((t) => !t.archived && t.workspacePath === workspacePath);
+}
+
+/** On app rehydrate: only the active thread stays visible; rest archived. */
+export function migrateThreadsOnRehydrate(
+  threads: ChatThread[],
+  activeThreadId: string
+): ChatThread[] {
+  return threads.map((t) => ({
+    ...t,
+    archived: t.id !== activeThreadId,
+  }));
 }
 
 type IncludeMode = 'file' | 'project' | 'selection';
@@ -171,6 +237,17 @@ interface CavalWindow {
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
     abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
+    onPipelineVerifyStatus?: (
+      callback: (payload: {
+        runId: string;
+        streamId?: string;
+        workspaceRoot: string;
+        ok: boolean;
+        summary: string;
+        issues: Array<{ code: string; message: string }>;
+        verifyRan: boolean;
+      }) => void
+    ) => () => void;
     workspaceSessionReset?: () => Promise<{ ok: boolean }>;
     onWorkspaceSessionReset?: (callback: () => void) => () => void;
     pipelineResume?: (input: {
@@ -429,9 +506,6 @@ interface AIStore {
   runWorkspaceVerifyAndReport: () => Promise<void>;
   runBuildAndReport: () => Promise<void>;
   verifyInFlight: 'none' | 'tests' | 'build';
-
-  deliveryPause: { runId: string; streamId: string } | null;
-  submitUiDeliveryPreferences: (prefs: string) => Promise<void>;
 }
 
 function generateId(): string {
@@ -527,14 +601,57 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
   }
 }
 
-const persistApiKeys = async (apiKeys: ApiKeys): Promise<void> => {
-  await getCaval()?.secretsSet?.(apiKeys as Record<string, string>);
+const persistApiKeys = async (apiKeys: ApiKeys, extraPatch?: Record<string, string>): Promise<void> => {
+  const patch = { ...apiKeysToSecrets(apiKeys), ...extraPatch };
+  await getCaval()?.secretsSet?.(patch);
 };
 
 const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
   const result = await getCaval()?.secretsGet?.();
-  return (result?.secrets ?? {}) as ApiKeys;
+  return secretsToApiKeys(result?.secrets ?? {});
 };
+
+/** Load persisted API keys from disk into the AI store (call on app mount). */
+export async function hydrateApiKeysFromSecrets(): Promise<void> {
+  const apiKeys = await loadApiKeysFromSecrets();
+  useAIStore.setState({ apiKeys });
+}
+
+let pipelineVerifyUnsub: (() => void) | null = null;
+
+/** Subscribe once to background pipeline verify results (agentic speed profile). */
+export function ensurePipelineVerifyListener(): void {
+  if (pipelineVerifyUnsub) return;
+  const unsub = getCaval()?.onPipelineVerifyStatus?.((payload) => {
+    const state = useAIStore.getState();
+    const currentPath = useEditorStore.getState().projectPath;
+    const target = findPipelineVerifyTargetMessage(
+      state.messages,
+      payload,
+      currentPath
+    );
+    if (!target) return;
+    const suffix = payload.ok
+      ? `\n\n✓ Verify: ${payload.summary}`
+      : `\n\n⚠️ [NEEDS_REVIEW] Verify: ${payload.summary}${
+          payload.issues.length
+            ? `\n${payload.issues.slice(0, 4).map((i) => `- ${i.message}`).join('\n')}`
+            : ''
+        }`;
+    useAIStore.setState({
+      messages: state.messages.map((m) =>
+        m.id === target.id
+          ? {
+              ...m,
+              content: `${m.content ?? ''}${suffix}`.trim(),
+              multiAgentStatus: payload.ok ? 'Verify OK' : 'Verify failed',
+            }
+          : m
+      ),
+    });
+  });
+  if (unsub) pipelineVerifyUnsub = unsub;
+}
 
 let abortController: AbortController | null = null;
 let streamCleanup: (() => void) | null = null;
@@ -545,9 +662,9 @@ let userStoppedStream = false;
 let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
 let deliveryWaveIndex = 0;
+let agenticRepairWave = 0;
 let buildRepairWave = 0;
 const MAX_BUILD_REPAIR_WAVES = 2;
-let resumeAfterUiPrefs: { runId: string; uiPreferences: string } | null = null;
 
 const initialThread = createThread();
 
@@ -560,7 +677,7 @@ export const useAIStore = create<AIStore>()(
       modelLabels: {},
       activeResolvedModel: null,
       includeMode: 'project',
-      strictReview: false,
+      strictReview: true,
       modeSwitchNotice: null,
       attachedFiles: [],
       activeThreadId: initialThread.id,
@@ -571,7 +688,6 @@ export const useAIStore = create<AIStore>()(
       prepareInFlight: false,
       pendingChatDraft: null,
       pendingAutoSend: false,
-      deliveryPause: null,
       verifyInFlight: 'none' as const,
 
       setModel: (id) => {
@@ -635,7 +751,10 @@ export const useAIStore = create<AIStore>()(
       setApiKey: (provider, key) => {
         set((s) => {
           const apiKeys = { ...s.apiKeys, [provider]: key };
-          void persistApiKeys(apiKeys);
+          const patch: Record<string, string> = {};
+          const secretKey = BYOK_TO_SECRET[provider as keyof typeof BYOK_TO_SECRET];
+          if (secretKey && !key.trim()) patch[secretKey] = '';
+          void persistApiKeys(apiKeys, patch);
           return { apiKeys };
         });
       },
@@ -667,15 +786,24 @@ export const useAIStore = create<AIStore>()(
 
       newThread: (title?: string) => {
         const workspacePath = useEditorStore.getState().projectPath;
-        const thread = createThread(
-          title ?? workspaceFolderTitle(workspacePath),
-          workspacePath
-        );
-        set((s) => ({
-          threads: [thread, ...s.threads],
-          activeThreadId: thread.id,
-          messages: [],
-        }));
+        const { activeThreadId, messages } = get();
+        set((s) => {
+          let threads = archiveThreadInList(s.threads, activeThreadId, messages);
+          threads = threads.map((t) =>
+            !t.archived && t.workspacePath === workspacePath && t.id !== activeThreadId
+              ? { ...t, archived: true, updatedAt: Date.now() }
+              : t
+          );
+          const thread = createThread(
+            title ?? workspaceFolderTitle(workspacePath),
+            workspacePath
+          );
+          return {
+            threads: [thread, ...threads],
+            activeThreadId: thread.id,
+            messages: [],
+          };
+        });
       },
 
       onWorkspaceChanged: (nextPath) => {
@@ -683,7 +811,10 @@ export const useAIStore = create<AIStore>()(
 
         const active = get().threads.find((t) => t.id === get().activeThreadId);
         const alreadyOnWorkspace =
-          active?.workspacePath === nextPath && !get().isStreaming && !get().prepareInFlight;
+          active?.workspacePath === nextPath &&
+          !active?.archived &&
+          !get().isStreaming &&
+          !get().prepareInFlight;
         if (alreadyOnWorkspace) return;
 
         void getCaval()?.workspaceSessionReset?.();
@@ -692,14 +823,44 @@ export const useAIStore = create<AIStore>()(
         set({ pendingChatDraft: null, pendingAutoSend: false, attachedFiles: [] });
         useEditorStore.getState().closeAiPreview();
 
-        if (DEFAULT_SESSION_FOCUS.newThreadOnWorkspaceChange) {
+        set((s) => {
+          let threads = archiveThreadsForWorkspaceSwitch(
+            s.threads,
+            nextPath,
+            s.activeThreadId,
+            s.messages
+          );
+
+          if (DEFAULT_SESSION_FOCUS.newThreadOnWorkspaceChange) {
+            threads = threads.map((t) =>
+              !t.archived && t.workspacePath === nextPath
+                ? { ...t, archived: true, updatedAt: Date.now() }
+                : t
+            );
+            const thread = createThread(workspaceFolderTitle(nextPath), nextPath);
+            return {
+              threads: [thread, ...threads],
+              activeThreadId: thread.id,
+              messages: [],
+            };
+          }
+
+          const existing = visibleThreadForWorkspace(threads, nextPath);
+          if (existing) {
+            return {
+              threads,
+              activeThreadId: existing.id,
+              messages: existing.messages,
+            };
+          }
+
           const thread = createThread(workspaceFolderTitle(nextPath), nextPath);
-          set((s) => ({
-            threads: [thread, ...s.threads],
+          return {
+            threads: [thread, ...threads],
             activeThreadId: thread.id,
             messages: [],
-          }));
-        }
+          };
+        });
       },
 
       selectThread: (id) => {
@@ -781,12 +942,13 @@ export const useAIStore = create<AIStore>()(
           !isDeliveryContinueRequest(userText) &&
           !isScaffoldContinueRequest(userText) &&
           !isBuildContinueRequest(userText) &&
-          !isArenaContinueRequest(userText)
+          !isArenaContinueRequest(userText) &&
+          !isAgenticRepairRequest(userText)
         ) {
           deliveryWaveIndex = 0;
+          agenticRepairWave = 0;
           buildRepairWave = 0;
         }
-        set({ deliveryPause: null });
 
         const editorState = useEditorStore.getState();
         const boundWorkspace = editorState.projectPath;
@@ -890,6 +1052,8 @@ export const useAIStore = create<AIStore>()(
           timestamp: Date.now(),
           model: selectedModel,
           isStreaming: true,
+          workspacePath: boundWorkspace ?? undefined,
+          streamId: pendingStreamId ?? undefined,
           multiAgentStatus: isAgenticPipelineMode(agentMode) ? 'Memory…' : undefined,
           multiAgentSteps: isAgenticPipelineMode(agentMode)
               ? [{ phase: 'memory', status: 'active', detail: 'init', at: Date.now() }]
@@ -907,6 +1071,33 @@ export const useAIStore = create<AIStore>()(
         set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
 
         try {
+        if (isCavalloModesTestRequest(userText) && !cavalloCfg?.modesTestUseLlm) {
+          set((s) => {
+            const updated = s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: CAVALLO_MODES_TEST_FIXTURE,
+                    isStreaming: false,
+                    resolvedModel: 'cavallo-modes-test',
+                    activitySteps: markAllActivityDone(
+                      m.activitySteps ?? createInitialActivitySteps()
+                    ),
+                  }
+                : m
+            );
+            const updatedThreads = s.threads.map((t) =>
+              t.id === activeThreadId
+                ? { ...t, messages: updated, updatedAt: Date.now() }
+                : t
+            );
+            return { messages: updated, threads: updatedThreads, isStreaming: false };
+          });
+          sendAbortController?.abort();
+          sendAbortController = null;
+          return;
+        }
+
         const caval = (window as unknown as CavalWindow).caval;
 
         const mentionPaths = [
@@ -1025,6 +1216,7 @@ export const useAIStore = create<AIStore>()(
         let capturedRecapMeta: PipelineRecapMeta | undefined;
         let capturedComposeText = '';
         let pipelineWrittenFiles: string[] = [];
+        let composePhaseActive = false;
 
         const isSessionStale = () =>
           isStaleWorkspace(boundWorkspace, useEditorStore.getState().projectPath);
@@ -1036,12 +1228,17 @@ export const useAIStore = create<AIStore>()(
           useEditorStore.getState().updateAiPreview(live.path, live.content);
         };
 
-        const openWrittenFile = (relativePath: string) => {
+        const openWrittenFile = async (relativePath: string): Promise<boolean> => {
           const projectPath = useEditorStore.getState().projectPath;
-          if (!projectPath) return;
+          if (!projectPath) return false;
           const sep = projectPath.includes('\\') ? '\\' : '/';
           const abs = `${projectPath}${sep}${relativePath.replace(/\//g, sep)}`;
-          void useEditorStore.getState().openFile(abs);
+          try {
+            await useEditorStore.getState().openFile(abs);
+            return true;
+          } catch {
+            return false;
+          }
         };
 
         const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
@@ -1083,9 +1280,6 @@ export const useAIStore = create<AIStore>()(
             ...extra,
           });
           set({ isStreaming: false });
-          if (!extra?.error) {
-            document.dispatchEvent(new CustomEvent('caval:ai-generation-complete'));
-          }
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
@@ -1094,6 +1288,7 @@ export const useAIStore = create<AIStore>()(
           if (skipScaffold || blockOnDiff) return;
 
           void (async () => {
+            try {
             if (isSessionStale()) {
               useEditorStore.getState().closeAiPreview();
               return;
@@ -1126,6 +1321,8 @@ export const useAIStore = create<AIStore>()(
 
             const recapText = msgForParse?.recap ?? capturedRecapMeta?.pendingIssues?.join(' ');
             const gate = capturedRecapMeta?.completionGate;
+            const fullDelivery: FullDeliveryConfig =
+              capturedRecapMeta?.fullDelivery ?? DEFAULT_FULL_DELIVERY_CONFIG;
             const incomplete = isDeliveryBlocked(
               {
                 writtenFiles,
@@ -1136,30 +1333,58 @@ export const useAIStore = create<AIStore>()(
               gate
             );
 
-            if (
-              isAgenticPipelineMode(agentMode) &&
-              incomplete &&
-              canAutoContinueDelivery(deliveryWaveIndex, DEFAULT_FULL_DELIVERY_CONFIG) &&
-              !isSessionStale()
-            ) {
-              deliveryWaveIndex += 1;
-              const gateMessage = gate?.suggestedContinueMessage?.trim();
-              const planContext =
-                gateMessage ||
-                reasoningWithFences ||
-                msgForParse?.reasoning ||
-                (capturedReasoningBrief
-                  ? [capturedReasoningBrief.goal, capturedReasoningBrief.approach].join('\n')
-                  : '');
+            const planContext =
+              gate?.suggestedContinueMessage?.trim() ||
+              reasoningWithFences ||
+              msgForParse?.reasoning ||
+              (capturedReasoningBrief
+                ? [capturedReasoningBrief.goal, capturedReasoningBrief.approach].join('\n')
+                : '');
+
+            const tryAgenticAutonomousRepair = (label: string, verifyOutput?: string): boolean => {
+              if (!isAgenticPipelineMode(agentMode) || isSessionStale()) return false;
+              if (!canAutoContinueRepair(agenticRepairWave, fullDelivery)) return false;
+              agenticRepairWave += 1;
               updateAssistant({
                 error: undefined,
-                content: `Continuă delivery (${deliveryWaveIndex}/${DEFAULT_FULL_DELIVERY_CONFIG.maxComposeWaves})…`,
-                multiAgentStatus: 'Delivery…',
+                content: `${label} (${agenticRepairWave}/${fullDelivery.maxRepairWaves})…`,
+                multiAgentStatus: 'Repair…',
               });
               void get().sendMessage(
-                buildDeliveryContinueMessage(planContext, deliveryWaveIndex - 1)
+                buildAgenticRepairMessage({
+                  wave: agenticRepairWave - 1,
+                  gate,
+                  verifyOutput,
+                  planContext,
+                })
               );
-              return;
+              return true;
+            };
+
+            if (isAgenticPipelineMode(agentMode) && incomplete) {
+              if (tryAgenticAutonomousRepair('Autonomous repair')) return;
+              if (
+                canAutoContinueDelivery(deliveryWaveIndex, fullDelivery) &&
+                !isSessionStale()
+              ) {
+                deliveryWaveIndex += 1;
+                updateAssistant({
+                  error: undefined,
+                  content: `Continuă delivery (${deliveryWaveIndex}/${fullDelivery.maxComposeWaves})…`,
+                  multiAgentStatus: 'Delivery…',
+                });
+                void get().sendMessage(
+                  buildDeliveryContinueMessage(planContext, deliveryWaveIndex - 1)
+                );
+                return;
+              }
+              if (gate && !gate.ok) {
+                updateAssistant({
+                  error: gate.issues.map((i) => `[${i.code}] ${i.message}`).join('\n').slice(0, 800),
+                  content: `Autonomie epuizată (${fullDelivery.maxRepairWaves} repair waves). Issues rămase:`,
+                });
+                return;
+              }
             }
 
             if (writtenFiles.length === 0) {
@@ -1167,27 +1392,45 @@ export const useAIStore = create<AIStore>()(
               const hadReasoningPlan = Boolean(
                 reasoningWithFences || msgForParse?.reasoning?.trim() || capturedReasoningBrief
               );
+              if (
+                isAgenticPipelineMode(agentMode) &&
+                hadReasoningPlan &&
+                fullDelivery.autonomousFinish &&
+                canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
+                !isSessionStale()
+              ) {
+                agenticRepairWave += 1;
+                updateAssistant({
+                  content: `Emit fișiere (${agenticRepairWave}/${fullDelivery.maxRepairWaves})…`,
+                  multiAgentStatus: 'Scaffold…',
+                });
+                void get().sendMessage(buildScaffoldContinueUserMessage(planContext));
+                return;
+              }
               updateAssistant({
                 error: hadReasoningPlan
-                  ? 'AI a planificat fără fișiere valide (```lang:path```). Trimite SCAFFOLD_CONTINUE sau reformulează promptul.'
+                  ? 'AI a planificat fără fișiere valide (```lang:path```). Reformulează promptul sau deschide un folder.'
                   : 'Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.',
               });
               return;
             }
-            useEditorStore.getState().closeAiPreview();
-            openWrittenFile(writtenFiles[writtenFiles.length - 1]!);
+            const lastFile = writtenFiles[writtenFiles.length - 1]!;
+            const opened = await openWrittenFile(lastFile);
+            if (opened) {
+              useEditorStore.getState().closeAiPreview();
+            }
 
             if (buildMode) {
               const { runCavaloConsistencyScan } = await import('./consistency-engine');
               const scan = await runCavaloConsistencyScan({
                 projectPath,
                 writtenFiles,
-                readFileContent: async (abs) => {
+                readFileContent: async (abs: string) => {
                   const res = await window.caval?.fs?.readFile?.(abs);
                   return res?.ok && res.content != null ? res.content : null;
                 },
                 workspaceVerify: window.caval?.workspaceVerify
-                  ? (root) => window.caval!.workspaceVerify!(root)
+                  ? (root: string) => window.caval!.workspaceVerify!(root)
                   : undefined,
               });
 
@@ -1227,14 +1470,19 @@ export const useAIStore = create<AIStore>()(
             }
 
             let devToolsForRecap = capturedRecapMeta?.devTools;
+            const fullDeliveryRecap: FullDeliveryConfig =
+              capturedRecapMeta?.fullDelivery ?? DEFAULT_FULL_DELIVERY_CONFIG;
             if (!devToolsForRecap?.verify?.ran && window.caval?.workspaceVerify) {
-              const verifyRes = await window.caval.workspaceVerify(projectPath);
+              const verifyRes = await window.caval.workspaceVerify(projectPath, {
+                autoInstall: fullDeliveryRecap.autoInstallDependencies,
+                writtenFiles,
+              });
               if (verifyRes.ok && verifyRes.verify) {
                 devToolsForRecap = { ...devToolsForRecap, verify: verifyRes.verify };
               }
             }
 
-            const verifyFailed = devToolsForRecap?.verify?.commands?.find((c) => !c.ok);
+            let verifyFailed = devToolsForRecap?.verify?.commands?.find((c) => !c.ok);
             const recapPatch: Partial<ChatMessage> = { writtenFiles };
             if (verifyFailed) {
               recapPatch.error = `Verificare eșuată: ${verifyFailed.command}\n${verifyFailed.output.slice(0, 500)}`;
@@ -1242,7 +1490,38 @@ export const useAIStore = create<AIStore>()(
               recapPatch.content = `✓ Verificare: ${devToolsForRecap.verify.summary}`;
             }
 
-            if (isAgenticPipelineMode(agentMode) && capturedReasoningBrief) {
+            if (isAgenticPipelineMode(agentMode) && DEFAULT_REASONING_LAYER_CONFIG.showFinalRecap) {
+              const projectTitle = workspaceFolderTitle(projectPath);
+              const needsReview = Boolean(capturedRecapMeta?.needsReview);
+              const verifyPending = Boolean(capturedRecapMeta?.verifyPending);
+              const brief = capturedReasoningBrief ?? briefFromContext(userText);
+              const recap = buildProjectCompletionRecap({
+                projectTitle,
+                writtenFiles,
+                userMessage: userText,
+                brief,
+                recapMeta: capturedRecapMeta,
+                needsReview,
+                verifyPending,
+              });
+              recapPatch.recap = recap;
+              recapPatch.content = formatArenaReasoning(brief, recap, false);
+              recapPatch.multiAgentStatus = `Gata · ${projectTitle}`;
+              if (verifyFailed) {
+                recapPatch.error = `Verificare eșuată: ${verifyFailed.command}\n${verifyFailed.output.slice(0, 500)}`;
+              }
+              if (projectPath === boundWorkspace) {
+                showWorkbenchToast(
+                  buildProjectCompletionToast({
+                    projectTitle,
+                    writtenFiles,
+                    needsReview,
+                    verifyPending,
+                  }),
+                  6000
+                );
+              }
+            } else if (isAgenticPipelineMode(agentMode) && capturedReasoningBrief) {
               const recap = buildFinalRecap({
                 brief: capturedReasoningBrief,
                 writtenFiles,
@@ -1259,6 +1538,29 @@ export const useAIStore = create<AIStore>()(
               }
             }
             updateAssistant(recapPatch);
+
+            if (
+              isAgenticPipelineMode(agentMode) &&
+              verifyFailed &&
+              fullDeliveryRecap.autonomousFinish &&
+              !isSessionStale()
+            ) {
+              const verifyOutput = `${verifyFailed.command}\n${verifyFailed.output}`;
+              if (
+                tryAgenticAutonomousRepair(
+                  'Verify repair',
+                  verifyOutput
+                )
+              ) {
+                return;
+              }
+            }
+            } catch (deliveryErr) {
+              const msg =
+                deliveryErr instanceof Error ? deliveryErr.message : String(deliveryErr);
+              updateAssistant({ error: `Delivery eșuat: ${msg}` });
+              console.error('[caval] finish delivery error:', deliveryErr);
+            }
           })();
         };
 
@@ -1302,21 +1604,6 @@ export const useAIStore = create<AIStore>()(
 
         const handleStreamChunk = (chunk: CavalStreamChunk) => {
           if (userStoppedStream) return;
-          if (chunk.type === 'delivery-pause' && chunk.runId) {
-            updateAssistant({
-              content:
-                'Backend finalizat. Specifică preferințele UI (stil, temă, layout) în panoul de mai jos.',
-              isStreaming: false,
-              multiAgentStatus: 'UI checkpoint',
-            });
-            set({
-              isStreaming: false,
-              deliveryPause: { runId: chunk.runId, streamId: chunk.streamId },
-            });
-            streamCleanup?.();
-            streamCleanup = null;
-            return;
-          }
           if (isSessionStale()) {
             if (chunk.type === 'done' || chunk.type === 'error') {
               finish('Workspace schimbat — stream oprit.', { error: 'workspace-changed' });
@@ -1341,9 +1628,14 @@ export const useAIStore = create<AIStore>()(
               prevMsg?.multiAgentSteps,
               phase,
               chunkStatus,
-              chunk.detail
+              chunk.detail,
+              chunk.multiAgentModel,
+              chunk.multiAgentStepId
             );
             updateAssistant({ multiAgentStatus: label, multiAgentSteps });
+            if (phase === 'compose') {
+              composePhaseActive = chunkStatus === 'active';
+            }
             if (isAgenticPipelineMode(agentMode) && !gotFirstDelta) {
               const content = capturedReasoningBrief
                 ? formatArenaReasoning(capturedReasoningBrief, undefined, true)
@@ -1372,7 +1664,7 @@ export const useAIStore = create<AIStore>()(
               chunk.toolDetail?.match(/"path"\s*:\s*"([^"]+)"/)?.[1];
             if (relPath) {
               toolWrittenPaths.push(relPath);
-              openWrittenFile(relPath);
+              void openWrittenFile(relPath);
               void useEditorStore.getState().refreshTree();
             }
           }
@@ -1384,6 +1676,10 @@ export const useAIStore = create<AIStore>()(
             }
             rawStreamBuffer += chunk.delta;
             activeStreamBuffer = rawStreamBuffer;
+            if (isAgenticPipelineMode(agentMode) && composePhaseActive) {
+              updateAssistant({ multiAgentStatus: 'Compose…' });
+              return;
+            }
             syncLiveEditorPreview(rawStreamBuffer);
             updateAssistant({
               content: isAgenticPipelineMode(agentMode)
@@ -1402,6 +1698,9 @@ export const useAIStore = create<AIStore>()(
           if (chunk.type === 'done') {
             const resolved = chunk.model ?? get().messages.find((m) => m.id === assistantMsgId)?.resolvedModel;
             if (resolved) set({ activeResolvedModel: resolved });
+            if (chunk.runId) {
+              updateAssistant({ pipelineRunId: chunk.runId });
+            }
             if (chunk.reasoningBrief) capturedReasoningBrief = chunk.reasoningBrief;
             if (chunk.pipelineRecapMeta) {
               capturedRecapMeta = {
@@ -1412,6 +1711,15 @@ export const useAIStore = create<AIStore>()(
                 deliveryBlocked:
                   (chunk as { deliveryBlocked?: boolean }).deliveryBlocked ??
                   (chunk.pipelineRecapMeta as PipelineRecapMeta).deliveryBlocked,
+                needsReview:
+                  (chunk as { needsReview?: boolean }).needsReview ??
+                  (chunk.pipelineRecapMeta as PipelineRecapMeta).needsReview,
+                verifyPending:
+                  (chunk as { verifyPending?: boolean }).verifyPending ??
+                  (chunk.pipelineRecapMeta as PipelineRecapMeta).verifyPending,
+                fullDelivery:
+                  (chunk.pipelineRecapMeta as PipelineRecapMeta).fullDelivery ??
+                  DEFAULT_FULL_DELIVERY_CONFIG,
               };
             }
             if (chunk.composeText?.trim()) {
@@ -1425,6 +1733,10 @@ export const useAIStore = create<AIStore>()(
             if (chunk.writtenFiles?.length) {
               pipelineWrittenFiles = chunk.writtenFiles;
             }
+            updateAssistant({
+              isStreaming: false,
+              ...(pipelineWrittenFiles.length ? { writtenFiles: pipelineWrittenFiles } : {}),
+            });
             const finalSteps = markAllActivityDone(
               get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
                 createInitialActivitySteps()
@@ -1460,38 +1772,16 @@ export const useAIStore = create<AIStore>()(
           scaffoldMode: boolean
         ) => {
           if (userStoppedStream || sendSignal.aborted) return;
-          const uiResume = resumeAfterUiPrefs;
-          if (uiResume) {
-            resumeAfterUiPrefs = null;
-          }
 
           const streamId = pendingStreamId ?? generateId();
           pendingStreamId = null;
           activeStreamId = streamId;
+          updateAssistant({ streamId });
           abortController = new AbortController();
           activeStreamBuffer = '';
           rawStreamBuffer = '';
           gotFirstDelta = false;
           activeTabPath = streamContext.filePath ?? null;
-
-          if (uiResume && caval?.pipelineResumeStream) {
-            streamCleanup =
-              caval.pipelineResumeStream(
-                {
-                  runId: uiResume.runId,
-                  streamId,
-                  uiPreferences: uiResume.uiPreferences,
-                  workspaceRoot: boundWorkspace ?? editorState.projectPath ?? '',
-                  model: selectedModel,
-                  strictReview: isAgenticPipelineMode(agentMode) ? strictReview : undefined,
-                },
-                handleStreamChunk
-              ) ?? null;
-            if (!streamCleanup) {
-              finish('Pipeline resume indisponibil.', undefined, streamContext.filePath);
-            }
-            return;
-          }
 
           streamCleanup = caval?.chatStream?.(
             {
@@ -1547,7 +1837,8 @@ export const useAIStore = create<AIStore>()(
             attachmentsSnapshot.some((f) => f.path.startsWith('engineering://')) ||
             /\bSCAFFOLD\b/i.test(apiPrompt) ||
             isScaffoldContinueRequest(apiPrompt) ||
-            (isAgenticPipelineMode(agentMode) && isDeliveryContinueRequest(apiPrompt)));
+            (isAgenticPipelineMode(agentMode) &&
+              (isDeliveryContinueRequest(apiPrompt) || isAgenticRepairRequest(apiPrompt))));
 
         if (isAgenticPipelineMode(agentMode) && editorState.projectPath) {
           useEditorStore.getState().showAiPreview('generating.ts', '// AI scrie cod…\n');
@@ -1653,6 +1944,8 @@ export const useAIStore = create<AIStore>()(
             attachments: attachmentsSnapshot,
             agentMode,
             buildMemoryHint: buildMemoryHintText,
+            cavalloModesTestLlm:
+              cavalloCfg?.modesTestUseLlm === true && isCavalloModesTestRequest(userText),
           }
         );
 
@@ -1946,14 +2239,6 @@ export const useAIStore = create<AIStore>()(
         window.dispatchEvent(new CustomEvent(CAVAL_OPEN_CODING_CHAT_EVENT));
       },
 
-      submitUiDeliveryPreferences: async (prefs) => {
-        const pause = get().deliveryPause;
-        if (!pause || !prefs.trim()) return;
-        resumeAfterUiPrefs = { runId: pause.runId, uiPreferences: prefs.trim() };
-        set({ deliveryPause: null });
-        await get().sendMessage(`[UI Preferences]\n${prefs.trim()}`);
-      },
-
       handoffFromEngineering: ({ project, userPrompt }) => {
         const projectPath = useEditorStore.getState().projectPath;
         if (!projectPath) {
@@ -2016,6 +2301,7 @@ export const useAIStore = create<AIStore>()(
             }
           });
         }
+        state.threads = migrateThreadsOnRehydrate(state.threads, state.activeThreadId);
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
         if (thread) state.messages = thread.messages;
         state.isStreaming = false;
@@ -2049,10 +2335,8 @@ export const useAIStore = create<AIStore>()(
         if (!AGENT_MODES.some((m) => m.id === state.agentMode)) {
           state.agentMode = 'code';
         }
-        void loadApiKeysFromSecrets().then((secrets) => {
-          if (Object.keys(secrets).length > 0) {
-            useAIStore.setState({ apiKeys: secrets });
-          }
+        void loadApiKeysFromSecrets().then((apiKeys) => {
+          useAIStore.setState({ apiKeys });
         });
       },
     }

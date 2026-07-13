@@ -17,6 +17,7 @@ export interface WorkbenchCommandContext {
   runWorkspaceVerify: () => Promise<void>;
   runBuild: () => Promise<void>;
   openShortcuts?: () => void;
+  queueChatFromPanel?: (text: string, options?: { autoSend?: boolean }) => void;
 }
 
 export interface WorkbenchCommand {
@@ -127,6 +128,13 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       category: 'Run',
       keywords: ['test', 'verify', 'vitest', 'jest'],
       run: () => void ctx.runWorkspaceVerify(),
+    },
+    {
+      id: 'ai:test-modes',
+      label: 'AI: Test Cavallo modes',
+      category: 'AI',
+      keywords: ['cavallo', 'modes', 'plan', 'code', 'ask', 'debug', 'protocol', 'test'],
+      run: () => ctx.queueChatFromPanel?.('Test Cavallo modes', { autoSend: true }),
     },
     {
       id: 'run:build',

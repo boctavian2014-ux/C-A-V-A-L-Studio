@@ -8,7 +8,7 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { registerMonacoEditor } from '../../store/editor-command-store';
-import { CavaloHorseMark } from '../brand/CavaloHorseMark';
+import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -340,28 +340,7 @@ export function MonacoEditor() {
     if (cadStlUrl) {
       return <EngineeringCadPreview />;
     }
-    return (
-      <div style={{
-        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#0D1117', flexDirection: 'column', gap: 16,
-        color: theme.colors.textMuted, userSelect: 'none',
-      }}>
-        <CavaloHorseMark size={88} />
-        <div style={{ fontSize: 13, textAlign: 'center', lineHeight: 1.6 }}>
-          <div style={{
-            color: '#F5F7FA', fontWeight: 800, marginBottom: 6,
-            fontFamily: "'Sora', sans-serif", letterSpacing: '0.12em', fontSize: 14,
-          }}>CAVALLO</div>
-          Deschide un fișier din sidebar
-          <br />
-          sau apasă <kbd style={{
-            background: 'rgba(0,224,255,0.1)', border: '1px solid rgba(0,224,255,0.3)',
-            borderRadius: 4, padding: '1px 6px', fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 11, color: '#00E0FF',
-          }}>Ctrl+P</kbd> pentru căutare rapidă
-        </div>
-      </div>
-    );
+    return <WelcomeWorkspacePanel />;
   }
 
   return (

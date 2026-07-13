@@ -14,6 +14,11 @@ import {
   getCavalloEnterprisePrompt,
   CAVALLO_GLOBAL_RULES,
 } from '../prompts/cavallo-enterprise-modes';
+import {
+  CAVALLO_AI_IDENTITY,
+  getModeEndLabelInstruction,
+  isCavalloModesTestRequest,
+} from '../prompts/cavallo-mode-protocol';
 import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
 import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
 import { CAVALO_RELEASE_ENGINEER_PROMPT } from '../prompts/cavalo-release-engineer';
@@ -24,11 +29,17 @@ const RELEASE_MODE_EXPLICIT = /\b(?:RELEASE\s+MODE|mod\s+release|release\s+engin
 export interface CavalloModesConfig {
   autoModeSwitch?: boolean;
   explicitTriggers?: boolean;
+  /** When true, "Test Cavallo modes" uses LLM instead of deterministic fixture. */
+  modesTestUseLlm?: boolean;
+  /** When true, append [END *] instructions to direct chat prompts. */
+  enforceEndLabels?: boolean;
 }
 
 export const DEFAULT_CAVALLO_MODES_CONFIG: CavalloModesConfig = {
   autoModeSwitch: true,
   explicitTriggers: true,
+  modesTestUseLlm: false,
+  enforceEndLabels: true,
 };
 
 export interface ModeResolution {
@@ -55,6 +66,10 @@ export function resolveEffectiveMode(
 
   if (isAgenticPipelineMode(normalized)) {
     return { mode: 'agentic', switched: false };
+  }
+
+  if (isCavalloModesTestRequest(message)) {
+    return { mode: normalized, switched: false };
   }
 
   if (options?.explicitTriggers !== false && RELEASE_MODE_EXPLICIT.test(message)) {
@@ -112,9 +127,10 @@ export function resolveEffectiveMode(
 /** Build strict CAVALLO system prompt for direct modes. Agentic uses CODING_ARENA separately. */
 export function getCavalloSystemPrompt(
   mode: string,
-  opts?: { includeScaffold?: boolean; workspaceRoot?: string }
+  opts?: { includeScaffold?: boolean; workspaceRoot?: string; enforceEndLabels?: boolean }
 ): string {
   const normalized = normalizeAgentModeId(mode);
+  const enforceEndLabels = opts?.enforceEndLabels !== false;
 
   if (isAgenticPipelineMode(normalized)) {
     return '';
@@ -140,10 +156,21 @@ export function getCavalloSystemPrompt(
   }
 
   if (!isDirectChatMode(normalized)) {
-    return getCavalloEnterprisePrompt('ask');
+    let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt('ask')}`;
+    if (enforceEndLabels) {
+      prompt += `\n\n${getModeEndLabelInstruction('ask')}`;
+    }
+    if (opts?.workspaceRoot?.trim()) {
+      prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
+    }
+    return prompt;
   }
 
-  let prompt = getCavalloEnterprisePrompt(normalized);
+  let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt(normalized)}`;
+
+  if (enforceEndLabels) {
+    prompt += `\n\n${getModeEndLabelInstruction(normalized)}`;
+  }
 
   if (normalized === 'code' && opts?.includeScaffold !== false) {
     prompt += `\n\n${SCAFFOLD_EMISSION_RULE}`;
@@ -177,4 +204,4 @@ export function getModeLabel(mode: DirectChatModeId | 'build' | 'release'): stri
   }
 }
 
-export { CAVALLO_GLOBAL_RULES };
+export { CAVALLO_GLOBAL_RULES, isCavalloModesTestRequest };

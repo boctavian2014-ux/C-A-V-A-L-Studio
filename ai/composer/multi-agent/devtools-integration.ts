@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { DevToolsIntegrationResult } from './types';
-import { runWorkspaceVerify } from '../../tools/workspace-verify';
+import { runWorkspaceVerifyWithAutoFix } from '../../tools/workspace-verify';
 
 const execAsync = promisify(exec);
 
@@ -65,7 +65,7 @@ function probePackageJson(workspaceRoot: string): DevToolsIntegrationResult['ter
 
 export async function runDevToolsIntegration(
   workspaceRoot: string,
-  options?: { mcpServersReady?: number; verify?: boolean }
+  options?: { mcpServersReady?: number; verify?: boolean; autoInstall?: boolean; writtenFiles?: string[] }
 ): Promise<DevToolsIntegrationResult> {
   const git = await probeGit(workspaceRoot);
   const terminal = probePackageJson(workspaceRoot);
@@ -78,7 +78,10 @@ export async function runDevToolsIntegration(
   };
 
   if (options?.verify) {
-    result.verify = await runWorkspaceVerify(workspaceRoot);
+    result.verify = await runWorkspaceVerifyWithAutoFix(workspaceRoot, {
+      autoInstall: options.autoInstall,
+      writtenFiles: options.writtenFiles,
+    });
   }
 
   return result;

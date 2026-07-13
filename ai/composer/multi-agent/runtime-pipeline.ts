@@ -29,44 +29,39 @@ import { FullIntegrationAgent } from './integration-agent';
 import { formatOrchestratorSummary } from './orchestrator-plan';
 
 import { ModelRotator, planExecutionWithRoles } from './orchestrator';
-import { buildArenaModelPlan } from './arena-model-orchestrator';
+import { applyRoleModelsToPlan } from './arena-model-orchestrator';
 import { runArenaConsistencyOnly, runArenaPostCompose } from './arena-post-compose';
-import { buildArenaContinueMessage } from '../../prompts/arena-continue';
+import { buildArenaContinueMessage, buildGateRepairMessage } from '../../prompts/arena-continue';
 
 import { evaluateCompletionGate } from '../project-completion-gate';
+import { resolveDeliveryOutcome } from './delivery-status';
 import {
   pendingFastPipelineSupervisor,
   runProgrammaticSupervisor,
 } from './programmatic-supervisor';
 import { detectFashionArchetype } from '../../scaffolds/fashion-matching/archetype';
+import { remediateWorkspaceBeforeGate } from '../../scaffolds/workspace-cleanup';
 
-import { PipelineContextStore } from './pipeline-context-store';
-
-import { PipelineMemoryEngine } from './pipeline-memory';
-
-import {
-
-  runContextCapture,
-
-  runDecomposition,
-
-  runFinalComposer,
-
-  runMerge,
-
-  runSubAgents,
-
-  runSupervisor,
-
-  runTargetedSubAgentRetries,
-
-} from './stage-runners';
-
+import { PipelineContextStore, CAVALLO_AUTO_UI_PREFERENCES } from './pipeline-context-store';
 import { partitionTasksByUiPhase, hasUiSpecInPrompt } from '../ui-spec-detector';
 import { applyPipelineScaffold } from '../scaffold-apply-node';
 import { ensureMcpServersReady } from '../../tools/tool-runtime';
 
 import { rememberCheckpoint, getCheckpoint, loadCheckpointFromDisk, clearCheckpoint } from './pipeline-checkpoint';
+
+import { PipelineMemoryEngine } from './pipeline-memory';
+
+import {
+  runContextCapture,
+  runDecomposition,
+  runFinalComposer,
+  runMerge,
+  runModelOrchestrator,
+  runSubAgents,
+  runSupervisor,
+  runTargetedSubAgentRetries,
+  stageModelForRole,
+} from './stage-runners';
 
 import type {
 
@@ -272,26 +267,33 @@ function buildRuntimeSummary(state: PipelineState): string {
 
 
 
-function buildCompactChatSummary(state: PipelineState): string {
+function buildCompactChatSummary(
+  state: PipelineState,
+  gateOk: boolean,
+  writtenFiles: string[] = []
+): string {
+  const stages = 'Review→Test→Verify→Integrate';
 
-  const stages = 'Memory→Context→Decompose→Sub→Compose→Integrate';
-
-  if (state.composerText.includes('```')) {
-
-    const fenceCount = Math.floor((state.composerText.match(/```/g)?.length ?? 0) / 2);
-
-    const gitHint = state.devTools?.git?.isRepo
-
-      ? `\nGit: ${state.devTools.git.branch ?? 'repo'} (${state.devTools.git.changedFiles ?? 0} changed)`
-
-      : '';
-
-    return `✓ Full Integration complete (${stages}).\n${fenceCount} file block(s) — vezi editorul.${gitHint}`;
-
+  if (!gateOk) {
+    const hint = state.supervisor?.summary?.slice(0, 200) ?? 'Remediere automată în curs.';
+    return `Delivery incomplet (${stages}).\n${hint}`;
   }
 
-  return `✓ Pipeline ${stages} finished.\n${state.supervisor?.summary ?? 'Review complete.'}\nVezi editorul pentru cod.`;
+  const runHints: string[] = [];
+  if (writtenFiles.some((f) => /readme/i.test(f))) runHints.push('README');
+  if (writtenFiles.some((f) => /package\.json$/i.test(f))) runHints.push('npm install && npm start / npm test');
 
+  const gitHint = state.devTools?.git?.isRepo
+    ? `\nGit: ${state.devTools.git.branch ?? 'repo'} (${state.devTools.git.changedFiles ?? 0} changed)`
+    : '';
+
+  if (state.composerText.includes('```')) {
+    const fenceCount = Math.floor((state.composerText.match(/```/g)?.length ?? 0) / 2);
+    const runLine = runHints.length ? `\nRun: ${runHints.join(' · ')}` : '';
+    return `✓ Produs ready-to-use (${stages}).\n${fenceCount} file block(s) — vezi editorul.${runLine}${gitHint}`;
+  }
+
+  return `✓ Produs ready-to-use (${stages}).\n${state.supervisor?.summary ?? 'Review APPROVED.'}${gitHint}`;
 }
 
 
@@ -469,11 +471,11 @@ export async function runCavalloMultiAgentPipeline(
 
     ...callbacks,
 
-    onMultiAgentStatus: (stage, status, detail) => {
+    onMultiAgentStatus: (stage, status, detail, modelId, stepId) => {
 
       markStage(stages, stage, status === 'active' ? 'active' : 'done', detail);
 
-      callbacks.onMultiAgentStatus?.(stage, status, detail);
+      callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId);
 
     },
 
@@ -549,20 +551,35 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    markStage(stages, 'modelOrch', 'active');
-    pipelineCallbacks.onMultiAgentStatus?.('modelOrch', 'active');
-
     const rotator = new ModelRotator();
     await rotator.init();
-    const arenaModels = buildArenaModelPlan(model, rotator);
+    const { plan: arenaModels } = await runModelOrchestrator(
+      model,
+      request.message,
+      '',
+      rotator,
+      workspaceRoot,
+      pipelineCallbacks
+    );
     markStage(stages, 'modelOrch', 'done', arenaModels.summary.slice(0, 80));
-    pipelineCallbacks.onMultiAgentStatus?.('modelOrch', 'done', arenaModels.summary.slice(0, 80));
+    state.roleModelMap = arenaModels.roleModelMap;
+
+    const mergeModel = stageModelForRole('merge', arenaModels, model);
+    const supervisorModel = stageModelForRole('supervisor', arenaModels, model);
+    const composeModelId = stageModelForRole('compose', arenaModels, model);
 
     markStage(stages, 'orchestrator', 'active');
 
     pipelineCallbacks.onMultiAgentStatus?.('orchestrator', 'active');
 
-    const decomp = await runDecomposition(model, store, config, workspaceRoot, pipelineCallbacks);
+    const decomposeModel = stageModelForRole('decompose', arenaModels, model);
+    const decomp = await runDecomposition(
+      decomposeModel,
+      store,
+      config,
+      workspaceRoot,
+      pipelineCallbacks
+    );
 
     if ('error' in decomp) {
 
@@ -598,7 +615,13 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    const plan = planExecutionWithRoles(runId, decomp.tasks, rotator, model);
+    const basePlan = planExecutionWithRoles(runId, decomp.tasks, rotator, model);
+    const plan = applyRoleModelsToPlan(
+      basePlan,
+      decomp.tasks,
+      arenaModels.roleModelMap,
+      rotator
+    );
 
     state.plan = plan;
 
@@ -637,47 +660,8 @@ export async function runCavalloMultiAgentPipeline(
       return { ok: false, error: 'Aborted', runId };
     }
 
-    const needsUiGate =
-      config.fullDelivery.enabled &&
-      config.fullDelivery.uiCheckpoint &&
-      ui.length > 0 &&
-      !hasUiSpecInPrompt(request.message);
-
-    if (needsUiGate) {
-      const snapshot = store.exportSnapshot();
-      rememberCheckpoint({
-        runId,
-        streamId,
-        workspaceRoot,
-        model,
-        strictReview: request.strictReview,
-        userMessage: request.message,
-        decompositionRaw: state.decompositionRaw ?? decomp.raw,
-        tasks: decomp.tasks,
-        uiTasks: ui,
-        preUiResults: [...state.subAgentResults],
-        plan,
-        context: snapshot.context,
-        subAgentOutputs: snapshot.subAgentOutputs,
-        reasoningBrief: state.reasoningBrief,
-      });
-
-      sender.send('caval:ai-stream-chunk', {
-        streamId,
-        type: 'delivery-pause',
-        pauseReason: 'ui-design',
-        runId,
-      });
-
-      clearMultiAgentAbort(streamId);
-      return {
-        ok: true,
-        paused: true,
-        pauseReason: 'ui-design',
-        runId,
-        text: 'Preferințe UI necesare — continuă delivery după răspuns.',
-        reasoningBrief: state.reasoningBrief,
-      };
+    if (ui.length > 0 && !hasUiSpecInPrompt(request.message)) {
+      store.applyUiPreferences(CAVALLO_AUTO_UI_PREFERENCES, 'auto');
     }
 
     if (ui.length > 0) {
@@ -724,7 +708,10 @@ export async function runCavalloMultiAgentPipeline(
 
     } else {
 
-      let mergeResult = await runMerge(model, store, workspaceRoot, pipelineCallbacks);
+      const mergeModel = stageModelForRole('merge', arenaModels, model);
+      const supervisorModel = stageModelForRole('supervisor', arenaModels, model);
+
+      let mergeResult = await runMerge(mergeModel, store, workspaceRoot, pipelineCallbacks);
 
       if ('error' in mergeResult) {
 
@@ -736,7 +723,7 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-      let supervisor = await runSupervisor(model, store, workspaceRoot, pipelineCallbacks);
+      let supervisor = await runSupervisor(supervisorModel, store, workspaceRoot, pipelineCallbacks);
 
       if ('error' in supervisor) {
 
@@ -778,7 +765,7 @@ export async function runCavalloMultiAgentPipeline(
 
         );
 
-        mergeResult = await runMerge(model, store, workspaceRoot, pipelineCallbacks);
+        mergeResult = await runMerge(mergeModel, store, workspaceRoot, pipelineCallbacks);
 
         if ('error' in mergeResult) break;
 
@@ -786,7 +773,7 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-        const supRetry = await runSupervisor(model, store, workspaceRoot, pipelineCallbacks);
+        const supRetry = await runSupervisor(supervisorModel, store, workspaceRoot, pipelineCallbacks);
 
         if ('error' in supRetry) break;
 
@@ -818,7 +805,7 @@ export async function runCavalloMultiAgentPipeline(
 
     while (composeWaves < maxWaves) {
       const compose = await runFinalComposer(
-        model,
+        composeModelId,
         store,
         workspaceRoot,
         pipelineCallbacks,
@@ -868,22 +855,22 @@ export async function runCavalloMultiAgentPipeline(
     });
     finalWrittenFiles = arenaPost.writtenFiles;
 
-    const MAX_ARENA_REPAIR_WAVES = 2;
+    const maxArenaRepairWaves = config.fullDelivery.maxArenaRepairWaves;
     let arenaRepairWave = 0;
     while (
       !arenaPost.consistencyOk &&
       arenaPost.consistencyScan &&
-      arenaRepairWave < MAX_ARENA_REPAIR_WAVES &&
+      arenaRepairWave < maxArenaRepairWaves &&
       !isAborted()
     ) {
       arenaRepairWave += 1;
       pipelineCallbacks.onMultiAgentStatus?.(
         'compose',
         'active',
-        `arena repair ${arenaRepairWave}/${MAX_ARENA_REPAIR_WAVES}`
+        `arena repair ${arenaRepairWave}/${maxArenaRepairWaves}`
       );
       const repair = await runFinalComposer(
-        model,
+        composeModelId,
         store,
         workspaceRoot,
         pipelineCallbacks,
@@ -908,20 +895,118 @@ export async function runCavalloMultiAgentPipeline(
       pipelineCallbacks.onMultiAgentStatus?.('compose', 'done', scan.summary.slice(0, 80));
     }
 
-    if (config.enableDevToolsIntegration) {
+    const remediation = remediateWorkspaceBeforeGate(workspaceRoot, request.message);
+    if (remediation.deleted.length > 0 || remediation.created.length > 0) {
+      const deletedSet = new Set(remediation.deleted.map((p) => p.replace(/\\/g, '/')));
+      finalWrittenFiles = [
+        ...new Set([
+          ...finalWrittenFiles.filter((f) => !deletedSet.has(f.replace(/\\/g, '/'))),
+          ...remediation.created,
+        ]),
+      ];
+      const detail = [
+        remediation.deleted.length ? `removed ${remediation.deleted.length}` : '',
+        remediation.created.length ? `seeded ${remediation.created.join(', ')}` : '',
+        remediation.fixed.length ? `fixed imports ${remediation.fixed.length}` : '',
+      ]
+        .filter(Boolean)
+        .join('; ');
+      if (detail) {
+        pipelineCallbacks.onMultiAgentStatus?.('integrate', 'active', `workspace cleanup: ${detail}`);
+      }
+    }
+
+    if (config.enableDevToolsIntegration && !config.devtoolsAsyncVerify) {
       state.devTools = await runDevToolsIntegration(workspaceRoot, {
         verify: finalWrittenFiles.length > 0,
+        autoInstall: config.fullDelivery.autoInstallDependencies,
+        writtenFiles: finalWrittenFiles,
+      });
+    } else if (config.enableDevToolsIntegration && config.devtoolsAsyncVerify) {
+      state.devTools = await runDevToolsIntegration(workspaceRoot, {
+        verify: false,
+        autoInstall: false,
+        writtenFiles: finalWrittenFiles,
       });
     }
 
+    const maxGateRepairWaves = config.devtoolsAsyncVerify
+      ? 0
+      : config.fullDelivery.maxGateRepairWaves;
+    let gateRepairWave = 0;
+    while (
+      state.devTools?.verify?.ran &&
+      !state.devTools.verify.commands.every((c) => c.ok) &&
+      gateRepairWave < maxGateRepairWaves &&
+      !isAborted()
+    ) {
+      gateRepairWave += 1;
+      const gateRemediation = remediateWorkspaceBeforeGate(workspaceRoot, request.message);
+      if (
+        gateRemediation.deleted.length > 0 ||
+        gateRemediation.created.length > 0 ||
+        gateRemediation.fixed.length > 0
+      ) {
+        const deletedSet = new Set(gateRemediation.deleted.map((p) => p.replace(/\\/g, '/')));
+        finalWrittenFiles = [
+          ...new Set([
+            ...finalWrittenFiles.filter((f) => !deletedSet.has(f.replace(/\\/g, '/'))),
+            ...gateRemediation.created,
+          ]),
+        ];
+      }
+
+      const failedVerify = state.devTools.verify.commands.find((c) => !c.ok);
+      pipelineCallbacks.onMultiAgentStatus?.(
+        'compose',
+        'active',
+        `gate repair ${gateRepairWave}/${maxGateRepairWaves}`
+      );
+      const gateRepair = await runFinalComposer(
+        composeModelId,
+        store,
+        workspaceRoot,
+        pipelineCallbacks,
+        isAborted,
+        {
+          waveIndex: composeWaves + maxArenaRepairWaves + gateRepairWave,
+          repairMessage: buildGateRepairMessage(failedVerify?.output ?? '', gateRepairWave),
+        }
+      );
+      if (!gateRepair.ok) break;
+      composeText = `${composeText}\n\n${gateRepair.text}`;
+      const gateRepaired = applyPipelineScaffold(workspaceRoot, gateRepair.text, store);
+      finalWrittenFiles = [...new Set([...finalWrittenFiles, ...gateRepaired])];
+
+      if (config.enableDevToolsIntegration) {
+        state.devTools = await runDevToolsIntegration(workspaceRoot, {
+          verify: finalWrittenFiles.length > 0,
+          autoInstall: config.fullDelivery.autoInstallDependencies,
+          writtenFiles: finalWrittenFiles,
+        });
+      }
+      pipelineCallbacks.onMultiAgentStatus?.(
+        'integrate',
+        'active',
+        state.devTools?.verify?.summary?.slice(0, 80) ?? 'gate repair verify'
+      );
+    }
+
+    const llmSupervisor = state.supervisor;
     const gateResult = evaluateCompletionGate({
       workspaceRoot,
       writtenFiles: finalWrittenFiles,
       userMessage: request.message,
-      recap: state.supervisor?.summary,
+      recap: llmSupervisor?.summary,
       taskCount: decomp.tasks.length,
       verify: state.devTools?.verify,
       consistencyOk: arenaPost.consistencyOk,
+      arenaIssues: arenaPost.issues,
+      supervisorApproved: llmSupervisor?.approved,
+      supervisorRaw: llmSupervisor?.raw,
+      supervisorFallback: config.supervisorFallback,
+      fastPipeline: config.fastPipeline,
+      devtoolsAsyncVerify: config.devtoolsAsyncVerify,
     });
 
     state.supervisor = runProgrammaticSupervisor(gateResult);
@@ -999,24 +1084,47 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    const deliveryBlocked = !gateResult.ok;
-
-    const chatSummary = buildCompactChatSummary(state);
+    const chatSummary = buildCompactChatSummary(state, gateResult.ok, finalWrittenFiles);
 
     const stageSummary = buildRuntimeSummary(state);
 
-    const gateNotice = deliveryBlocked
-      ? `\n\n⚠️ **Poarta finalizare** — proiect incomplet:\n${gateResult.issues
-          .slice(0, 5)
-          .map((i) => `- ${i.message}`)
-          .join('\n')}`
-      : '';
+    const delivery = resolveDeliveryOutcome({
+      gate: gateResult,
+      composeText,
+      chatSummary,
+      supervisorSummary: llmSupervisor?.summary,
+      supervisorFallback: config.supervisorFallback,
+      writtenFiles: finalWrittenFiles,
+    });
+
+    if (
+      config.devtoolsAsyncVerify &&
+      config.enableDevToolsIntegration &&
+      finalWrittenFiles.length > 0
+    ) {
+      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker');
+      scheduleBackgroundVerify(sender, {
+        workspaceRoot,
+        runId,
+        streamId,
+        senderId: sender.id,
+        autoInstall: config.fullDelivery.autoInstallDependencies,
+        writtenFiles: finalWrittenFiles,
+        userMessage: request.message,
+        taskCount: decomp.tasks.length,
+        supervisorApproved: llmSupervisor?.approved,
+        supervisorRaw: llmSupervisor?.raw,
+        supervisorFallback: config.supervisorFallback,
+        fastPipeline: config.fastPipeline,
+        consistencyOk: arenaPost.consistencyOk,
+      });
+    }
 
     return {
 
       ok: true,
 
-      text: (composeText.trim() ? composeText : chatSummary) + gateNotice,
+      text: delivery.text,
 
       composeText,
 
@@ -1034,7 +1142,11 @@ export async function runCavalloMultiAgentPipeline(
 
       completionGate: gateResult,
 
-      deliveryBlocked,
+      deliveryBlocked: delivery.deliveryBlocked,
+
+      needsReview: delivery.needsReview,
+
+      verifyPending: delivery.verifyPending,
 
       pipelineRecapMeta: config.reasoningLayer.enabled
 
@@ -1057,7 +1169,15 @@ export async function runCavalloMultiAgentPipeline(
 
             completionGate: gateResult,
 
-            deliveryBlocked,
+            deliveryBlocked: delivery.deliveryBlocked,
+
+            needsReview: delivery.needsReview,
+
+            verifyPending: delivery.verifyPending,
+
+            fullDelivery: { ...config.fullDelivery },
+
+            roleModelMap: state.roleModelMap,
 
           }
 
@@ -1120,10 +1240,19 @@ export async function resumeCavalloMultiAgentPipeline(
 
   const memoryEngine = PipelineMemoryEngine.load(workspaceRoot);
 
+  const resumeArenaPlan = {
+    primaryModel: model,
+    roleModelMap: cp.plan.roleModelMap ?? {},
+    summary: 'resume',
+  };
+  const resumeMergeModel = stageModelForRole('merge', resumeArenaPlan, model);
+  const resumeSupervisorModel = stageModelForRole('supervisor', resumeArenaPlan, model);
+  const resumeComposeModel = stageModelForRole('compose', resumeArenaPlan, model);
+
   const pipelineCallbacks: MultiAgentPipelineCallbacks = {
     ...callbacks,
-    onMultiAgentStatus: (stage, status, detail) => {
-      callbacks.onMultiAgentStatus?.(stage, status, detail);
+    onMultiAgentStatus: (stage, status, detail, modelId, stepId) => {
+      callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId);
     },
   };
 
@@ -1151,11 +1280,11 @@ export async function resumeCavalloMultiAgentPipeline(
       store.setMergeRaw(synth);
       supervisor = pendingFastPipelineSupervisor();
     } else {
-      const mergeResult = await runMerge(model, store, workspaceRoot, pipelineCallbacks);
+      const mergeResult = await runMerge(resumeMergeModel, store, workspaceRoot, pipelineCallbacks);
       if ('error' in mergeResult) {
         return { ok: false, error: mergeResult.error, runId };
       }
-      const sup = await runSupervisor(model, store, workspaceRoot, pipelineCallbacks);
+      const sup = await runSupervisor(resumeSupervisorModel, store, workspaceRoot, pipelineCallbacks);
       if ('error' in sup) {
         return { ok: false, error: sup.error, runId };
       }
@@ -1170,7 +1299,7 @@ export async function resumeCavalloMultiAgentPipeline(
 
     while (composeWaves < maxWaves) {
       const compose = await runFinalComposer(
-        model,
+        resumeComposeModel,
         store,
         workspaceRoot,
         pipelineCallbacks,
@@ -1191,8 +1320,12 @@ export async function resumeCavalloMultiAgentPipeline(
 
     const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
 
-    const devTools = config.enableDevToolsIntegration
-      ? await runDevToolsIntegration(workspaceRoot, { verify: writtenFiles.length > 0 })
+    const devTools = config.enableDevToolsIntegration && !config.devtoolsAsyncVerify
+      ? await runDevToolsIntegration(workspaceRoot, {
+          verify: writtenFiles.length > 0,
+          autoInstall: config.fullDelivery.autoInstallDependencies,
+          writtenFiles,
+        })
       : undefined;
 
     const gateResult = evaluateCompletionGate({
@@ -1202,13 +1335,18 @@ export async function resumeCavalloMultiAgentPipeline(
       recap: supervisor.summary,
       taskCount: cp.tasks.length,
       verify: devTools?.verify,
+      supervisorApproved: supervisor.approved,
+      supervisorRaw: supervisor.raw,
+      supervisorFallback: config.supervisorFallback,
+      fastPipeline: config.fastPipeline,
+      devtoolsAsyncVerify: config.devtoolsAsyncVerify,
     });
     supervisor = runProgrammaticSupervisor(gateResult);
     if (!gateResult.ok) {
       memoryEngine.recordFailure({
         runId,
         userMessage: cp.userMessage,
-        issues: gateResult.issues,
+        issues: gateResult.blockingIssues.length > 0 ? gateResult.blockingIssues : gateResult.issues,
         archetype: gateResult.archetype,
       });
     }
@@ -1222,11 +1360,40 @@ export async function resumeCavalloMultiAgentPipeline(
     memoryEngine.save(workspaceRoot);
     clearCheckpoint(runId);
 
-    const deliveryBlocked = !gateResult.ok;
+    const delivery = resolveDeliveryOutcome({
+      gate: gateResult,
+      composeText,
+      chatSummary: composeText,
+      supervisorSummary: supervisor.summary,
+      supervisorFallback: config.supervisorFallback,
+      writtenFiles,
+    });
+
+    if (
+      config.devtoolsAsyncVerify &&
+      config.enableDevToolsIntegration &&
+      writtenFiles.length > 0
+    ) {
+      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker');
+      scheduleBackgroundVerify(_sender, {
+        workspaceRoot,
+        runId,
+        streamId,
+        senderId: _sender.id,
+        autoInstall: config.fullDelivery.autoInstallDependencies,
+        writtenFiles,
+        userMessage: cp.userMessage,
+        taskCount: cp.tasks.length,
+        supervisorApproved: supervisor.approved,
+        supervisorRaw: supervisor.raw,
+        supervisorFallback: config.supervisorFallback,
+        fastPipeline: config.fastPipeline,
+      });
+    }
 
     return {
       ok: true,
-      text: composeText,
+      text: delivery.text,
       composeText,
       writtenFiles,
       resolvedModel: composeModel,
@@ -1234,7 +1401,9 @@ export async function resumeCavalloMultiAgentPipeline(
       runId,
       reasoningBrief: cp.reasoningBrief,
       completionGate: gateResult,
-      deliveryBlocked,
+      deliveryBlocked: delivery.deliveryBlocked,
+      needsReview: delivery.needsReview,
+      verifyPending: delivery.verifyPending,
       pipelineRecapMeta: {
         taskCount: cp.tasks.length,
         fastPipeline: config.fastPipeline,
@@ -1245,7 +1414,11 @@ export async function resumeCavalloMultiAgentPipeline(
         composeWaves,
         supervisor,
         completionGate: gateResult,
-        deliveryBlocked,
+        deliveryBlocked: delivery.deliveryBlocked,
+        needsReview: delivery.needsReview,
+        verifyPending: delivery.verifyPending,
+        fullDelivery: { ...config.fullDelivery },
+        roleModelMap: cp.plan.roleModelMap,
       },
     };
   } finally {

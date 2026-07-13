@@ -8,7 +8,8 @@ import { createUsersRouter } from "./api/users";
 import { requireAuth } from "./middleware/auth";
 import type { MarketplaceRegistry } from "./registry";
 
-const allowedOrigins = (process.env.CAVAL_MARKETPLACE_CORS_ORIGINS ?? "http://localhost:8787,http://127.0.0.1:8787")
+const allowedOrigins = (process.env.CAVAL_MARKETPLACE_CORS_ORIGINS
+  ?? "http://localhost:8787,http://127.0.0.1:8787,http://localhost:5173,http://127.0.0.1:5173")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);

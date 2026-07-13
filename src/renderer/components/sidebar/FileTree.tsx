@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { useEditorStore, type FileNode } from '../../store/editor-store';
-import { useAIStore } from '../../../../ai/composer/ai-store';
+import { useOpenWorkspace } from '../../hooks/useOpenWorkspace';
 import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
@@ -215,18 +215,14 @@ function TreeNode({
 // ──────────────────────────────────────────────
 
 export function FileTree({ onClose }: { onClose?: () => void }) {
-  const { fileTree, projectPath, setProjectPath, setFileTree, refreshTree } = useEditorStore();
+  const { fileTree, projectPath, refreshTree } = useEditorStore();
   const { theme } = useCavalTheme();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
+  const { pickAndOpenFolder } = useOpenWorkspace();
+
   const handleOpenFolder = async () => {
-    const folderPath = await window.caval.fs.openFolder();
-    if (!folderPath) return;
-    setProjectPath(folderPath);
-    useAIStore.getState().setIncludeMode('project');
-    const tree = await window.caval.fs.readTree(folderPath);
-    setFileTree(tree);
-    await window.caval.workspaceOpen?.(folderPath);
+    await pickAndOpenFolder();
   };
 
   const handleContextMenu = (e: React.MouseEvent, node: FileNode) => {

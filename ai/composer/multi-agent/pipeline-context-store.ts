@@ -150,8 +150,9 @@ export class PipelineContextStore {
     return store;
   }
 
-  applyUiPreferences(prefs: string): void {
-    const block = `\n\n## UI Design Preferences (user)\n${prefs.trim()}`;
+  applyUiPreferences(prefs: string, source: 'user' | 'auto' = 'user'): void {
+    const label = source === 'auto' ? 'UI Design Preferences (auto)' : 'UI Design Preferences (user)';
+    const block = `\n\n## ${label}\n${prefs.trim()}`;
     this.context.interfaceContext = (this.context.interfaceContext ?? '') + block;
     this.context.normalizedRequirements += block;
   }
@@ -261,3 +262,6 @@ export class PipelineContextStore {
     };
   }
 }
+
+export const CAVALLO_AUTO_UI_PREFERENCES =
+  'Stil: modern\nTemă: dark\nLayout: responsive, production-ready\nNote: livrare automată fără întrebare user';

@@ -20,9 +20,17 @@ Module 4: Frontend dashboard React
     expect(cfg.fullDelivery.minFencesAbsolute).toBeGreaterThanOrEqual(6);
   });
 
-  it('leaves short prompts unchanged', () => {
+  it('leaves short prompts on fast pipeline', () => {
     const cfg = applyComplexPromptOverrides(DEFAULT_MULTI_AGENT_CONFIG, 'fix typo in readme');
     expect(cfg.fastPipeline).toBe(true);
     expect(cfg.skipContextLlm).toBe(true);
+  });
+
+  it('skips overrides when applyComplexPromptOverrides is false', () => {
+    const cfg = applyComplexPromptOverrides(
+      { ...DEFAULT_MULTI_AGENT_CONFIG, applyComplexPromptOverrides: false },
+      'module frontend backend dashboard'.repeat(20)
+    );
+    expect(cfg.fastPipeline).toBe(true);
   });
 });

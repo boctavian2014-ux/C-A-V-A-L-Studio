@@ -23,17 +23,26 @@ import { toolSandbox } from "../../ai/pipeline/tool-sandbox";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { assertShellCommandAllowed } from "./shell-security";
 import { registerGitHandlers } from "./git-handlers";
+import {
+  addRecentWorkspace,
+  listRecentWorkspaces,
+  removeRecentWorkspace,
+  type RecentWorkspaceSource,
+} from "./recent-workspaces";
 import { registerEngineeringHandlers } from "./engineering-handlers";
-import { registerModelHandlers } from "./model-handlers";
+import { registerModelHandlers, abortAllStreamsForSender } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers } from "./cad-handlers";
 import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
+import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
+import { setMcpSecretsProvider } from "../../ai/tools/tool-runtime";
 import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
 import { registerSchematicHandlers } from "./schematic-handlers";
 import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
 import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
+import { mergeSecrets, normalizeSecretsMap } from "../../ai/models/api-secrets";
 import { inferPreloadContext } from "../../ai/models/infer-context";
 import "./ipc-handlers";
 import "./terminal-handlers";
@@ -41,6 +50,8 @@ import { registerSearchHandlers } from "./search-handlers";
 import { registerDebugHandlers } from "./debug-handlers";
 import { registerLspHandlers } from "./lsp-handlers";
 import { registerExtensionHandlers } from "./extension-handlers";
+import { registerMarketplaceHandlers } from "./marketplace-handlers";
+import { setCavalConfigExtraPaths } from "../../ai/config/caval-config";
 import { setIpcWorkspaceRoot } from "./ipc-handlers";
 
 const loadLocalEnvFile = (): void => {
@@ -96,6 +107,7 @@ registerSearchHandlers(workspaceFor);
 registerDebugHandlers(workspaceFor);
 registerLspHandlers(workspaceFor);
 registerExtensionHandlers(workspaceFor);
+registerMarketplaceHandlers();
 
 const subscribePipelineIpc = (sender: Electron.WebContents): (() => void) => {
   return pipelineEventBus.on((event: PipelineEvent) => {
@@ -180,6 +192,32 @@ const createWindow = (): BrowserWindow => {
     window.loadFile(path.join(__dirname, "../renderer/index.html"));
   };
 
+  let rendererRecoveryPending = false;
+  let lastRendererGoneReason: string | undefined;
+
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error(
+      "[caval] Renderer process gone:",
+      details.reason,
+      "exitCode=",
+      details.exitCode
+    );
+    lastRendererGoneReason = details.reason;
+    abortAllStreamsForSender(window.webContents.id);
+    rendererRecoveryPending = true;
+    if (!window.isDestroyed()) {
+      loadRenderer();
+    }
+  });
+
+  window.webContents.on("unresponsive", () => {
+    console.warn("[caval] Renderer unresponsive");
+  });
+
+  window.webContents.on("responsive", () => {
+    console.info("[caval] Renderer responsive again");
+  });
+
   if (!app.isPackaged) {
     void window.webContents.session.clearCache().then(loadRenderer);
   } else {
@@ -188,6 +226,14 @@ const createWindow = (): BrowserWindow => {
 
   window.webContents.on("did-finish-load", () => {
     console.info("[caval] Renderer loaded");
+    if (rendererRecoveryPending && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      rendererRecoveryPending = false;
+      window.webContents.send("caval:renderer-recovered", {
+        reason: lastRendererGoneReason ?? "unknown",
+        recoveredAt: new Date().toISOString(),
+      });
+      lastRendererGoneReason = undefined;
+    }
   });
 
   if (!app.isPackaged) {
@@ -298,6 +344,7 @@ const openFolder = async (): Promise<void> => {
     files: await listFolderFiles(folderPath)
   });
   bindWorkspace(window.webContents.id, folderPath);
+  addRecentWorkspace(folderPath, "folder");
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(folderPath);
   preloadForContext(inferPreloadContext(folderPath));
@@ -307,9 +354,15 @@ const sendMenuCommand = (command: string): void => {
   focusedWindow()?.webContents.send("caval:menu-command", command);
 };
 
-const sendWorkspaceToRenderer = async (webContentsId: number, sender: Electron.WebContents, folderPath: string): Promise<void> => {
+const sendWorkspaceToRenderer = async (
+  webContentsId: number,
+  sender: Electron.WebContents,
+  folderPath: string,
+  source: RecentWorkspaceSource = "folder"
+): Promise<void> => {
   sender.send("caval:workspace-session-reset");
   bindWorkspace(webContentsId, folderPath);
+  addRecentWorkspace(folderPath, source);
   const files = await listFolderFiles(folderPath, 240);
   sender.send("caval:folder-opened", {
     path: folderPath,
@@ -1066,17 +1119,30 @@ ipcMain.handle("caval:context-index", async (event) => {
   return { ok: true, documentCount: documents.length };
 });
 
-ipcMain.handle("caval:workspace-open", async (event, folderPath: string) => {
+ipcMain.handle("caval:workspace-open", async (event, folderPath: string, options?: { source?: RecentWorkspaceSource }) => {
   if (!folderPath || typeof folderPath !== "string") {
     return { ok: false, error: "Invalid folder path" };
   }
+  const source = options?.source === "clone" ? "clone" : "folder";
   const current = workspaceRoots.get(event.sender.id);
   if (current === folderPath) {
     bindWorkspace(event.sender.id, folderPath);
+    addRecentWorkspace(folderPath, source);
     return { ok: true, path: folderPath, cached: true };
   }
-  await sendWorkspaceToRenderer(event.sender.id, event.sender, folderPath);
+  await sendWorkspaceToRenderer(event.sender.id, event.sender, folderPath, source);
   return { ok: true, path: folderPath };
+});
+
+ipcMain.handle("workspace:list-recent", () => {
+  return { ok: true, entries: listRecentWorkspaces() };
+});
+
+ipcMain.handle("workspace:remove-recent", (_event, folderPath: string) => {
+  if (!folderPath || typeof folderPath !== "string") {
+    return { ok: false, error: "Invalid folder path" };
+  }
+  return { ok: true, entries: removeRecentWorkspace(folderPath) };
 });
 
 /** Lightweight root sync — no re-index, no warm cache storm (used on chat send). */
@@ -1100,54 +1166,177 @@ ipcMain.handle("caval:context-search", async (event, input: { query: string; lim
   }
 });
 
+const secretsFilePath = (): string => path.join(app.getPath("userData"), "caval-api-keys.bin");
+
+const SECRET_ENV_KEYS = [
+  "OPENROUTER_API_KEY",
+  "POOLSIDE_API_KEY",
+  "NORTH_API_KEY",
+  "NVIDIA_API_KEY",
+  "MESHY_API_KEY",
+  "CAD_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_API_KEY",
+  "FIRECRAWL_API_KEY",
+  "POSTGRES_CONNECTION_STRING",
+  "GITHUB_PERSONAL_ACCESS_TOKEN",
+  "SEMGREP_APP_TOKEN",
+] as const;
+
+const readApiSecrets = (): Record<string, string> => {
+  try {
+    if (!fsSync.existsSync(secretsFilePath())) return {};
+    const raw = fsSync.readFileSync(secretsFilePath());
+    if (safeStorage.isEncryptionAvailable()) {
+      return JSON.parse(safeStorage.decryptString(raw)) as Record<string, string>;
+    }
+    return JSON.parse(raw.toString("utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+
+const writeApiSecrets = (secrets: Record<string, string>): void => {
+  const payload = JSON.stringify(secrets);
+  if (safeStorage.isEncryptionAvailable()) {
+    fsSync.writeFileSync(secretsFilePath(), safeStorage.encryptString(payload));
+  } else {
+    fsSync.writeFileSync(secretsFilePath(), payload, "utf8");
+  }
+};
+
+const mergeApiSecrets = (patch: Record<string, string>): Record<string, string> =>
+  normalizeSecretsMap(mergeSecrets(readApiSecrets(), patch));
+
+const applyStoredSecretsToEnv = (): void => {
+  const secrets = normalizeSecretsMap(readApiSecrets());
+  for (const key of SECRET_ENV_KEYS) {
+    const value = secrets[key]?.trim();
+    if (value) process.env[key] = value;
+    else delete process.env[key];
+  }
+};
+
 const appSettings = new Map<number, Record<string, string>>();
 
-ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) => {
-  appSettings.set(event.sender.id, settings);
-  if (settings["openrouter.apiKey"]) {
-    process.env.OPENROUTER_API_KEY = settings["openrouter.apiKey"];
+const SETTINGS_KEYS_ON_DISK = new Set([
+  "ollama.url",
+  "cad.apiUrl",
+  "caval.userId",
+]);
+
+const SETTINGS_SENSITIVE_KEYS = new Set([
+  "openrouter.apiKey",
+  "caval.cloud.apiKey",
+  "cad.apiKey",
+  "mesh.apiKey",
+]);
+
+const settingsFilePath = (): string =>
+  path.join(app.getPath("userData"), "caval-app-settings.json");
+
+let persistedAppSettings: Record<string, string> = {};
+
+const readPersistedAppSettings = (): Record<string, string> => {
+  try {
+    if (!fsSync.existsSync(settingsFilePath())) return {};
+    const raw = fsSync.readFileSync(settingsFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
   }
-  if (settings["caval.cloud.apiKey"]) {
-    process.env.CAVAL_CLOUD_API_KEY = settings["caval.cloud.apiKey"];
+};
+
+const writePersistedAppSettings = (settings: Record<string, string>): void => {
+  const forDisk: Record<string, string> = {};
+  for (const [key, value] of Object.entries(settings)) {
+    if (SETTINGS_SENSITIVE_KEYS.has(key)) continue;
+    if (!SETTINGS_KEYS_ON_DISK.has(key) && !key.startsWith("caval.")) continue;
+    if (value?.trim()) forDisk[key] = value.trim();
   }
-  if (settings["ollama.url"]) {
-    process.env.OLLAMA_BASE_URL = settings["ollama.url"];
+  fsSync.writeFileSync(settingsFilePath(), JSON.stringify(forDisk, null, 2), "utf8");
+  persistedAppSettings = forDisk;
+};
+
+const applySettingsToEnv = (settings: Record<string, string>): void => {
+  if (settings["ollama.url"]?.trim()) {
+    process.env.OLLAMA_BASE_URL = settings["ollama.url"].trim();
   }
-  if (settings["cad.apiUrl"]) {
+  if (settings["cad.apiUrl"]?.trim()) {
     process.env.CAD_API_URL = settings["cad.apiUrl"].trim();
   }
-  if (settings["cad.apiKey"]) {
+  if (settings["cad.apiKey"]?.trim()) {
     process.env.CAD_API_KEY = settings["cad.apiKey"].trim();
   }
-  if (settings["mesh.apiKey"]) {
-    process.env.MESHY_API_KEY = settings["mesh.apiKey"];
+  if (settings["mesh.apiKey"]?.trim()) {
+    process.env.MESHY_API_KEY = settings["mesh.apiKey"].trim();
   }
+  if (settings["caval.cloud.apiKey"]?.trim()) {
+    process.env.CAVAL_CLOUD_API_KEY = settings["caval.cloud.apiKey"].trim();
+  }
+};
+
+const loadPersistedAppSettings = (): void => {
+  persistedAppSettings = readPersistedAppSettings();
+  applySettingsToEnv(persistedAppSettings);
+};
+
+ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) => {
+  const merged = { ...persistedAppSettings, ...settings };
+  const secretsPatch: Record<string, string> = {};
+  if (settings["openrouter.apiKey"] !== undefined) {
+    secretsPatch.OPENROUTER_API_KEY = settings["openrouter.apiKey"];
+  }
+  if (settings["mesh.apiKey"] !== undefined) {
+    secretsPatch.MESHY_API_KEY = settings["mesh.apiKey"];
+  }
+  if (settings["cad.apiKey"] !== undefined) {
+    secretsPatch.CAD_API_KEY = settings["cad.apiKey"];
+  }
+  if (Object.keys(secretsPatch).length > 0) {
+    const mergedSecrets = mergeApiSecrets(secretsPatch);
+    writeApiSecrets(mergedSecrets);
+    applyStoredSecretsToEnv();
+  }
+  writePersistedAppSettings(merged);
+  appSettings.set(event.sender.id, merged);
+  applySettingsToEnv(merged);
   return { ok: true };
 });
 
 ipcMain.handle("caval:settings-load", (event) => {
-  const stored = appSettings.get(event.sender.id) ?? {};
-  const secrets = readApiSecrets();
-  const settings = { ...stored };
+  persistedAppSettings = readPersistedAppSettings();
+  const secrets = normalizeSecretsMap(readApiSecrets());
+  const settings = { ...persistedAppSettings };
   if (secrets.OPENROUTER_API_KEY && !settings["openrouter.apiKey"]) {
     settings["openrouter.apiKey"] = secrets.OPENROUTER_API_KEY;
+  }
+  if (secrets.MESHY_API_KEY && !settings["mesh.apiKey"]) {
+    settings["mesh.apiKey"] = secrets.MESHY_API_KEY;
   }
   applyCadCloudEnvDefaults();
   if (!settings["cad.apiUrl"] && process.env.CAD_API_URL) {
     settings["cad.apiUrl"] = process.env.CAD_API_URL;
   }
-  appSettings.set(event.sender.id, settings);
-  return { ok: true, settings };
+  const withUser = getRendererSettings(event.sender.id, settings);
+  appSettings.set(event.sender.id, withUser);
+  return { ok: true, settings: withUser };
 });
 
 const billingBaseUrl = (): string =>
   process.env.BILLING_URL ?? `http://127.0.0.1:${process.env.BILLING_PORT ?? 8790}`;
 
-const getRendererSettings = (senderId: number): Record<string, string> => {
-  const settings = appSettings.get(senderId) ?? {};
+const getRendererSettings = (
+  senderId: number,
+  base?: Record<string, string>
+): Record<string, string> => {
+  const settings = { ...(base ?? appSettings.get(senderId) ?? persistedAppSettings) };
   if (!settings["caval.userId"]) {
-    settings["caval.userId"] = `caval_${randomUUID()}`;
-    appSettings.set(senderId, settings);
+    settings["caval.userId"] = persistedAppSettings["caval.userId"] ?? `caval_${randomUUID()}`;
+    persistedAppSettings = { ...persistedAppSettings, "caval.userId": settings["caval.userId"] };
+    writePersistedAppSettings(persistedAppSettings);
   }
   return settings;
 };
@@ -1213,32 +1402,8 @@ ipcMain.handle("caval:billing-checkout", async (event, input: { email: string })
   }
 });
 
-const secretsFilePath = (): string => path.join(app.getPath("userData"), "caval-api-keys.bin");
-
-const readApiSecrets = (): Record<string, string> => {
-  try {
-    if (!fsSync.existsSync(secretsFilePath())) return {};
-    const raw = fsSync.readFileSync(secretsFilePath());
-    if (safeStorage.isEncryptionAvailable()) {
-      return JSON.parse(safeStorage.decryptString(raw)) as Record<string, string>;
-    }
-    return JSON.parse(raw.toString("utf8")) as Record<string, string>;
-  } catch {
-    return {};
-  }
-};
-
-const writeApiSecrets = (secrets: Record<string, string>): void => {
-  const payload = JSON.stringify(secrets);
-  if (safeStorage.isEncryptionAvailable()) {
-    fsSync.writeFileSync(secretsFilePath(), safeStorage.encryptString(payload));
-  } else {
-    fsSync.writeFileSync(secretsFilePath(), payload, "utf8");
-  }
-};
-
 ipcMain.handle("caval:secrets-get", () => {
-  const stored = readApiSecrets();
+  const stored = normalizeSecretsMap(readApiSecrets());
   const merged: Record<string, string> = { ...stored };
   if (process.env.OPENROUTER_API_KEY && !merged.OPENROUTER_API_KEY) {
     merged.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -1250,37 +1415,25 @@ ipcMain.handle("caval:secrets-get", () => {
 });
 
 ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) => {
-  writeApiSecrets(secrets);
-  if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
-  if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
-  if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
-  if (secrets.NVIDIA_API_KEY) process.env.NVIDIA_API_KEY = secrets.NVIDIA_API_KEY;
-  if (secrets.MESHY_API_KEY) process.env.MESHY_API_KEY = secrets.MESHY_API_KEY;
-  if (secrets.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = secrets.ANTHROPIC_API_KEY;
-  if (secrets.OPENAI_API_KEY) process.env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
-  if (secrets.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = secrets.GOOGLE_API_KEY;
+  const merged = mergeApiSecrets(secrets);
+  writeApiSecrets(merged);
+  applyStoredSecretsToEnv();
   return { ok: true };
 });
-
-const applyStoredSecretsToEnv = (): void => {
-  const secrets = readApiSecrets();
-  if (secrets.OPENROUTER_API_KEY) process.env.OPENROUTER_API_KEY = secrets.OPENROUTER_API_KEY;
-  if (secrets.POOLSIDE_API_KEY) process.env.POOLSIDE_API_KEY = secrets.POOLSIDE_API_KEY;
-  if (secrets.NORTH_API_KEY) process.env.NORTH_API_KEY = secrets.NORTH_API_KEY;
-  if (secrets.NVIDIA_API_KEY) process.env.NVIDIA_API_KEY = secrets.NVIDIA_API_KEY;
-  if (secrets.MESHY_API_KEY) process.env.MESHY_API_KEY = secrets.MESHY_API_KEY;
-  if (secrets.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = secrets.ANTHROPIC_API_KEY;
-  if (secrets.OPENAI_API_KEY) process.env.OPENAI_API_KEY = secrets.OPENAI_API_KEY;
-  if (secrets.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = secrets.GOOGLE_API_KEY;
-};
 
 app.whenReady().then(() => {
   app.setName("CAVALLO");
   installApplicationMenu();
+  loadPersistedAppSettings();
   applyStoredSecretsToEnv();
+  setCavalConfigExtraPaths([app.getAppPath()]);
+  setMcpSecretsProvider(readApiSecrets);
   applyCadCloudEnvDefaults();
   warmOpenRouterConnection(true);
   preloadCoreModels();
+  void startMarketplaceServer().catch((err) => {
+    console.warn("[marketplace] auto-start skipped:", err instanceof Error ? err.message : err);
+  });
   if (!isCadCloudOnly()) {
     void ensureCadLocalServer().catch((err) => {
       console.warn("[cad] auto-start skipped:", err instanceof Error ? err.message : err);
@@ -1304,6 +1457,7 @@ app.on("window-all-closed", () => {
     }
   }
   stopCadLocalServer();
+  stopMarketplaceServer();
   if (process.platform !== "darwin") {
     app.quit();
   }

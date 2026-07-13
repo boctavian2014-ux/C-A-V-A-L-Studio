@@ -11,8 +11,8 @@ export const SearchBar = ({ query, suggestions, onChange, onSubmit }: SearchBarP
     onSubmit?.(query);
   }}>
     <input
-      aria-label="Search Marketplace"
-      placeholder="Search extensions, themes, AI tools..."
+      aria-label="Caută extensii"
+      placeholder="Caută extensii…"
       value={query}
       onChange={(event) => onChange(event.target.value)}
     />

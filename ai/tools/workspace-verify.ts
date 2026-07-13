@@ -5,6 +5,12 @@ import {
   runAllowedWorkspaceCommand,
   type CommandRunResult,
 } from './workspace-command-runner';
+import { maybeAutoFixBeforeVerify } from './verify-auto-fix';
+
+export interface WorkspaceVerifyOptions {
+  autoInstall?: boolean;
+  writtenFiles?: string[];
+}
 
 export interface WorkspaceVerifyResult {
   ran: boolean;
@@ -61,7 +67,10 @@ export function formatVerifySummary(result: WorkspaceVerifyResult): string {
 }
 
 /** Run build/test/typecheck locally — no MCP required. */
-export async function runWorkspaceVerify(workspaceRoot: string): Promise<WorkspaceVerifyResult> {
+export async function runWorkspaceVerify(
+  workspaceRoot: string,
+  options: WorkspaceVerifyOptions = {}
+): Promise<WorkspaceVerifyResult> {
   if (isAiJunkWorkspacePackage(workspaceRoot)) {
     return {
       ran: false,
@@ -81,6 +90,26 @@ export async function runWorkspaceVerify(workspaceRoot: string): Promise<Workspa
   }
 
   const commands: CommandRunResult[] = [];
+  const preInstall = await maybeAutoFixBeforeVerify(workspaceRoot, {
+    autoInstall: options.autoInstall,
+    writtenFiles: options.writtenFiles,
+  });
+  if (preInstall.installed) {
+    commands.push({
+      command: preInstall.command ?? 'npm install',
+      ok: preInstall.ok,
+      exitCode: preInstall.ok ? 0 : 1,
+      output: preInstall.output,
+    });
+    if (!preInstall.ok) {
+      return {
+        ran: true,
+        commands,
+        summary: `failed at ${preInstall.command ?? 'npm install'}`,
+      };
+    }
+  }
+
   for (const command of planned) {
     const result = await runAllowedWorkspaceCommand(command, workspaceRoot);
     commands.push(result);
@@ -95,4 +124,29 @@ export async function runWorkspaceVerify(workspaceRoot: string): Promise<Workspa
       ? formatVerifySummary({ ran: true, commands, summary: '' })
       : `failed at ${commands.find((c) => !c.ok)?.command ?? 'unknown'}`,
   };
+}
+
+/** Run verify with optional pre-install and one retry after installing missing modules from output. */
+export async function runWorkspaceVerifyWithAutoFix(
+  workspaceRoot: string,
+  options: WorkspaceVerifyOptions = {}
+): Promise<WorkspaceVerifyResult> {
+  let result = await runWorkspaceVerify(workspaceRoot, options);
+  if (!options.autoInstall) return result;
+
+  const failed = result.commands.find((c) => !c.ok && !/^npm install/i.test(c.command));
+  if (!failed?.output) return result;
+
+  const { autoFixMissingModulesFromVerify, applyFashionWebImportFixes } = await import('./verify-auto-fix.js');
+  const fix = await autoFixMissingModulesFromVerify(workspaceRoot, failed.output);
+  if (fix.installed && fix.ok) {
+    return runWorkspaceVerify(workspaceRoot, { ...options, autoInstall: false });
+  }
+
+  const relFix = await applyFashionWebImportFixes(workspaceRoot, failed.output);
+  if (relFix.output) {
+    return runWorkspaceVerify(workspaceRoot, { ...options, autoInstall: false });
+  }
+
+  return result;
 }

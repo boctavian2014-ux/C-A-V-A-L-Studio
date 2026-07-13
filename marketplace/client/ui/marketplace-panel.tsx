@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { MarketplaceExtension } from "../../api";
 import { useExtensions } from "../hooks/useExtensions";
 import { useSearch } from "../hooks/useSearch";
@@ -28,7 +28,11 @@ export const MarketplacePanel = ({
   const { extensions, loading, error } = useExtensions(baseUrl, category);
   const { results, suggestions } = useSearch(baseUrl, query);
   const visibleExtensions = query.trim() ? results : extensions;
-  const installed = marketplaceStore.getSnapshot().installedExtensionIds;
+  const installed = useSyncExternalStore(
+    (onStoreChange) => marketplaceStore.subscribe(onStoreChange),
+    () => marketplaceStore.getSnapshot().installedExtensionIds,
+    () => marketplaceStore.getSnapshot().installedExtensionIds
+  );
 
   const install = async (extension: MarketplaceExtension) => {
     setInstallError(null);

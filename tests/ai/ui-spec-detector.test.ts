@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { hasUiSpecInPrompt, isUiDesignTask } from '../../ai/composer/ui-spec-detector';
 
-describe('ui-spec-detector', () => {
-  it('hasUiSpecInPrompt detects theme and layout hints', () => {
-    expect(hasUiSpecInPrompt('Build app with dark mode and Tailwind')).toBe(true);
-    expect(hasUiSpecInPrompt('sidebar layout minimal UI')).toBe(true);
-    expect(hasUiSpecInPrompt('Create REST API only')).toBe(false);
-  });
+import { partitionTasksByUiPhase } from '../../ai/composer/ui-spec-detector';
 
-  it('isUiDesignTask matches phase:ui and frontend modules', () => {
-    expect(isUiDesignTask({ phase: 'ui', description: 'shell' })).toBe(true);
-    expect(isUiDesignTask({ module: 'frontend', description: 'dashboard' })).toBe(true);
-    expect(isUiDesignTask({ module: 'database', description: 'postgres schema' })).toBe(false);
+describe('ui-spec-detector auto UI path', () => {
+  it('partitions UI tasks without requiring user pause', () => {
+    const tasks = [
+      { id: '1', module: 'api', description: 'REST handlers', phase: 'core' as const },
+      { id: '2', module: 'ui', description: 'Dashboard shell', phase: 'ui' as const },
+    ];
+    const { preUi, ui } = partitionTasksByUiPhase(tasks);
+    expect(preUi).toHaveLength(1);
+    expect(ui).toHaveLength(1);
+    expect(ui[0]?.phase).toBe('ui');
   });
 });

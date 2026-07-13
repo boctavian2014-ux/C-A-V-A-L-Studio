@@ -24,6 +24,14 @@ export const DEFAULT_RECOVERY_PATTERNS: RecoveryPattern[] = [
     fix: 'Delete src/zero-latency/, restore package.json name to project (not zero-latency-composer), use fashion-fullstack archetype.',
   },
   {
+    pattern: 'placeholder spam files',
+    fix: 'Delete src/fileN.txt and src/main_N.sh placeholders; emit only real modules from architect plan.',
+  },
+  {
+    pattern: 'TS2307 cannot find module ../types',
+    fix: 'Create web/src/types.ts with ImageUpload, MatchResult, Product, Outfit, ApiError exports; align component imports.',
+  },
+  {
     pattern: 'fashion project missing web/mobile',
     fix: 'Seed web/ (Vite React upload UI) and mobile/ (Expo standalone) with fashion-matching-engine API routes.',
   },

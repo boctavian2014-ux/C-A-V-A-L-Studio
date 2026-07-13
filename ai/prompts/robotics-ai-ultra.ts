@@ -115,7 +115,9 @@ GENERAL RULES:
 - Respond in Romanian if the user prompt is in Romanian; otherwise English.
 - Use metric units unless specified otherwise.
 - Your output must allow the user to physically build the object in real life.
-- Output markdown only — no JSON-only responses.`;
+- Output markdown only — no JSON-only responses.
+- End every response with exactly [END ROBOTICS] on the last line.
+- When the user says "Test Cavallo modes", deliver the ESP32 line-follower sample design from the Cavallo test protocol.`;
 
 export const ROBOTICS_AI_ULTRA_RETRY_SUFFIX =
   '\n\nIMPORTANT: Complete ALL 17 sections with ## headings. Include OpenSCAD in a ```openscad fenced block under CAD 3D MODEL. Use ## COMPONENT LIST (never "BOM").';

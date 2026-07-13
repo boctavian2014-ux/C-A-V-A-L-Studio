@@ -4,6 +4,7 @@ import {
   shouldUseMultiAgentPipeline,
   applyMultiAgentOverrides,
 } from '../../../ai/composer/multi-agent/config';
+import { DEFAULT_MULTI_AGENT_CONFIG } from '../../../ai/composer/multi-agent/types';
 
 const baseCfg = {
   enabled: true,
@@ -55,10 +56,20 @@ describe('multi-agent config', () => {
         showPipelineTimeline: true,
         showLiveReasoning: true,
         showHorseWaitAnimation: true,
-        waitMessageRotateMs: 3500,
+        waitMessageRotateMs: 4800,
       },
     };
     expect(applyMultiAgentOverrides(base, { strictReview: false }).fastPipeline).toBe(true);
     expect(applyMultiAgentOverrides(base, { strictReview: true }).fastPipeline).toBe(false);
+  });
+
+  it('keeps fastPipeline when fullDelivery is enabled', () => {
+    const cfg = applyMultiAgentOverrides({
+      ...DEFAULT_MULTI_AGENT_CONFIG,
+      fastPipeline: true,
+      fullDelivery: { ...DEFAULT_MULTI_AGENT_CONFIG.fullDelivery, enabled: true },
+    });
+    expect(cfg.fastPipeline).toBe(true);
+    expect(cfg.fullDelivery.enabled).toBe(true);
   });
 });

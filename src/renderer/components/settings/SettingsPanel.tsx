@@ -1,76 +1,20 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useCavalTheme } from '../../../../themes/theme-provider';
-import {
-  useSettingsStore,
-  type SettingsSection,
-  type ImagePreset,
-  DEFAULT_PRESETS,
-} from '../../store/settings-store';
-import { PromptLibraryPanel } from './PromptLibraryPanel';
+import { useSettingsStore, type SettingsSection } from '../../store/settings-store';
 import { useEditorStore } from '../../store/editor-store';
+import { useAIStore } from '../../../../ai/composer/ai-store';
+import { ApiKeysForm } from '../../../../ai/composer/ApiKeysForm';
+import { normalizeSecretsMap } from '../../../../ai/models/api-secrets';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 
-// ──────────────────────────────────────────────
-//  SettingsPanel — CAVALLO Studio
-//  Secțiuni: Image Generator · Asset Manager ·
-//            Context Bridge · Safety & Credits ·
-//            Editor · App · Shortcuts · About
-// ──────────────────────────────────────────────
-
-// ── Navigare ──────────────────────────────────
-
-const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode; badge?: string }[] = [
+const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
   {
-    id: 'asset-manager',
-    label: 'Asset Manager',
-    badge: 'Presets',
+    id: 'general',
+    label: 'General',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="2" y="7" width="20" height="14" rx="2" />
-        <path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" />
-        <line x1="12" y1="12" x2="12" y2="17" strokeLinecap="round" />
-        <line x1="9.5" y1="14.5" x2="14.5" y2="14.5" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    id: 'context-bridge',
-    label: 'AI Context Bridge',
-    badge: 'SMART',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    id: 'export',
-    label: 'Export & Paths',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" />
-        <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
-        <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    id: 'cad-cloud',
-    label: 'CAD Cloud 3D',
-    badge: 'STL',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinejoin="round" />
-        <path d="M2 17l10 5 10-5M2 12l10 5 10-5" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    id: 'safety',
-    label: 'Safety & Credits',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -85,8 +29,37 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode; ba
     ),
   },
   {
+    id: 'ai',
+    label: 'AI & Chei API',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z" strokeLinejoin="round" />
+        <path d="M6 10h12v10a2 2 0 01-2 2H8a2 2 0 01-2-2V10z" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    id: 'arena',
+    label: 'Coding Arena',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M4 6h16M4 12h10M4 18h16" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    id: 'cad-cloud',
+    label: 'Robotics & CAD',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinejoin="round" />
+        <path d="M2 17l10 5 10-5M2 12l10 5 10-5" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     id: 'shortcuts',
-    label: 'Shortcuts',
+    label: 'Scurtături',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <rect x="2" y="4" width="20" height="16" rx="2" />
@@ -95,18 +68,8 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode; ba
     ),
   },
   {
-    id: 'prompt-library' as SettingsSection,
-    label: 'Prompt Library',
-    badge: 'NEW',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    ),
-  },
-  {
     id: 'about',
-    label: 'Despre Caval',
+    label: 'Despre CAVALLO',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="12" r="10" />
@@ -115,10 +78,6 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode; ba
     ),
   },
 ];
-
-// ──────────────────────────────────────────────
-//  Componente UI reutilizabile
-// ──────────────────────────────────────────────
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -138,13 +97,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({
-  label, desc, children,
-}: {
-  label: string;
-  desc?: string;
-  children: React.ReactNode;
-}) {
+function Row({ label, desc, children }: { label: string; desc?: string; children: React.ReactNode }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center',
@@ -160,15 +113,10 @@ function Row({
   );
 }
 
-function Toggle({
-  value, onChange, disabled,
-}: {
-  value: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-}) {
+function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <button
+      type="button"
       onClick={() => !disabled && onChange(!value)}
       style={{
         width: 36, height: 20, borderRadius: 10, border: 'none',
@@ -212,8 +160,6 @@ function Input({
         fontFamily: mono ? "'JetBrains Mono', monospace" : 'inherit',
         outline: 'none', width: '100%', boxSizing: 'border-box',
       }}
-      onFocus={(e) => { e.target.style.borderColor = 'rgba(0,224,255,0.4)'; }}
-      onBlur={(e) => { e.target.style.borderColor = 'var(--caval-border)'; }}
     />
   );
 }
@@ -267,531 +213,161 @@ function NumberInput({
         outline: 'none', width: 70,
         fontFamily: "'JetBrains Mono', monospace",
       }}
-      onFocus={(e) => { e.target.style.borderColor = 'rgba(0,224,255,0.4)'; }}
-      onBlur={(e) => { e.target.style.borderColor = 'var(--caval-border)'; }}
     />
   );
 }
 
-// ──────────────────────────────────────────────
-//  Secțiune: Asset Manager & Format Presets
-// ──────────────────────────────────────────────
-
-const CATEGORY_LABELS: Record<string, string> = {
-  app: 'App Assets',
-  marketing: 'Marketing',
-  social: 'Social Media',
-  custom: 'Custom',
-};
-
-function PresetCard({
-  preset, onToggle, onRemove,
-}: {
-  preset: ImagePreset;
-  onToggle: () => void;
-  onRemove?: () => void;
-}) {
-  const isCustom = preset.category === 'custom';
-
+function InfoBox({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center',
-      padding: '7px 10px', borderRadius: 6,
-      background: preset.enabled ? 'rgba(0,224,255,0.04)' : 'var(--caval-bg)',
-      border: `1px solid ${preset.enabled ? 'rgba(0,224,255,0.2)' : 'var(--caval-border)'}`,
-      gap: 10, transition: 'all 0.15s',
+      fontSize: 11, color: 'var(--caval-text-muted)', lineHeight: 1.5,
+      padding: '10px 12px', borderRadius: 6,
+      background: 'var(--caval-bg)', border: '1px solid var(--caval-border)',
+      marginBottom: 12,
     }}>
-      {/* Toggle */}
-      <Toggle value={preset.enabled} onChange={onToggle} />
-
-      {/* Info */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--caval-text)' }}>
-            {preset.label}
-          </span>
-          <span style={{
-            fontSize: 9.5, padding: '1px 5px', borderRadius: 3,
-            background: 'rgba(255,255,255,0.05)', color: 'var(--caval-text-muted)',
-            fontFamily: "'JetBrains Mono', monospace",
-          }}>
-            {preset.width}×{preset.height}
-          </span>
-        </div>
-        <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 1 }}>
-          {preset.description}
-        </div>
-      </div>
-
-      {/* Remove (custom only) */}
-      {isCustom && onRemove && (
-        <button
-          onClick={onRemove}
-          style={{
-            width: 20, height: 20, borderRadius: 3, border: 'none',
-            background: 'none', color: '#EF4444', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          ×
-        </button>
-      )}
+      {children}
     </div>
   );
 }
 
-function SectionAssetManager() {
-  const { presets, togglePreset, addCustomPreset, removePreset } = useSettingsStore();
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newLabel, setNewLabel] = useState('');
-  const [newW, setNewW] = useState('');
-  const [newH, setNewH] = useState('');
-  const [newDesc, setNewDesc] = useState('');
+function SectionGeneral() {
+  const { app, updateApp } = useSettingsStore();
+  const { mode, setMode } = useCavalTheme();
 
-  const categories = ['app', 'marketing', 'social', 'custom'] as const;
-
-  const handleAdd = () => {
-    if (!newLabel || !newW || !newH) return;
-    addCustomPreset({
-      label: newLabel,
-      width: parseInt(newW),
-      height: parseInt(newH),
-      description: newDesc || `${newW}×${newH}px`,
-    });
-    setNewLabel(''); setNewW(''); setNewH(''); setNewDesc('');
-    setShowAddForm(false);
+  const setTheme = (theme: 'dark' | 'light') => {
+    updateApp({ theme });
+    setMode(theme);
   };
 
-  return (
-    <>
-      <InfoBox accent>
-        Bifează rezoluțiile pe care vrei să le exporți automat. La fiecare generare,
-        Caval creează versiuni pentru toate formatele active.
-      </InfoBox>
-
-      {categories.map((cat) => {
-        const items = presets.filter((p) => p.category === cat);
-        if (items.length === 0) return null;
-        return (
-          <Section key={cat} title={CATEGORY_LABELS[cat]}>
-            {items.map((p) => (
-              <PresetCard
-                key={p.id}
-                preset={p}
-                onToggle={() => togglePreset(p.id)}
-                onRemove={cat === 'custom' ? () => removePreset(p.id) : undefined}
-              />
-            ))}
-          </Section>
-        );
-      })}
-
-      {/* Adaugă preset custom */}
-      <div style={{ marginTop: 8 }}>
-        {!showAddForm ? (
-          <button
-            onClick={() => setShowAddForm(true)}
-            style={{
-              width: '100%', padding: '7px', borderRadius: 6,
-              border: '1px dashed rgba(0,224,255,0.25)',
-              background: 'transparent', color: 'var(--caval-accent)',
-              cursor: 'pointer', fontSize: 12, fontWeight: 500,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            }}
-          >
-            <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
-            Adaugă rezoluție custom
-          </button>
-        ) : (
-          <div style={{
-            padding: 12, borderRadius: 6,
-            border: '1px solid var(--caval-border)',
-            background: 'var(--caval-bg)',
-            display: 'flex', flexDirection: 'column', gap: 8,
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--caval-text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Preset nou
-            </div>
-            <Input value={newLabel} onChange={setNewLabel} placeholder="Nume (ex: Notification Icon)" />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Input value={newW} onChange={setNewW} placeholder="Lățime (px)" mono />
-              <Input value={newH} onChange={setNewH} placeholder="Înălțime (px)" mono />
-            </div>
-            <Input value={newDesc} onChange={setNewDesc} placeholder="Descriere (opțional)" />
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                onClick={handleAdd}
-                disabled={!newLabel || !newW || !newH}
-                style={{
-                  flex: 1, padding: '6px', borderRadius: 5, border: 'none',
-                  background: newLabel && newW && newH ? 'var(--caval-accent)' : 'rgba(255,255,255,0.07)',
-                  color: newLabel && newW && newH ? '#0E0E0F' : 'var(--caval-text-muted)',
-                  fontWeight: 600, fontSize: 12, cursor: 'pointer',
-                }}
-              >
-                Adaugă
-              </button>
-              <button
-                onClick={() => setShowAddForm(false)}
-                style={{
-                  padding: '6px 12px', borderRadius: 5,
-                  border: '1px solid var(--caval-border)',
-                  background: 'transparent', color: 'var(--caval-text-muted)',
-                  fontSize: 12, cursor: 'pointer',
-                }}
-              >
-                Anulează
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Secțiune: AI Context Bridge
-// ──────────────────────────────────────────────
-
-function SectionContextBridge() {
-  const { contextBridge, updateContextBridge } = useSettingsStore();
-  const projectPath = useEditorStore((s) => s.projectPath);
-  const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<string | null>(null);
-
-  // Scanează fișierele de tema din proiect pentru a extrage culori
-  const scanProject = useCallback(async () => {
-    if (!projectPath) {
-      setScanResult('Deschide un proiect mai întâi.');
-      return;
-    }
-    setScanning(true);
-    setScanResult(null);
-
-    try {
-      // Citim fișierele comune de teme
-      const themeFiles = [
-        'src/theme.ts', 'src/themes/colors.ts', 'src/tokens/colors.ts',
-        'tailwind.config.js', 'tailwind.config.ts',
-        'src/styles/theme.ts', 'theme.ts', 'colors.ts',
-      ];
-
-      const colors: string[] = [];
-      const fonts: string[] = [];
-      let scannedCount = 0;
-
-      for (const file of themeFiles) {
-        const result = await window.caval.fs.readFile(`${projectPath}/${file}`);
-        if (!result.ok) continue;
-        scannedCount++;
-
-        const content = result.content;
-
-        // Extrage hex colors
-        const hexMatches = content.match(/#[0-9A-Fa-f]{3,8}\b/g) || [];
-        const rgbMatches = (content.match(/rgba?\([^)]+\)/g) || []);
-
-        colors.push(...hexMatches, ...rgbMatches);
-
-        // Extrage font names
-        const fontMatches = content.match(/['"]([A-Z][a-zA-Z\s]+(?:Mono|Sans|Serif)?)['"]/g) || [];
-        fonts.push(...fontMatches.map((f) => f.replace(/['"]/g, '')));
-      }
-
-      // Deduplică și limitează
-      const uniqueColors = [...new Set(colors)].slice(0, 20);
-      const uniqueFonts  = [...new Set(fonts)].slice(0, 10);
-
-      updateContextBridge({
-        detectedColors: uniqueColors,
-        detectedFonts: uniqueFonts,
-        lastScanPath: projectPath,
-      });
-
-      setScanResult(
-        scannedCount === 0
-          ? 'Nu s-au găsit fișiere de temă în proiect.'
-          : `Scanat ${scannedCount} fișier${scannedCount > 1 ? 'e' : ''} · ${uniqueColors.length} culori · ${uniqueFonts.length} fonturi`
-      );
-    } catch {
-      setScanResult('Eroare la scanare proiect.');
-    } finally {
-      setScanning(false);
-    }
-  }, [projectPath, updateContextBridge]);
+  useEffect(() => {
+    if (app.theme !== mode) setMode(app.theme);
+  }, [app.theme, mode, setMode]);
 
   return (
     <>
-      <InfoBox accent>
-        <strong>Diferențiatorul Caval față de VS Code.</strong> Când e activat, AI-ul
-        primește automat paleta de culori și stilul proiectului tău — fără să trebuiască
-        să explici manual ce culori folosești.
-      </InfoBox>
-
-      <Section title="Activare">
-        <Row
-          label="AI Context Bridge"
-          desc="Injectează contextul proiectului în fiecare generare AI"
-        >
-          <Toggle
-            value={contextBridge.enabled}
-            onChange={(v) => updateContextBridge({ enabled: v })}
-          />
-        </Row>
-      </Section>
-
-      <Section title="Ce să analizeze">
-        <Row
-          label="Culori proiect"
-          desc="Citește theme.ts, colors.ts, tailwind.config — extrage paleta"
-        >
-          <Toggle
-            value={contextBridge.analyzeColors}
-            onChange={(v) => updateContextBridge({ analyzeColors: v })}
-            disabled={!contextBridge.enabled}
-          />
-        </Row>
-        <Row
-          label="Fonturi proiect"
-          desc="Detectează fonturile folosite în proiect"
-        >
-          <Toggle
-            value={contextBridge.analyzeFonts}
-            onChange={(v) => updateContextBridge({ analyzeFonts: v })}
-            disabled={!contextBridge.enabled}
-          />
-        </Row>
-        <Row
-          label="Numele proiectului"
-          desc="Include numele și contextul proiectului în prompt"
-        >
-          <Toggle
-            value={contextBridge.analyzeProjectName}
-            onChange={(v) => updateContextBridge({ analyzeProjectName: v })}
-            disabled={!contextBridge.enabled}
-          />
-        </Row>
-      </Section>
-
-      {/* Scan proiect */}
-      <Section title="Scanează proiect acum">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.5 }}>
-            Caval va citi fișierele de temă din proiectul deschis și va extrage
-            culorile automat. Rulează după ce deschizi un proiect nou.
-          </div>
-          <button
-            onClick={scanProject}
-            disabled={scanning || !projectPath}
-            style={{
-              padding: '7px 14px', borderRadius: 6,
-              background: scanning ? 'rgba(0,224,255,0.1)' : 'rgba(0,224,255,0.12)',
-              border: '1px solid rgba(0,224,255,0.2)',
-              color: 'var(--caval-accent)', fontWeight: 600, fontSize: 12,
-              cursor: scanning || !projectPath ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-              opacity: !projectPath ? 0.5 : 1,
-              transition: 'all 0.15s',
-            } as any}
-          >
-            {scanning ? (
-              <>
-                <span style={{ animation: 'caval-spin 1s linear infinite', display: 'inline-block' }}>
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M14 8A6 6 0 112 8" strokeLinecap="round" />
-                  </svg>
-                </span>
-                Scanez…
-              </>
-            ) : (
-              <>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <circle cx="11" cy="11" r="4" /><path d="M2 2l5 5" strokeLinecap="round" />
-                </svg>
-                Scanează proiect
-              </>
-            )}
-          </button>
-
-          {scanResult && (
-            <div style={{
-              fontSize: 11, padding: '6px 9px', borderRadius: 5,
-              background: 'rgba(47,191,113,0.07)',
-              border: '1px solid rgba(47,191,113,0.15)',
-              color: '#2FBF71',
-            }}>
-              {scanResult}
-            </div>
-          )}
-        </div>
-      </Section>
-
-      {/* Culori detectate */}
-      {contextBridge.detectedColors.length > 0 && (
-        <Section title={`Culori detectate (${contextBridge.detectedColors.length})`}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {contextBridge.detectedColors.map((color, i) => (
-              <div
-                key={i}
-                title={color}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '2px 7px 2px 4px', borderRadius: 4,
-                  background: 'var(--caval-bg)',
-                  border: '1px solid var(--caval-border)',
-                  fontSize: 10.5,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: 'var(--caval-text-muted)',
-                }}
-              >
-                <span style={{
-                  width: 12, height: 12, borderRadius: 3,
-                  background: color,
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  flexShrink: 0,
-                }} />
-                {color.length > 14 ? color.substring(0, 14) + '…' : color}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Instrucțiuni custom */}
-      <Section title="Instrucțiuni custom">
-        <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
-          Text adăugat automat la fiecare prompt de generare imagini.
-          Exemplu: <em style={{ color: 'var(--caval-text)' }}>"Always use the brand colors. No text in images."</em>
-        </div>
-        <textarea
-          value={contextBridge.customInstructions}
-          onChange={(e) => updateContextBridge({ customInstructions: e.target.value })}
-          placeholder="Instrucțiuni adăugate automat la fiecare prompt…"
-          rows={3}
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            background: 'var(--caval-bg)', border: '1px solid var(--caval-border)',
-            borderRadius: 6, padding: '7px 9px',
-            color: 'var(--caval-text)', fontSize: 12,
-            fontFamily: "'Inter', sans-serif", resize: 'vertical', outline: 'none',
-            lineHeight: 1.5,
-          }}
-          onFocus={(e) => { e.target.style.borderColor = 'rgba(0,224,255,0.4)'; }}
-          onBlur={(e) => { e.target.style.borderColor = 'var(--caval-border)'; }}
-        />
-      </Section>
-    </>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Secțiune: Export & Paths
-// ──────────────────────────────────────────────
-
-function SectionExport() {
-  const { exportSettings, updateExport } = useSettingsStore();
-  const projectPath = useEditorStore((s) => s.projectPath);
-
-  const resolvedPath = projectPath
-    ? `${projectPath}/${exportSettings.autoExportPath.replace('./', '')}`
-    : exportSettings.autoExportPath;
-
-  return (
-    <>
-      <Section title="Auto-Export">
-        <Row
-          label="Export automat activat"
-          desc="Fiecare imagine generată se salvează automat"
-        >
-          <Toggle
-            value={exportSettings.autoExportEnabled}
-            onChange={(v) => updateExport({ autoExportEnabled: v })}
-          />
-        </Row>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Folder export
-          </div>
-          <Input
-            value={exportSettings.autoExportPath}
-            onChange={(v) => updateExport({ autoExportPath: v })}
-            placeholder="./assets/generated/"
-            mono
-          />
-          {projectPath && (
-            <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>
-              → {resolvedPath}
-            </div>
-          )}
-        </div>
-
-        <Row label="Format fișier">
+      <Section title="Aspect">
+        <Row label="Temă" desc="Dark sau light pentru întreaga aplicație">
           <Select
-            value={exportSettings.exportFormat}
-            onChange={(v) => updateExport({ exportFormat: v })}
+            value={app.theme}
+            onChange={setTheme}
             options={[
-              { value: 'png',  label: 'PNG (lossless)' },
-              { value: 'webp', label: 'WebP (mic, web)' },
-              { value: 'jpg',  label: 'JPEG (fotografii)' },
+              { value: 'dark', label: 'Dark' },
+              { value: 'light', label: 'Light' },
+            ]}
+          />
+        </Row>
+        <Row label="Limbă" desc="Interfață (i18n în curs)">
+          <Select
+            value={app.language}
+            onChange={(v) => updateApp({ language: v })}
+            options={[
+              { value: 'ro', label: 'Română' },
+              { value: 'en', label: 'English' },
             ]}
           />
         </Row>
       </Section>
+    </>
+  );
+}
 
-      <Section title="Organizare fișiere">
-        <Row
-          label="Subfoldere per categorie"
-          desc="icons/ · banners/ · social/ în folderul de export"
-        >
-          <Toggle
-            value={exportSettings.createSubfolders}
-            onChange={(v) => updateExport({ createSubfolders: v })}
+function SectionEditor() {
+  const { app, updateApp } = useSettingsStore();
+
+  return (
+    <>
+      <Section title="Monaco Editor">
+        <Row label="Font size" desc="Dimensiunea fontului în editor">
+          <NumberInput value={app.fontSize} onChange={(v) => updateApp({ fontSize: v })} min={8} max={32} />
+        </Row>
+        <Row label="Tab size">
+          <Select
+            value={String(app.tabSize) as '2' | '4' | '8'}
+            onChange={(v) => updateApp({ tabSize: parseInt(v, 10) })}
+            options={[
+              { value: '2', label: '2 spații' },
+              { value: '4', label: '4 spații' },
+              { value: '8', label: '8 spații' },
+            ]}
           />
         </Row>
-        <Row
-          label="Adaugă timestamp"
-          desc="Exemplu: splash_2732x2732_1719241200.png"
-        >
-          <Toggle
-            value={exportSettings.addTimestamp}
-            onChange={(v) => updateExport({ addTimestamp: v })}
-          />
+        <Row label="Word wrap" desc="Înfășoară liniile lungi">
+          <Toggle value={app.wordWrap} onChange={(v) => updateApp({ wordWrap: v })} />
         </Row>
-        <Row
-          label="Sufix rezoluție"
-          desc="Exemplu: app_icon_1024x1024.png"
-        >
-          <Toggle
-            value={exportSettings.addPresetSuffix}
-            onChange={(v) => updateExport({ addPresetSuffix: v })}
-          />
+        <Row label="Minimap" desc="Harta minimă din dreapta editorului">
+          <Toggle value={app.minimap} onChange={(v) => updateApp({ minimap: v })} />
         </Row>
       </Section>
     </>
   );
 }
 
-// ──────────────────────────────────────────────
-//  Secțiune: CAD Cloud 3D
-// ──────────────────────────────────────────────
+function SectionAi() {
+  return (
+    <Section title="Provideri & chei API">
+      <ApiKeysForm showSaveButton />
+    </Section>
+  );
+}
+
+function SectionArena() {
+  const { strictReview, setStrictReview } = useAIStore();
+  const projectPath = useEditorStore((s) => s.projectPath);
+
+  return (
+    <>
+      <Section title="Pipeline agentic">
+        <Row
+          label="Review strict"
+          desc="Pipeline complet multi-agent; dezactivat = fast pipeline când e permis în caval.jsonc"
+        >
+          <Toggle value={strictReview} onChange={setStrictReview} />
+        </Row>
+      </Section>
+
+      <Section title="Sesiune chat">
+        <InfoBox>
+          Un singur chat activ per folder deschis. Click „Chat nou” arhivează conversația curentă;
+          istoricul rămâne local, dar nu apare ca tab-uri vechi.
+        </InfoBox>
+      </Section>
+
+      <Section title="Config avansat">
+        <InfoBox>
+          Modele implicite per mod (Ask, Code, Agentic, Plan, Debug), multi-agent, MCP și zero-latency
+          se configurează în <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>caval.jsonc</code>
+          {projectPath ? (
+            <> din rădăcina proiectului deschis.</>
+          ) : (
+            <> — deschide un folder de proiect.</>
+          )}
+        </InfoBox>
+      </Section>
+    </>
+  );
+}
 
 function SectionCadCloud() {
   const [apiUrl, setApiUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [meshKey, setMeshKey] = useState('');
   const [healthMsg, setHealthMsg] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [cloudOnly, setCloudOnly] = useState(true);
+  const [meshyOk, setMeshyOk] = useState(false);
+  const [openRouterOk, setOpenRouterOk] = useState(false);
 
   useEffect(() => {
     void (async () => {
-      const res = await window.caval.settingsLoad?.();
-      const s = res?.settings ?? {};
+      const [settingsRes, secretsRes] = await Promise.all([
+        window.caval.settingsLoad?.(),
+        window.caval.secretsGet?.(),
+      ]);
+      const s = settingsRes?.settings ?? {};
       setApiUrl(s['cad.apiUrl'] ?? '');
       setApiKey(s['cad.apiKey'] ?? '');
-      setMeshKey(s['mesh.apiKey'] ?? '');
+      const secrets = normalizeSecretsMap(secretsRes?.secrets ?? {});
+      setMeshyOk(Boolean(secrets.MESHY_API_KEY?.trim()));
+      setOpenRouterOk(Boolean(secrets.OPENROUTER_API_KEY?.trim()));
       const mode = await window.caval.cad?.isCloudOnly?.();
       if (mode?.cloudOnly !== undefined) setCloudOnly(mode.cloudOnly);
     })();
@@ -804,7 +380,6 @@ function SectionCadCloud() {
       ...prev,
       'cad.apiUrl': apiUrl.trim(),
       'cad.apiKey': apiKey.trim(),
-      'mesh.apiKey': meshKey.trim(),
     });
   };
 
@@ -833,39 +408,18 @@ function SectionCadCloud() {
 
   return (
     <div>
-      <Section title="Server CAD cloud (Railway)">
+      <Section title="Server CAD cloud">
         <p style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.5, margin: '0 0 10px' }}>
-          Generarea STL 3D rulează pe serverul cloud — OpenSCAD în Docker pe Railway.
+          Generarea STL 3D pentru Robotics rulează pe serverul cloud (OpenSCAD în Docker).
           {cloudOnly ? ' Mod cloud-only activ.' : ''}
         </p>
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>URL API CAD</div>
-          <Input
-            value={apiUrl}
-            onChange={setApiUrl}
-            placeholder="https://xxx.up.railway.app"
-            mono
-          />
+          <Input value={apiUrl} onChange={setApiUrl} placeholder="https://xxx.up.railway.app" mono />
         </div>
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Cheie API CAD (opțional)</div>
-          <Input
-            value={apiKey}
-            onChange={setApiKey}
-            placeholder="CAD_API_KEY de pe Railway"
-            type="password"
-            mono
-          />
-        </div>
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Cheie Meshy (opțional)</div>
-          <Input
-            value={meshKey}
-            onChange={setMeshKey}
-            placeholder="mesh.apiKey — obiecte organice"
-            type="password"
-            mono
-          />
+          <Input value={apiKey} onChange={setApiKey} placeholder="CAD_API_KEY" type="password" mono />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button
@@ -900,250 +454,51 @@ function SectionCadCloud() {
           </div>
         )}
       </Section>
+
+      <Section title="Chei conexe">
+        <InfoBox>
+          Meshy: {meshyOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          <br />
+          OpenRouter: {openRouterOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+        </InfoBox>
+      </Section>
     </div>
   );
 }
 
-// ──────────────────────────────────────────────
-//  Secțiune: Safety & Credits
-// ──────────────────────────────────────────────
-
-function SectionSafety() {
-  const {
-    safety, updateSafety,
-    sessionGenerations, resetSessionGenerations,
-  } = useSettingsStore();
-
-  const maxGen = safety.maxGenerationsPerSession;
-  const pct = maxGen > 0 ? Math.min(100, (sessionGenerations / maxGen) * 100) : 0;
-  const isOver = maxGen > 0 && sessionGenerations >= maxGen;
-
-  return (
-    <>
-      {/* Usage Meter */}
-      <Section title="Credit & Usage Meter">
-        <Row label="Arată usage meter" desc="Contor generări în sesiunea curentă">
-          <Toggle
-            value={safety.showUsageMeter}
-            onChange={(v) => updateSafety({ showUsageMeter: v })}
-          />
-        </Row>
-
-        {safety.showUsageMeter && (
-          <div style={{
-            padding: '10px 12px', borderRadius: 8,
-            background: 'var(--caval-bg)', border: '1px solid var(--caval-border)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>Sesiunea curentă</span>
-              <span style={{
-                fontSize: 12, fontWeight: 700,
-                fontFamily: "'JetBrains Mono', monospace",
-                color: isOver ? '#EF4444' : 'var(--caval-accent)',
-              }}>
-                {sessionGenerations}{maxGen > 0 ? ` / ${maxGen}` : ''} generări
-              </span>
-            </div>
-
-            {maxGen > 0 && (
-              <div style={{
-                height: 6, borderRadius: 3,
-                background: 'rgba(255,255,255,0.08)', overflow: 'hidden',
-              }}>
-                <div style={{
-                  height: '100%', borderRadius: 3,
-                  width: `${pct}%`,
-                  background: isOver
-                    ? '#EF4444'
-                    : pct > 80 ? '#F59E0B' : 'var(--caval-accent)',
-                  transition: 'width 0.3s',
-                }} />
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 10.5, color: 'var(--caval-text-muted)' }}>
-                {maxGen === 0 ? 'Fără limită' : isOver ? 'Limită atinsă' : `${maxGen - sessionGenerations} rămase`}
-              </span>
-              <button
-                onClick={resetSessionGenerations}
-                style={{
-                  fontSize: 10, padding: '2px 7px', borderRadius: 3,
-                  background: 'rgba(255,255,255,0.05)', border: '1px solid var(--caval-border)',
-                  color: 'var(--caval-text-muted)', cursor: 'pointer',
-                }}
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        )}
-
-        <Row
-          label="Limită generări / sesiune"
-          desc="0 = nelimitat · DALL-E 3 = ~$0.04-0.08 / imagine"
-        >
-          <NumberInput
-            value={safety.maxGenerationsPerSession}
-            onChange={(v) => updateSafety({ maxGenerationsPerSession: v })}
-            min={0}
-            max={100}
-          />
-        </Row>
-      </Section>
-
-      <Section title="Dark Mode & Transparență">
-        <InfoBox>
-          Opțiunile de mai jos modifică automat promptul de generare.
-          Util pentru imagini care trebuie să funcționeze pe fundal dark și light.
-        </InfoBox>
-
-        <Row
-          label="Fundal transparent"
-          desc='Adaugă "transparent background, PNG format" la prompt'
-        >
-          <Toggle
-            value={safety.requireTransparentBg}
-            onChange={(v) => updateSafety({ requireTransparentBg: v })}
-          />
-        </Row>
-        <Row
-          label="Preview dark + light mode"
-          desc='Adaugă "works well on both dark and light backgrounds" la prompt'
-        >
-          <Toggle
-            value={safety.addDarkModeNote}
-            onChange={(v) => updateSafety({ addDarkModeNote: v })}
-          />
-        </Row>
-        <Row
-          label="Safe mode"
-          desc='Adaugă prefix de siguranță la fiecare prompt (evită conținut NSFW)'
-        >
-          <Toggle
-            value={safety.safeMode}
-            onChange={(v) => updateSafety({ safeMode: v })}
-          />
-        </Row>
-      </Section>
-
-      {/* Preview prompt modificat */}
-      {(safety.requireTransparentBg || safety.addDarkModeNote || safety.safeMode) && (
-        <Section title="Prefix prompt adăugat automat">
-          <div style={{
-            padding: '8px 10px', borderRadius: 6,
-            background: 'rgba(0,224,255,0.04)',
-            border: '1px solid rgba(0,224,255,0.12)',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 11, color: 'var(--caval-text-muted)',
-            lineHeight: 1.6,
-          }}>
-            {safety.safeMode && <div style={{ color: '#2FBF71' }}>[SAFE] </div>}
-            <span style={{ opacity: 0.6 }}>{"<promptul tău>"}</span>
-            {safety.requireTransparentBg && (
-              <div style={{ color: 'var(--caval-accent)' }}>. Transparent background, PNG format.</div>
-            )}
-            {safety.addDarkModeNote && (
-              <div style={{ color: 'var(--caval-accent)' }}>Works well on both dark and light backgrounds.</div>
-            )}
-          </div>
-        </Section>
-      )}
-    </>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Secțiune: Editor
-// ──────────────────────────────────────────────
-
-function SectionEditor() {
-  const { app, updateApp } = useSettingsStore();
-
-  return (
-    <>
-      <Section title="Aspect">
-        <Row label="Font size editor" desc="Dimensiunea fontului în Monaco Editor">
-          <NumberInput value={app.fontSize} onChange={(v) => updateApp({ fontSize: v })} min={8} max={32} />
-        </Row>
-        <Row label="Tab size">
-          <Select
-            value={String(app.tabSize) as any}
-            onChange={(v) => updateApp({ tabSize: parseInt(v) })}
-            options={[
-              { value: '2', label: '2 spații' },
-              { value: '4', label: '4 spații' },
-              { value: '8', label: '8 spații' },
-            ]}
-          />
-        </Row>
-        <Row label="Word wrap" desc="Înfășoară liniile lungi automat">
-          <Toggle value={app.wordWrap} onChange={(v) => updateApp({ wordWrap: v })} />
-        </Row>
-        <Row label="Minimap" desc="Harta minimă din dreapta editorului">
-          <Toggle value={app.minimap} onChange={(v) => updateApp({ minimap: v })} />
-        </Row>
-      </Section>
-
-      <Section title="Salvare">
-        <Row label="Auto-save" desc="Salvează automat la inactivitate">
-          <Toggle value={app.autoSave} onChange={(v) => updateApp({ autoSave: v })} />
-        </Row>
-        <Row label="Delay auto-save" desc="Milisecunde de inactivitate înainte de salvare">
-          <NumberInput
-            value={app.autoSaveDelay}
-            onChange={(v) => updateApp({ autoSaveDelay: v })}
-            min={500} max={10000} step={500}
-          />
-        </Row>
-      </Section>
-    </>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Secțiune: Shortcuts
-// ──────────────────────────────────────────────
-
 const SHORTCUTS = [
-  { action: 'Toggle AI Panel',         keys: ['Ctrl', 'Shift', 'A'] },
-  { action: 'Toggle Git Panel',        keys: ['Ctrl', 'Shift', 'G'] },
-  { action: 'Toggle Explorer',         keys: ['Ctrl', 'Shift', 'E'] },
-  { action: 'Image Generator',         keys: ['Ctrl', 'Shift', 'I'] },
-  { action: 'Settings',                keys: ['Ctrl', ','] },
-  { action: 'Salvează fișier',         keys: ['Ctrl', 'S'] },
-  { action: 'Commit rapid (Git box)',  keys: ['Ctrl', 'Enter'] },
-  { action: 'Generează imagine',       keys: ['Ctrl', 'Enter'] },
-  { action: 'Nou fișier',              keys: ['Ctrl', 'N'] },
-  { action: 'Deschide folder',         keys: ['Ctrl', 'O'] },
-  { action: 'Caută în proiect',        keys: ['Ctrl', 'Shift', 'F'] },
-  { action: 'Închide tab',             keys: ['Ctrl', 'W'] },
-  { action: 'Command Palette',         keys: ['Ctrl', 'Shift', 'P'] },
+  { action: 'Toggle panou AI', keys: ['Ctrl', 'Shift', 'A'] },
+  { action: 'Command Palette', keys: ['Ctrl', 'Shift', 'P'] },
+  { action: 'Quick Open fișier', keys: ['Ctrl', 'P'] },
+  { action: 'Toggle Explorer', keys: ['Ctrl', 'Shift', 'E'] },
+  { action: 'Toggle Git', keys: ['Ctrl', 'Shift', 'G'] },
+  { action: 'Setări', keys: ['Ctrl', ','] },
+  { action: 'Salvează fișier', keys: ['Ctrl', 'S'] },
+  { action: 'Deschide folder', keys: ['Ctrl', 'O'] },
+  { action: 'Caută în proiect', keys: ['Ctrl', 'Shift', 'F'] },
+  { action: 'Commit rapid (Git)', keys: ['Ctrl', 'Enter'] },
 ];
 
 function SectionShortcuts() {
   return (
-    <Section title="Keyboard shortcuts">
-      <InfoBox>Shortcut-urile nu sunt configurabile în această versiune. Coming soon.</InfoBox>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {SHORTCUTS.map((s) => (
+    <Section title="Scurtături tastatură">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {SHORTCUTS.map(({ action, keys }) => (
           <div
-            key={s.action}
+            key={action}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
+              padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
             }}
           >
-            <span style={{ fontSize: 12, color: 'var(--caval-text)' }}>{s.action}</span>
-            <div style={{ display: 'flex', gap: 3 }}>
-              {s.keys.map((k, i) => (
-                <kbd key={i} style={{
-                  fontSize: 10.5, padding: '2px 6px', borderRadius: 4,
-                  background: 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.1)',
+            <span style={{ fontSize: 12, color: 'var(--caval-text)' }}>{action}</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {keys.map((k) => (
+                <kbd key={k} style={{
+                  fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid var(--caval-border)',
                   color: 'var(--caval-text-muted)',
                   fontFamily: "'JetBrains Mono', monospace",
-                  boxShadow: '0 1px 0 rgba(0,0,0,0.4)',
                 }}>
                   {k}
                 </kbd>
@@ -1156,14 +511,9 @@ function SectionShortcuts() {
   );
 }
 
-// ──────────────────────────────────────────────
-//  Secțiune: Despre Caval
-// ──────────────────────────────────────────────
-
 function SectionAbout() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Logo + versiune */}
       <div style={{
         padding: '24px 20px', borderRadius: 10,
         background: 'linear-gradient(135deg, rgba(0,224,255,0.05), rgba(124,58,237,0.05))',
@@ -1171,219 +521,112 @@ function SectionAbout() {
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
         textAlign: 'center',
       }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 16,
-          background: 'radial-gradient(circle at 35% 30%, rgba(0,224,255,0.12), rgba(0,0,0,0))',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          filter: 'drop-shadow(0 0 6px rgba(0,224,255,0.45))',
-        }}>
-          <CavaloHorseMark size={52} />
-        </div>
+        <CavaloHorseMark size={52} />
         <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', fontFamily: "'Sora', sans-serif", letterSpacing: '0.06em' }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', letterSpacing: '0.06em' }}>
             CAVALLO
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginTop: 2 }}>
-            Version 0.1.0 · Build 2026.06
+            Version 0.1.0 · Build 2026.07
           </div>
         </div>
-        <div style={{
-          fontSize: 12, color: 'var(--caval-text-muted)', lineHeight: 1.6,
-          maxWidth: 280,
-        }}>
-          IDE pentru dezvoltatori moderni — Monaco Editor, AI multi-model, Git integrat,
-          generare imagini cu context din proiect.
+        <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', lineHeight: 1.6, maxWidth: 300 }}>
+          IDE pentru dezvoltatori — Monaco Editor, Coding Arena cu pipeline agentic,
+          OpenRouter multi-model, Robotics CAD și Git integrat.
         </div>
       </div>
 
-      <Section title="Stack tehnic">
+      <Section title="Stack">
         {[
-          ['Runtime',    'Electron + Node.js'],
-          ['UI',         'React + TypeScript'],
-          ['Editor',     'Monaco Editor (VS Code engine)'],
-          ['AI Chat',    'Claude / GPT-4o / Gemini / Ollama'],
-          ['Imagini',    'OpenAI DALL-E 3'],
-          ['Terminal',   'node-pty + xterm.js'],
-          ['State',      'Zustand + persist'],
-          ['Build',      'Webpack 5'],
-        ].map(([label, value]) => (
-          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0' }}>
-            <span style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>{label}</span>
-            <span style={{ fontSize: 11.5, color: 'var(--caval-text)', fontFamily: "'JetBrains Mono', monospace" }}>{value}</span>
-          </div>
+          ['Runtime', 'Electron + Node.js'],
+          ['UI', 'React + TypeScript'],
+          ['Editor', 'Monaco Editor'],
+          ['AI', 'OpenRouter · Ollama · BYOK'],
+          ['Engineering', 'CAD cloud · OpenSCAD · Meshy'],
+          ['Git', 'Integrat în workbench'],
+        ].map(([k, v]) => (
+          <Row key={k} label={k}>
+            <span style={{ fontSize: 11, color: 'var(--caval-text-muted)' }}>{v}</span>
+          </Row>
         ))}
       </Section>
     </div>
   );
 }
 
-// ──────────────────────────────────────────────
-//  Helper: InfoBox
-// ──────────────────────────────────────────────
-
-function InfoBox({ children, accent }: { children: React.ReactNode; accent?: boolean }) {
-  return (
-    <div style={{
-      padding: '8px 10px', borderRadius: 6, fontSize: 11.5, lineHeight: 1.5,
-      background: accent ? 'rgba(0,224,255,0.04)' : 'rgba(255,255,255,0.03)',
-      border: `1px solid ${accent ? 'rgba(0,224,255,0.12)' : 'rgba(255,255,255,0.07)'}`,
-      color: 'var(--caval-text-muted)',
-      marginBottom: 4,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  SettingsPanel — componenta principală
-// ──────────────────────────────────────────────
-
 export function SettingsPanel({ onClose }: { onClose?: () => void }) {
   const { activeSection, setActiveSection } = useSettingsStore();
 
   const renderContent = () => {
     switch (activeSection) {
-      case 'asset-manager':   return <SectionAssetManager />;
-      case 'context-bridge':  return <SectionContextBridge />;
-      case 'cad-cloud':       return <SectionCadCloud />;
-      case 'export':          return <SectionExport />;
-      case 'safety':          return <SectionSafety />;
-      case 'editor':          return <SectionEditor />;
-      case 'shortcuts':       return <SectionShortcuts />;
-      case 'about':           return <SectionAbout />;
-      case 'prompt-library':  return <PromptLibraryPanel />;
-      default:                return null;
+      case 'general': return <SectionGeneral />;
+      case 'editor': return <SectionEditor />;
+      case 'ai': return <SectionAi />;
+      case 'arena': return <SectionArena />;
+      case 'cad-cloud': return <SectionCadCloud />;
+      case 'shortcuts': return <SectionShortcuts />;
+      case 'about': return <SectionAbout />;
+      default: return <SectionGeneral />;
     }
   };
 
   const currentNav = NAV_ITEMS.find((n) => n.id === activeSection);
 
   return (
-    <div style={{
-      display: 'flex', height: '100%', overflow: 'hidden',
-      background: 'var(--caval-bg)',
-    }}>
-      {/* ── Sidebar nav ────────────────────── */}
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--caval-bg)' }}>
       <div style={{
         width: 190, flexShrink: 0,
         borderRight: '1px solid var(--caval-border)',
         display: 'flex', flexDirection: 'column',
-        overflow: 'hidden',
-        background: 'var(--caval-surface)',
+        overflow: 'hidden', background: 'var(--caval-surface)',
       }}>
-        {/* Header */}
         <div style={{
           padding: '12px 14px 10px',
           borderBottom: '1px solid var(--caval-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--caval-text)' }}>
-            Setări
-          </span>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--caval-text)' }}>Setări</span>
           {onClose && (
-            <button
-              onClick={onClose}
-              style={{
-                width: 20, height: 20, borderRadius: 3, border: 'none',
-                background: 'none', color: 'var(--caval-text-muted)',
-                cursor: 'pointer', fontSize: 15, lineHeight: 1,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              ×
-            </button>
+            <button type="button" onClick={onClose} style={{
+              width: 20, height: 20, border: 'none', background: 'none',
+              color: 'var(--caval-text-muted)', cursor: 'pointer', fontSize: 15,
+            }}>×</button>
           )}
         </div>
 
-        {/* Nav items */}
-        <div style={{ overflowY: 'auto', flex: 1, padding: '6px 6px' }}
-          className="ai-messages-scroll"
-        >
+        <div style={{ overflowY: 'auto', flex: 1, padding: '6px 6px' }}>
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
+              type="button"
               onClick={() => setActiveSection(item.id)}
               style={{
                 width: '100%', padding: '7px 8px', borderRadius: 5,
                 border: 'none', textAlign: 'left', cursor: 'pointer',
-                background: activeSection === item.id
-                  ? 'rgba(0,224,255,0.08)'
-                  : 'transparent',
-                color: activeSection === item.id
-                  ? 'var(--caval-accent)'
-                  : 'var(--caval-text-muted)',
                 display: 'flex', alignItems: 'center', gap: 8,
-                transition: 'all 0.12s',
-                marginBottom: 1,
-              }}
-              onMouseEnter={(e) => {
-                if (activeSection !== item.id) {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                  e.currentTarget.style.color = 'var(--caval-text)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (activeSection !== item.id) {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = 'var(--caval-text-muted)';
-                }
+                background: activeSection === item.id ? 'rgba(0,224,255,0.08)' : 'transparent',
+                color: activeSection === item.id ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
               }}
             >
-              <span style={{ flexShrink: 0 }}>{item.icon}</span>
-              <span style={{ fontSize: 12, fontWeight: activeSection === item.id ? 600 : 400, flex: 1 }}>
+              {item.icon}
+              <span style={{ fontSize: 12, fontWeight: activeSection === item.id ? 600 : 400 }}>
                 {item.label}
               </span>
-              {item.badge && (
-                <span style={{
-                  fontSize: 8.5, padding: '1px 4px', borderRadius: 3,
-                  background: activeSection === item.id
-                    ? 'rgba(0,224,255,0.15)' : 'rgba(255,255,255,0.06)',
-                  color: activeSection === item.id
-                    ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-                  fontWeight: 700, letterSpacing: '0.03em',
-                }}>
-                  {item.badge}
-                </span>
-              )}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── Content ────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        {/* Content header */}
-        <div style={{
-          padding: '12px 18px 10px',
-          borderBottom: '1px solid var(--caval-border)',
-          flexShrink: 0,
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <span style={{ color: 'var(--caval-accent)', display: 'flex' }}>
-            {currentNav?.icon}
-          </span>
-          <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--caval-text)' }}>
-            {currentNav?.label}
-          </span>
-          {currentNav?.badge && (
-            <span style={{
-              fontSize: 9, padding: '2px 6px', borderRadius: 3,
-              background: 'rgba(0,224,255,0.08)',
-              border: '1px solid rgba(0,224,255,0.15)',
-              color: 'var(--caval-accent)', fontWeight: 700, letterSpacing: '0.05em',
-            }}>
-              {currentNav.badge}
-            </span>
-          )}
-        </div>
-
-        {/* Scrollable content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}
-          className="ai-messages-scroll"
-        >
-          {renderContent()}
-        </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px' }} className="ai-messages-scroll">
+        {currentNav && (
+          <h2 style={{
+            fontSize: 16, fontWeight: 700, color: 'var(--caval-text)',
+            margin: '0 0 18px', letterSpacing: '-0.01em',
+          }}>
+            {currentNav.label}
+          </h2>
+        )}
+        {renderContent()}
       </div>
     </div>
   );

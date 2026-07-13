@@ -128,7 +128,20 @@ export interface MultiAgentStepRecord {
   phase: MultiAgentPhase;
   status: 'active' | 'done';
   detail?: string;
+  /** Resolved model id for this pipeline step (sub-agent or stage). */
+  modelId?: string;
+  /** Unique step key — allows multiple subagent rows in timeline. */
+  stepId?: string;
   at: number;
+}
+
+/** Short label for timeline model badge. */
+export function shortModelLabel(modelId: string): string {
+  if (modelId.startsWith('caval-auto/')) {
+    return modelId.replace('caval-auto/', 'Auto ');
+  }
+  const tail = modelId.split('/').pop() ?? modelId;
+  return tail.length > 22 ? `${tail.slice(0, 20)}…` : tail;
 }
 
 /** Accumulate multi-agent pipeline steps for Arena timeline UI. */
@@ -136,30 +149,48 @@ export function patchMultiAgentSteps(
   steps: MultiAgentStepRecord[] | undefined,
   phase: MultiAgentPhase,
   status: 'active' | 'done',
-  detail?: string
+  detail?: string,
+  modelId?: string,
+  stepId?: string
 ): MultiAgentStepRecord[] {
   const next = [...(steps ?? [])];
   const now = Date.now();
-  const idx = next.findIndex((s) => s.phase === phase);
+  const key = stepId ?? phase;
+  const idx = next.findIndex((s) => (s.stepId ?? s.phase) === key);
 
   if (status === 'active') {
     for (let i = 0; i < next.length; i++) {
-      if (next[i]!.status === 'active' && next[i]!.phase !== phase) {
+      const sameKey = (next[i]!.stepId ?? next[i]!.phase) === key;
+      if (next[i]!.status === 'active' && !sameKey) {
         next[i] = { ...next[i]!, status: 'done' };
       }
     }
     if (idx >= 0) {
-      next[idx] = { ...next[idx]!, status: 'active', detail: detail ?? next[idx]!.detail, at: now };
+      next[idx] = {
+        ...next[idx]!,
+        status: 'active',
+        detail: detail ?? next[idx]!.detail,
+        modelId: modelId ?? next[idx]!.modelId,
+        stepId: stepId ?? next[idx]!.stepId,
+        at: now,
+      };
     } else {
-      next.push({ phase, status: 'active', detail, at: now });
+      next.push({ phase, status: 'active', detail, modelId, stepId, at: now });
     }
     return next;
   }
 
   if (idx >= 0) {
-    next[idx] = { ...next[idx]!, status: 'done', detail: detail ?? next[idx]!.detail, at: now };
+    next[idx] = {
+      ...next[idx]!,
+      status: 'done',
+      detail: detail ?? next[idx]!.detail,
+      modelId: modelId ?? next[idx]!.modelId,
+      stepId: stepId ?? next[idx]!.stepId,
+      at: now,
+    };
   } else {
-    next.push({ phase, status: 'done', detail, at: now });
+    next.push({ phase, status: 'done', detail, modelId, stepId, at: now });
   }
   return next;
 }

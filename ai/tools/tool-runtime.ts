@@ -6,6 +6,10 @@ import { ToolRegistry, type ToolDefinition } from "./tool-registry";
 const contextEngine = new ContextEngineApi();
 const registries = new Map<number, ToolRegistry>();
 
+export function setMcpSecretsProvider(provider: () => Record<string, string>): void {
+  mcpManager.setSecretsProvider(provider);
+}
+
 export function syncRegistryMcpTools(registry: ToolRegistry): void {
   registry.setMcpToolDefinitions(mcpManager.getToolDefinitions());
 }

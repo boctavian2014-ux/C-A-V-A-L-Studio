@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { ipcMain, type WebContents } from "electron";
 
 import { buildModelCatalog, invalidateCatalogCache } from "../../ai/models/model-catalog";
@@ -29,18 +32,20 @@ import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
 import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
 import { CODING_ARENA_SYSTEM_PROMPT } from "../../ai/prompts/coding-arena";
 import { getCavalloSystemPrompt } from "../../ai/modes/mode-router";
+import { isDirectChatMode } from "../../ai/modes/intent-detector";
 import {
   runCavalloMultiAgentPipeline,
   resumeCavalloMultiAgentPipeline,
   shouldUseMultiAgentPipeline,
   abortMultiAgentPipeline,
 } from "../../ai/composer/multi-agent";
+import { loadReasoningConfig } from "../../ai/composer/multi-agent/config";
 import {
   buildWorkspaceBootstrap,
   mergeProjectContextWithBootstrap,
 } from "../../ai/context/workspace-bootstrap";
 import { WORKSPACE_BOOTSTRAP_MARKER } from "../../ai/context/workspace-bootstrap-shared";
-import { runWorkspaceVerify } from "../../ai/tools/workspace-verify";
+import { runWorkspaceVerify, runWorkspaceVerifyWithAutoFix } from "../../ai/tools/workspace-verify";
 
 
 
@@ -314,11 +319,23 @@ function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
     const msgs = request.messages.map((m) => ({ ...m }));
 
     const hasSystem = msgs.some((m) => m.role === "system");
+    const directChatMode =
+      request.mode === "architect"
+        ? "plan"
+        : isDirectChatMode(request.mode ?? "")
+          ? request.mode
+          : null;
 
     if (!hasSystem) {
-
       msgs.unshift({ role: "system", content: system });
-
+    } else if (directChatMode) {
+      const sysIdx = msgs.findIndex((m) => m.role === "system");
+      if (sysIdx >= 0) {
+        msgs[sysIdx] = {
+          ...msgs[sysIdx]!,
+          content: systemPromptForMode(directChatMode, request.workspaceRoot),
+        };
+      }
     }
 
     const lastUserIdx = [...msgs].reverse().findIndex((m) => m.role === "user");
@@ -443,50 +460,133 @@ function agentCompleteUsesTools(model: string): boolean {
   return true;
 }
 
-function sendStatusChunk(
+type StreamChunkSender = {
+  send: (chunk: Record<string, unknown>) => boolean;
+  isAlive: () => boolean;
+};
+
+function createStreamChunkSender(
   sender: WebContents,
-  streamId: string,
+  senderId: number,
+  streamId: string
+): StreamChunkSender {
+  let alive = true;
+  const send = (chunk: Record<string, unknown>): boolean => {
+    if (!alive) return false;
+    if (sender.isDestroyed()) {
+      alive = false;
+      abortMultiAgentPipeline(streamId);
+      return false;
+    }
+    try {
+      sender.send("caval:ai-stream-chunk", { streamId, ...chunk });
+      return true;
+    } catch {
+      alive = false;
+      abortAllStreamsForSender(senderId);
+      return false;
+    }
+  };
+  return { send, isAlive: () => alive };
+}
+
+function sendStatusChunk(
+  stream: StreamChunkSender,
   phase: ChatActivityPhase,
   status: "active" | "done",
   detail?: string
-): void {
-  sender.send("caval:ai-stream-chunk", {
-    streamId,
-    type: "status",
-    phase,
-    status,
-    detail,
-  });
+): boolean {
+  return stream.send({ type: "status", phase, status, detail });
 }
 
 function sendMultiAgentStatusChunk(
-  sender: WebContents,
-  streamId: string,
+  stream: StreamChunkSender,
   phase: import("../../ai/composer/chat-activity-types").MultiAgentPhase,
   status: "active" | "done",
-  detail?: string
-): void {
-  sender.send("caval:ai-stream-chunk", {
-    streamId,
+  detail?: string,
+  modelId?: string,
+  stepId?: string
+): boolean {
+  return stream.send({
     type: "multiagent",
     multiAgentPhase: phase,
     status,
     detail,
+    multiAgentModel: modelId,
+    multiAgentStepId: stepId,
   });
 }
 
 function sendReasoningBriefChunk(
-  sender: WebContents,
-  streamId: string,
+  stream: StreamChunkSender,
   brief: { goal: string; approach: string; modules: string[] }
-): void {
-  sender.send("caval:ai-stream-chunk", {
-    streamId,
+): boolean {
+  return stream.send({
     type: "reasoning-brief",
     goal: brief.goal,
     approach: brief.approach,
     modules: brief.modules,
   });
+}
+
+export interface PipelineCompletionRecord {
+  runId: string;
+  writtenFiles: string[];
+  composeText?: string;
+  pipelineRecapMeta?: unknown;
+  finishedAt: string;
+}
+
+function persistPipelineCompletion(
+  workspaceRoot: string,
+  runId: string | undefined,
+  data: Omit<PipelineCompletionRecord, "runId">
+): void {
+  if (!workspaceRoot?.trim() || !runId) return;
+  try {
+    const dir = path.join(workspaceRoot, ".cavalo", "pipeline", runId);
+    fs.mkdirSync(dir, { recursive: true });
+    const record: PipelineCompletionRecord = {
+      runId,
+      writtenFiles: data.writtenFiles,
+      composeText: data.composeText?.slice(0, 8000),
+      pipelineRecapMeta: data.pipelineRecapMeta,
+      finishedAt: data.finishedAt,
+    };
+    fs.writeFileSync(path.join(dir, "completion.json"), JSON.stringify(record, null, 2));
+  } catch {
+    /* non-fatal */
+  }
+}
+
+export function loadRecentPipelineCompletion(
+  workspaceRoot: string,
+  maxAgeMs = 30 * 60 * 1000
+): PipelineCompletionRecord | null {
+  if (!workspaceRoot?.trim()) return null;
+  const pipelineDir = path.join(workspaceRoot, ".cavalo", "pipeline");
+  if (!fs.existsSync(pipelineDir)) return null;
+
+  let best: PipelineCompletionRecord | null = null;
+  let bestTime = 0;
+  const cutoff = Date.now() - maxAgeMs;
+
+  for (const runId of fs.readdirSync(pipelineDir)) {
+    const file = path.join(pipelineDir, runId, "completion.json");
+    if (!fs.existsSync(file)) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as PipelineCompletionRecord;
+      const finishedAt = Date.parse(parsed.finishedAt);
+      if (!Number.isFinite(finishedAt) || finishedAt < cutoff) continue;
+      if (finishedAt > bestTime) {
+        bestTime = finishedAt;
+        best = { ...parsed, runId: parsed.runId || runId };
+      }
+    } catch {
+      /* skip corrupt */
+    }
+  }
+  return best;
 }
 
 function enrichRequestWithWorkspaceBootstrap(
@@ -538,6 +638,7 @@ async function streamToRenderer(
   getWorkspaceRoot: (senderId: number) => string
 ): Promise<void> {
   trackActiveStream(senderId, streamId);
+  const stream = createStreamChunkSender(sender, senderId, streamId);
   try {
   const workspaceRoot = request.workspaceRoot ?? getWorkspaceRoot(senderId);
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
@@ -551,50 +652,55 @@ async function streamToRenderer(
     shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot);
 
   if (useMultiAgent) {
-    sendStatusChunk(sender, streamId, "prepare", "done");
-    sendStatusChunk(sender, streamId, "route", "active");
-    sendMultiAgentStatusChunk(sender, streamId, "context", "active", "pipeline start");
+    if (!stream.isAlive()) return;
+    sendStatusChunk(stream, "prepare", "done");
+    sendStatusChunk(stream, "route", "active");
+    sendMultiAgentStatusChunk(stream, "context", "active", "pipeline start");
 
     const result = await runCavalloMultiAgentPipeline(sender, streamId, request, {
-      onMultiAgentStatus: (phase, status, detail) => {
-        sendMultiAgentStatusChunk(sender, streamId, phase, status, detail);
+      onMultiAgentStatus: (phase, status, detail, modelId, stepId) => {
+        if (!stream.isAlive()) return;
+        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId);
       },
       onReasoningBrief: (brief) => {
-        sendReasoningBriefChunk(sender, streamId, brief);
+        if (!stream.isAlive()) return;
+        sendReasoningBriefChunk(stream, brief);
       },
       onMeta: (resolvedModel, reason) => {
-        sender.send("caval:ai-stream-chunk", {
-          streamId,
-          type: "meta",
-          resolvedModel,
-          reason,
-        });
+        if (!stream.isAlive()) return;
+        stream.send({ type: "meta", resolvedModel, reason });
       },
       onDelta: (delta) => {
-        sender.send("caval:ai-stream-chunk", { streamId, type: "delta", delta });
+        if (!stream.isAlive()) return;
+        stream.send({ type: "delta", delta });
       },
       onReasoning: (reasoningDelta) => {
-        sender.send("caval:ai-stream-chunk", { streamId, type: "reasoning", reasoningDelta });
+        if (!stream.isAlive()) return;
+        stream.send({ type: "reasoning", reasoningDelta });
       },
       onStatus: (phase, status, detail) => {
-        sendStatusChunk(sender, streamId, phase, status, detail);
+        if (!stream.isAlive()) return;
+        sendStatusChunk(stream, phase, status, detail);
       },
     });
+
+    if (!stream.isAlive()) return;
 
     if (result.ok && result.paused) {
       return;
     }
 
     if (result.ok) {
+      persistPipelineCompletion(workspaceRoot, result.runId, {
+        writtenFiles: result.writtenFiles ?? [],
+        composeText: result.composeText ?? result.text,
+        pipelineRecapMeta: result.pipelineRecapMeta,
+        finishedAt: new Date().toISOString(),
+      });
       if (result.text?.includes('```')) {
-        sender.send("caval:ai-stream-chunk", {
-          streamId,
-          type: "delta",
-          delta: result.text,
-        });
+        if (!stream.send({ type: "delta", delta: result.text })) return;
       }
-      sender.send("caval:ai-stream-chunk", {
-        streamId,
+      stream.send({
         type: "done",
         model: result.resolvedModel,
         provider: result.provider,
@@ -604,12 +710,13 @@ async function streamToRenderer(
         writtenFiles: result.writtenFiles,
         completionGate: result.completionGate,
         deliveryBlocked: result.deliveryBlocked,
+        needsReview: result.needsReview,
+        verifyPending: result.verifyPending,
       });
       return;
     }
 
-    sender.send("caval:ai-stream-chunk", {
-      streamId,
+    stream.send({
       type: "error",
       error: result.error ?? "Multi-agent pipeline failed",
     });
@@ -624,8 +731,10 @@ async function streamToRenderer(
   const effectiveModel = await resolveEffectiveChatModel(fusedRequest.model, fusedRequest.mode);
   const useTools = chatPanelUsesTools(fusedRequest.mode, workspaceRoot, effectiveModel);
   if (useTools) {
-    void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
+    await ensureMcpServersReady(workspaceRoot).catch(() => undefined);
   }
+
+  if (!stream.isAlive()) return;
 
   const toolRegistry = useTools
     ? getOrCreateToolRegistry(senderId, workspaceRoot)
@@ -638,45 +747,43 @@ async function streamToRenderer(
     workspaceRoot,
   };
 
-  sendStatusChunk(sender, streamId, "prepare", "done");
-  sendStatusChunk(sender, streamId, "route", "active");
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "route", "active");
 
   const result = await executeModelCompletion(completionInput, {
     onMeta: (resolvedModel, reason) => {
-      sender.send("caval:ai-stream-chunk", {
-        streamId,
-        type: "meta",
-        resolvedModel,
-        reason,
-      });
+      if (!stream.isAlive()) return;
+      stream.send({ type: "meta", resolvedModel, reason });
     },
     onDelta: (delta) => {
-      sender.send("caval:ai-stream-chunk", { streamId, type: "delta", delta });
+      if (!stream.isAlive()) return;
+      stream.send({ type: "delta", delta });
     },
     onReasoning: (reasoningDelta) => {
-      sender.send("caval:ai-stream-chunk", { streamId, type: "reasoning", reasoningDelta });
+      if (!stream.isAlive()) return;
+      stream.send({ type: "reasoning", reasoningDelta });
     },
     onStatus: (phase, status, detail) => {
-      sendStatusChunk(sender, streamId, phase, status, detail);
+      if (!stream.isAlive()) return;
+      sendStatusChunk(stream, phase, status, detail);
     },
     onToolCall: (toolName, status, detail, writtenPath) => {
+      if (!stream.isAlive()) return;
       const isDirectCodingMode = fusedRequest.mode === "code" || fusedRequest.mode === "debug";
       if (!isDirectCodingMode) {
         const notice = formatToolCallNotice(toolName, status, detail);
         if (notice) {
-          sender.send("caval:ai-stream-chunk", { streamId, type: "delta", delta: notice });
+          if (!stream.send({ type: "delta", delta: notice })) return;
         }
       } else if (status === "error" && detail) {
-        sender.send("caval:ai-stream-chunk", {
-          streamId,
+        stream.send({
           type: "delta",
           delta: `\n⚠ ${toolName}: ${detail.slice(0, 120)}\n`,
         });
       } else if (status === "done" && toolName === "write_file" && writtenPath) {
-        sendStatusChunk(sender, streamId, "write", "active", writtenPath);
+        sendStatusChunk(stream, "write", "active", writtenPath);
       }
-      sender.send("caval:ai-stream-chunk", {
-        streamId,
+      stream.send({
         type: "tool",
         toolName,
         toolStatus: status,
@@ -686,36 +793,20 @@ async function streamToRenderer(
     },
   });
 
-
+  if (!stream.isAlive()) return;
 
   if (result.ok) {
-
-    sender.send("caval:ai-stream-chunk", {
-
-      streamId,
-
+    stream.send({
       type: "done",
-
       model: result.resolvedModel,
-
       provider: result.provider,
-
     });
-
     return;
-
   }
 
-
-
-  sender.send("caval:ai-stream-chunk", {
-
-    streamId,
-
+  stream.send({
     type: "error",
-
     error: result.error,
-
   });
 
   } finally {
@@ -737,43 +828,48 @@ async function streamResumeToRenderer(
 ): Promise<void> {
   const { streamId } = input;
   trackActiveStream(senderId, streamId);
+  const stream = createStreamChunkSender(sender, senderId, streamId);
   try {
-    sendStatusChunk(sender, streamId, "prepare", "done");
-    sendMultiAgentStatusChunk(sender, streamId, "subagent", "active", "UI delivery resume");
+    if (!stream.isAlive()) return;
+    sendStatusChunk(stream, "prepare", "done");
+    sendMultiAgentStatusChunk(stream, "subagent", "active", "UI delivery resume");
 
     const result = await resumeCavalloMultiAgentPipeline(sender, streamId, input, {
-      onMultiAgentStatus: (phase, status, detail) => {
-        sendMultiAgentStatusChunk(sender, streamId, phase, status, detail);
+      onMultiAgentStatus: (phase, status, detail, modelId, stepId) => {
+        if (!stream.isAlive()) return;
+        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId);
       },
       onMeta: (resolvedModel, reason) => {
-        sender.send("caval:ai-stream-chunk", {
-          streamId,
-          type: "meta",
-          resolvedModel,
-          reason,
-        });
+        if (!stream.isAlive()) return;
+        stream.send({ type: "meta", resolvedModel, reason });
       },
       onDelta: (delta) => {
-        sender.send("caval:ai-stream-chunk", { streamId, type: "delta", delta });
+        if (!stream.isAlive()) return;
+        stream.send({ type: "delta", delta });
       },
       onReasoning: (reasoningDelta) => {
-        sender.send("caval:ai-stream-chunk", { streamId, type: "reasoning", reasoningDelta });
+        if (!stream.isAlive()) return;
+        stream.send({ type: "reasoning", reasoningDelta });
       },
       onStatus: (phase, status, detail) => {
-        sendStatusChunk(sender, streamId, phase, status, detail);
+        if (!stream.isAlive()) return;
+        sendStatusChunk(stream, phase, status, detail);
       },
     });
 
+    if (!stream.isAlive()) return;
+
     if (result.ok) {
+      persistPipelineCompletion(input.workspaceRoot, result.runId ?? input.runId, {
+        writtenFiles: result.writtenFiles ?? [],
+        composeText: result.composeText ?? result.text,
+        pipelineRecapMeta: result.pipelineRecapMeta,
+        finishedAt: new Date().toISOString(),
+      });
       if (result.text?.includes("```")) {
-        sender.send("caval:ai-stream-chunk", {
-          streamId,
-          type: "delta",
-          delta: result.text,
-        });
+        if (!stream.send({ type: "delta", delta: result.text })) return;
       }
-      sender.send("caval:ai-stream-chunk", {
-        streamId,
+      stream.send({
         type: "done",
         model: result.resolvedModel,
         provider: result.provider,
@@ -783,12 +879,13 @@ async function streamResumeToRenderer(
         writtenFiles: result.writtenFiles,
         completionGate: result.completionGate,
         deliveryBlocked: result.deliveryBlocked,
+        needsReview: result.needsReview,
+        verifyPending: result.verifyPending,
       });
       return;
     }
 
-    sender.send("caval:ai-stream-chunk", {
-      streamId,
+    stream.send({
       type: "error",
       error: result.error ?? "Pipeline resume failed",
     });
@@ -806,9 +903,21 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
     return { ok: true, bootstrap };
   });
 
-  ipcMain.handle("caval:workspace-verify", async (_event, workspaceRoot: string) => {
+  ipcMain.handle("multiagent:reasoning-config", async (_event, workspaceRoot?: string) => {
+    return { ok: true, config: loadReasoningConfig(workspaceRoot) };
+  });
+
+  ipcMain.handle(
+    "caval:workspace-verify",
+    async (
+      _event,
+      workspaceRoot: string,
+      options?: { autoInstall?: boolean; writtenFiles?: string[] }
+    ) => {
     try {
-      const verify = await runWorkspaceVerify(workspaceRoot);
+      const verify = options?.autoInstall
+        ? await runWorkspaceVerifyWithAutoFix(workspaceRoot, options)
+        : await runWorkspaceVerify(workspaceRoot, options);
       return { ok: true, verify };
     } catch (error) {
       return {
@@ -816,7 +925,8 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  });
+  }
+  );
 
   ipcMain.handle("caval:models-list", async () => {
 
@@ -855,6 +965,11 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
   });
 
 
+
+  ipcMain.handle("caval:pipeline-recent-completion", async (_event, workspaceRoot: string) => {
+    const completion = loadRecentPipelineCompletion(workspaceRoot);
+    return { ok: true, completion };
+  });
 
   ipcMain.handle("caval:ai-chat-stream", async (event, request: CavalChatStreamRequest) => {
     warmOpenRouterConnection();
@@ -896,13 +1011,16 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
   ipcMain.handle("caval:ai-complete", async (event, input: CavalAiCompleteRequest) => {
     try {
       const workspaceRoot = input.workspaceRoot ?? getWorkspaceRoot(event.sender.id);
-      void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
+      const useTools = input.jsonMode ? false : agentCompleteUsesTools(input.model);
+      if (useTools) {
+        await ensureMcpServersReady(workspaceRoot).catch(() => undefined);
+      }
       const toolRegistry = getOrCreateToolRegistry(event.sender.id, workspaceRoot);
       return await completeModelText({
         ...input,
         workspaceRoot,
         toolRegistry,
-        useTools: input.jsonMode ? false : agentCompleteUsesTools(input.model),
+        useTools,
       });
     } catch (error) {
 

@@ -45,7 +45,7 @@ Comenzile native Electron (`caval:menu-command`) sunt rutate prin `src/renderer/
 
 ## Command Palette
 
-Comenzi suplimentare în `command-registry.ts`: Explorer, Terminal New/Toggle, Output, Problems, verify/build.
+Comenzi suplimentare în `command-registry.ts`: Explorer, Terminal New/Toggle, Output, Problems, verify/build, **AI: Test Cavallo modes** (fixture protocol — vezi `docs/cavallo-modes.md`).
 
 ## Evenimente terminal
 

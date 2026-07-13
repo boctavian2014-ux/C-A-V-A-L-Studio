@@ -48,6 +48,11 @@ export function getCompletionChecklist(archetype: FashionProjectArchetype): Arch
       description: 'React web UI with Vite',
     },
     {
+      id: 'web-types',
+      path: 'web/src/types.ts',
+      description: 'Shared TS types (ImageUpload, MatchResult, Product, ApiError)',
+    },
+    {
       id: 'web-upload',
       path: 'web/src/components/ImageUploadPanel.tsx',
       description: 'Image upload + match UI',

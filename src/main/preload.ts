@@ -124,6 +124,8 @@ export interface CavalStreamChunk {
   status?: "active" | "done";
   label?: string;
   detail?: string;
+  multiAgentModel?: string;
+  multiAgentStepId?: string;
   goal?: string;
   approach?: string;
   modules?: string[];
@@ -310,6 +312,31 @@ contextBridge.exposeInMainWorld("caval", {
   },
   abortChatStream: (streamId: string) =>
     ipcRenderer.invoke("caval:ai-stream-abort", streamId) as Promise<{ ok: boolean }>,
+  onPipelineVerifyStatus: (
+      callback: (payload: {
+        runId: string;
+        streamId?: string;
+        workspaceRoot: string;
+        ok: boolean;
+        summary: string;
+        issues: Array<{ code: string; message: string }>;
+        verifyRan: boolean;
+      }) => void
+  ) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      callback(payload as {
+        runId: string;
+        streamId?: string;
+        workspaceRoot: string;
+        ok: boolean;
+        summary: string;
+        issues: Array<{ code: string; message: string }>;
+        verifyRan: boolean;
+      });
+    };
+    ipcRenderer.on("caval:pipeline-verify-status", listener);
+    return () => ipcRenderer.removeListener("caval:pipeline-verify-status", listener);
+  },
   workspaceSessionReset: () =>
     ipcRenderer.invoke("caval:workspace-session-reset") as Promise<{ ok: boolean }>,
   pipelineResume: (input: {
@@ -348,6 +375,32 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.on("caval:workspace-session-reset", listener);
     return () => ipcRenderer.removeListener("caval:workspace-session-reset", listener);
   },
+  onRendererRecovered: (
+    callback: (payload: { reason: string; recoveredAt: string }) => void
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { reason: string; recoveredAt: string }
+    ) => callback(payload);
+    ipcRenderer.on("caval:renderer-recovered", listener);
+    return () => ipcRenderer.removeListener("caval:renderer-recovered", listener);
+  },
+  getRecentPipelineCompletion: (workspaceRoot: string) =>
+    ipcRenderer.invoke("caval:pipeline-recent-completion", workspaceRoot) as Promise<{
+      ok: boolean;
+      completion?: {
+        runId: string;
+        writtenFiles: string[];
+        composeText?: string;
+        pipelineRecapMeta?: unknown;
+        finishedAt: string;
+      } | null;
+    }>,
+  getReasoningLayerConfig: (workspaceRoot?: string) =>
+    ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{
+      ok: boolean;
+      config?: import("../../ai/composer/multi-agent/types").ReasoningLayerConfig;
+    }>,
   aiComplete: (request: {
     model: string;
     intent?: string;
@@ -452,17 +505,42 @@ contextBridge.exposeInMainWorld("caval", {
   contextIndex: () => ipcRenderer.invoke("caval:context-index") as Promise<{ ok: boolean; documentCount?: number }>,
   contextSearch: (input: { query: string; limit?: number }) =>
     ipcRenderer.invoke("caval:context-search", input) as Promise<{ ok: boolean; results?: unknown[] }>,
-  workspaceOpen: (folderPath: string) =>
-    ipcRenderer.invoke("caval:workspace-open", folderPath) as Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>,
+  workspaceOpen: (folderPath: string, options?: { source?: 'folder' | 'clone' }) =>
+    ipcRenderer.invoke("caval:workspace-open", folderPath, options) as Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>,
   workspaceSync: (folderPath: string) =>
     ipcRenderer.invoke("caval:workspace-sync", folderPath) as Promise<{ ok: boolean; path?: string }>,
+  workspace: {
+    listRecent: () =>
+      ipcRenderer.invoke("workspace:list-recent") as Promise<{
+        ok: boolean;
+        entries?: Array<{
+          path: string;
+          name: string;
+          lastOpened: string;
+          source: 'folder' | 'clone';
+        }>;
+      }>,
+    removeRecent: (folderPath: string) =>
+      ipcRenderer.invoke("workspace:remove-recent", folderPath) as Promise<{
+        ok: boolean;
+        entries?: Array<{
+          path: string;
+          name: string;
+          lastOpened: string;
+          source: 'folder' | 'clone';
+        }>;
+      }>,
+  },
   getWorkspaceBootstrap: (workspaceRoot: string) =>
     ipcRenderer.invoke("caval:workspace-bootstrap", workspaceRoot) as Promise<{
       ok: boolean;
       bootstrap?: string;
     }>,
-  workspaceVerify: (workspaceRoot: string) =>
-    ipcRenderer.invoke("caval:workspace-verify", workspaceRoot) as Promise<{
+  workspaceVerify: (
+    workspaceRoot: string,
+    options?: { autoInstall?: boolean; writtenFiles?: string[] }
+  ) =>
+    ipcRenderer.invoke("caval:workspace-verify", workspaceRoot, options) as Promise<{
       ok: boolean;
       verify?: {
         ran: boolean;
@@ -601,7 +679,9 @@ contextBridge.exposeInMainWorld("caval", {
     createBranch: (projectPath: string, name: string) => ipcRenderer.invoke("git:createBranch", projectPath, name),
     init: (projectPath: string) => ipcRenderer.invoke("git:init", projectPath),
     stash: (projectPath: string, message?: string) => ipcRenderer.invoke("git:stash", projectPath, message),
-    stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath)
+    stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath),
+    clone: (input: { url: string; parentDir?: string }) =>
+      ipcRenderer.invoke("git:clone", input) as Promise<{ ok: boolean; path?: string; error?: string }>,
   },
 
 
@@ -806,6 +886,37 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.invoke("extensions:register", manifest) as Promise<{ ok: boolean; error?: string }>,
     install: (input: { extensionId: string; baseUrl: string }) =>
       ipcRenderer.invoke("extensions:install", input) as Promise<{ ok: boolean; error?: string }>,
+  },
+
+  openvsx: {
+    search: (query: string) =>
+      ipcRenderer.invoke("openvsx:search", query) as Promise<{
+        ok: boolean;
+        extensions?: unknown[];
+        error?: string;
+      }>,
+    popular: () =>
+      ipcRenderer.invoke("openvsx:popular") as Promise<{
+        ok: boolean;
+        extensions?: unknown[];
+        error?: string;
+      }>,
+    install: (input: { namespace: string; name: string }) =>
+      ipcRenderer.invoke("openvsx:install", input) as Promise<{ ok: boolean; error?: string; extension?: unknown }>,
+  },
+
+  marketplace: {
+    health: () =>
+      ipcRenderer.invoke("marketplace:health") as Promise<{ ok: boolean; url?: string }>,
+    search: (query: {
+      text?: string;
+      category?: string;
+      sortBy?: string;
+      limit?: number;
+    }) => ipcRenderer.invoke("marketplace:search", query) as Promise<unknown[]>,
+    autocomplete: (input: { q: string; mode?: string }) =>
+      ipcRenderer.invoke("marketplace:autocomplete", input) as Promise<string[]>,
+    categories: () => ipcRenderer.invoke("marketplace:categories") as Promise<string[]>,
   },
 
   schematic: {

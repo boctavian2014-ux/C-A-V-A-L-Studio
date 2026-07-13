@@ -1,5 +1,9 @@
+import { execSync } from "child_process";
+import os from "os";
+import path from "path";
 import type { ToolDefinition } from "../tools/tool-registry";
-import { resolveMcpServerArgs } from "./mcp-workspace-args";
+import { mergeMcpServerEnv } from "./mcp-env";
+import { resolveMcpServerArgs, isGitRepository } from "./mcp-workspace-args";
 import { mcpToolId } from "./mcp-tool-names";
 
 export interface McpServerConfig {
@@ -27,23 +31,66 @@ export interface McpServerStatus {
   error?: string;
 }
 
-const WINDOWS_SHELL_COMMANDS = new Set(["npx", "npm", "node", "pnpm", "yarn"]);
+/** npm/pnpm/yarn ship .cmd shims on Windows; uv/docker/trivy are native .exe. */
+const WINDOWS_CMD_SHIMS = new Set(["npx", "npm", "pnpm", "yarn"]);
+
+const augmentWindowsPath = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".local", "bin"),
+    path.join(process.env.APPDATA ?? "", "npm"),
+    path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python313", "Scripts"),
+    path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Python", "Python312", "Scripts"),
+  ];
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  const current = env[pathKey] ?? "";
+  const lower = current.toLowerCase();
+  const extra = candidates.filter((dir) => dir && !lower.includes(dir.toLowerCase()));
+  if (extra.length === 0) return env;
+  return { ...env, [pathKey]: [...extra, current].filter(Boolean).join(path.delimiter) };
+};
+
+const resolveWindowsExecutable = (command: string, env: NodeJS.ProcessEnv): string => {
+  const base =
+    command.replace(/\\/g, "/").split("/").pop()?.toLowerCase().replace(/\.(cmd|exe|bat)$/i, "") ?? command;
+
+  if (WINDOWS_CMD_SHIMS.has(base)) {
+    return `${base}.cmd`;
+  }
+
+  if (command.includes(path.sep) || command.includes("/")) {
+    return command;
+  }
+
+  try {
+    const located = execSync(`where.exe ${base}`, {
+      encoding: "utf8",
+      env,
+      windowsHide: true,
+      timeout: 5000,
+    }).trim();
+    const first = located.split(/\r?\n/)[0]?.trim();
+    if (first) return first;
+  } catch {
+    // fall through to bare command (PATHEXT may still resolve .exe)
+  }
+
+  return command;
+};
 
 export const resolveMcpSpawn = (
   command: string,
   args: string[],
-  options: { env?: NodeJS.ProcessEnv; cwd?: string }
+  options: { env?: Record<string, string>; cwd?: string; secrets?: Record<string, string> }
 ): { command: string; args: string[]; env: NodeJS.ProcessEnv; cwd?: string } => {
-  const env = { ...process.env, ...options.env };
+  let env = mergeMcpServerEnv(options.env, options.secrets);
   if (process.platform !== "win32") {
     return { command, args, env, cwd: options.cwd };
   }
 
-  const base = command.replace(/\\/g, "/").split("/").pop()?.toLowerCase().replace(/\.(cmd|exe|bat)$/i, "") ?? command;
-  if (WINDOWS_SHELL_COMMANDS.has(base)) {
-    return { command: `${base}.cmd`, args, env, cwd: options.cwd };
-  }
-  return { command, args, env, cwd: options.cwd };
+  env = augmentWindowsPath(env);
+  const resolvedCommand = resolveWindowsExecutable(command, env);
+  return { command: resolvedCommand, args, env, cwd: options.cwd };
 };
 
 interface ServerEntry {
@@ -103,26 +150,26 @@ function extractCallToolOutput(result: unknown): { ok: boolean; output?: unknown
 
 export class McpClientManager {
   private servers = new Map<string, ServerEntry>();
+  private secretsProvider: () => Record<string, string> = () => ({});
+
+  setSecretsProvider(provider: () => Record<string, string>): void {
+    this.secretsProvider = provider;
+  }
 
   loadFromConfig(
     config: { mcp?: { servers?: McpServerConfig[] } },
     cwd?: string
   ): void {
-    const enabledIds = new Set(
-      (config.mcp?.servers ?? [])
-        .filter((s) => s.enabled !== false)
-        .map((s) => s.id)
-    );
+    const configIds = new Set((config.mcp?.servers ?? []).map((s) => s.id));
 
     for (const id of [...this.servers.keys()]) {
-      if (!enabledIds.has(id)) {
+      if (!configIds.has(id)) {
         this.stop(id);
         this.servers.delete(id);
       }
     }
 
     for (const server of config.mcp?.servers ?? []) {
-      if (server.enabled === false) continue;
       const existing = this.servers.get(server.id);
       if (existing) {
         existing.config = server;
@@ -186,11 +233,24 @@ export class McpClientManager {
     entry.error = undefined;
     entry.stderrTail = "";
 
+    if (serverId === "git" && workdir && !isGitRepository(workdir)) {
+      entry.error = `${workdir} is not a valid Git repository`;
+      return {
+        id: serverId,
+        name: entry.config.name,
+        running: false,
+        tools: [],
+        toolDetails: [],
+        error: entry.error,
+      };
+    }
+
     try {
       const resolvedArgs = resolveMcpServerArgs(entry.config.args, workdir);
       const spawn = resolveMcpSpawn(entry.config.command, resolvedArgs, {
         env: entry.config.env,
         cwd: workdir,
+        secrets: this.secretsProvider(),
       });
 
       const [{ Client }, { StdioClientTransport }] = await Promise.all([

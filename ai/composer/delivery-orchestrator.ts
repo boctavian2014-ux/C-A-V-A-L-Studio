@@ -39,9 +39,14 @@ export function isDeliveryIncompleteFromGate(gate: CompletionGateResult | undefi
 
 export function isDeliveryBlocked(
   input: DeliveryIncompleteInput,
-  gate?: CompletionGateResult
+  gate?: CompletionGateResult,
+  arenaIssues?: Array<{ severity: string }>
 ): boolean {
   if (isDeliveryIncompleteFromGate(gate)) return true;
+  const hasBlockingArena = (arenaIssues ?? []).some(
+    (i) => i.severity === 'critical' || i.severity === 'major'
+  );
+  if (hasBlockingArena && gate && !gate.ok) return true;
   return isDeliveryIncomplete(input);
 }
 
@@ -50,4 +55,16 @@ export function canAutoContinueDelivery(
   config: FullDeliveryConfig = DEFAULT_FULL_DELIVERY
 ): boolean {
   return config.enabled && config.autoContinue && waveIndex < config.maxComposeWaves;
+}
+
+export function canAutoContinueRepair(
+  repairWaveIndex: number,
+  config: FullDeliveryConfig = DEFAULT_FULL_DELIVERY
+): boolean {
+  return (
+    config.enabled &&
+    config.autonomousFinish &&
+    config.autoContinue &&
+    repairWaveIndex < config.maxRepairWaves
+  );
 }

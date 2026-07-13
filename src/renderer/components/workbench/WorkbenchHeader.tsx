@@ -1,5 +1,4 @@
 import React from 'react';
-import { useEditorStore } from '../../store/editor-store';
 import { SidebarToggleButton } from './SidebarCloseButton';
 import { CavaloLogo } from '../brand/CavaloHorseMark';
 import { dispatchTerminalNew, dispatchTerminalToggle } from '../../terminal/terminal-events';
@@ -17,13 +16,6 @@ export function WorkbenchHeader({
   sidebarOpen,
   onToggleSidebar,
 }: WorkbenchHeaderProps) {
-  const { projectPath, tabs, activeTabId } = useEditorStore();
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-
-  const pathLabel = activeTab?.path
-    ?? (projectPath ? projectPath.split(/[/\\]/).pop() : null)
-    ?? 'Fără proiect deschis';
-
   return (
     <header
       style={{
@@ -41,27 +33,15 @@ export function WorkbenchHeader({
         flexShrink: 0,
       }}
     >
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        minWidth: 0,
-        flex: 1,
-      }}>
-        <span style={{ flexShrink: 0 }}>
-          <CavaloLogo height={24} />
-        </span>
-        <span style={{
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
           minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          color: '#6f7a89',
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11,
-        }}>
-          {pathLabel}
-        </span>
+          flex: 1,
+        }}
+      >
+        <CavaloLogo height={24} />
       </div>
 
       <nav

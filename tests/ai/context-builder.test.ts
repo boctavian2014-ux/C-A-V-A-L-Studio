@@ -91,7 +91,24 @@ describe('context-builder project attach', () => {
   it('buildFastChatMessages includes system + user for ask mode', () => {
     const msgs = buildFastChatMessages('Salut', [], 'ask');
     expect(msgs[0].role).toBe('system');
+    expect(msgs[0].content).toContain('ASK MODE');
+    expect(msgs[0].content).not.toContain('Multi-Model Reasoning');
     expect(msgs.at(-1)?.content).toBe('Salut');
+  });
+
+  it('buildContextMessages uses enterprise prompt for plan mode', () => {
+    const messages = buildContextMessages('Planifică API', [], {
+      activeTab: null,
+      fileTree: [],
+      projectPath: null,
+      includeMode: 'file',
+      agentMode: 'plan',
+    });
+    const system = messages.find((m) => m.role === 'system');
+    expect(system).toBeDefined();
+    expect(system!.content).toContain('PLAN MODE');
+    expect(system!.content).toContain('[END PLAN]');
+    expect(system!.content).not.toContain('Multi-Model Reasoning');
   });
 
   it('buildFinalUserMessage attaches active file when not skipped', () => {

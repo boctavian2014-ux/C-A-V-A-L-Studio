@@ -1,10 +1,11 @@
 import React from 'react';
 import {
   MULTI_AGENT_LABELS,
+  shortModelLabel,
   type MultiAgentStepRecord,
 } from './chat-activity-types';
 import { CavaloHorseMark } from '../../src/renderer/components/brand/CavaloHorseMark';
-import { getWaitGlowFilter, getWaitGlowBoxShadow, activePhaseFromSteps } from './arena-wait-copy';
+import { getWaitGlowFilter, getWaitGlowBoxShadow, getCompletionGlowFilter, getCompletionGlowBoxShadow, activePhaseFromSteps } from './arena-wait-copy';
 
 interface MultiAgentTimelineProps {
   steps: MultiAgentStepRecord[];
@@ -12,6 +13,9 @@ interface MultiAgentTimelineProps {
   waitMessage?: string;
   waitStatusLine?: string;
   waitVisible?: boolean;
+  completionMessage?: string;
+  showCompletionHorse?: boolean;
+  completionNeedsReview?: boolean;
 }
 
 function StepIcon({ status }: { status: MultiAgentStepRecord['status'] }) {
@@ -36,12 +40,46 @@ function StepIcon({ status }: { status: MultiAgentStepRecord['status'] }) {
   );
 }
 
+function ModelBadge({ modelId }: { modelId: string }) {
+  return (
+    <span
+      style={{
+        fontSize: 9.5,
+        fontFamily: 'JetBrains Mono, monospace',
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: 'var(--caval-bg-elevated)',
+        border: '1px solid var(--caval-border)',
+        color: 'var(--caval-accent)',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+      title={modelId}
+    >
+      {shortModelLabel(modelId)}
+    </span>
+  );
+}
+
+function stepLabel(step: MultiAgentStepRecord): string {
+  if (step.stepId?.startsWith('modelOrch-')) {
+    return step.detail ?? MULTI_AGENT_LABELS.modelOrch;
+  }
+  if (step.stepId?.startsWith('subagent-')) {
+    return `Implementer · ${step.detail ?? step.stepId.replace('subagent-', '')}`;
+  }
+  return MULTI_AGENT_LABELS[step.phase] ?? step.phase;
+}
+
 export function MultiAgentTimeline({
   steps,
   collapsed,
   waitMessage,
   waitStatusLine,
   waitVisible = true,
+  completionMessage,
+  showCompletionHorse = false,
+  completionNeedsReview = false,
 }: MultiAgentTimelineProps) {
   if (!steps.length) return null;
 
@@ -55,7 +93,7 @@ export function MultiAgentTimeline({
       ? displaySteps
       : activeIdx >= 0
         ? steps.slice(0, activeIdx + 1)
-        : steps.slice(-3);
+        : steps.slice(-8);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
@@ -68,24 +106,28 @@ export function MultiAgentTimeline({
           color: 'var(--caval-text-muted)',
         }}
       >
-        Pipeline
+        Pipeline · multi-model
       </div>
       {visible.map((step) => (
         <div
-          key={`${step.phase}-${step.at}`}
+          key={`${step.stepId ?? step.phase}-${step.at}`}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             fontSize: 11.5,
             color: step.status === 'active' ? 'var(--caval-text)' : 'var(--caval-text-muted)',
+            flexWrap: 'wrap',
           }}
         >
           <StepIcon status={step.status} />
-          <span>{MULTI_AGENT_LABELS[step.phase] ?? step.phase}</span>
-          {step.detail && (
+          <span>{stepLabel(step)}</span>
+          {step.modelId ? <ModelBadge modelId={step.modelId} /> : null}
+          {step.detail &&
+          !step.stepId?.startsWith('modelOrch-') &&
+          !step.stepId?.startsWith('subagent-') ? (
             <span style={{ fontSize: 10.5, opacity: 0.85 }}>{step.detail}</span>
-          )}
+          ) : null}
         </div>
       ))}
       {waitMessage ? (
@@ -136,6 +178,41 @@ export function MultiAgentTimeline({
                 {waitStatusLine}
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+      {showCompletionHorse && completionMessage ? (
+        <div
+          style={{
+            marginTop: 6,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+          }}
+        >
+          <div
+            className="arena-horse-completion-mark"
+            style={{
+              flexShrink: 0,
+              lineHeight: 0,
+              borderRadius: 8,
+              boxShadow: getCompletionGlowBoxShadow(completionNeedsReview),
+            }}
+          >
+            <CavaloHorseMark
+              size={28}
+              glowFilter={getCompletionGlowFilter(completionNeedsReview)}
+            />
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              lineHeight: 1.45,
+              color: 'var(--caval-text)',
+              fontWeight: 600,
+            }}
+          >
+            {completionMessage}
           </div>
         </div>
       ) : null}

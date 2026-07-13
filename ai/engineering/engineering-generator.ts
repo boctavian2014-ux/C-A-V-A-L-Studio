@@ -11,6 +11,10 @@ import {
   ROBOTICS_AI_ULTRA_SYSTEM_PROMPT,
 } from '../prompts/robotics-ai-ultra';
 import {
+  CAVALLO_MODES_TEST_ROBOTICS_FIXTURE,
+  isCavalloModesTestRequest,
+} from '../prompts/cavallo-mode-protocol';
+import {
   missingRoboticsSections,
   parseRoboticsPlan,
   roboticsPlanToEngProject,
@@ -159,6 +163,17 @@ export async function generateEngineering(params: {
 
   if (signal?.aborted) {
     return { ok: false, error: 'Generare anulată.' };
+  }
+
+  if (isCavalloModesTestRequest(prompt)) {
+    const plan = parseRoboticsPlan(CAVALLO_MODES_TEST_ROBOTICS_FIXTURE);
+    return {
+      ok: true,
+      plan,
+      project: roboticsPlanToEngProject(plan),
+      raw: CAVALLO_MODES_TEST_ROBOTICS_FIXTURE,
+      resolvedModel: 'cavallo-modes-test',
+    };
   }
 
   try {

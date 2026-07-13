@@ -11,10 +11,15 @@ import {
   buildMultiModelSystemPrompt,
   MULTI_MODEL_RECAP_ADDON,
 } from '../prompts/multi-model-reasoning-chat';
-import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
 import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
 import { CAVALO_RELEASE_ENGINEER_PROMPT } from '../prompts/cavalo-release-engineer';
 import type { AgentModeId } from '../modes/agent-modes';
+import {
+  CAVALLO_MODES_TEST_LLM_PROMPT,
+  isCavalloModesTestRequest,
+} from '../prompts/cavallo-mode-protocol';
+import { getCavalloSystemPrompt } from '../modes/mode-router';
+import { isDirectChatMode } from '../modes/intent-detector';
 
 export interface ContextOptions {
   activeTab:    EditorTab | null;
@@ -31,6 +36,8 @@ export interface ContextOptions {
   agentMode?: AgentModeId;
   /** Hint from last Build run (.cavalo/memory) */
   buildMemoryHint?: string;
+  /** Use Cavallo modes test LLM system prompt (dev flag modesTestUseLlm). */
+  cavalloModesTestLlm?: boolean;
 }
 
 // Token estimator simplu (1 token ≈ 4 caractere)
@@ -75,6 +82,19 @@ export function buildLiteSystemPrompt(agentMode?: ContextOptions['agentMode']): 
   return `${buildMultiModelSystemPrompt({ agentMode })}${MULTI_MODEL_RECAP_ADDON}`;
 }
 
+function buildEnterpriseOrLiteSystemPrompt(
+  agentMode: ContextOptions['agentMode'] | undefined,
+  workspaceRoot?: string | null
+): string {
+  if (agentMode && isDirectChatMode(agentMode)) {
+    return getCavalloSystemPrompt(agentMode, {
+      workspaceRoot: workspaceRoot ?? undefined,
+      includeScaffold: agentMode === 'code' || agentMode === 'debug',
+    });
+  }
+  return buildLiteSystemPrompt(agentMode);
+}
+
 /** Minimal payload for general chat — target TTFT ~3s */
 export function buildFastChatMessages(
   userMessage: string,
@@ -88,7 +108,7 @@ export function buildFastChatMessages(
         ? CAVALO_RELEASE_ENGINEER_PROMPT
         : agentMode === 'build'
           ? CAVALO_BUILD_ENGINE_PROMPT
-          : buildLiteSystemPrompt(agentMode);
+          : buildEnterpriseOrLiteSystemPrompt(agentMode);
   const msgs: AIMessage[] = [{ role: 'system', content: system }];
   for (const m of history.slice(-2)) {
     if (m.role === 'user' || m.role === 'assistant') {
@@ -174,17 +194,22 @@ export function buildContextMessages(
   });
 
   const systemContent =
-    opts.agentMode === 'agentic'
+    opts.cavalloModesTestLlm && isCavalloModesTestRequest(userMessage)
+      ? CAVALLO_MODES_TEST_LLM_PROMPT
+      : opts.agentMode === 'agentic'
       ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace activ: ${opts.projectPath}` : ''}`
       : opts.agentMode === 'build' && opts.projectPath
         ? `${CAVALO_BUILD_ENGINE_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
         : opts.agentMode === 'release' && opts.projectPath
           ? `${CAVALO_RELEASE_ENGINEER_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
-          : opts.agentMode === 'debug' && opts.projectPath
-        ? `${buildLiteSystemPrompt(opts.agentMode)}${MULTI_MODEL_RECAP_ADDON}\n\nFocus: debug errors and apply fixes as \`\`\`lang:path\`\`\` fences.\n${SCAFFOLD_EMISSION_RULE}`
-        : attachProject
-        ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
-        : buildLiteSystemPrompt(opts.agentMode);
+          : opts.agentMode && isDirectChatMode(opts.agentMode)
+            ? getCavalloSystemPrompt(opts.agentMode, {
+                workspaceRoot: opts.projectPath ?? undefined,
+                includeScaffold: opts.agentMode === 'code' || opts.agentMode === 'debug',
+              })
+            : attachProject
+              ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
+              : buildLiteSystemPrompt(opts.agentMode);
   messages.push({ role: 'system', content: systemContent });
   usedTokens += estimateTokens(systemContent);
 

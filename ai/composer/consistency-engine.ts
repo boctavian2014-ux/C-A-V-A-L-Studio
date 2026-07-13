@@ -125,7 +125,7 @@ export async function runCavaloConsistencyScan(
 ): Promise<ConsistencyScanResult> {
   const readFile = opts.readFileContent ?? (async () => null);
   const fileExists = opts.fileExists ?? (() => false);
-  const { SyntaxChecker } = await import('./validation/syntax-checker');
+  const { SyntaxChecker } = await import('./validation/syntax-checker.js');
   const syntaxChecker = new SyntaxChecker();
 
   const fileContents: Array<{ path: string; content: string }> = [];

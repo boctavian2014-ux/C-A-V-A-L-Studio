@@ -95,7 +95,7 @@ export const DEFAULT_REASONING_LAYER_CONFIG: ReasoningLayerConfig = {
   showPipelineTimeline: true,
   showLiveReasoning: true,
   showHorseWaitAnimation: true,
-  waitMessageRotateMs: 3500,
+  waitMessageRotateMs: 4800,
 };
 
 export interface PipelineRecapMeta {
@@ -107,6 +107,12 @@ export interface PipelineRecapMeta {
   supervisor?: SupervisorResult;
   completionGate?: import('../project-completion-gate').CompletionGateResult;
   deliveryBlocked?: boolean;
+  needsReview?: boolean;
+  verifyPending?: boolean;
+  /** Snapshot of fullDelivery config used by the pipeline (for renderer autonomous loop). */
+  fullDelivery?: FullDeliveryConfig;
+  /** Final role → model map from Model Orchestrator LLM. */
+  roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
 }
 
 export interface FullDeliveryConfig {
@@ -118,15 +124,30 @@ export interface FullDeliveryConfig {
   minFencesPerTask: number;
   /** Minimum absolute fenced files before a wave can end early. */
   minFencesAbsolute: number;
+  /** Auto-continue repair loops until gate OK or maxRepairWaves (no user DELIVERY_CONTINUE). */
+  autonomousFinish: boolean;
+  /** Max autonomous repair waves (gate/verify/consistency) after pipeline compose. */
+  maxRepairWaves: number;
+  /** Max arena consistency repair waves inside pipeline compose stage. */
+  maxArenaRepairWaves: number;
+  /** Max gate verify repair waves after devtools verify fails. */
+  maxGateRepairWaves: number;
+  /** Run npm install before verify when package.json changed or deps missing. */
+  autoInstallDependencies: boolean;
 }
 
 export const DEFAULT_FULL_DELIVERY_CONFIG: FullDeliveryConfig = {
   enabled: true,
   maxComposeWaves: 3,
   autoContinue: true,
-  uiCheckpoint: true,
+  uiCheckpoint: false,
   minFencesPerTask: 2,
   minFencesAbsolute: 4,
+  autonomousFinish: true,
+  maxRepairWaves: 8,
+  maxArenaRepairWaves: 1,
+  maxGateRepairWaves: 1,
+  autoInstallDependencies: true,
 };
 
 export interface PipelineContext {
@@ -177,6 +198,7 @@ export interface PipelineState {
   devTools?: DevToolsIntegrationResult;
   integrationSummary?: IntegrationSummary;
   reasoningBrief?: ReasoningBrief;
+  roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
 }
 
 export interface DevToolsIntegrationResult {
@@ -228,6 +250,12 @@ export interface MultiAgentConfig {
   decompositionMaxTokens: number;
   /** Post-compose Git/MCP/terminal probes */
   enableDevToolsIntegration: boolean;
+  /** Deliver output when LLM supervisor rejects (tag [NEEDS_REVIEW]) */
+  supervisorFallback: boolean;
+  /** Auto-boost limits on long / multi-module prompts */
+  applyComplexPromptOverrides: boolean;
+  /** Run npm verify in background — do not block pipeline return */
+  devtoolsAsyncVerify: boolean;
   reasoningLayer: ReasoningLayerConfig;
   fullDelivery: FullDeliveryConfig;
 }
@@ -243,12 +271,21 @@ export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
   antiCollapseDecomposition: true,
   decompositionMaxTokens: 8192,
   enableDevToolsIntegration: true,
+  supervisorFallback: true,
+  applyComplexPromptOverrides: true,
+  devtoolsAsyncVerify: true,
   reasoningLayer: { ...DEFAULT_REASONING_LAYER_CONFIG },
   fullDelivery: { ...DEFAULT_FULL_DELIVERY_CONFIG },
 };
 
 export interface MultiAgentPipelineCallbacks {
-  onMultiAgentStatus?: (stage: MultiAgentStageId, status: 'active' | 'done', detail?: string) => void;
+  onMultiAgentStatus?: (
+    stage: MultiAgentStageId,
+    status: 'active' | 'done',
+    detail?: string,
+    modelId?: string,
+    stepId?: string
+  ) => void;
   onReasoningBrief?: (brief: ReasoningBrief) => void;
   onMeta?: (resolvedModel: string, reason: string) => void;
   onDelta?: (delta: string) => void;
@@ -273,6 +310,8 @@ export type MultiAgentPipelineResult =
       writtenFiles?: string[];
       completionGate?: import('../project-completion-gate').CompletionGateResult;
       deliveryBlocked?: boolean;
+      needsReview?: boolean;
+      verifyPending?: boolean;
     }
   | {
       ok: false;

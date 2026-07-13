@@ -77,18 +77,11 @@ export async function resolveSecretsFromClient(): Promise<Record<string, string>
   if (typeof window === 'undefined') return {};
   const w = window as {
     caval?: {
-      settingsLoad?: () => Promise<{ settings?: Record<string, string> }>;
       secretsGet?: () => Promise<{ secrets?: Record<string, string> }>;
     };
   };
-  const [settingsRes, secretsRes] = await Promise.all([
-    w.caval?.settingsLoad?.().catch(() => undefined),
-    w.caval?.secretsGet?.().catch(() => undefined),
-  ]);
-  const secrets = { ...(secretsRes?.secrets ?? {}) };
-  const orKey = settingsRes?.settings?.['openrouter.apiKey']?.trim();
-  if (orKey) secrets.OPENROUTER_API_KEY = orKey;
-  return secrets;
+  const secretsRes = await w.caval?.secretsGet?.().catch(() => undefined);
+  return { ...(secretsRes?.secrets ?? {}) };
 }
 
 export async function resolveOpenRouterKeyFromClient(): Promise<string | undefined> {

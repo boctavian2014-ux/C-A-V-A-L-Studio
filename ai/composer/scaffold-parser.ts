@@ -130,6 +130,7 @@ import {
   FORBIDDEN_USER_WORKSPACE_PATH_RE,
   FORBIDDEN_USER_PACKAGE_NAMES,
 } from '../scaffolds/workspace-forbidden-paths';
+import { isFashionDuplicateScaffoldPath, isJunkScaffoldPath } from '../scaffolds/workspace-rules';
 
 /** Paths that collide with built-in CAVALLO modules — never scaffold here. */
 const BLOCKED_SCAFFOLD_PATH_RE = FORBIDDEN_USER_WORKSPACE_PATH_RE;
@@ -138,7 +139,11 @@ const BLOCKED_SCAFFOLD_PACKAGE_NAMES = FORBIDDEN_USER_PACKAGE_NAMES;
 
 export function isBlockedScaffoldPath(path: string): boolean {
   const normalized = path.trim().replace(/\\/g, '/').replace(/^\.\/+/, '');
-  return BLOCKED_SCAFFOLD_PATH_RE.test(normalized);
+  return (
+    BLOCKED_SCAFFOLD_PATH_RE.test(normalized) ||
+    isJunkScaffoldPath(normalized) ||
+    isFashionDuplicateScaffoldPath(normalized)
+  );
 }
 
 /** Ensure `composer.ts` exports `composer` when sibling `server.ts` imports it. */

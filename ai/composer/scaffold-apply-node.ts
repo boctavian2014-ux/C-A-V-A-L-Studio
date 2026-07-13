@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { parseScaffoldFiles, isScaffoldFragment } from './scaffold-parser';
+import { sortScaffoldFiles } from './scaffold-order';
 import type { PipelineContextStore } from './multi-agent/pipeline-context-store';
 
 function joinWorkspace(root: string, relative: string): string {
@@ -13,7 +14,7 @@ function joinWorkspace(root: string, relative: string): string {
 export function applyScaffoldToWorkspaceNode(workspaceRoot: string, content: string): string[] {
   if (!workspaceRoot?.trim() || !content.trim()) return [];
 
-  const files = parseScaffoldFiles(content);
+  const files = sortScaffoldFiles(parseScaffoldFiles(content));
   const written: string[] = [];
 
   for (const file of files) {

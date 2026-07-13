@@ -5,7 +5,7 @@ import { TabBar } from './components/editor/TabBar';
 import { MonacoEditor } from './components/editor/MonacoEditor';
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { useEditorStore } from './store/editor-store';
-import { useAIStore } from '../../ai/composer/ai-store';
+import { useAIStore, hydrateApiKeysFromSecrets } from '../../ai/composer/ai-store';
 import { AIPanel } from '../../ai/composer/AIPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { useGitStore } from './store/git-store';
@@ -20,9 +20,11 @@ import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
 import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
 import { buildWorkbenchCommands } from './commands/command-registry';
 import { handleMenuCommand, type MenuCommandContext } from './commands/menu-command-router';
+import { showWorkbenchToast } from './commands/workbench-toast';
 import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
+import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
 import {
   IconExplorer, IconSearch, IconGit, IconMarketplace,
@@ -417,7 +419,7 @@ export function WorkbenchRoot() {
   const navStackRef = useRef<string[]>([]);
   const navIndexRef = useRef(-1);
   const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, tabs, projectPath, activeSymbol } = useEditorStore();
-  const { runWorkspaceVerifyAndReport, runBuildAndReport } = useAIStore();
+  const { runWorkspaceVerifyAndReport, runBuildAndReport, queueChatFromPanel } = useAIStore();
   const gitChangesCount = useGitStore((s) => s.files.length);
 
   const toggleAI = useCallback(() => setAiPanelOpen((v) => !v), []);
@@ -425,15 +427,11 @@ export function WorkbenchRoot() {
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
+  const { pickAndOpenFolder } = useOpenWorkspace();
+
   const openFolderFromPalette = useCallback(async () => {
-    const folderPath = await window.caval.fs.openFolder();
-    if (!folderPath) return;
-    setProjectPath(folderPath);
-    useAIStore.getState().setIncludeMode('project');
-    const tree = await window.caval.fs.readTree(folderPath);
-    setFileTree(tree);
-    await window.caval.workspaceOpen?.(folderPath);
-  }, [setProjectPath, setFileTree]);
+    await pickAndOpenFolder();
+  }, [pickAndOpenFolder]);
 
   const runVerifyFromPalette = useCallback(async () => {
     setAiPanelOpen(true);
@@ -564,14 +562,44 @@ export function WorkbenchRoot() {
         runWorkspaceVerify: runVerifyFromPalette,
         runBuild: runBuildFromPalette,
         openShortcuts: () => setShortcutsVisible(true),
+        queueChatFromPanel,
       }),
-    [toggleAI, toggleSidebar, saveTab, openFolderFromPalette, runVerifyFromPalette, runBuildFromPalette]
+    [toggleAI, toggleSidebar, saveTab, openFolderFromPalette, runVerifyFromPalette, runBuildFromPalette, queueChatFromPanel]
   );
 
   useEffect(() => {
     const openCodingChat = () => setAiPanelOpen(true);
     window.addEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
     return () => window.removeEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
+  }, []);
+
+  useEffect(() => {
+    void hydrateApiKeysFromSecrets();
+    void window.caval?.settingsLoad?.();
+  }, []);
+
+  useEffect(() => {
+    const unsub = window.caval?.onRendererRecovered?.((payload) => {
+      console.warn('[caval] Renderer recovered after', payload.reason);
+      void (async () => {
+        const root = useEditorStore.getState().projectPath;
+        if (!root || !window.caval?.getRecentPipelineCompletion) return;
+        const res = await window.caval.getRecentPipelineCompletion(root);
+        const files = res.completion?.writtenFiles;
+        if (!res.ok || !files?.length) return;
+        showWorkbenchToast(
+          `Ultimul run Arena s-a terminat — ${files.length} fișier(e) scrise pe disc.`,
+          6000
+        );
+        const last = files[files.length - 1];
+        if (last && root) {
+          const sep = root.includes('\\') ? '\\' : '/';
+          const abs = `${root}${sep}${last.replace(/\//g, sep)}`;
+          void useEditorStore.getState().openFile(abs);
+        }
+      })();
+    });
+    return () => unsub?.();
   }, []);
 
   useEffect(() => {
@@ -596,18 +624,9 @@ export function WorkbenchRoot() {
   }, [sidebarOpen, activeActivity, engineeringOpen, aiPanelOpen]);
 
   const openAccountSettings = useCallback(() => {
-    useSettingsStore.getState().setActiveSection('safety');
+    useSettingsStore.getState().setActiveSection('ai');
     setActiveActivity('settings');
     setSidebarOpen(true);
-  }, []);
-
-  // Contor generări AI pentru usage meter
-  useEffect(() => {
-    const onGeneration = () => {
-      useSettingsStore.getState().incrementGenerations();
-    };
-    document.addEventListener('caval:ai-generation-complete', onGeneration);
-    return () => document.removeEventListener('caval:ai-generation-complete', onGeneration);
   }, []);
 
   const handleActivityChange = useCallback((tab: ActivityTab) => {

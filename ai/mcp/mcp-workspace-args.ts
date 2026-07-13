@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 
 /** Replace static "." workspace placeholders in MCP server args with the real project path. */
 export function injectWorkspaceIntoMcpArgs(
@@ -37,4 +38,13 @@ export function resolveMcpServerArgs(
     out.push(arg);
   }
   return out;
+}
+
+export function isGitRepository(workspaceRoot?: string): boolean {
+  if (!workspaceRoot?.trim()) return false;
+  try {
+    return fs.existsSync(path.join(path.resolve(workspaceRoot), ".git"));
+  } catch {
+    return false;
+  }
 }
