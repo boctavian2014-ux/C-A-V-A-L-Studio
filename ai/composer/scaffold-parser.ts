@@ -105,16 +105,17 @@ const FILE_PATH_RE =
   /^[\w./\\-]+\.(ts|tsx|js|jsx|json|py|go|rs|java|kt|swift|dart|cs|cpp|c|h|ino|yaml|yml|toml|md|mdx|html|htm|css|scss|sass|less|sql|env|sh|gradle|xml|plist|properties|txt|vue|svelte|astro|prisma|graphql|gql|rb|php|ex|exs|erl|hs|lua|r|m|mm|swift|wasm|wast|proto|tf|hcl|lock)$/i;
 
 function normalizeRelativePath(raw: string): string | null {
-  const path = raw
+  const normalized = raw
     .trim()
     .replace(/^["'`]+|["'`]+$/g, '')
     .replace(/\\/g, '/')
+    .replace(/^[/\\]+/, '')
     .replace(/^\.\/+/, '');
-  if (!path || path.includes('..') || path.startsWith('/')) return null;
-  const base = path.split('/').pop() ?? path;
-  if (base === 'Dockerfile' || base === 'Makefile') return path;
+  if (!normalized || normalized.includes('..')) return null;
+  const base = normalized.split('/').pop() ?? normalized;
+  if (base === 'Dockerfile' || base === 'Makefile') return normalized;
   if (!FILE_PATH_RE.test(base)) return null;
-  return path;
+  return normalized;
 }
 
 const FRAGMENT_INTERNAL_MARKERS = [

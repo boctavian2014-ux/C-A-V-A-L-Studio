@@ -137,6 +137,12 @@
       "showLiveReasoning": true,
       "showHorseWaitAnimation": true,
       "waitMessageRotateMs": 4800
+    },
+    "selfAudit": {
+      "enabled": true,
+      "persistReports": true,
+      "useProgrammaticScores": true,
+      "injectIntoAllAgents": true
     }
   },
   "fullAudit": {

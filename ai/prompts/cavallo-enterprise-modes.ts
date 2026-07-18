@@ -1,9 +1,7 @@
 /**
- * CAVALLO Enterprise Multi-Mode prompts — PLAN, CODE, BUILD, ASK, DEBUG.
+ * CAVALLO Enterprise Multi-Mode prompts — PLAN, CODE, ASK, DEBUG.
  * Agentic mode uses CODING_ARENA_SYSTEM_PROMPT separately (unchanged).
  */
-import { CAVALO_BUILD_ENGINE_PROMPT } from './cavalo-build-engine';
-
 import { CAVALLO_MODES_TEST_PROTOCOL_RULES } from './cavallo-mode-protocol';
 
 export const CAVALLO_GLOBAL_RULES = `
@@ -67,8 +65,6 @@ Rules:
 ${CAVALLO_GLOBAL_RULES}
 `.trim();
 
-export const CAVALLO_BUILD_PROMPT = CAVALO_BUILD_ENGINE_PROMPT;
-
 export const CAVALLO_ASK_PROMPT = `
 ASK MODE — KNOWLEDGE & EXPLANATION ENGINE
 
@@ -115,7 +111,7 @@ Output structure:
 ${CAVALLO_GLOBAL_RULES}
 `.trim();
 
-export type CavalloEnterpriseModeId = 'plan' | 'code' | 'build' | 'ask' | 'debug';
+export type CavalloEnterpriseModeId = 'plan' | 'code' | 'ask' | 'debug';
 
 export function getCavalloEnterprisePrompt(mode: CavalloEnterpriseModeId): string {
   switch (mode) {
@@ -123,8 +119,6 @@ export function getCavalloEnterprisePrompt(mode: CavalloEnterpriseModeId): strin
       return CAVALLO_PLAN_PROMPT;
     case 'code':
       return CAVALLO_CODE_PROMPT;
-    case 'build':
-      return CAVALLO_BUILD_PROMPT;
     case 'ask':
       return CAVALLO_ASK_PROMPT;
     case 'debug':

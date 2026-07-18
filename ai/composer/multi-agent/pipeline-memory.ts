@@ -259,6 +259,10 @@ export class PipelineMemoryEngine {
     return this.record.runs.slice(-limit);
   }
 
+  appendPreference(key: string, value: string): void {
+    this.record.preferences[key] = value.slice(0, 500);
+  }
+
   toJSON(): PipelineMemoryRecord {
     return { ...this.record, runs: [...this.record.runs] };
   }

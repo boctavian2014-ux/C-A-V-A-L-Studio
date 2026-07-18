@@ -53,6 +53,16 @@ import { registerExtensionHandlers } from "./extension-handlers";
 import { registerMarketplaceHandlers } from "./marketplace-handlers";
 import { setCavalConfigExtraPaths } from "../../ai/config/caval-config";
 import { setIpcWorkspaceRoot } from "./ipc-handlers";
+import { assertTrustedSender, openSafeExternalUrl, STRIPE_CHECKOUT_HOSTS } from "./ipc-trust";
+import { normalizeWorkspaceRoot } from "./path-security";
+import {
+  getRendererWebPreferences,
+  installRendererSessionPolicy,
+  installWebContentsSecurity,
+} from "./renderer-security";
+
+// Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
 
 const loadLocalEnvFile = (): void => {
   const envPath = path.join(process.cwd(), ".env");
@@ -91,13 +101,21 @@ const contextEngine = new ContextEngineApi();
 const workspaceFor = (senderId: number): string => workspaceRoots.get(senderId) ?? process.cwd();
 
 function bindWorkspace(senderId: number, folderPath: string): void {
-  workspaceRoots.set(senderId, folderPath);
-  setIpcWorkspaceRoot(senderId, folderPath);
+  const normalized = normalizeWorkspaceRoot(folderPath);
+  workspaceRoots.set(senderId, normalized);
+  setIpcWorkspaceRoot(senderId, normalized);
+}
+
+export function getBoundWorkspaceRoot(senderId: number): string | undefined {
+  return workspaceRoots.get(senderId);
 }
 
 registerGitHandlers();
 registerEngineeringHandlers(workspaceFor);
-registerModelHandlers(workspaceFor);
+registerModelHandlers(
+  (id) => workspaceRoots.get(id) ?? process.cwd(),
+  getBoundWorkspaceRoot
+);
 registerMcpHandlers(workspaceFor);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);
@@ -169,12 +187,7 @@ const createWindow = (): BrowserWindow => {
     title: "CAVALLO",
     ...(fsSync.existsSync(iconPath) ? { icon: iconPath } : {}),
     backgroundColor: "#090B12",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
-    }
+    webPreferences: getRendererWebPreferences(path.join(__dirname, "preload.js")),
   });
 
   window.maximize();
@@ -1395,14 +1408,18 @@ ipcMain.handle("caval:billing-checkout", async (event, input: { email: string })
     if (!res.ok || !json.url) {
       return { ok: false, error: json.error ?? `Checkout failed (${res.status})` };
     }
-    await shell.openExternal(json.url);
+    const opened = await openSafeExternalUrl(json.url, STRIPE_CHECKOUT_HOSTS);
+    if (!opened.ok) {
+      return { ok: false, error: opened.error ?? "Checkout URL blocked by security policy." };
+    }
     return { ok: true, url: json.url };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 
-ipcMain.handle("caval:secrets-get", () => {
+ipcMain.handle("caval:secrets-get", (event) => {
+  assertTrustedSender(event);
   const stored = normalizeSecretsMap(readApiSecrets());
   const merged: Record<string, string> = { ...stored };
   if (process.env.OPENROUTER_API_KEY && !merged.OPENROUTER_API_KEY) {
@@ -1414,7 +1431,8 @@ ipcMain.handle("caval:secrets-get", () => {
   return { ok: true, secrets: merged };
 });
 
-ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) => {
+ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => {
+  assertTrustedSender(event);
   const merged = mergeApiSecrets(secrets);
   writeApiSecrets(merged);
   applyStoredSecretsToEnv();
@@ -1423,6 +1441,8 @@ ipcMain.handle("caval:secrets-set", (_event, secrets: Record<string, string>) =>
 
 app.whenReady().then(() => {
   app.setName("CAVALLO");
+  installRendererSessionPolicy();
+  installWebContentsSecurity();
   installApplicationMenu();
   loadPersistedAppSettings();
   applyStoredSecretsToEnv();

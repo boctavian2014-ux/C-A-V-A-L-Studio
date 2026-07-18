@@ -11,6 +11,7 @@ import {
   TESTER_AGENT_PROMPT,
   REFACTORER_AGENT_PROMPT,
   MODEL_ORCHESTRATOR_AGENT_PROMPT,
+  SELF_AUDIT_PROTOCOL,
 } from '../../prompts/multi-agent';
 import type { ArenaModelPlan } from './arena-model-orchestrator';
 import { buildArenaModelPlan } from './arena-model-orchestrator';
@@ -50,6 +51,12 @@ export const SCAFFOLD_SYSTEM_ADDON = [
   FULL_DELIVERY_RULE,
   SCAFFOLD_EMISSION_RULE,
 ].join('\n');
+
+export function agenticSelfAuditAddon(config?: MultiAgentConfig): string {
+  if (config?.selfAudit?.enabled === false) return '';
+  if (config?.selfAudit?.injectIntoAllAgents === false) return '';
+  return `\n\n${SELF_AUDIT_PROTOCOL}`;
+}
 
 function promptForRole(role?: ArenaAgentRole): string {
   switch (role) {
@@ -114,7 +121,8 @@ export async function runModelOrchestrator(
   taskHint: string,
   rotator: ModelRotator,
   workspaceRoot: string,
-  callbacks?: MultiAgentPipelineCallbacks
+  callbacks?: MultiAgentPipelineCallbacks,
+  opts?: { config?: MultiAgentConfig; capabilityHint?: string }
 ): Promise<{ plan: ArenaModelPlan; orchestratorModel: string }> {
   emitStage(callbacks, 'modelOrch', 'active', undefined, undefined, 'modelOrch');
 
@@ -135,6 +143,7 @@ export async function runModelOrchestrator(
   const user = [
     `User request:\n${userMessage.slice(0, 2_000)}`,
     taskHint ? `\nPipeline hint:\n${taskHint.slice(0, 800)}` : '',
+    opts?.capabilityHint ? `\n${opts.capabilityHint}` : '',
     '\n**Available models**',
     `Planning: ${[...new Set(planningPool)].join(', ')}`,
     `Coding: ${[...new Set(codingPool)].join(', ')}`,
@@ -143,7 +152,9 @@ export async function runModelOrchestrator(
     '\nAssign distinct models per role when possible.',
   ].join('\n');
 
-  const result = await runComplete(orchModel, MODEL_ORCHESTRATOR_AGENT_PROMPT, user, {
+  const system = `${MODEL_ORCHESTRATOR_AGENT_PROMPT}${agenticSelfAuditAddon(opts?.config)}`;
+
+  const result = await runComplete(orchModel, system, user, {
     capability: 'planning',
     intent: 'planning',
     workspaceRoot,
@@ -205,7 +216,8 @@ export async function runContextCapture(
   projectContext: string | undefined,
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks,
-  skipLlm = true
+  skipLlm = true,
+  config?: MultiAgentConfig
 ): Promise<PipelineContextStore> {
   emitStage(callbacks, 'context', 'active');
 
@@ -220,7 +232,11 @@ export async function runContextCapture(
     projectContext ? `\n\nExisting project context:\n${projectContext.slice(0, 8000)}` : '',
   ].join('');
 
-  const result = await runComplete(model, PIPELINE_CONTEXT_AGENT_PROMPT, user, {
+  const result = await runComplete(
+    model,
+    `${PIPELINE_CONTEXT_AGENT_PROMPT}${agenticSelfAuditAddon(config)}`,
+    user,
+    {
     capability: 'planning',
     intent: 'planning',
     workspaceRoot,
@@ -252,7 +268,8 @@ export async function runDecomposition(
   callbacks?: MultiAgentPipelineCallbacks
 ): Promise<{ tasks: PipelineTask[]; raw: string } | { error: string }> {
   emitStage(callbacks, 'decompose', 'active', undefined, model, 'decompose');
-  const result = await runComplete(model, DECOMPOSITION_AGENT_PROMPT, store.buildPromptFor('decompose'), {
+  const decomposeSystem = `${DECOMPOSITION_AGENT_PROMPT}${agenticSelfAuditAddon(config)}`;
+  const result = await runComplete(model, decomposeSystem, store.buildPromptFor('decompose'), {
     capability: 'planning',
     intent: 'planning',
     workspaceRoot,
@@ -274,7 +291,7 @@ export async function runDecomposition(
     emitStage(callbacks, 'decompose', 'active', 'retry (anti-collapse)');
     const retry = await runComplete(
       model,
-      DECOMPOSITION_AGENT_PROMPT + DECOMPOSITION_RETRY_ADDON,
+      decomposeSystem + DECOMPOSITION_RETRY_ADDON,
       store.buildPromptFor('decompose'),
       {
         capability: 'planning',
@@ -307,9 +324,10 @@ async function runOneSubAgent(
   store: PipelineContextStore,
   workspaceRoot: string,
   rotator: ModelRotator,
-  callbacks?: MultiAgentPipelineCallbacks
+  callbacks?: MultiAgentPipelineCallbacks,
+  config?: MultiAgentConfig
 ): Promise<SubAgentResult> {
-  const system = `${promptForRole(task.role)}\n\n${SCAFFOLD_SYSTEM_ADDON}`;
+  const system = `${promptForRole(task.role)}${agenticSelfAuditAddon(config)}\n\n${SCAFFOLD_SYSTEM_ADDON}`;
   const result = await runComplete(modelId as ModelSelectionId, system, store.buildPromptFor('subagent-task', task), {
     capability: 'code',
     intent: 'kilocode',
@@ -373,7 +391,7 @@ export async function runSubAgents(
         stepId
       );
 
-      const result = await runOneSubAgent(task, modelId, store, workspaceRoot, rotator, callbacks);
+      const result = await runOneSubAgent(task, modelId, store, workspaceRoot, rotator, callbacks, config);
       results.push(result);
       completed += 1;
       emitStage(
@@ -399,16 +417,22 @@ export async function runMerge(
   model: ModelSelectionId,
   store: PipelineContextStore,
   workspaceRoot: string,
-  callbacks?: MultiAgentPipelineCallbacks
+  callbacks?: MultiAgentPipelineCallbacks,
+  config?: MultiAgentConfig
 ): Promise<{ raw: string } | { error: string }> {
   emitStage(callbacks, 'merge', 'active', undefined, model, 'merge');
-  const result = await runComplete(model, MERGE_AGENT_PROMPT, store.buildPromptFor('merge'), {
-    capability: 'planning',
-    intent: 'planning',
-    workspaceRoot,
-    requestId: 'ma-merge',
-    callbacks,
-  });
+  const result = await runComplete(
+    model,
+    `${MERGE_AGENT_PROMPT}${agenticSelfAuditAddon(config)}`,
+    store.buildPromptFor('merge'),
+    {
+      capability: 'planning',
+      intent: 'planning',
+      workspaceRoot,
+      requestId: 'ma-merge',
+      callbacks,
+    }
+  );
 
   if (!result.ok) {
     emitStage(callbacks, 'merge', 'done', 'failed', model, 'merge');
@@ -424,16 +448,22 @@ export async function runSupervisor(
   model: ModelSelectionId,
   store: PipelineContextStore,
   workspaceRoot: string,
-  callbacks?: MultiAgentPipelineCallbacks
+  callbacks?: MultiAgentPipelineCallbacks,
+  config?: MultiAgentConfig
 ): Promise<SupervisorResult | { error: string }> {
   emitStage(callbacks, 'supervisor', 'active', undefined, model, 'supervisor');
-  const result = await runComplete(model, SUPERVISOR_AGENT_PROMPT, store.buildPromptFor('supervisor'), {
-    capability: 'debug',
-    intent: 'debug',
-    workspaceRoot,
-    requestId: 'ma-supervisor',
-    callbacks,
-  });
+  const result = await runComplete(
+    model,
+    `${SUPERVISOR_AGENT_PROMPT}${agenticSelfAuditAddon(config)}`,
+    store.buildPromptFor('supervisor'),
+    {
+      capability: 'debug',
+      intent: 'debug',
+      workspaceRoot,
+      requestId: 'ma-supervisor',
+      callbacks,
+    }
+  );
 
   if (!result.ok) {
     emitStage(callbacks, 'supervisor', 'done', 'failed', model, 'supervisor');
@@ -459,7 +489,7 @@ export async function runFinalComposer(
   workspaceRoot: string,
   callbacks?: MultiAgentPipelineCallbacks,
   isAborted?: () => boolean,
-  opts?: { waveIndex?: number; repairMessage?: string }
+  opts?: { waveIndex?: number; repairMessage?: string; config?: MultiAgentConfig }
 ): Promise<{ ok: true; text: string; model: string; provider: string } | { ok: false; error: string }> {
   emitStage(
     callbacks,
@@ -469,7 +499,7 @@ export async function runFinalComposer(
     model,
     opts?.waveIndex != null ? `compose-w${opts.waveIndex}` : 'compose'
   );
-  const system = `${FINAL_COMPOSER_WITH_REASONING}\n${SCAFFOLD_SYSTEM_ADDON}`;
+  const system = `${FINAL_COMPOSER_WITH_REASONING}${agenticSelfAuditAddon(opts?.config)}\n${SCAFFOLD_SYSTEM_ADDON}`;
   let user = opts?.repairMessage ?? store.buildPromptFor('compose');
   if (!opts?.repairMessage && opts?.waveIndex && opts.waveIndex > 0) {
     user += `\n\n## DELIVERY WAVE ${opts.waveIndex + 1}\nComplete ALL missing files from the plan. Emit every remaining file as \`\`\`lang:path\`\`\` fences with full source. Do not repeat explanations.`;
@@ -549,7 +579,8 @@ function emitStage(
   status: 'active' | 'done',
   detail?: string,
   modelId?: string,
-  stepId?: string
+  stepId?: string,
+  auditBadge?: string
 ): void {
-  callbacks?.onMultiAgentStatus?.(stage, status, detail, modelId, stepId);
+  callbacks?.onMultiAgentStatus?.(stage, status, detail, modelId, stepId, auditBadge);
 }

@@ -80,7 +80,7 @@ function detectLanguage(filename: string): string {
     css: 'css', scss: 'scss',
     html: 'html', py: 'python',
     rs: 'rust', go: 'go',
-    sh: 'shell', yaml: 'yaml', yml: 'yaml',
+    sh: 'plaintext', yaml: 'yaml', yml: 'yaml',
     toml: 'toml', env: 'plaintext',
   };
   return map[ext] ?? 'plaintext';
@@ -111,6 +111,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   refreshTree: async () => {
     const { projectPath } = get();
     if (!projectPath) return;
+    await window.caval.workspaceSync?.(projectPath);
     const tree: FileNode[] = await window.caval.fs.readTree(projectPath);
     set({ fileTree: tree });
   },

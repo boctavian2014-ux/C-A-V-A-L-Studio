@@ -23,7 +23,9 @@ describe('multi-agent config', () => {
 
   it('uses pipeline for agentic mode with workspace', () => {
     expect(
-      shouldUseMultiAgentPipeline('agentic', 'build app', '/tmp/proj', baseCfg)
+      shouldUseMultiAgentPipeline('agentic', 'build app', '/tmp/proj', baseCfg, {
+        userBoundWorkspace: true,
+      })
     ).toBe(true);
   });
 
@@ -35,7 +37,9 @@ describe('multi-agent config', () => {
 
   it('skips pipeline for partial requests', () => {
     expect(
-      shouldUseMultiAgentPipeline('agentic', '/quick fix', '/tmp/proj', baseCfg)
+      shouldUseMultiAgentPipeline('agentic', '/quick fix', '/tmp/proj', baseCfg, {
+        userBoundWorkspace: true,
+      })
     ).toBe(false);
   });
 

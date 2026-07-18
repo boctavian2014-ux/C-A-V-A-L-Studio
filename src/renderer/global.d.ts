@@ -143,6 +143,7 @@ interface CavalStreamChunk {
   detail?: string;
   multiAgentModel?: string;
   multiAgentStepId?: string;
+  multiAgentAuditBadge?: string;
   goal?: string;
   approach?: string;
   modules?: string[];
@@ -156,6 +157,12 @@ interface CavalStreamChunk {
     deliveryBlocked?: boolean;
     needsReview?: boolean;
     verifyPending?: boolean;
+    roleModelMap?: Record<string, string>;
+    capabilitySnapshot?: Record<
+      string,
+      { reasoning?: number; coding?: number; planning?: number; toolUse?: number }
+    >;
+    selfAuditSummary?: string;
   };
       composeText?: string;
       writtenFiles?: string[];

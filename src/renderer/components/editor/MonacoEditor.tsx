@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef } from 'react';
+import '../../monaco-setup';
 import Editor, { useMonaco, type OnMount, type OnChange } from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
 import { useEditorStore } from '../../store/editor-store';
@@ -169,13 +170,19 @@ export function MonacoEditor() {
         module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.NodeJs,
         jsx: ts.JsxEmit.ReactJSX,
+        allowNonTsExtensions: true,
         strict: true,
         esModuleInterop: true,
         allowSyntheticDefaultImports: true,
         resolveJsonModule: true
       });
       ts.typescriptDefaults.setDiagnosticsOptions({
-        noSemanticValidation: false,
+        noSemanticValidation: true,
+        noSyntaxValidation: false
+      });
+      const jsDefaults = (monaco.languages.typescript as { javascriptDefaults?: { setDiagnosticsOptions: (options: Record<string, unknown>) => void } }).javascriptDefaults;
+      jsDefaults?.setDiagnosticsOptions({
+        noSemanticValidation: true,
         noSyntaxValidation: false
       });
     }

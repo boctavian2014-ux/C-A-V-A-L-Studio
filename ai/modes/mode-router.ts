@@ -3,7 +3,7 @@
  * Agentic mode bypasses this module entirely.
  */
 import type { AgentModeId } from './agent-modes';
-import { isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode } from './agent-modes';
+import { isAgenticPipelineMode } from './agent-modes';
 import {
   detectIntent,
   isDirectChatMode,
@@ -20,11 +20,6 @@ import {
   isCavalloModesTestRequest,
 } from '../prompts/cavallo-mode-protocol';
 import { SCAFFOLD_EMISSION_RULE } from '../prompts/scaffold-emission-rule';
-import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
-import { CAVALO_RELEASE_ENGINEER_PROMPT } from '../prompts/cavalo-release-engineer';
-
-const BUILD_MODE_EXPLICIT = /\b(?:BUILD\s+MODE|mod\s+build)\b/i;
-const RELEASE_MODE_EXPLICIT = /\b(?:RELEASE\s+MODE|mod\s+release|release\s+engineer)\b/i;
 
 export interface CavalloModesConfig {
   autoModeSwitch?: boolean;
@@ -72,32 +67,6 @@ export function resolveEffectiveMode(
     return { mode: normalized, switched: false };
   }
 
-  if (options?.explicitTriggers !== false && RELEASE_MODE_EXPLICIT.test(message)) {
-    return {
-      mode: 'release',
-      switched: normalized !== 'release',
-      switchReason: 'explicit release trigger',
-      fromMode: normalized !== 'release' ? normalized : undefined,
-    };
-  }
-
-  if (options?.explicitTriggers !== false && BUILD_MODE_EXPLICIT.test(message)) {
-    return {
-      mode: 'build',
-      switched: normalized !== 'build',
-      switchReason: 'explicit build trigger',
-      fromMode: normalized !== 'build' ? normalized : undefined,
-    };
-  }
-
-  if (isBuildEngineMode(normalized)) {
-    return { mode: 'build', switched: false };
-  }
-
-  if (isReleaseEngineerMode(normalized)) {
-    return { mode: 'release', switched: false };
-  }
-
   const autoSwitch = options?.autoSwitch !== false;
   if (!autoSwitch) {
     return { mode: normalized, switched: false };
@@ -136,25 +105,6 @@ export function getCavalloSystemPrompt(
     return '';
   }
 
-  if (isReleaseEngineerMode(normalized)) {
-    let prompt = CAVALO_RELEASE_ENGINEER_PROMPT;
-    if (opts?.workspaceRoot?.trim()) {
-      prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
-    }
-    return prompt;
-  }
-
-  if (isBuildEngineMode(normalized)) {
-    let prompt = CAVALO_BUILD_ENGINE_PROMPT;
-    if (opts?.includeScaffold !== false) {
-      prompt += `\n\n${SCAFFOLD_EMISSION_RULE}`;
-    }
-    if (opts?.workspaceRoot?.trim()) {
-      prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
-    }
-    return prompt;
-  }
-
   if (!isDirectChatMode(normalized)) {
     let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt('ask')}`;
     if (enforceEndLabels) {
@@ -187,16 +137,12 @@ export function getCavalloSystemPrompt(
   return prompt;
 }
 
-export function getModeLabel(mode: DirectChatModeId | 'build' | 'release'): string {
+export function getModeLabel(mode: DirectChatModeId): string {
   switch (mode) {
     case 'plan':
       return 'Plan';
     case 'code':
       return 'Code';
-    case 'build':
-      return 'Build';
-    case 'release':
-      return 'Release';
     case 'ask':
       return 'Ask';
     case 'debug':

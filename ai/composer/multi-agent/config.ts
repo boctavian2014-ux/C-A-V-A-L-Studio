@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { MultiAgentConfig } from './types';
-import { DEFAULT_MULTI_AGENT_CONFIG } from './types';
+import { DEFAULT_MULTI_AGENT_CONFIG, DEFAULT_SELF_AUDIT_CONFIG } from './types';
 
 const PARTIAL_RUN_PATTERNS = [
   /\/quick\b/i,
@@ -38,6 +38,7 @@ export function loadMultiAgentConfig(workspaceRoot?: string): MultiAgentConfig {
         multiAgent?: Partial<MultiAgentConfig> & {
           reasoningLayer?: Partial<import('./types').ReasoningLayerConfig>;
           fullDelivery?: Partial<import('./types').FullDeliveryConfig>;
+          selfAudit?: Partial<import('./types').SelfAuditConfig>;
         };
       };
       if (parsed.multiAgent) {
@@ -52,6 +53,14 @@ export function loadMultiAgentConfig(workspaceRoot?: string): MultiAgentConfig {
           fullDelivery: {
             ...DEFAULT_MULTI_AGENT_CONFIG.fullDelivery,
             ...cfg.fullDelivery,
+          },
+          selfAudit: {
+            enabled: cfg.selfAudit?.enabled ?? DEFAULT_SELF_AUDIT_CONFIG.enabled,
+            persistReports: cfg.selfAudit?.persistReports ?? DEFAULT_SELF_AUDIT_CONFIG.persistReports,
+            useProgrammaticScores:
+              cfg.selfAudit?.useProgrammaticScores ?? DEFAULT_SELF_AUDIT_CONFIG.useProgrammaticScores,
+            injectIntoAllAgents:
+              cfg.selfAudit?.injectIntoAllAgents ?? DEFAULT_SELF_AUDIT_CONFIG.injectIntoAllAgents,
           },
         };
       }
@@ -114,10 +123,12 @@ export function shouldUseMultiAgentPipeline(
   mode: string | undefined,
   message: string,
   workspaceRoot: string | undefined,
-  config?: MultiAgentConfig
+  config?: MultiAgentConfig,
+  opts?: { userBoundWorkspace?: boolean }
 ): boolean {
   if (mode !== 'agentic') return false;
-  if (!workspaceRoot) return false;
+  if (!workspaceRoot?.trim()) return false;
+  if (opts?.userBoundWorkspace === false) return false;
   const cfg = config ?? loadMultiAgentConfig(workspaceRoot);
   if (!cfg.enabled) return false;
   if (isPartialRunRequest(message)) return false;

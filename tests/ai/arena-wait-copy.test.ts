@@ -8,6 +8,9 @@ import {
   activePhaseFromSteps,
   createWaitMessagePicker,
   formatWaitElapsed,
+  fillWaitTemplate,
+  buildContextualPool,
+  buildWaitSceneContext,
   __testOnly,
 } from '../../ai/composer/arena-wait-copy';
 import type { MultiAgentPhase } from '../../ai/composer/chat-activity-types';
@@ -210,5 +213,74 @@ describe('arena-wait-copy', () => {
     for (const msg of bag) {
       expect(exclude.has(msg)).toBe(false);
     }
+  });
+});
+
+describe('arena-wait contextual messages', () => {
+  beforeEach(() => {
+    vi.stubGlobal('sessionStorage', mockSessionStorage());
+    sessionStorage.removeItem(__testOnly.SESSION_KEY);
+  });
+
+  afterEach(() => {
+    sessionStorage.removeItem(__testOnly.SESSION_KEY);
+    vi.unstubAllGlobals();
+  });
+
+  it('fillWaitTemplate fills project and skips incomplete templates', () => {
+    expect(fillWaitTemplate('Lucrez la {project}', { project: 'demo-app' })).toBe(
+      'Lucrez la demo-app'
+    );
+    expect(fillWaitTemplate('Scriu în {project} — {file}', { project: 'demo-app' })).toBeNull();
+    expect(
+      fillWaitTemplate('Scriu în {project} — {file}', { project: 'demo-app', file: 'App.tsx' })
+    ).toBe('Scriu în demo-app — App.tsx');
+  });
+
+  it('buildContextualPool includes project and file for compose', () => {
+    const pool = buildContextualPool('compose', { project: 'demo', file: 'App.tsx' });
+    expect(pool.some((m) => m.includes('demo'))).toBe(true);
+    expect(pool.some((m) => m.includes('App.tsx'))).toBe(true);
+    expect(pool.length).toBeGreaterThan(getWaitMessagesForPhase('compose').length);
+  });
+
+  it('buildContextualPool without context returns generic only', () => {
+    const pool = buildContextualPool('compose', undefined);
+    expect(pool).toEqual(getWaitMessagesForPhase('compose'));
+  });
+
+  it('picker with context can surface project name', () => {
+    const picker = createWaitMessagePicker('compose', {
+      project: 'caval-shop',
+      file: 'Cart.tsx',
+    });
+    const samples = new Set<string>();
+    for (let i = 0; i < 12; i++) samples.add(picker.next());
+    expect([...samples].some((m) => m.includes('caval-shop'))).toBe(true);
+  });
+
+  it('buildWaitSceneContext maps steps and modules', () => {
+    const ctx = buildWaitSceneContext({
+      projectTitle: 'my-app',
+      activeFile: 'src/pages/Home.tsx',
+      modules: ['auth', 'ui'],
+      model: 'openrouter:anthropic/claude-sonnet-4',
+      writtenFiles: ['a.ts', 'b.ts'],
+      steps: [
+        {
+          phase: 'subagent',
+          status: 'active',
+          detail: 'auth · 2/5',
+          modelId: 'stepfun/step-3.5-flash',
+          at: 1,
+        },
+      ],
+    });
+    expect(ctx.project).toBe('my-app');
+    expect(ctx.file).toBe('Home.tsx');
+    expect(ctx.module).toBe('auth');
+    expect(ctx.task).toBe('auth · 2/5');
+    expect(ctx.model).toContain('step');
+    expect(ctx.files).toBe(2);
   });
 });

@@ -24,4 +24,6 @@ Optional JSON block (same ids):
 {"coordinator":"...","architect":"...","implementer":"...","tester":"...","refactorer":"..."}
 \`\`\`
 
-Max 8 lines total. No chat, no apologies.`;
+Max 8 lines total. No chat, no apologies.
+
+Capability delegation: When a **Capability map** is provided in the user message, prefer models with higher historical scores for each role (reasoning vs coding vs tool-use).`;

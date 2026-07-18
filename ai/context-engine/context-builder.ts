@@ -11,8 +11,6 @@ import {
   buildMultiModelSystemPrompt,
   MULTI_MODEL_RECAP_ADDON,
 } from '../prompts/multi-model-reasoning-chat';
-import { CAVALO_BUILD_ENGINE_PROMPT } from '../prompts/cavalo-build-engine';
-import { CAVALO_RELEASE_ENGINEER_PROMPT } from '../prompts/cavalo-release-engineer';
 import type { AgentModeId } from '../modes/agent-modes';
 import {
   CAVALLO_MODES_TEST_LLM_PROMPT,
@@ -104,11 +102,7 @@ export function buildFastChatMessages(
   const system =
     agentMode === 'agentic'
       ? CODING_ARENA_SYSTEM_PROMPT
-      : agentMode === 'release'
-        ? CAVALO_RELEASE_ENGINEER_PROMPT
-        : agentMode === 'build'
-          ? CAVALO_BUILD_ENGINE_PROMPT
-          : buildEnterpriseOrLiteSystemPrompt(agentMode);
+      : buildEnterpriseOrLiteSystemPrompt(agentMode);
   const msgs: AIMessage[] = [{ role: 'system', content: system }];
   for (const m of history.slice(-2)) {
     if (m.role === 'user' || m.role === 'assistant') {
@@ -198,11 +192,7 @@ export function buildContextMessages(
       ? CAVALLO_MODES_TEST_LLM_PROMPT
       : opts.agentMode === 'agentic'
       ? `${CODING_ARENA_SYSTEM_PROMPT}${opts.projectPath ? `\n\nWorkspace activ: ${opts.projectPath}` : ''}`
-      : opts.agentMode === 'build' && opts.projectPath
-        ? `${CAVALO_BUILD_ENGINE_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
-        : opts.agentMode === 'release' && opts.projectPath
-          ? `${CAVALO_RELEASE_ENGINEER_PROMPT}\n\nWorkspace activ: ${opts.projectPath}`
-          : opts.agentMode && isDirectChatMode(opts.agentMode)
+      : opts.agentMode && isDirectChatMode(opts.agentMode)
             ? getCavalloSystemPrompt(opts.agentMode, {
                 workspaceRoot: opts.projectPath ?? undefined,
                 includeScaffold: opts.agentMode === 'code' || opts.agentMode === 'debug',

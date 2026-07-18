@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ipcMain, dialog, shell } from 'electron';
+import { ipcMain, dialog } from 'electron';
+import { openSafeExternalUrl } from './ipc-trust';
 
 // ──────────────────────────────────────────────
 //  Robotics AI — IPC Handlers (CAVALLO Studio)
@@ -163,15 +164,7 @@ export function registerEngineeringHandlers(getWorkspaceRoot: (senderId: number)
   ipcMain.handle(
     'engineering:openExternal',
     async (_e, url: string): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        if (!/^https?:\/\//i.test(url)) {
-          return { ok: false, error: 'URL invalid.' };
-        }
-        await shell.openExternal(url);
-        return { ok: true };
-      } catch (err: unknown) {
-        return { ok: false, error: err instanceof Error ? err.message : 'Nu am putut deschide linkul.' };
-      }
+      return openSafeExternalUrl(url);
     }
   );
 }

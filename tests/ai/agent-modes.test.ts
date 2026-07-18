@@ -2,39 +2,23 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_MODES,
   getAgentMode,
-  isBuildEngineMode,
-  isReleaseEngineerMode,
   isAgenticPipelineMode,
 } from '../../ai/modes/agent-modes';
 
 describe('agent modes', () => {
+  it('exposes exactly five modes in UI order', () => {
+    expect(AGENT_MODES.map((m) => m.id)).toEqual(['ask', 'plan', 'code', 'debug', 'agentic']);
+  });
+
   it('includes agentic mode', () => {
     const agentic = AGENT_MODES.find((m) => m.id === 'agentic');
     expect(agentic).toBeDefined();
     expect(agentic?.label).toBe('Agentic');
   });
 
-  it('includes build mode', () => {
-    const build = AGENT_MODES.find((m) => m.id === 'build');
-    expect(build).toBeDefined();
-    expect(build?.description.toLowerCase()).toContain('autonomous');
-  });
-
-  it('isBuildEngineMode is true only for build', () => {
-    expect(isBuildEngineMode('build')).toBe(true);
-    expect(isBuildEngineMode('code')).toBe(false);
-    expect(isBuildEngineMode('release')).toBe(false);
-  });
-
-  it('isReleaseEngineerMode is true only for release', () => {
-    expect(isReleaseEngineerMode('release')).toBe(true);
-    expect(isReleaseEngineerMode('build')).toBe(false);
-  });
-
-  it('includes release mode', () => {
-    const release = AGENT_MODES.find((m) => m.id === 'release');
-    expect(release).toBeDefined();
-    expect(release?.description.toLowerCase()).toContain('release');
+  it('does not include build or release modes', () => {
+    expect(AGENT_MODES.some((m) => m.id === 'build')).toBe(false);
+    expect(AGENT_MODES.some((m) => m.id === 'release')).toBe(false);
   });
 
   it('isAgenticPipelineMode is true only for agentic', () => {
@@ -58,7 +42,12 @@ describe('agent modes', () => {
     expect(getAgentMode('architect').id).toBe('plan');
   });
 
-  it('agentic is first in mode list', () => {
-    expect(AGENT_MODES[0]?.id).toBe('agentic');
+  it('migrates legacy build/release to code via getAgentMode', () => {
+    expect(getAgentMode('build').id).toBe('code');
+    expect(getAgentMode('release').id).toBe('code');
+  });
+
+  it('ask is first in mode list', () => {
+    expect(AGENT_MODES[0]?.id).toBe('ask');
   });
 });

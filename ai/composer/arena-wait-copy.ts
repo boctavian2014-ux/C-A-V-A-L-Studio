@@ -1,6 +1,6 @@
 import type { MultiAgentPhase } from './chat-activity-types';
 import type { MultiAgentStepRecord } from './chat-activity-types';
-import { MULTI_AGENT_LABELS } from './chat-activity-types';
+import { MULTI_AGENT_LABELS, shortModelLabel } from './chat-activity-types';
 
 /** Fixed compose wait line (animated dots appended in UI). */
 export const COMPOSE_WAIT_LABEL = 'Scriu codul în editor';
@@ -326,6 +326,217 @@ const DEFAULT_MESSAGES = [
   'Încă procesez. Calitatea nu se grăbește',
 ];
 
+/** Live IDE + pipeline snapshot for contextual wait jokes. */
+export interface WaitSceneContext {
+  project?: string;
+  file?: string;
+  module?: string;
+  task?: string;
+  model?: string;
+  files?: number;
+}
+
+const PLACEHOLDER_RE = /\{(project|file|module|task|model|files)\}/g;
+const MAX_LABEL_LEN = 28;
+
+const PHASE_CONTEXT_TEMPLATES: Record<MultiAgentPhase, string[]> = {
+  memory: [
+    'Memorie pentru {project}: caut ce am mai promis data trecută',
+    'În {project} am găsit deja-vu. {file} sună cunoscut.',
+    'Snapshot {project}: lecții vechi, optimism nou',
+    'Îmi amintesc de {project}. Și de „fix later” din {file}',
+    'Context istoric {project} — {files} fișiere deja pe disc',
+    'Memoria zice: {project} merită un plan, nu panică',
+  ],
+  integrate: [
+    'Integrez {project}: modulele se țin de mână (aproape)',
+    'Full Integration pe {project} — {module} intră în joc',
+    'Leg piesele din {project}. {task}',
+    'Unific fluxul în {project}. {file} e pe radar',
+    'Handshake în {project}: agenți + {model}',
+    'Pod între idee și fișiere în {project}',
+  ],
+  context: [
+    'Citesc {project}. Fișierul deschis: {file}',
+    'Mapez {project} — {file} e pe ecran, restul e mister',
+    'Context pack pentru {project}. {module} e pe listă',
+    'Scanez {project}. Editorul ține {file} deschis ca un indiciu',
+    'Workspace {project}: structură creativă, focus pe {file}',
+    'Înțeleg stack-ul din {project} înainte să inventez folderul greșit',
+  ],
+  modelOrch: [
+    'Aleg creierul pentru {project} → {model}',
+    'Orchestrare modele pe {project}. Candidat: {model}',
+    'Rutez task-ul din {project} către {model}',
+    'Match complexity ↔ model pentru {project}',
+    'DJ de token-uri: {project} pe {model}',
+    'Fallback gata — {project} nu rămâne fără creier ({model})',
+  ],
+  orchestrator: [
+    'Coordonez {project}: {task}',
+    'Plan pentru {project} — {module} e pe tablă',
+    'Distribuie misiuni în {project}. Tu ai zis surpriză, eu fac listă',
+    'Orchestrator pe {project}: {file} e în vizor',
+    'Timeline {project}: gândim → facem → ne mirăm',
+    'Roluri clare în {project}. {model} pe fir',
+  ],
+  decompose: [
+    'Sparg {project} în module. {module} e primul suspect',
+    'Architect pe {project}: {task}',
+    'Decompose {project} — {file} sugerează unde tăiem',
+    'Task-uri atomice pentru {project}. Fără „fă tot”',
+    'Harta modulelor din {project} prinde contur',
+    'Împart {project} ca un puzzle cu instrucțiuni (aproape)',
+  ],
+  subagent: [
+    'Agent pe {module}: {task}',
+    'Sub-agent în {project} — lucrează la {module}',
+    'Implementare {module} în {project}. {model} tastează',
+    'Task activ: {task} · proiect {project}',
+    'Un agent, un modul ({module}), zero scuze',
+    'Cod pentru {module} — ții {file} deschis ca martor',
+  ],
+  merge: [
+    'Merge în {project}: unific output-urile fără dramă',
+    'Consolidez {project}. {module} trebuie să se potrivească',
+    'Un singur adevăr pentru {project}. {task}',
+    'Merge pass: {project} + {files} fișiere pe drum',
+    'Lipesc piesele din {project}. Importuri, nu scântei',
+    'Reconciliere în {project} — {file} poate fi pe listă',
+  ],
+  supervisor: [
+    'Review pe {project}. {task}',
+    'Supervisor uită-se la {project} ca un QA cu cafea',
+    'Checklist {project}: {module} trece sau se întoarce',
+    'QA pe {project} — {files} fișiere merită o privire',
+    'Aprobare condiționată pentru {project}. Detalii: {task}',
+    'Review: {project} pe {model} — zero monolog, doar issues',
+  ],
+  compose: [
+    'Scriu în {project} — {file} prinde viață',
+    'Compose {project}: fence-uri spre editor',
+    'Livrez fișiere în {project}. Acum: {task}',
+    'Composer pe {project} ({model}) — {module} pe val',
+    'Editorul așteaptă {project}. {files} deja scrise',
+    'Scriu cod în {project}. Ții {file} deschis? Perfect timing',
+  ],
+  userSim: [
+    'Simulez userul pe {project}. Click mental pe {file}',
+    'User sim {project}: ce se sparge prima dată?',
+    'Perspectiva userului în {project} — {module} pe bancă',
+    'Test mental {project}: {task}',
+    'User simulator pe {project}. Zero clickbait, doar flow',
+    'Parcurs user în {project} — {file} e pe drum',
+  ],
+  security: [
+    'Security scan pe {project}. {file} e pe listă',
+    'Caut secrete în {project}. Spoiler: nu în commit',
+    'Hardening {project} — {module} sub lupă',
+    'Security pass: {project} · {task}',
+    'Scan {project}: auth, paths, și optimism periculos',
+    'Checklist securitate {project} ({model})',
+  ],
+  performance: [
+    'Tuning {project}: caut lag, nu scuze',
+    'Performance pe {project} — {file} merită un profil',
+    'Măsor {project}. {module} e suspectul nr. 1',
+    'Viteza în {project}: {task}',
+    'Optimizare {project} — {files} fișiere, zero panică',
+    'Perf scan {project} pe {model}',
+  ],
+};
+
+const DEFAULT_CONTEXT_TEMPLATES = [
+  'Lucrez la {project}. Tu respiri, eu procesez',
+  'Focus IDE: {file} · proiect {project}',
+  'Pipeline pe {project} — {model} pe fir',
+  '{project}: încă puțin, apoi vezi diferența',
+  'Context live: {project} / {file}',
+  'CAVALLO pe {project}. {files} fișiere deja pe disc',
+];
+
+export function shortenWaitLabel(
+  raw: string | undefined,
+  max = MAX_LABEL_LEN,
+  opts?: { asPath?: boolean }
+): string | undefined {
+  if (!raw?.trim()) return undefined;
+  let base = raw.trim();
+  if (opts?.asPath) {
+    base = base.replace(/\\/g, '/').split('/').pop() ?? base;
+  }
+  if (base.length <= max) return base;
+  return `${base.slice(0, max - 1)}…`;
+}
+
+export function waitSceneContextKey(ctx?: WaitSceneContext): string {
+  if (!ctx) return '';
+  return [ctx.project, ctx.file, ctx.module, ctx.task, ctx.model, ctx.files ?? '']
+    .map((v) => String(v ?? '').trim())
+    .join('|');
+}
+
+/** Fill template; returns null if any required placeholder lacks context. */
+export function fillWaitTemplate(template: string, ctx: WaitSceneContext): string | null {
+  const slots = template.match(PLACEHOLDER_RE);
+  if (!slots) return template;
+  const values: Record<string, string> = {
+    project: shortenWaitLabel(ctx.project) ?? '',
+    file: shortenWaitLabel(ctx.file, MAX_LABEL_LEN, { asPath: true }) ?? '',
+    module: shortenWaitLabel(ctx.module) ?? '',
+    task: shortenWaitLabel(ctx.task, 40) ?? '',
+    model: shortenWaitLabel(ctx.model) ?? '',
+    files: ctx.files != null && ctx.files >= 0 ? String(ctx.files) : '',
+  };
+  for (const slot of slots) {
+    const key = slot.slice(1, -1);
+    if (!values[key]) return null;
+  }
+  return template.replace(PLACEHOLDER_RE, (_, key: string) => values[key]!);
+}
+
+export function buildContextualPool(
+  phase: MultiAgentPhase | undefined,
+  ctx?: WaitSceneContext
+): string[] {
+  const generic = phase ? [...getWaitMessagesForPhase(phase)] : [...DEFAULT_MESSAGES];
+  if (!ctx || !Object.values(ctx).some((v) => v !== undefined && v !== '' && v !== 0)) {
+    return generic;
+  }
+  const templates = phase
+    ? (PHASE_CONTEXT_TEMPLATES[phase] ?? DEFAULT_CONTEXT_TEMPLATES)
+    : DEFAULT_CONTEXT_TEMPLATES;
+  const filled = templates
+    .map((tpl) => fillWaitTemplate(tpl, ctx))
+    .filter((m): m is string => Boolean(m));
+  if (filled.length === 0) return generic;
+  return [...shuffleArray(filled), ...shuffleArray(generic)];
+}
+
+export function buildWaitSceneContext(input: {
+  projectTitle?: string | null;
+  activeFile?: string | null;
+  steps?: MultiAgentStepRecord[];
+  modules?: string[];
+  model?: string | null;
+  writtenFiles?: string[];
+}): WaitSceneContext {
+  const active = input.steps
+    ? [...input.steps].reverse().find((s) => s.status === 'active') ??
+      input.steps[input.steps.length - 1]
+    : undefined;
+  const moduleFromBrief = input.modules?.find((m) => m.trim())?.trim();
+  const modelRaw = active?.modelId ?? input.model ?? undefined;
+  return {
+    project: shortenWaitLabel(input.projectTitle ?? undefined),
+    file: shortenWaitLabel(input.activeFile ?? undefined, MAX_LABEL_LEN, { asPath: true }),
+    module: shortenWaitLabel(moduleFromBrief ?? undefined),
+    task: shortenWaitLabel(active?.detail, 40),
+    model: modelRaw ? shortModelLabel(modelRaw) : undefined,
+    files: input.writtenFiles?.length,
+  };
+}
+
 function shuffleArray<T>(items: T[]): T[] {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -384,23 +595,27 @@ function buildShuffledBag(pool: string[], exclude: Set<string>, avoidFirst?: str
 
 export interface WaitMessagePicker {
   next(): string;
-  reset(nextPhase?: MultiAgentPhase): void;
+  reset(nextPhase?: MultiAgentPhase, ctx?: WaitSceneContext): void;
+  setContext(ctx?: WaitSceneContext): void;
 }
 
-export function createWaitMessagePicker(initialPhase?: MultiAgentPhase): WaitMessagePicker {
+export function createWaitMessagePicker(
+  initialPhase?: MultiAgentPhase,
+  initialCtx?: WaitSceneContext
+): WaitMessagePicker {
   let phase = initialPhase;
+  let sceneCtx = initialCtx;
   let bag: string[] = [];
   let index = 0;
   let lastShown = '';
   let sessionRecent = readSessionRecent();
 
-  const poolFor = (p?: MultiAgentPhase): string[] =>
-    p ? [...getWaitMessagesForPhase(p)] : [...DEFAULT_MESSAGES];
+  const poolFor = (): string[] => buildContextualPool(phase, sceneCtx);
 
   const excludeSet = (): Set<string> => new Set([...sessionRecent, lastShown].filter(Boolean));
 
   const refill = (avoidLast?: string) => {
-    bag = buildShuffledBag(poolFor(phase), excludeSet(), avoidLast);
+    bag = buildShuffledBag(poolFor(), excludeSet(), avoidLast);
     index = 0;
   };
 
@@ -409,17 +624,23 @@ export function createWaitMessagePicker(initialPhase?: MultiAgentPhase): WaitMes
     writeSessionRecent(sessionRecent);
   };
 
-  const reset = (nextPhase?: MultiAgentPhase) => {
+  const reset = (nextPhase?: MultiAgentPhase, ctx?: WaitSceneContext) => {
     phase = nextPhase;
+    if (ctx !== undefined) sceneCtx = ctx;
     lastShown = '';
     refill();
+  };
+
+  const setContext = (ctx?: WaitSceneContext) => {
+    sceneCtx = ctx;
+    refill(lastShown || undefined);
   };
 
   const next = (): string => {
     if (bag.length === 0 || index >= bag.length) {
       refill(lastShown || undefined);
     }
-    const msg = bag[index] ?? poolFor(phase)[0] ?? DEFAULT_MESSAGES[0]!;
+    const msg = bag[index] ?? poolFor()[0] ?? DEFAULT_MESSAGES[0]!;
     index += 1;
     lastShown = msg;
     remember(msg);
@@ -428,7 +649,7 @@ export function createWaitMessagePicker(initialPhase?: MultiAgentPhase): WaitMes
 
   refill();
 
-  return { next, reset };
+  return { next, reset, setContext };
 }
 
 export function formatWaitElapsed(seconds: number, phase?: MultiAgentPhase): string {

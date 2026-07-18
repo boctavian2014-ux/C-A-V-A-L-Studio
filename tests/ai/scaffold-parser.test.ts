@@ -17,6 +17,12 @@ describe('scaffold-parser', () => {
     expect(files).toEqual([{ path: 'src/app.ts', content: 'export const x = 1;' }]);
   });
 
+  it('strips leading slash from fence path', () => {
+    const text = '```typescript:/src/app.ts\nexport const x = 1;\n```';
+    const files = parseScaffoldFiles(text);
+    expect(files).toEqual([{ path: 'src/app.ts', content: 'export const x = 1;' }]);
+  });
+
   it('parses JSON files array', () => {
     const text = '```json\n{"files":[{"path":"package.json","content":"{}"}]}\n```';
     expect(parseScaffoldFiles(text)[0]?.path).toBe('package.json');
@@ -61,10 +67,10 @@ describe('scaffold-parser', () => {
     expect(parseScaffoldFiles(text)[0]?.path).toBe('src/main.ts');
   });
 
-  it('falls back to .txt only when lang and content are unrecognizable', () => {
+  it('rejects anonymous text fence when fallback path is junk', () => {
     expect(inferExtensionFromContent('plain notes\nno code here')).toBeNull();
     const text = '```text\nplain notes\nno code\n```';
-    expect(parseScaffoldFiles(text)[0]?.path).toBe('src/main.txt');
+    expect(parseScaffoldFiles(text)).toHaveLength(0);
   });
 
   it('accepts explicit .txt path in fence header', () => {

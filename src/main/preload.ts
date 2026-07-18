@@ -126,6 +126,7 @@ export interface CavalStreamChunk {
   detail?: string;
   multiAgentModel?: string;
   multiAgentStepId?: string;
+  multiAgentAuditBadge?: string;
   goal?: string;
   approach?: string;
   modules?: string[];

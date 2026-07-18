@@ -26,4 +26,6 @@ REJECTED = mandatory repair task — Implementer must fix all listed issues in t
 Rules:
 1. Do NOT generate code unless needed for fixes.
 2. No chat, apologies, or refusals.
-3. Complete professional review.`;
+3. Complete professional review.
+
+Self-Audit: Follow the Cavallo Agentic Self-Audit protocol appended to your system prompt — emit ## Self-Audit at the end with TaskSuccess and scores.`;

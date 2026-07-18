@@ -113,6 +113,13 @@ export interface PipelineRecapMeta {
   fullDelivery?: FullDeliveryConfig;
   /** Final role → model map from Model Orchestrator LLM. */
   roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
+  /** Per-model capability scores after self-audit pass. */
+  capabilitySnapshot?: Record<
+    string,
+    Pick<import('./capability-profile').ModelCapabilityProfile, 'reasoning' | 'coding' | 'planning' | 'toolUse'>
+  >;
+  /** Short human summary of last self-audit cycle. */
+  selfAuditSummary?: string;
 }
 
 export interface FullDeliveryConfig {
@@ -234,6 +241,20 @@ export interface IntegrationSummary {
   runtimeStatus: string;
 }
 
+export interface SelfAuditConfig {
+  enabled: boolean;
+  persistReports: boolean;
+  useProgrammaticScores: boolean;
+  injectIntoAllAgents: boolean;
+}
+
+export const DEFAULT_SELF_AUDIT_CONFIG: SelfAuditConfig = {
+  enabled: true,
+  persistReports: true,
+  useProgrammaticScores: true,
+  injectIntoAllAgents: true,
+};
+
 export interface MultiAgentConfig {
   enabled: boolean;
   maxTasks: number;
@@ -258,6 +279,7 @@ export interface MultiAgentConfig {
   devtoolsAsyncVerify: boolean;
   reasoningLayer: ReasoningLayerConfig;
   fullDelivery: FullDeliveryConfig;
+  selfAudit?: SelfAuditConfig;
 }
 
 export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
@@ -276,6 +298,7 @@ export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
   devtoolsAsyncVerify: true,
   reasoningLayer: { ...DEFAULT_REASONING_LAYER_CONFIG },
   fullDelivery: { ...DEFAULT_FULL_DELIVERY_CONFIG },
+  selfAudit: { ...DEFAULT_SELF_AUDIT_CONFIG },
 };
 
 export interface MultiAgentPipelineCallbacks {
@@ -284,7 +307,8 @@ export interface MultiAgentPipelineCallbacks {
     status: 'active' | 'done',
     detail?: string,
     modelId?: string,
-    stepId?: string
+    stepId?: string,
+    auditBadge?: string
   ) => void;
   onReasoningBrief?: (brief: ReasoningBrief) => void;
   onMeta?: (resolvedModel: string, reason: string) => void;

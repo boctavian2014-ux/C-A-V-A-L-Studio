@@ -1,55 +1,113 @@
 import {
+
   parseScaffoldFiles,
+
   isScaffoldFragment,
+
   isBlockedScaffoldPath,
+
   isJunkCodeFileContent,
+
   repairScaffoldComposerExport,
+
   type ParsedScaffoldFile,
+
 } from './scaffold-parser';
+
 import { sortScaffoldFiles } from './scaffold-order';
 
-function joinWorkspace(root: string, relative: string): string {
-  const sep = root.includes('\\') ? '\\' : '/';
-  const clean = relative.replace(/^[/\\]+/, '').replace(/\//g, sep);
-  return `${root}${sep}${clean}`;
+
+
+export interface ScaffoldApplyResult {
+
+  written: string[];
+
+  errors: string[];
+
 }
 
-function parentDir(filePath: string): string {
-  const sep = filePath.includes('\\') ? '\\' : '/';
-  const idx = filePath.lastIndexOf(sep);
-  return idx > 0 ? filePath.slice(0, idx) : filePath;
-}
+
 
 export async function applyScaffoldToWorkspace(
+
   projectPath: string,
+
   files: ParsedScaffoldFile[]
-): Promise<string[]> {
+
+): Promise<ScaffoldApplyResult> {
+
   const caval = window.caval;
-  if (!caval?.fs?.writeFile) return [];
 
-  const written: string[] = [];
-  const mkdirDone = new Set<string>();
+  if (!caval?.fs?.writeFile) {
 
-  for (const file of sortScaffoldFiles(files)) {
-    if (
-      isBlockedScaffoldPath(file.path) ||
-      isScaffoldFragment(file.content) ||
-      isJunkCodeFileContent(file.path, file.content)
-    ) {
-      continue;
-    }
-    const content = repairScaffoldComposerExport(file.path, file.content);
-    const abs = joinWorkspace(projectPath, file.path);
-    const dir = parentDir(abs);
-    if (!mkdirDone.has(dir) && caval.fs.createDir) {
-      await caval.fs.createDir(dir);
-      mkdirDone.add(dir);
-    }
-    const res = await caval.fs.writeFile(abs, content);
-    if (res.ok) written.push(file.path);
+    return { written: [], errors: ['IPC filesystem unavailable'] };
+
   }
 
-  return written;
+
+
+  await caval.workspaceSync?.(projectPath);
+
+
+
+  const written: string[] = [];
+
+  const errors: string[] = [];
+
+  const mkdirDone = new Set<string>();
+
+
+
+  for (const file of sortScaffoldFiles(files)) {
+
+    if (
+
+      isBlockedScaffoldPath(file.path) ||
+
+      isScaffoldFragment(file.content) ||
+
+      isJunkCodeFileContent(file.path, file.content)
+
+    ) {
+
+      continue;
+
+    }
+
+    const content = repairScaffoldComposerExport(file.path, file.content);
+
+    const rel = file.path.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+
+    const slash = rel.lastIndexOf('/');
+
+    const dir = slash > 0 ? rel.slice(0, slash) : '';
+
+    if (dir && !mkdirDone.has(dir) && caval.fs.createDir) {
+
+      const dirRes = await caval.fs.createDir(dir);
+
+      if (dirRes.ok) mkdirDone.add(dir);
+
+      else if (dirRes.error) errors.push(`${dir}: ${dirRes.error}`);
+
+    }
+
+    const res = await caval.fs.writeFile(rel, content);
+
+    if (res.ok) written.push(rel);
+
+    else errors.push(`${rel}: ${res.error ?? 'write failed'}`);
+
+  }
+
+
+
+  return { written, errors };
+
 }
 
+
+
 export { parseScaffoldFiles };
+
+

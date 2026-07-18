@@ -5,7 +5,7 @@ import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
-import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode } from '../modes/agent-modes';
 import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
@@ -13,13 +13,15 @@ import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
 import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning, sanitizeLiveReasoning } from './chat-display';
 import { MultiAgentTimeline } from './MultiAgentTimeline';
-import { resolveWaitPhase } from './arena-wait-copy';
+import { resolveWaitPhase, buildWaitSceneContext } from './arena-wait-copy';
 import { DEFAULT_REASONING_LAYER_CONFIG, type ReasoningLayerConfig } from './multi-agent/types';
 import { DEFAULT_ZERO_LATENCY_CONFIG } from '../../ai/composer/zero-latency/zl-config-shared';
 import { useArenaWaitMessage } from './use-arena-wait-message';
 import { checkModelReadiness } from '../models/model-readiness';
 import { workspaceFolderTitle } from './workspace-session';
 import { formatProjectCompletionWaitMessage } from './project-completion-announce';
+import { RoleMapPanel } from './RoleMapPanel';
+import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -163,6 +165,10 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   const globalStreaming = useAIStore((s) => s.isStreaming);
   const projectPath = useEditorStore((s) => s.projectPath);
+  const activeTab = useEditorStore((s) => {
+    const id = s.activeTabId;
+    return id ? s.tabs.find((t) => t.id === id) ?? null : null;
+  });
   const [cfg, setCfg] = useState<ReasoningLayerConfig>(DEFAULT_REASONING_LAYER_CONFIG);
 
   useEffect(() => {
@@ -205,8 +211,35 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
     ? formatProjectCompletionWaitMessage(projectTitle, fileCount, needsReview)
     : undefined;
   const waitPhase = resolveWaitPhase(message.multiAgentSteps, message.multiAgentStatus);
+  const waitCtx = useMemo(
+    () =>
+      buildWaitSceneContext({
+        projectTitle,
+        activeFile: activeTab?.name ?? activeTab?.path,
+        steps: message.multiAgentSteps,
+        modules: message.reasoningBrief?.modules,
+        model: message.resolvedModel ?? message.model,
+        writtenFiles: message.writtenFiles,
+      }),
+    [
+      projectTitle,
+      activeTab?.name,
+      activeTab?.path,
+      message.multiAgentSteps,
+      message.reasoningBrief?.modules,
+      message.resolvedModel,
+      message.model,
+      message.writtenFiles,
+    ]
+  );
   const { message: waitMessage, statusLine: waitStatusLine, visible: waitVisible } =
-    useArenaWaitMessage(waitPhase, showWait, cfg.waitMessageRotateMs, message.multiAgentStatus);
+    useArenaWaitMessage(
+      waitPhase,
+      showWait,
+      cfg.waitMessageRotateMs,
+      message.multiAgentStatus,
+      waitCtx
+    );
   const composePhase =
     isStreaming && Boolean(message.multiAgentStatus?.toLowerCase().includes('compose'));
   const planText = formatArenaReasoning(
@@ -218,6 +251,14 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   const liveReasoning = message.reasoning
     ? sanitizeLiveReasoning(message.reasoning)
     : '';
+  const roleMapEntries = buildRoleMapEntries(
+    message.pipelineRecapMeta,
+    message.multiAgentSteps,
+    message.model
+  );
+  const showRoleMap =
+    Boolean(message.recap || hasModelOrchSteps(message.multiAgentSteps)) &&
+    roleMapEntries.length > 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -252,6 +293,13 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
         />
       )}
       {message.recap && <CompactArenaStatus text={planText} />}
+      {showRoleMap && (
+        <RoleMapPanel
+          entries={roleMapEntries}
+          userModel={message.model}
+          capabilitySnapshot={message.pipelineRecapMeta?.capabilitySnapshot}
+        />
+      )}
       {!isStreaming && !message.recap && !message.reasoningBrief && planText && (
         <CompactArenaStatus
           text={
@@ -296,9 +344,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   const { modelLabels, agentMode } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
-  const buildMode = isBuildEngineMode(agentMode);
-  const releaseMode = isReleaseEngineerMode(agentMode);
-  const engineMode = buildMode || releaseMode;
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
   const resolvedLabel = message.resolvedModel
     ? getModelDisplayLabel(message.resolvedModel, modelLabels)
@@ -308,17 +353,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     ? resolvedLabel
       ? `Agentic · ${resolvedLabel}`
       : 'Agentic · multi-model'
-    : engineMode
-      ? resolvedLabel
-        ? `${releaseMode ? 'Release' : 'Build'} · ${resolvedLabel}`
-        : releaseMode
-          ? 'Release · Engineer'
-          : 'Build · Autonomous Engine'
-      : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
-        ? `${selectionLabel} → ${resolvedLabel}`
-        : resolvedLabel ?? selectionLabel ?? 'Model';
+    : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
+      ? `${selectionLabel} → ${resolvedLabel}`
+      : resolvedLabel ?? selectionLabel ?? 'Model';
 
-  const displayText = arenaMode || engineMode
+  const displayText = arenaMode
     ? message.reasoningBrief || message.recap
       ? formatArenaReasoning(message.reasoningBrief, message.recap, Boolean(message.isStreaming))
       : formatChatPanelSummary(
@@ -328,7 +367,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     : message.content;
 
   const arenaStatusText =
-    (arenaMode || engineMode) && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
+    arenaMode && message.isStreaming && message.multiAgentStatus && !message.reasoningBrief
       ? message.multiAgentStatus
       : displayText;
 
@@ -383,7 +422,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               ) : null}
             </>
           )
-        ) : engineMode && !isUser ? (
+        ) : arenaMode && !isUser ? (
           <>
             <CompactArenaStatus
               text={
@@ -425,11 +464,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
 
         {/* Diff block dacă există */}
-        {message.diff && !message.isStreaming && !message.diff.autoApplied && !engineMode && (
+        {message.diff && !message.isStreaming && !message.diff.autoApplied && !arenaMode && (
           <DiffBlock message={message} />
         )}
 
-        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && !engineMode && (
+        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && (
           <div style={{
             marginTop: 10, padding: '8px 12px', borderRadius: 6,
             background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
@@ -473,7 +512,20 @@ function CompactArenaStatus({ text }: { text: string }) {
 }
 
 function StreamingDots({ rotateMs = DEFAULT_REASONING_LAYER_CONFIG.waitMessageRotateMs }: { rotateMs?: number }) {
-  const { message, visible } = useArenaWaitMessage(undefined, true, rotateMs);
+  const projectPath = useEditorStore((s) => s.projectPath);
+  const activeTab = useEditorStore((s) => {
+    const id = s.activeTabId;
+    return id ? s.tabs.find((t) => t.id === id) ?? null : null;
+  });
+  const waitCtx = useMemo(
+    () =>
+      buildWaitSceneContext({
+        projectTitle: workspaceFolderTitle(projectPath),
+        activeFile: activeTab?.name ?? activeTab?.path,
+      }),
+    [projectPath, activeTab?.name, activeTab?.path]
+  );
+  const { message, visible } = useArenaWaitMessage(undefined, true, rotateMs, undefined, waitCtx);
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
@@ -582,8 +634,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       ? 'Planificare enterprise — arhitectură, roadmap, KPIs (Enter = trimite)'
       : agentMode === 'code'
         ? 'Implementare cod — descrie ce să construiești (Enter = trimite)'
-        : agentMode === 'release'
-          ? 'Release Engineer — rulează release:win și raportează release-report.json (Enter = trimite)'
         : agentMode === 'debug'
           ? 'Lipește eroarea sau codul de analizat (Enter = trimite)'
           : agentMode === 'ask'

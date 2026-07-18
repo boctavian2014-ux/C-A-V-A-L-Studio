@@ -33,4 +33,9 @@ describe('intent-detector', () => {
     expect(normalizeAgentModeId('architect')).toBe('plan');
     expect(normalizeAgentModeId('code')).toBe('code');
   });
+
+  it('migrates legacy build and release to code', () => {
+    expect(normalizeAgentModeId('build')).toBe('code');
+    expect(normalizeAgentModeId('release')).toBe('code');
+  });
 });

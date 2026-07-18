@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { getCavalloSystemPrompt, resolveEffectiveMode } from '../../ai/modes/mode-router';
 
-describe('mode-router build', () => {
-  it('returns build engine prompt for build mode', () => {
+describe('mode-router', () => {
+  it('maps legacy build mode to code prompt', () => {
     const prompt = getCavalloSystemPrompt('build', { workspaceRoot: '/tmp/proj' });
-    expect(prompt).toContain('Autonomous Build Engine');
+    expect(prompt).toContain('CODE MODE');
     expect(prompt).toContain('/tmp/proj');
+    expect(prompt).not.toContain('Autonomous Build Engine');
   });
 
-  it('returns release engineer prompt for release mode', () => {
+  it('maps legacy release mode to code prompt', () => {
     const prompt = getCavalloSystemPrompt('release', { workspaceRoot: '/tmp/caval' });
-    expect(prompt).toContain('Release Engineer');
-    expect(prompt).toContain('release:win');
-    expect(prompt).toContain('/tmp/caval');
+    expect(prompt).toContain('CODE MODE');
+    expect(prompt).not.toContain('Release Engineer');
   });
 
-  it('switches to release on explicit trigger', () => {
+  it('does not switch to release on legacy trigger', () => {
     const result = resolveEffectiveMode('code', 'RELEASE MODE — build installer');
-    expect(result.mode).toBe('release');
-    expect(result.switched).toBe(true);
+    expect(result.mode).toBe('code');
+    expect(result.switched).toBe(false);
   });
 
   it('includes Cavallo identity and end label for plan mode', () => {

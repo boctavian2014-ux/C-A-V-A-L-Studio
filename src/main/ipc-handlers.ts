@@ -1,10 +1,11 @@
-import { ipcMain, dialog, shell, BrowserWindow } from "electron";
+import { ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import * as fs from "fs";
 
 import { readDirTree } from "./fs-tree";
-import { assertPathInWorkspace, resolveWorkspacePath } from "./path-security";
+import { requireWorkspacePath } from "./path-security";
 import { parseIpcInput, fsPathSchema, fsReadFileSchema, fsRenameSchema, fsWriteFileSchema } from "./ipc-schemas";
 import { recordAudit, persistAuditLog } from "./audit-log";
+import { assertTrustedSender } from "./ipc-trust";
 
 const workspaceForSender = new Map<number, string>();
 
@@ -26,8 +27,14 @@ function auditFs(channel: string, senderId: number, targetPath: string, ok: bool
   });
 }
 
+function trustedWorkspacePath(event: IpcMainInvokeEvent, relativeOrAbsolute: string): string {
+  assertTrustedSender(event);
+  return requireWorkspacePath(workspaceForSender.get(event.sender.id), relativeOrAbsolute);
+}
+
 /** Selectează unul sau mai multe fișiere (atașamente chat, import, etc.) */
 ipcMain.handle("fs:pickFiles", async (event) => {
+  assertTrustedSender(event);
   const window = BrowserWindow.fromWebContents(event.sender);
   const result = window
     ? await dialog.showOpenDialog(window, {
@@ -59,7 +66,8 @@ ipcMain.handle("fs:pickFiles", async (event) => {
 });
 
 /** Deschide un dialog de selectare folder și returnează calea */
-ipcMain.handle("fs:openFolder", async () => {
+ipcMain.handle("fs:openFolder", async (event) => {
+  assertTrustedSender(event);
   const result = await dialog.showOpenDialog({
     properties: ["openDirectory"],
     title: "Deschide proiect",
@@ -69,18 +77,18 @@ ipcMain.handle("fs:openFolder", async () => {
 });
 
 /** Citește recursiv structura unui director și returnează un arbore JSON */
-ipcMain.handle("fs:readTree", async (_event, dirPath: string) => {
-  return readDirTree(dirPath, dirPath);
+ipcMain.handle("fs:readTree", async (event, dirPath: string) => {
+  const target = trustedWorkspacePath(event, dirPath);
+  return readDirTree(target, target);
 });
 
 /** Citește conținutul unui fișier text */
 ipcMain.handle("fs:readFile", async (event, filePath: string) => {
   try {
     const { filePath: validated } = parseIpcInput(fsReadFileSchema, { filePath });
-    const root = workspaceForSender.get(event.sender.id);
-    if (root) resolveWorkspacePath(root, validated);
-    const content = fs.readFileSync(validated, "utf-8");
-    auditFs("fs:readFile", event.sender.id, validated, true);
+    const target = trustedWorkspacePath(event, validated);
+    const content = fs.readFileSync(target, "utf-8");
+    auditFs("fs:readFile", event.sender.id, target, true);
     return { ok: true, content };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -93,8 +101,7 @@ ipcMain.handle("fs:readFile", async (event, filePath: string) => {
 ipcMain.handle("fs:writeFile", async (event, filePath: string, content: string) => {
   try {
     const parsed = parseIpcInput(fsWriteFileSchema, { filePath, content });
-    const root = workspaceForSender.get(event.sender.id);
-    const target = root ? resolveWorkspacePath(root, parsed.filePath) : parsed.filePath;
+    const target = trustedWorkspacePath(event, parsed.filePath);
     fs.writeFileSync(target, parsed.content, "utf-8");
     auditFs("fs:writeFile", event.sender.id, target, true);
     const ws = workspaceForSender.get(event.sender.id);
@@ -111,8 +118,7 @@ ipcMain.handle("fs:writeFile", async (event, filePath: string, content: string) 
 ipcMain.handle("fs:createFile", async (event, filePath: string) => {
   try {
     const { targetPath } = parseIpcInput(fsPathSchema, { targetPath: filePath });
-    const root = workspaceForSender.get(event.sender.id);
-    const target = root ? resolveWorkspacePath(root, targetPath) : targetPath;
+    const target = trustedWorkspacePath(event, targetPath);
     fs.writeFileSync(target, "", "utf-8");
     auditFs("fs:createFile", event.sender.id, target, true);
     return { ok: true };
@@ -125,8 +131,7 @@ ipcMain.handle("fs:createFile", async (event, filePath: string) => {
 ipcMain.handle("fs:createDir", async (event, dirPath: string) => {
   try {
     const { targetPath } = parseIpcInput(fsPathSchema, { targetPath: dirPath });
-    const root = workspaceForSender.get(event.sender.id);
-    const target = root ? resolveWorkspacePath(root, targetPath) : targetPath;
+    const target = trustedWorkspacePath(event, targetPath);
     fs.mkdirSync(target, { recursive: true });
     auditFs("fs:createDir", event.sender.id, target, true);
     return { ok: true };
@@ -139,9 +144,8 @@ ipcMain.handle("fs:createDir", async (event, dirPath: string) => {
 ipcMain.handle("fs:rename", async (event, oldPath: string, newPath: string) => {
   try {
     const parsed = parseIpcInput(fsRenameSchema, { oldPath, newPath });
-    const root = workspaceForSender.get(event.sender.id);
-    const from = root ? resolveWorkspacePath(root, parsed.oldPath) : parsed.oldPath;
-    const to = root ? resolveWorkspacePath(root, parsed.newPath) : parsed.newPath;
+    const from = trustedWorkspacePath(event, parsed.oldPath);
+    const to = trustedWorkspacePath(event, parsed.newPath);
     fs.renameSync(from, to);
     auditFs("fs:rename", event.sender.id, `${from} -> ${to}`, true);
     return { ok: true };
@@ -154,9 +158,7 @@ ipcMain.handle("fs:rename", async (event, oldPath: string, newPath: string) => {
 ipcMain.handle("fs:delete", async (event, targetPath: string) => {
   try {
     const { targetPath: validated } = parseIpcInput(fsPathSchema, { targetPath });
-    const root = workspaceForSender.get(event.sender.id);
-    const target = root ? resolveWorkspacePath(root, validated) : validated;
-    if (root) assertPathInWorkspace(root, target);
+    const target = trustedWorkspacePath(event, validated);
     fs.rmSync(target, { recursive: true, force: true });
     auditFs("fs:delete", event.sender.id, target, true);
     return { ok: true };
@@ -166,9 +168,14 @@ ipcMain.handle("fs:delete", async (event, targetPath: string) => {
 });
 
 /** Deschide fișier în file explorer nativ */
-ipcMain.handle("fs:reveal", async (_event, filePath: string) => {
-  shell.showItemInFolder(filePath);
-  return { ok: true };
+ipcMain.handle("fs:reveal", async (event, filePath: string) => {
+  try {
+    const target = trustedWorkspacePath(event, filePath);
+    shell.showItemInFolder(target);
+    return { ok: true };
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 });
 
 ipcMain.handle("window:minimize", (event) => {

@@ -13,9 +13,10 @@ export function useOpenWorkspace() {
     async (folderPath: string, source: WorkspaceOpenSource = 'folder') => {
       setProjectPath(folderPath);
       useAIStore.getState().setIncludeMode('project');
+      await window.caval.workspaceOpen?.(folderPath, { source });
+      await window.caval.workspaceSync?.(folderPath);
       const tree = await window.caval.fs.readTree(folderPath);
       setFileTree(tree);
-      await window.caval.workspaceOpen?.(folderPath, { source });
       await useGitStore.getState().refresh();
     },
     [setProjectPath, setFileTree]

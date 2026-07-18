@@ -23,7 +23,7 @@ export function applyScaffoldToWorkspaceNode(workspaceRoot: string, content: str
     const dir = path.dirname(abs);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(abs, file.content, 'utf8');
-    written.push(file.path);
+    written.push(file.path.replace(/^[/\\]+/, '').replace(/\\/g, '/'));
   }
 
   return written;
@@ -55,4 +55,35 @@ export function applyPipelineScaffold(
 ): string[] {
   const content = collectPipelineScaffoldContent(composeText, store);
   return applyScaffoldToWorkspaceNode(workspaceRoot, content);
+}
+
+/** Persist parse diagnostics when compose had fences but nothing was written. */
+export function writeScaffoldDiagnostics(
+  workspaceRoot: string,
+  runId: string,
+  composeText: string,
+  store: PipelineContextStore,
+  writtenFiles: string[]
+): void {
+  if (writtenFiles.length > 0 || !workspaceRoot?.trim() || !runId) return;
+  const content = collectPipelineScaffoldContent(composeText, store);
+  const fencePairs = Math.floor((content.match(/```/g)?.length ?? 0) / 2);
+  if (fencePairs < 1) return;
+
+  const parsed = parseScaffoldFiles(content);
+  const dir = path.join(workspaceRoot, '.cavalo', 'pipeline', runId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'write-debug.json'),
+    JSON.stringify(
+      {
+        fencePairs,
+        parsedCount: parsed.length,
+        parsedPaths: parsed.map((f) => f.path).slice(0, 30),
+        composeFencePairs: Math.floor((composeText.match(/```/g)?.length ?? 0) / 2),
+      },
+      null,
+      2
+    )
+  );
 }

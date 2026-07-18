@@ -106,12 +106,13 @@ describe("ai-store sendMessage readiness gate", () => {
   it("blocks agentic send without project folder", async () => {
     editorState.projectPath = null;
     const { useAIStore } = await import("../../ai/composer/ai-store");
+    useAIStore.setState({ agentMode: "agentic" });
     const store = useAIStore.getState();
-    store.setAgentMode("agentic");
     await store.sendMessage("build a full app");
 
     const last = useAIStore.getState().messages.at(-1);
-    expect(last?.error).toBe("projectPath lipsă");
-    expect(last?.content).toContain("Open Folder");
+    expect(last?.role).toBe("assistant");
+    expect(last?.error).toContain("Open Folder");
+    editorState.projectPath = "/proj/demo";
   });
 });

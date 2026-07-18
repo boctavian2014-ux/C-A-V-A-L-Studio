@@ -1,8 +1,10 @@
-import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useCallback, useMemo, useRef, useState, Suspense, lazy } from 'react';
 import { CavalThemeProvider } from '../../themes/theme-provider';
 import { FileTree } from './components/sidebar/FileTree';
 import { TabBar } from './components/editor/TabBar';
-import { MonacoEditor } from './components/editor/MonacoEditor';
+const MonacoEditor = lazy(() =>
+  import('./components/editor/MonacoEditor').then((m) => ({ default: m.MonacoEditor }))
+);
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { useEditorStore } from './store/editor-store';
 import { useAIStore, hydrateApiKeysFromSecrets } from '../../ai/composer/ai-store';
@@ -506,7 +508,7 @@ export function WorkbenchRoot() {
 
   const openComposer = useCallback(() => {
     setAiPanelOpen(true);
-    useAIStore.getState().setAgentMode('build');
+    useAIStore.getState().setAgentMode('code');
   }, []);
 
   const menuCommandCtx = useMemo<MenuCommandContext>(() => ({
@@ -526,7 +528,7 @@ export function WorkbenchRoot() {
     setPaletteVisible,
     openReferences,
     openDefinition,
-    setAgentModeBuild: () => useAIStore.getState().setAgentMode('build'),
+    setAgentModeBuild: () => useAIStore.getState().setAgentMode('code'),
     openComposer,
     pushNavLocation,
     navBack,
@@ -962,7 +964,24 @@ export function WorkbenchRoot() {
                 onCloseAi={() => setAiPanelOpen(false)}
               />
             )}
-            <MonacoEditor />
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--caval-text-muted, #8a95a6)',
+                    fontSize: 13,
+                  }}
+                >
+                  Loading editor…
+                </div>
+              }
+            >
+              <MonacoEditor />
+            </Suspense>
             <TerminalPanel />
           </div>
 

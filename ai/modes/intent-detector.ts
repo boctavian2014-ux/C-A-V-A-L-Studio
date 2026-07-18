@@ -104,10 +104,14 @@ export function detectIntent(message: string, options?: { explicitTriggers?: boo
   };
 }
 
-/** Map legacy architect id to plan. */
+/** Map legacy architect id to plan; build/release → code. */
 export function normalizeAgentModeId(mode: string): AgentModeId {
   if (mode === 'architect') return 'plan';
-  return mode as AgentModeId;
+  if (mode === 'build' || mode === 'release') return 'code';
+  if (mode === 'ask' || mode === 'plan' || mode === 'code' || mode === 'debug' || mode === 'agentic') {
+    return mode;
+  }
+  return 'code';
 }
 
 export function isDirectChatMode(mode: string): mode is DirectChatModeId {

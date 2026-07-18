@@ -505,7 +505,8 @@ function sendMultiAgentStatusChunk(
   status: "active" | "done",
   detail?: string,
   modelId?: string,
-  stepId?: string
+  stepId?: string,
+  auditBadge?: string
 ): boolean {
   return stream.send({
     type: "multiagent",
@@ -514,6 +515,7 @@ function sendMultiAgentStatusChunk(
     detail,
     multiAgentModel: modelId,
     multiAgentStepId: stepId,
+    multiAgentAuditBadge: auditBadge,
   });
 }
 
@@ -635,21 +637,37 @@ async function streamToRenderer(
   senderId: number,
   streamId: string,
   request: CavalChatStreamRequest,
-  getWorkspaceRoot: (senderId: number) => string
+  getWorkspaceRoot: (senderId: number) => string,
+  getBoundWorkspaceRoot?: (senderId: number) => string | undefined
 ): Promise<void> {
   trackActiveStream(senderId, streamId);
   const stream = createStreamChunkSender(sender, senderId, streamId);
   try {
-  const workspaceRoot = request.workspaceRoot ?? getWorkspaceRoot(senderId);
+  const explicitRoot = request.workspaceRoot?.trim();
+  const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim();
+  const userBoundWorkspace = Boolean(explicitRoot || boundRoot);
+  const workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
+  request = { ...request, workspaceRoot };
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 
   if (workspaceRoot?.trim()) {
     void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
   }
 
+  if (!request.skipMultiAgent && request.mode === "agentic" && !userBoundWorkspace) {
+    if (!stream.isAlive()) return;
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de modul Agentic.",
+    });
+    return;
+  }
+
   const useMultiAgent =
     !request.skipMultiAgent &&
-    shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot);
+    shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot, undefined, {
+      userBoundWorkspace,
+    });
 
   if (useMultiAgent) {
     if (!stream.isAlive()) return;
@@ -658,9 +676,9 @@ async function streamToRenderer(
     sendMultiAgentStatusChunk(stream, "context", "active", "pipeline start");
 
     const result = await runCavalloMultiAgentPipeline(sender, streamId, request, {
-      onMultiAgentStatus: (phase, status, detail, modelId, stepId) => {
+      onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId);
+        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge);
       },
       onReasoningBrief: (brief) => {
         if (!stream.isAlive()) return;
@@ -835,9 +853,9 @@ async function streamResumeToRenderer(
     sendMultiAgentStatusChunk(stream, "subagent", "active", "UI delivery resume");
 
     const result = await resumeCavalloMultiAgentPipeline(sender, streamId, input, {
-      onMultiAgentStatus: (phase, status, detail, modelId, stepId) => {
+      onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId);
+        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge);
       },
       onMeta: (resolvedModel, reason) => {
         if (!stream.isAlive()) return;
@@ -896,7 +914,10 @@ async function streamResumeToRenderer(
 
 
 
-export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => string = () => process.cwd()): void {
+export function registerModelHandlers(
+  getWorkspaceRoot: (senderId: number) => string = () => process.cwd(),
+  getBoundWorkspaceRoot?: (senderId: number) => string | undefined
+): void {
 
   ipcMain.handle("caval:workspace-bootstrap", async (_event, workspaceRoot: string) => {
     const bootstrap = buildWorkspaceBootstrap(workspaceRoot);
@@ -973,7 +994,7 @@ export function registerModelHandlers(getWorkspaceRoot: (senderId: number) => st
 
   ipcMain.handle("caval:ai-chat-stream", async (event, request: CavalChatStreamRequest) => {
     warmOpenRouterConnection();
-    void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getWorkspaceRoot);
+    void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getWorkspaceRoot, getBoundWorkspaceRoot);
     return { ok: true, started: true };
   });
 

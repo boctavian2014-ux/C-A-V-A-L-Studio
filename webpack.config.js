@@ -67,7 +67,8 @@ module.exports = [
     resolve: {
       ...shared.resolve,
       alias: {
-        "monaco-editor": path.resolve(
+        // Exact match only — allow `monaco-editor/esm/...` language contributions.
+        "monaco-editor$": path.resolve(
           __dirname,
           "node_modules/monaco-editor/esm/vs/editor/editor.api.js"
         ),
@@ -91,7 +92,16 @@ module.exports = [
         global: "globalThis",
       }),
       new MonacoWebpackPlugin({
-        languages: ["typescript", "javascript", "json", "css", "html", "markdown", "python", "shell"],
+        languages: ["typescript", "javascript", "json", "css", "html", "markdown", "python"],
+        // Keep gotoSymbol + referenceSearch — used by editor commands (quickOutline / goToReferences).
+        features: [
+          "!rename",
+          "!inspectTokens",
+          "!documentSymbols",
+          "!codelens",
+          "!colorPicker",
+          "!folding",
+        ],
         publicPath: "renderer/",
       }),
       // TypeScript compiler is main-process only — bundling it in renderer causes OOM / black screen.
@@ -99,6 +109,23 @@ module.exports = [
         resourceRegExp: /^typescript$/,
       }),
     ],
+    optimization: {
+      splitChunks: {
+        chunks: "all",
+        maxInitialRequests: 10,
+        cacheGroups: {
+          // Only Monaco — disable default vendor splitting (avoids many startup requests).
+          default: false,
+          defaultVendors: false,
+          monaco: {
+            test: /[\\/]node_modules[\\/]monaco-editor[\\/]/,
+            name: "renderer/monaco",
+            priority: 20,
+            reuseExistingChunk: true,
+          },
+        },
+      },
+    },
     entry: {
       "renderer/workbench-app": "./src/renderer/workbench-app.tsx"
     }

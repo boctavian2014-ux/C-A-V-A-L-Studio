@@ -6,7 +6,7 @@ import type { RoutingIntent } from "../types";
 import type { ModelSelectionId } from "../models/model-catalog";
 import type { CavalloModesConfig } from "./mode-router";
 
-export type AgentModeId = "ask" | "code" | "build" | "release" | "agentic" | "plan" | "debug";
+export type AgentModeId = "ask" | "plan" | "code" | "debug" | "agentic";
 
 export interface AgentMode {
   id: AgentModeId;
@@ -17,14 +17,15 @@ export interface AgentMode {
   description: string;
 }
 
+/** UI order: Ask → Plan → Code → Debug → Agentic */
 export const AGENT_MODES: AgentMode[] = [
   {
-    id: "agentic",
-    label: "Agentic",
-    shortLabel: "Agentic",
-    intent: "kilocode",
+    id: "ask",
+    label: "Ask",
+    shortLabel: "Ask",
+    intent: "fallback",
     defaultModel: "caval-auto/balanced",
-    description: "Pipeline complet — de la idee la proiect livrat",
+    description: "Întrebări rapide, explicații, fără modificări de cod",
   },
   {
     id: "plan",
@@ -43,30 +44,6 @@ export const AGENT_MODES: AgentMode[] = [
     description: "Implementare cod — direct, fără pipeline multi-agent",
   },
   {
-    id: "build",
-    label: "Build",
-    shortLabel: "Build",
-    intent: "kilocode",
-    defaultModel: "caval-auto/balanced",
-    description: "Autonomous Build Engine — scrie direct în workspace, fără cod în chat",
-  },
-  {
-    id: "release",
-    label: "Release",
-    shortLabel: "Release",
-    intent: "kilocode",
-    defaultModel: "caval-auto/balanced",
-    description: "Release Engineer — pipeline Windows real (release:win), fără installer fantomă",
-  },
-  {
-    id: "ask",
-    label: "Ask",
-    shortLabel: "Ask",
-    intent: "fallback",
-    defaultModel: "caval-auto/balanced",
-    description: "Întrebări rapide, explicații, fără modificări de cod",
-  },
-  {
     id: "debug",
     label: "Debug",
     shortLabel: "Debug",
@@ -74,26 +51,24 @@ export const AGENT_MODES: AgentMode[] = [
     defaultModel: "caval-auto/balanced",
     description: "Analizează erori și sugerează fix-uri",
   },
+  {
+    id: "agentic",
+    label: "Agentic",
+    shortLabel: "Agentic",
+    intent: "kilocode",
+    defaultModel: "caval-auto/balanced",
+    description: "Pipeline complet — de la idee la proiect livrat",
+  },
 ];
 
 export function getAgentMode(id: AgentModeId | string): AgentMode {
-  const normalized = id === "architect" ? "plan" : id;
+  const normalized = id === "architect" ? "plan" : id === "build" || id === "release" ? "code" : id;
   return AGENT_MODES.find((m) => m.id === normalized) ?? AGENT_MODES.find((m) => m.id === "code")!;
 }
 
 /** Multi-agent pipeline + full delivery — only in Agentic mode. */
 export function isAgenticPipelineMode(mode: string | undefined): boolean {
   return mode === "agentic";
-}
-
-/** Autonomous Build Engine — file-first, auto-apply, consistency scan. */
-export function isBuildEngineMode(mode: string | undefined): boolean {
-  return mode === "build";
-}
-
-/** Release Engineer — orchestrates real release scripts, blocks on failed gates. */
-export function isReleaseEngineerMode(mode: string | undefined): boolean {
-  return mode === "release";
 }
 
 export interface CavalConfig {
@@ -124,8 +99,6 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
     perMode: {
       ask: "caval-auto/balanced",
       code: "caval-auto/free",
-      build: "caval-auto/balanced",
-      release: "caval-auto/balanced",
       agentic: "caval-auto/balanced",
       plan: "caval-auto/frontier",
       debug: "caval-auto/balanced",

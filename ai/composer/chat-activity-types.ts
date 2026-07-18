@@ -132,6 +132,8 @@ export interface MultiAgentStepRecord {
   modelId?: string;
   /** Unique step key — allows multiple subagent rows in timeline. */
   stepId?: string;
+  /** Self-audit badge, e.g. TS:✓ · TU:78% */
+  auditBadge?: string;
   at: number;
 }
 
@@ -151,7 +153,8 @@ export function patchMultiAgentSteps(
   status: 'active' | 'done',
   detail?: string,
   modelId?: string,
-  stepId?: string
+  stepId?: string,
+  auditBadge?: string
 ): MultiAgentStepRecord[] {
   const next = [...(steps ?? [])];
   const now = Date.now();
@@ -172,10 +175,11 @@ export function patchMultiAgentSteps(
         detail: detail ?? next[idx]!.detail,
         modelId: modelId ?? next[idx]!.modelId,
         stepId: stepId ?? next[idx]!.stepId,
+        auditBadge: auditBadge ?? next[idx]!.auditBadge,
         at: now,
       };
     } else {
-      next.push({ phase, status: 'active', detail, modelId, stepId, at: now });
+      next.push({ phase, status: 'active', detail, modelId, stepId, auditBadge, at: now });
     }
     return next;
   }
@@ -187,10 +191,11 @@ export function patchMultiAgentSteps(
       detail: detail ?? next[idx]!.detail,
       modelId: modelId ?? next[idx]!.modelId,
       stepId: stepId ?? next[idx]!.stepId,
+      auditBadge: auditBadge ?? next[idx]!.auditBadge,
       at: now,
     };
   } else {
-    next.push({ phase, status: 'done', detail, modelId, stepId, at: now });
+    next.push({ phase, status: 'done', detail, modelId, stepId, auditBadge, at: now });
   }
   return next;
 }

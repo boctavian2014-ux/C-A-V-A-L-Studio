@@ -61,6 +61,27 @@ function ModelBadge({ modelId }: { modelId: string }) {
   );
 }
 
+function AuditBadge({ badge }: { badge: string }) {
+  return (
+    <span
+      style={{
+        fontSize: 9.5,
+        fontFamily: 'JetBrains Mono, monospace',
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: 'rgba(99, 102, 241, 0.12)',
+        border: '1px solid rgba(99, 102, 241, 0.35)',
+        color: 'var(--caval-text-muted)',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+      title="Self-audit scores"
+    >
+      {badge}
+    </span>
+  );
+}
+
 function stepLabel(step: MultiAgentStepRecord): string {
   if (step.stepId?.startsWith('modelOrch-')) {
     return step.detail ?? MULTI_AGENT_LABELS.modelOrch;
@@ -123,6 +144,7 @@ export function MultiAgentTimeline({
           <StepIcon status={step.status} />
           <span>{stepLabel(step)}</span>
           {step.modelId ? <ModelBadge modelId={step.modelId} /> : null}
+          {step.auditBadge ? <AuditBadge badge={step.auditBadge} /> : null}
           {step.detail &&
           !step.stepId?.startsWith('modelOrch-') &&
           !step.stepId?.startsWith('subagent-') ? (

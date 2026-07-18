@@ -9,7 +9,7 @@ import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
 import { apiKeysToSecrets, secretsToApiKeys, BYOK_TO_SECRET } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
-import { getAgentMode, isAgenticPipelineMode, isBuildEngineMode, isReleaseEngineerMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
+import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
 import { resolveEffectiveMode, isCavalloModesTestRequest } from '../modes/mode-router';
 import { CAVALLO_MODES_TEST_FIXTURE } from '../prompts/cavallo-mode-protocol';
@@ -24,7 +24,7 @@ import {
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
-import { isBuildContinueRequest, buildScaffoldContinueMessage } from '../prompts/build-continue';
+import { buildScaffoldContinueMessage } from '../prompts/build-continue';
 import { isArenaContinueRequest } from '../prompts/arena-continue';
 import { isAgenticRepairRequest, buildAgenticRepairMessage } from '../prompts/agentic-repair';
 import {
@@ -83,7 +83,6 @@ import { getFashionFullStackScaffoldFiles } from '../scaffolds/fashion-matching/
 import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/manifest';
 import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
 import { stripArenaChatNoise, formatArenaReasoning, summarizeForChatPanel, formatChatPanelSummary } from './chat-display';
-import { loadBuildMemoryRecord, persistLastBuild, buildMemoryHint } from './build-memory-bridge';
 import {
   buildEarlyArenaMessage,
   buildFinalRecap,
@@ -127,6 +126,7 @@ export interface ChatMessage {
   workspacePath?: string;
   pipelineRunId?: string;
   streamId?: string;
+  pipelineRecapMeta?: PipelineRecapMeta;
 }
 
 export interface ChatPrepareState {
@@ -663,8 +663,6 @@ let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
 let deliveryWaveIndex = 0;
 let agenticRepairWave = 0;
-let buildRepairWave = 0;
-const MAX_BUILD_REPAIR_WAVES = 2;
 
 const initialThread = createThread();
 
@@ -941,17 +939,41 @@ export const useAIStore = create<AIStore>()(
         if (
           !isDeliveryContinueRequest(userText) &&
           !isScaffoldContinueRequest(userText) &&
-          !isBuildContinueRequest(userText) &&
           !isArenaContinueRequest(userText) &&
           !isAgenticRepairRequest(userText)
         ) {
           deliveryWaveIndex = 0;
           agenticRepairWave = 0;
-          buildRepairWave = 0;
         }
 
         const editorState = useEditorStore.getState();
         const boundWorkspace = editorState.projectPath;
+
+        if (isAgenticPipelineMode(get().agentMode) && !boundWorkspace?.trim()) {
+          const userMsg: ChatMessage = {
+            id: generateId(),
+            role: 'user',
+            content: userText,
+            timestamp: Date.now(),
+          };
+          const assistantMsg: ChatMessage = {
+            id: generateId(),
+            role: 'assistant',
+            content: '',
+            error: 'Deschide un folder (File → Open Folder) înainte de modul Agentic.',
+            timestamp: Date.now(),
+          };
+          const nextMessages = [...get().messages, userMsg, assistantMsg];
+          set((s) => ({
+            messages: nextMessages,
+            threads: s.threads.map((t) =>
+              t.id === s.activeThreadId
+                ? { ...t, messages: nextMessages, updatedAt: Date.now() }
+                : t
+            ),
+          }));
+          return;
+        }
 
         let {
           selectedModel,
@@ -1271,11 +1293,10 @@ export const useAIStore = create<AIStore>()(
           }
 
           const diff = detectDiff(finalContent, tabPath ?? null);
-          const buildMode = isBuildEngineMode(agentMode) || isReleaseEngineerMode(agentMode);
           updateAssistant({
             content: finalContent,
             isStreaming: false,
-            diff: buildMode && diff ? { ...diff, autoApplied: true } : diff,
+            diff: diff ?? undefined,
             reasoningExpanded: false,
             ...extra,
           });
@@ -1284,7 +1305,7 @@ export const useAIStore = create<AIStore>()(
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
           const skipScaffold = !appliesScaffold || !projectPath || extra?.error;
-          const blockOnDiff = diff && !buildMode;
+          const blockOnDiff = Boolean(diff);
           if (skipScaffold || blockOnDiff) return;
 
           void (async () => {
@@ -1297,24 +1318,14 @@ export const useAIStore = create<AIStore>()(
               ? getFashionMatchingScaffoldFiles().map((f) => f.path)
               : [...new Set([...toolWrittenPaths, ...pipelineWrittenFiles])];
 
-            if (buildMode && diff) {
-              const applied = await applyDiffToWorkspace(diff);
-              if (applied.ok && applied.filePath) {
-                writtenFiles.push(applied.filePath.replace(/\\/g, '/'));
-                patchMessageInThreads(set, assistantMsgId, (m) =>
-                  m.diff
-                    ? { ...m, diff: { ...m.diff, applied: true, autoApplied: true } }
-                    : m
-                );
+            let scaffoldErrors: string[] = [];
+            if (pipelineWrittenFiles.length === 0) {
+              const parsed = parseScaffoldFiles(parseSource);
+              if (parsed.length > 0) {
+                const applied = await applyScaffoldToWorkspace(projectPath, parsed);
+                writtenFiles = [...writtenFiles, ...applied.written];
+                scaffoldErrors = applied.errors;
               }
-            }
-
-            const parsed = parseScaffoldFiles(parseSource);
-            if (parsed.length > 0) {
-              writtenFiles = [
-                ...writtenFiles,
-                ...(await applyScaffoldToWorkspace(projectPath, parsed)),
-              ];
             }
             writtenFiles = [...new Set(writtenFiles)];
             await useEditorStore.getState().refreshTree();
@@ -1409,8 +1420,8 @@ export const useAIStore = create<AIStore>()(
               }
               updateAssistant({
                 error: hadReasoningPlan
-                  ? 'AI a planificat fără fișiere valide (```lang:path```). Reformulează promptul sau deschide un folder.'
-                  : 'Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.',
+                  ? `AI a planificat fără fișiere valide (\`\`\`lang:path\`\`\`). Reformulează promptul sau deschide un folder.${scaffoldErrors.length ? `\n${scaffoldErrors[0]}` : ''}`
+                  : `Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.${scaffoldErrors.length ? `\n${scaffoldErrors[0]}` : ''}`,
               });
               return;
             }
@@ -1418,55 +1429,6 @@ export const useAIStore = create<AIStore>()(
             const opened = await openWrittenFile(lastFile);
             if (opened) {
               useEditorStore.getState().closeAiPreview();
-            }
-
-            if (buildMode) {
-              const { runCavaloConsistencyScan } = await import('./consistency-engine');
-              const scan = await runCavaloConsistencyScan({
-                projectPath,
-                writtenFiles,
-                readFileContent: async (abs: string) => {
-                  const res = await window.caval?.fs?.readFile?.(abs);
-                  return res?.ok && res.content != null ? res.content : null;
-                },
-                workspaceVerify: window.caval?.workspaceVerify
-                  ? (root: string) => window.caval!.workspaceVerify!(root)
-                  : undefined,
-              });
-
-              const statusText = formatChatPanelSummary(summarizeForChatPanel(finalContent)) || scan.summary;
-              const recapPatch: Partial<ChatMessage> = {
-                writtenFiles,
-                content: scan.ok ? statusText : `${statusText}\n${scan.summary}`,
-              };
-              if (!scan.ok) {
-                recapPatch.error = scan.summary;
-              }
-              updateAssistant(recapPatch);
-
-              if (scan.ok && caval?.fs?.readFile && caval?.fs?.writeFile) {
-                await persistLastBuild(
-                  projectPath,
-                  { files: writtenFiles, scanSummary: scan.summary },
-                  {
-                    readFile: (p) => caval.fs!.readFile!(p),
-                    writeFile: (p, content) => caval.fs!.writeFile!(p, content),
-                  }
-                );
-              }
-
-              if (
-                !scan.ok &&
-                buildRepairWave < MAX_BUILD_REPAIR_WAVES &&
-                !isSessionStale()
-              ) {
-                buildRepairWave += 1;
-                updateAssistant({
-                  content: `Consistency repair (${buildRepairWave}/${MAX_BUILD_REPAIR_WAVES})…`,
-                });
-                void get().sendMessage(buildScaffoldContinueMessage(scan));
-              }
-              return;
             }
 
             let devToolsForRecap = capturedRecapMeta?.devTools;
@@ -1484,6 +1446,9 @@ export const useAIStore = create<AIStore>()(
 
             let verifyFailed = devToolsForRecap?.verify?.commands?.find((c) => !c.ok);
             const recapPatch: Partial<ChatMessage> = { writtenFiles };
+            if (capturedRecapMeta) {
+              recapPatch.pipelineRecapMeta = capturedRecapMeta;
+            }
             if (verifyFailed) {
               recapPatch.error = `Verificare eșuată: ${verifyFailed.command}\n${verifyFailed.output.slice(0, 500)}`;
             } else if (devToolsForRecap?.verify?.ran) {
@@ -1630,7 +1595,8 @@ export const useAIStore = create<AIStore>()(
               chunkStatus,
               chunk.detail,
               chunk.multiAgentModel,
-              chunk.multiAgentStepId
+              chunk.multiAgentStepId,
+              chunk.multiAgentAuditBadge
             );
             updateAssistant({ multiAgentStatus: label, multiAgentSteps });
             if (phase === 'compose') {
@@ -1818,7 +1784,7 @@ export const useAIStore = create<AIStore>()(
         };
 
         if (editorState.projectPath) {
-          void caval?.workspaceSync?.(editorState.projectPath);
+          await caval?.workspaceSync?.(editorState.projectPath);
           void caval?.mcpEnsureReady?.();
         }
 
@@ -1918,14 +1884,6 @@ export const useAIStore = create<AIStore>()(
         const editorSelection = useEditorStore.getState().editorSelection;
         const selectionText = editorSelection?.text?.trim() || undefined;
 
-        let buildMemoryHintText: string | undefined;
-        if ((isBuildEngineMode(agentMode) || isReleaseEngineerMode(agentMode)) && editorState.projectPath && caval?.fs?.readFile) {
-          const mem = await loadBuildMemoryRecord(editorState.projectPath, (p) =>
-            caval.fs!.readFile!(p)
-          );
-          buildMemoryHintText = buildMemoryHint(mem);
-        }
-
         assertSendNotAborted(sendSignal);
 
         const contextMessages: AIMessage[] = buildContextMessages(
@@ -1943,7 +1901,6 @@ export const useAIStore = create<AIStore>()(
             mentionFiles,
             attachments: attachmentsSnapshot,
             agentMode,
-            buildMemoryHint: buildMemoryHintText,
             cavalloModesTestLlm:
               cavalloCfg?.modesTestUseLlm === true && isCavalloModesTestRequest(userText),
           }
@@ -2331,6 +2288,9 @@ export const useAIStore = create<AIStore>()(
         const legacyMode = state.agentMode as string;
         if (legacyMode === 'architect') {
           state.agentMode = 'plan';
+        }
+        if (legacyMode === 'build' || legacyMode === 'release') {
+          state.agentMode = 'code';
         }
         if (!AGENT_MODES.some((m) => m.id === state.agentMode)) {
           state.agentMode = 'code';
