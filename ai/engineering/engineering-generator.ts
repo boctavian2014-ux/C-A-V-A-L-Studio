@@ -16,7 +16,9 @@ import {
 } from '../prompts/cavallo-mode-protocol';
 import {
   missingRoboticsSections,
+  missingRecommendedRoboticsSections,
   parseRoboticsPlan,
+  pickBestRoboticsMarkdown,
   roboticsPlanToEngProject,
   extractScadBlock,
   type ParsedRoboticsPlan,
@@ -107,6 +109,11 @@ async function runRoboticsCompletion(params: {
   | { ok: true; text: string; resolvedModel?: string }
   | { ok: false; error: string }
 > {
+  // Some models split their output between the main content and a separate
+  // `reasoning` channel. When the transport surfaces `reasoning`, keep the
+  // richest markdown fragment; otherwise fall back to plain `text`.
+  const bestText = (r: { text: string; reasoning?: string }): string =>
+    r.reasoning ? pickBestRoboticsMarkdown(r.text, r.reasoning) : r.text;
   const userContent = params.retryIncomplete
     ? `${params.prompt.trim()}${ROBOTICS_AI_ULTRA_RETRY_SUFFIX}`
     : params.prompt.trim();
@@ -125,7 +132,7 @@ async function runRoboticsCompletion(params: {
     signal: params.signal,
   });
 
-  if (streamResult.ok) return streamResult;
+  if (streamResult.ok) return { ...streamResult, text: bestText(streamResult) };
 
   if (caval?.aiComplete) {
     const completeResult = await caval.aiComplete({
@@ -143,7 +150,7 @@ async function runRoboticsCompletion(params: {
     if (completeResult.ok) {
       return {
         ok: true,
-        text: completeResult.text,
+        text: bestText(completeResult),
         resolvedModel: completeResult.resolvedModel,
       };
     }
@@ -265,11 +272,20 @@ export async function generateEngineering(params: {
 
   const project = roboticsPlanToEngProject(plan);
 
+  // Soft-warning tier: all hard-required sections are present, but the model
+  // may have silently dropped recommended sections (simulation, collision,
+  // animation, etc.). Surface them instead of letting them vanish.
+  const missingRecommended = missingRecommendedRoboticsSections(plan);
+
   return {
     ok: true,
     project,
     plan,
     raw: result.text,
     resolvedModel: result.resolvedModel,
+    warning:
+      missingRecommended.length > 0
+        ? `Secțiuni recomandate lipsă: ${missingRecommended.join(', ')}. Planul e utilizabil, dar poți regenera pentru acoperire completă.`
+        : undefined,
   };
 }

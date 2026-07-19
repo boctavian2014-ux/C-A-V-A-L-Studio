@@ -1,7 +1,4 @@
-import {
-  ROBOTICS_AI_ULTRA_HEADINGS,
-  ROBOTICS_AI_ULTRA_SYSTEM_PROMPT,
-} from '../prompts/robotics-ai-ultra';
+import { ROBOTICS_AI_ULTRA_SYSTEM_PROMPT } from '../prompts/robotics-ai-ultra';
 import type { BuildFile, EngProject, PartItem, SchemaNode } from './engineering-generator';
 
 export type RoboticsSectionKey =
@@ -130,6 +127,20 @@ export function requiredRoboticsSections(): RoboticsSectionKey[] {
   return ['summary', 'cad', 'partsList', 'assembly'];
 }
 
+/**
+ * Sections that are expected in a complete plan but are NOT hard-required.
+ * When missing they should surface a soft warning instead of disappearing
+ * silently, so the user knows the model skipped them.
+ */
+export function recommendedRoboticsSections(): RoboticsSectionKey[] {
+  return ['mechanical', 'circuit', 'testing', 'simulation', 'collision', 'animation', 'cost'];
+}
+
+/** Recommended sections that the parsed plan is missing (soft-warning tier). */
+export function missingRecommendedRoboticsSections(plan: ParsedRoboticsPlan): RoboticsSectionKey[] {
+  return recommendedRoboticsSections().filter((key) => !plan.sections[key]?.trim());
+}
+
 function emptySections(): Record<RoboticsSectionKey, string> {
   const out = {} as Record<RoboticsSectionKey, string>;
   for (const key of [...ROBOTICS_SECTION_ORDER, 'other'] as RoboticsSectionKey[]) {
@@ -146,18 +157,11 @@ function normalizeHeadingLine(line: string): string {
     .replace(/^[-*]\s+/, '');
 }
 
-function matchSectionKey(line: string): RoboticsSectionKey | null {
+export function matchSectionKey(line: string): RoboticsSectionKey | null {
   const normalized = normalizeHeadingLine(line);
   for (const [key, patterns] of Object.entries(SECTION_ALIASES) as [RoboticsSectionKey, RegExp[]][]) {
     if (key === 'other') continue;
     if (patterns.some((re) => re.test(normalized))) return key;
-  }
-  for (const heading of ROBOTICS_AI_ULTRA_HEADINGS) {
-    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`^#{1,3}\\s*${escaped}\\b`, 'i').test(normalized)) {
-      const entry = Object.entries(SECTION_LABELS).find(([, label]) => label === heading);
-      if (entry) return entry[0] as RoboticsSectionKey;
-    }
   }
   return null;
 }

@@ -13,6 +13,9 @@ import { GitPanel } from './components/git/GitPanel';
 import { useGitStore } from './store/git-store';
 import { CAVAL_OPEN_CODING_CHAT_EVENT } from '../../ai/engineering/engineering-handoff';
 import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
+import { EngineeringCadPreview } from './components/engineering/EngineeringCadPreview';
+import { CadViewer } from './components/engineering/CadViewer';
+import { useEngineeringCadStore } from './store/engineering-cad-store';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPanel } from './components/search/SearchPanel';
 import { ExtensionsHub } from './components/extensions/ExtensionsHub';
@@ -401,6 +404,30 @@ function StatusItem({ children, ...props }: React.HTMLAttributes<HTMLDivElement>
 }
 
 // ──────────────────────────────────────────────
+//  RoboticsCadStage — viewport CAD 3D (centru) pentru modul Robotics AI dedicat
+// ──────────────────────────────────────────────
+
+function RoboticsCadStage() {
+  const hasModel = useEngineeringCadStore((s) => Boolean(s.stlUrl));
+  // Cu model → preview complet (titlu + download + viewer). Fără model → placeholder-ul viewer-ului.
+  if (hasModel) return <EngineeringCadPreview />;
+  return (
+    <div style={{
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      background: '#0D1117',
+      minHeight: 0,
+    }}>
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <CadViewer stlUrl={null} />
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
 //  WorkbenchRoot — layout principal
 // ──────────────────────────────────────────────
 
@@ -570,7 +597,11 @@ export function WorkbenchRoot() {
   );
 
   useEffect(() => {
-    const openCodingChat = () => setAiPanelOpen(true);
+    const openCodingChat = () => {
+      // Handoff „Generează software în Coding Chat": ieși din modul Robotics dedicat.
+      setEngineeringOpen(false);
+      setAiPanelOpen(true);
+    };
     window.addEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
     return () => window.removeEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
   }, []);
@@ -906,11 +937,32 @@ export function WorkbenchRoot() {
           onToggleSidebar={toggleSidebar}
         />
 
-        {/* File tabs */}
-        <TabBar />
+        {/* File tabs — ascunse în modul Robotics AI dedicat */}
+        {!engineeringOpen && <TabBar />}
 
         {/* Main area */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          {engineeringOpen ? (
+            /* ── Robotics AI — workspace dedicat: viewport CAD 3D (centru) + chat Robotics (dreapta).
+               Coding Arena / pipeline / editor / sidebar-uri NU se montează. ── */
+            <>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, position: 'relative' }}>
+                <RoboticsCadStage />
+              </div>
+              <div style={{
+                width: 'clamp(380px, 34%, 460px)',
+                flexShrink: 0,
+                borderLeft: '1px solid var(--caval-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                background: 'var(--caval-bg)',
+              }}>
+                <EngineeringAIPanel />
+              </div>
+            </>
+          ) : (
+          <>
           {/* Activity bar */}
           <ActivityBar
             active={activeActivity}
@@ -941,12 +993,6 @@ export function WorkbenchRoot() {
           {sidebarOpen && activeActivity === 'extensions' && (
             <SidebarShell width={320} onClose={closeSidebar}>
               <ExtensionsHub />
-            </SidebarShell>
-          )}
-
-          {engineeringOpen && (
-            <SidebarShell width={360}>
-              <EngineeringAIPanel />
             </SidebarShell>
           )}
 
@@ -1012,6 +1058,8 @@ export function WorkbenchRoot() {
           {/* AI Panel — dreapta, 340px, ascundibil */}
           {aiPanelOpen && (
             <AIPanel onClose={() => setAiPanelOpen(false)} onOpenComposer={openComposer} />
+          )}
+          </>
           )}
         </div>
 

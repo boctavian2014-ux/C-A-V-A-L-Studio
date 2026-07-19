@@ -55,7 +55,24 @@ const CavalThemeContext = createContext<CavalThemeContextValue>({
   setMode: () => undefined
 });
 
+const hasDom = typeof window !== "undefined" && typeof document !== "undefined";
+
+const THEME_CSS_KEYS = [
+  "--caval-bg",
+  "--caval-surface",
+  "--caval-surface-raised",
+  "--caval-border",
+  "--caval-text",
+  "--caval-text-muted",
+  "--caval-accent",
+  "--caval-accent-glow",
+  "--caval-accent-ring",
+  "--caval-success",
+  "--caval-error",
+] as const;
+
 const applyVars = (theme: CavalTheme): void => {
+  if (!hasDom) return;
   const root = document.documentElement;
   root.style.setProperty("--caval-bg", theme.colors.bg);
   root.style.setProperty("--caval-surface", theme.colors.surface);
@@ -70,6 +87,12 @@ const applyVars = (theme: CavalTheme): void => {
   root.style.setProperty("--caval-error", "#F47067");
 };
 
+const clearVars = (): void => {
+  if (!hasDom) return;
+  const root = document.documentElement;
+  THEME_CSS_KEYS.forEach((key) => root.style.removeProperty(key));
+};
+
 export const CavalThemeProvider = ({
   children,
   defaultMode = "dark"
@@ -78,6 +101,7 @@ export const CavalThemeProvider = ({
   defaultMode?: CavalThemeMode;
 }) => {
   const readStoredMode = (): CavalThemeMode => {
+    if (!hasDom) return defaultMode;
     try {
       const raw = localStorage.getItem("caval-settings");
       if (!raw) return defaultMode;
@@ -94,6 +118,7 @@ export const CavalThemeProvider = ({
 
   useEffect(() => {
     applyVars(theme);
+    return () => clearVars();
   }, [theme]);
 
   const value = useMemo(() => ({ mode, theme, setMode }), [mode, theme]);

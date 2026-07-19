@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   extractPartsListRows,
   extractScadBlock,
+  missingRecommendedRoboticsSections,
   missingRoboticsSections,
   parseRoboticsPlan,
   partsListToCsv,
   pickBestRoboticsMarkdown,
+  recommendedRoboticsSections,
   roboticsPlanToEngProject,
   roboticsPlanToMarkdown,
   ROBOTICS_SECTION_ORDER,
@@ -125,5 +127,77 @@ describe('robotics-format', () => {
     const content = '## PROJECT SUMMARY\nRobot test\n## CAD 3D MODEL\n```openscad\ncube(1);\n```';
     const reasoning = '{"spec":{"title":"ignored"}}';
     expect(pickBestRoboticsMarkdown(content, reasoning)).toContain('## PROJECT SUMMARY');
+  });
+
+  it('pickBestRoboticsMarkdown recovers markdown from the reasoning channel', () => {
+    const content = '{"spec":{"title":"json only"}}';
+    const reasoning = [
+      '## PROJECT SUMMARY',
+      'Robot cu markdown în reasoning',
+      '## COMPONENT LIST',
+      '| Name | Part/Code | Qty | Role | Notes |',
+      '## ASSEMBLY STEPS',
+      'pasi',
+    ].join('\n');
+    const best = pickBestRoboticsMarkdown(content, reasoning);
+    expect(best).toContain('## PROJECT SUMMARY');
+    expect(best).not.toBe(content);
+  });
+
+  it('parses Romanian aliased headings (Lista de componente / Asamblare)', () => {
+    const md = [
+      '## Rezumat',
+      'Robot cu ESP32.',
+      '## Model 3D',
+      '```openscad',
+      'cube(5);',
+      '```',
+      '## Lista de componente',
+      '| Nume | Cod | Buc | Rol | Note |',
+      '| --- | --- | --- | --- | --- |',
+      '| ESP32 | DevKit | 1 | MCU | |',
+      '## Asamblare',
+      'Montaj șasiu.',
+    ].join('\n');
+
+    const plan = parseRoboticsPlan(md);
+    expect(plan.sections.summary).toContain('ESP32');
+    expect(plan.sections.cad).toContain('openscad');
+    expect(plan.sections.partsList).toContain('ESP32');
+    expect(plan.sections.assembly).toContain('Montaj');
+    expect(missingRoboticsSections(plan)).toEqual([]);
+  });
+
+  it('flags missing recommended sections without failing required parse', () => {
+    const md = [
+      '## PROJECT SUMMARY',
+      'Robot minimal.',
+      '## CAD 3D MODEL',
+      '```openscad',
+      'cube(1);',
+      '```',
+      '## COMPONENT LIST',
+      '| Name | Part/Code | Qty | Role | Notes |',
+      '| --- | --- | --- | --- | --- |',
+      '| ESP32 | DevKit | 1 | MCU | |',
+      '## ASSEMBLY STEPS',
+      'Montaj.',
+    ].join('\n');
+
+    const plan = parseRoboticsPlan(md);
+    // Hard-required sections satisfied...
+    expect(missingRoboticsSections(plan)).toEqual([]);
+    // ...but recommended ones (simulation, collision, animation, etc.) are flagged.
+    const missingRec = missingRecommendedRoboticsSections(plan);
+    expect(missingRec).toEqual(expect.arrayContaining(['simulation', 'collision', 'animation']));
+    expect(missingRec.length).toBeGreaterThan(0);
+  });
+
+  it('recommendedRoboticsSections and requiredRoboticsSections do not overlap', () => {
+    const rec = new Set(recommendedRoboticsSections());
+    for (const key of missingRoboticsSections(parseRoboticsPlan(''))) {
+      // required-but-missing keys should never appear in the recommended tier
+      expect(rec.has(key)).toBe(false);
+    }
   });
 });

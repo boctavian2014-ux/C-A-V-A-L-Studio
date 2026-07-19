@@ -14,11 +14,23 @@ export interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-export const CavalThemeProvider = ({ children, defaultMode = "system" }: { children: ReactNode; defaultMode?: CavalThemeMode }) => {
+// Guard so the provider is safe in non-DOM / SSR / worker contexts.
+const hasDom = typeof window !== "undefined" && typeof document !== "undefined";
+
+export const CavalThemeProvider = ({
+  children,
+  defaultMode = "system"
+}: {
+  children: ReactNode;
+  defaultMode?: CavalThemeMode;
+}) => {
   const [mode, setMode] = useState<CavalThemeMode>(defaultMode);
   const [systemMode, setSystemMode] = useState<"dark" | "light">("dark");
 
   useEffect(() => {
+    if (!hasDom) {
+      return;
+    }
     const media = window.matchMedia?.("(prefers-color-scheme: light)");
     if (!media) {
       return;
@@ -41,9 +53,19 @@ export const CavalThemeProvider = ({ children, defaultMode = "system" }: { child
   }, [mode, systemMode]);
 
   useEffect(() => {
+    if (!hasDom) {
+      return;
+    }
     const root = document.documentElement;
     root.dataset.cavalTheme = value.resolvedMode;
-    Object.entries(value.theme.cssVariables).forEach(([key, token]) => root.style.setProperty(key, token));
+    const entries = Object.entries(value.theme.cssVariables);
+    entries.forEach(([key, token]) => root.style.setProperty(key, token));
+
+    // Clean up the variables this provider set when it unmounts, so a torn-down
+    // provider does not leave stale --caval-* custom properties on <html>.
+    return () => {
+      entries.forEach(([key]) => root.style.removeProperty(key));
+    };
   }, [value]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

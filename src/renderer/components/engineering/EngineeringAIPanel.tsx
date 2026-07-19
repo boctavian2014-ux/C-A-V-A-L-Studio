@@ -6,18 +6,13 @@ import { ChatModelSelect } from '../../../../ai/composer/ChatModelSelect';
 import { useModelCatalog } from '../../../../ai/composer/use-model-catalog';
 import {
   generateEngineering,
-  type SpecData,
-  type SchemaNode,
-  type SchemaData,
   type PartItem,
-  type BuildFile,
   type EngProject,
 } from '../../../../ai/engineering/engineering-generator';
 import {
   ROBOTICS_TAB_GROUPS,
   extractScadBlock,
   markdownToSimpleHtml,
-  partsListToCsv,
   roboticsPlanToMarkdown,
   tabGroupMarkdown,
   type ParsedRoboticsPlan,
@@ -31,30 +26,6 @@ import { CavaloAiMark } from '../brand/CavaloHorseMark';
 // ──────────────────────────────────────────────────────────────
 
 type RoboticsTabId = (typeof ROBOTICS_TAB_GROUPS)[number]['id'];
-
-const EXAMPLE_PROMPTS = [
-  'Robot mic pe roți cu ESP32, senzor ultrasonic și control Bluetooth',
-  'Tren modular cu șasiu printat 3D și motor DC',
-  'Braț robotic simplu cu 2 servo-uri și gripper',
-  'Vehicul RC cu diferențial, baterie LiPo și receiver',
-  'Jucărie mecanică cu angrenaje printate și manivelă',
-];
-
-const NODE_COLORS: Record<SchemaNode['role'], string> = {
-  mcu: '#00E0FF',
-  sensor: '#2FBF71',
-  power: '#D4A857',
-  actuator: '#7C3AED',
-  io: '#8A95A6',
-};
-
-const NODE_LABELS: Record<SchemaNode['role'], string> = {
-  mcu: 'Controler',
-  sensor: 'Senzor',
-  power: 'Alimentare',
-  actuator: 'Actuator',
-  io: 'I/O',
-};
 
 export function EngineeringAIPanel() {
   useCavalTheme();
@@ -77,13 +48,27 @@ export function EngineeringAIPanel() {
   const [plan, setPlan] = useState<ParsedRoboticsPlan | null>(null);
   const [activeTab, setActiveTab] = useState<RoboticsTabId>('overview');
   const [openRouterKey, setOpenRouterKey] = useState<string | undefined>();
+  const [tabCols, setTabCols] = useState(2);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const tabsWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void loadModelLabels();
   }, [loadModelLabels]);
+
+  // Grilă tab-uri responsivă: 2 coloane când panelul e lat (>=360px), 1 coloană sub.
+  useEffect(() => {
+    const el = tabsWrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setTabCols(w < 360 ? 1 : 2);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [project, plan]);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,11 +151,6 @@ export function EngineeringAIPanel() {
     }
   };
 
-  const applyExample = (ex: string) => {
-    setPrompt(ex);
-    setTimeout(() => textareaRef.current?.focus(), 50);
-  };
-
   const handleSoftwareHandoff = useCallback(() => {
     if (!project) return;
     const result = handoffFromEngineering({ project, userPrompt: prompt });
@@ -190,9 +170,9 @@ export function EngineeringAIPanel() {
         borderBottom: '1px solid var(--caval-border)',
         flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{
-            width: 26, height: 26, borderRadius: 6,
+            width: 26, height: 26, borderRadius: 6, flexShrink: 0,
             background: 'linear-gradient(135deg, #00E0FF22, #7C3AED22)',
             border: '1px solid rgba(0,224,255,0.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -200,56 +180,29 @@ export function EngineeringAIPanel() {
           }}>
             <CavaloAiMark size={22} />
           </div>
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)' }}>
-              Robotics AI
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, lineHeight: 1.2 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)' }}>
+                Robotics AI
+              </span>
               <span style={{
-                marginLeft: 6, fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
                 padding: '1px 5px', borderRadius: 4,
                 background: 'rgba(124,58,237,0.25)', color: '#A78BFA',
-                verticalAlign: 'middle',
               }}>
                 ULTRA
               </span>
             </div>
-            <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
+            <div style={{
+              fontSize: 10, color: 'var(--caval-text-muted)', lineHeight: 1.35, marginTop: 2,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
               Roboți · vehicule · mecanisme · componente · CAD · fabricare
             </div>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <ChatModelSelect catalog={catalog} loading={catalogLoading} />
           </div>
-        </div>
-
-        <div style={{
-          display: 'flex', gap: 4, flexWrap: 'nowrap',
-          overflowX: 'auto', paddingBottom: 2, marginBottom: 8,
-        }}
-          className="ai-messages-scroll"
-        >
-          {EXAMPLE_PROMPTS.map((ex) => (
-            <button
-              key={ex}
-              onClick={() => applyExample(ex)}
-              style={{
-                flexShrink: 0,
-                padding: '3px 8px', borderRadius: 99, fontSize: 10.5,
-                background: 'var(--caval-surface)', border: '1px solid var(--caval-border)',
-                color: 'var(--caval-text-muted)', cursor: 'pointer', whiteSpace: 'nowrap',
-                transition: 'all 0.1s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(0,224,255,0.3)';
-                e.currentTarget.style.color = 'var(--caval-text)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--caval-border)';
-                e.currentTarget.style.color = 'var(--caval-text-muted)';
-              }}
-            >
-              {ex.split(',')[0].slice(0, 26)}…
-            </button>
-          ))}
         </div>
 
         <textarea
@@ -260,7 +213,7 @@ export function EngineeringAIPanel() {
           placeholder="Descrie orice obiect sau sistem… (Ctrl+Enter = generează)"
           rows={3}
           style={{
-            width: '100%', boxSizing: 'border-box',
+            width: '100%', boxSizing: 'border-box', marginTop: 10,
             background: 'var(--caval-surface)', border: '1px solid var(--caval-border)',
             borderRadius: 6, padding: '7px 9px',
             color: 'var(--caval-text)', fontSize: 12.5,
@@ -351,7 +304,16 @@ export function EngineeringAIPanel() {
             borderBottom: '1px solid var(--caval-border)', flexShrink: 0,
             flexDirection: 'column',
           }}>
-            <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <div
+              ref={tabsWrapRef}
+              role="tablist"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: tabCols === 1 ? '1fr' : '1fr 1fr',
+                gap: 6,
+                marginBottom: 2,
+              }}
+            >
             {ROBOTICS_TAB_GROUPS.map(({ id, label }) => (
               <ResultTab
                 key={id}
@@ -520,7 +482,10 @@ function CadActions({
   const phase = useEngineeringCadStore((s) => s.phase);
   const cadBusy = useEngineeringCadStore((s) => s.cadBusy);
   const cadStatus = useEngineeringCadStore((s) => s.serverStatus);
+  const cadError = useEngineeringCadStore((s) => s.error);
+  const statusMessage = useEngineeringCadStore((s) => s.statusMessage);
   const createCadJob = useEngineeringCadStore((s) => s.createCadJob);
+  const retryCadJob = useEngineeringCadStore((s) => s.retryCadJob);
   const scad = extractScadBlock(plan.rawMarkdown);
 
   const saveScad = async () => {
@@ -558,6 +523,34 @@ function CadActions({
           ? `Generez STL… (${phase}${cadStatus ? ` / ${cadStatus}` : ''})`
           : 'Generează STL 3D (cloud)'}
       </button>
+
+      {cadBusy && statusMessage && (
+        <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', lineHeight: 1.45 }}>
+          {statusMessage}
+        </div>
+      )}
+
+      {phase === 'failed' && cadError && (
+        <div style={{
+          padding: '7px 9px', borderRadius: 6,
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)',
+          color: '#EF4444', fontSize: 11.5, lineHeight: 1.45,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Generarea 3D a eșuat</div>
+          {cadError}
+          <button
+            type="button"
+            onClick={() => void retryCadJob()}
+            style={{
+              display: 'block', marginTop: 7, padding: '6px 12px', borderRadius: 6,
+              border: '1px solid rgba(239,68,68,0.35)', background: 'transparent',
+              color: '#EF4444', fontWeight: 600, fontSize: 11.5, cursor: 'pointer',
+            }}
+          >
+            Reîncearcă
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -565,14 +558,19 @@ function CadActions({
 function ResultTab({ label, icon, active, onClick }: { label: string; icon?: React.ReactNode; active: boolean; onClick: () => void }) {
   return (
     <button
+      type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       style={{
-        padding: '6px 12px', border: 'none', cursor: 'pointer',
-        background: 'transparent',
-        color: active ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-        fontSize: 12, fontWeight: active ? 600 : 500,
-        borderBottom: `2px solid ${active ? 'var(--caval-accent)' : 'transparent'}`,
-        marginBottom: -1, transition: 'all 0.12s',
+        padding: '7px 10px', borderRadius: 6, cursor: 'pointer',
+        border: `1px solid ${active ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
+        background: active ? 'rgba(0,224,255,0.10)' : 'var(--caval-surface)',
+        color: active ? 'var(--caval-accent)' : 'var(--caval-text)',
+        fontSize: 11.5, fontWeight: active ? 700 : 500,
+        lineHeight: 1.2, textAlign: 'left', width: '100%',
+        whiteSpace: 'normal', wordBreak: 'break-word',
+        transition: 'border-color 0.12s, background 0.12s, color 0.12s',
         display: 'flex', alignItems: 'center', gap: 6,
       }}
     >
@@ -590,161 +588,6 @@ function Card({ children }: { children: React.ReactNode }) {
       borderRadius: 8, padding: '12px 13px', marginBottom: 10,
     }}>
       {children}
-    </div>
-  );
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      fontSize: 10, color: 'var(--caval-text-muted)',
-      fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-      marginBottom: 3,
-    }}>
-      {children}
-    </div>
-  );
-}
-
-function SpecView({ spec }: { spec: SpecData }) {
-  return (
-    <div>
-      <Card>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--caval-text)', marginBottom: 6 }}>
-          {spec.title}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', lineHeight: 1.55 }}>
-          {spec.summary}
-        </div>
-      </Card>
-
-      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-        <div style={{ flex: 1 }}>
-          <Card>
-            <FieldLabel>Dimensiuni</FieldLabel>
-            <div style={{ fontSize: 12.5, color: 'var(--caval-text)', fontFamily: "'JetBrains Mono', monospace" }}>
-              {spec.dimensions}
-            </div>
-          </Card>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Card>
-            <FieldLabel>Greutate</FieldLabel>
-            <div style={{ fontSize: 12.5, color: 'var(--caval-text)', fontFamily: "'JetBrains Mono', monospace" }}>
-              {spec.weight}
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      <Card>
-        <FieldLabel>Materiale</FieldLabel>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {spec.materials.map((m) => (
-            <span key={m} style={{
-              fontSize: 11, padding: '2px 8px', borderRadius: 99,
-              background: 'rgba(0,224,255,0.06)', border: '1px solid rgba(0,224,255,0.15)',
-              color: 'var(--caval-accent)',
-            }}>
-              {m}
-            </span>
-          ))}
-        </div>
-      </Card>
-
-      <Card>
-        <FieldLabel>Toleranțe</FieldLabel>
-        <div style={{ fontSize: 12, color: 'var(--caval-text)', lineHeight: 1.5 }}>
-          {spec.tolerances}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function SchemaView({ schema }: { schema: SchemaData }) {
-  const nodeById = (id: string) => schema.nodes.find((n) => n.id === id);
-  return (
-    <div>
-      <Card>
-        <FieldLabel>Schemă bloc</FieldLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 4 }}>
-          {schema.nodes.map((n) => (
-            <div key={n.id} style={{
-              display: 'flex', alignItems: 'center', gap: 9,
-              padding: '7px 10px', borderRadius: 6,
-              background: 'var(--caval-bg)',
-              border: `1px solid ${NODE_COLORS[n.role]}33`,
-            }}>
-              <span style={{
-                width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-                background: NODE_COLORS[n.role],
-                boxShadow: `0 0 6px ${NODE_COLORS[n.role]}80`,
-              }} />
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)' }}>
-                {n.label}
-              </span>
-              <span style={{
-                marginLeft: 'auto', fontSize: 10,
-                color: NODE_COLORS[n.role], fontWeight: 600,
-                textTransform: 'uppercase', letterSpacing: '0.05em',
-              }}>
-                {NODE_LABELS[n.role]}
-              </span>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Card>
-        <FieldLabel>Conexiuni</FieldLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
-          {schema.connections.map((c, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              fontSize: 11.5, color: 'var(--caval-text)',
-              fontFamily: "'JetBrains Mono', monospace",
-            }}>
-              <span>{nodeById(c.from)?.label ?? c.from}</span>
-              <span style={{ color: 'var(--caval-accent)' }}>→</span>
-              <span>{nodeById(c.to)?.label ?? c.to}</span>
-              <span style={{
-                marginLeft: 'auto', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-                background: 'rgba(255,255,255,0.05)', color: 'var(--caval-text-muted)',
-              }}>
-                {c.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}>
-          <Card>
-            <FieldLabel>Buget putere</FieldLabel>
-            <div style={{ fontSize: 12, color: 'var(--caval-text)', lineHeight: 1.5 }}>
-              {schema.powerBudget}
-            </div>
-          </Card>
-        </div>
-        <div style={{ flex: 1 }}>
-          <Card>
-            <FieldLabel>Protocoale</FieldLabel>
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-              {schema.protocols.map((p) => (
-                <span key={p} style={{
-                  fontSize: 10.5, padding: '1px 6px', borderRadius: 3,
-                  background: 'rgba(255,255,255,0.05)', color: 'var(--caval-text-muted)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}>
-                  {p}
-                </span>
-              ))}
-            </div>
-          </Card>
-        </div>
-      </div>
     </div>
   );
 }
@@ -860,230 +703,6 @@ function PartsView({ parts, projectPath }: { parts: PartItem[]; projectPath: str
           wordBreak: 'break-all', lineHeight: 1.45,
         }}>
           {exportMsg}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const BUILD_ICONS: Record<BuildFile['kind'], string> = {
-  stl: '🧱',
-  firmware: '⚙️',
-  wiring: '🔌',
-  doc: '📄',
-};
-
-function buildFilePayload(f: BuildFile): { name: string; content: string } {
-  const content =
-    f.content && f.content.trim().length > 0
-      ? f.content
-      : `# ${f.name}\n# ${f.note}\n# (generat de RoboticsAI ULTRA — completează conținutul)\n`;
-  return { name: f.name, content };
-}
-
-function BuildView({
-  project,
-  projectPath,
-  userPrompt,
-}: {
-  project: EngProject;
-  projectPath: string | null;
-  userPrompt: string;
-}) {
-  const { build } = project;
-  const [savedAll, setSavedAll] = useState(false);
-  const [savingAll, setSavingAll] = useState(false);
-  const [savedFiles, setSavedFiles] = useState<Record<number, 'ok' | 'err'>>({});
-  const [msg, setMsg] = useState<string | null>(null);
-  const [installingScad, setInstallingScad] = useState(false);
-  const [cadCloudOnly, setCadCloudOnly] = useState(true);
-
-  useEffect(() => {
-    void window.caval.cad?.isCloudOnly?.().then((r) => {
-      if (r?.cloudOnly !== undefined) setCadCloudOnly(r.cloudOnly);
-    });
-  }, []);
-
-  const phase = useEngineeringCadStore((s) => s.phase);
-  const cadBusy = useEngineeringCadStore((s) => s.cadBusy);
-  const cadStatus = useEngineeringCadStore((s) => s.serverStatus);
-  const cadError = useEngineeringCadStore((s) => s.error);
-  const generateMessage = useEngineeringCadStore((s) => s.statusMessage);
-  const createCadJob = useEngineeringCadStore((s) => s.createCadJob);
-  const cancelCadJob = useEngineeringCadStore((s) => s.cancelCadJob);
-  const retryCadJob = useEngineeringCadStore((s) => s.retryCadJob);
-
-  const hasStl = build.some((f) => f.kind === 'stl');
-  const needsOpenScad = !cadCloudOnly && Boolean(cadError?.includes('OpenSCAD'));
-
-  const installOpenScad = async () => {
-    if (!window.caval?.cad?.installOpenScad) return;
-    setInstallingScad(true);
-    setMsg('Se deschide instalatorul OpenSCAD — aprobă UAC dacă apare.');
-    const res = await window.caval.cad.installOpenScad();
-    setInstallingScad(false);
-    if (res.ok) {
-      setMsg('OpenSCAD instalat. Relansez generarea STL…');
-      await retryCadJob();
-      return;
-    }
-    setMsg(`Eroare: ${res.error ?? 'instalare eșuată'}`);
-  };
-
-  const saveOne = async (f: BuildFile, i: number) => {
-    if (!projectPath) return;
-    const res = await window.caval.engineering.saveFile(projectPath, buildFilePayload(f));
-    setSavedFiles((prev) => ({ ...prev, [i]: res.ok ? 'ok' : 'err' }));
-    setMsg(res.ok ? `Salvat: ${res.savedPath}` : `Eroare: ${res.error}`);
-  };
-
-  const saveAll = async () => {
-    if (!projectPath) return;
-    setSavingAll(true);
-    const res = await window.caval.engineering.saveAll(projectPath, build.map(buildFilePayload));
-    setSavingAll(false);
-    setSavedAll(res.ok);
-    setMsg(
-      res.ok
-        ? `Salvate ${res.savedPaths?.length ?? 0} fișiere în caval-engineering/`
-        : `Eroare: ${res.error}`
-    );
-  };
-
-  return (
-    <div>
-      {hasStl && (
-        <div style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            onClick={() => void createCadJob({ project, userPrompt, projectPath })}
-            disabled={cadBusy}
-            style={{
-              width: '100%', padding: '9px 0', borderRadius: 6, border: 'none',
-              background: cadBusy ? 'rgba(0,224,255,0.25)' : 'rgba(124,58,237,0.85)',
-              color: '#fff', fontWeight: 700, fontSize: 12.5,
-              cursor: cadBusy ? 'wait' : 'pointer', marginBottom: 8,
-            }}
-          >
-            {cadBusy
-              ? `Generez STL pe cloud… (${phase}${cadStatus ? ` / ${cadStatus}` : ''})`
-              : 'Generează STL 3D (cloud)'}
-          </button>
-          {cadBusy && (
-            <button
-              type="button"
-              onClick={cancelCadJob}
-              style={{
-                width: '100%', padding: '6px 0', borderRadius: 6,
-                border: '1px solid var(--caval-border)', background: 'transparent',
-                color: 'var(--caval-text-muted)', fontSize: 11.5, cursor: 'pointer', marginBottom: 8,
-              }}
-            >
-              Anulează generarea
-            </button>
-          )}
-          {cadError && phase === 'failed' && needsOpenScad && (
-            <button
-              type="button"
-              onClick={() => void installOpenScad()}
-              disabled={installingScad}
-              style={{
-                width: '100%', padding: '6px 0', borderRadius: 6, border: 'none',
-                background: 'rgba(124,58,237,0.85)', color: '#fff',
-                fontSize: 11.5, fontWeight: 600, cursor: installingScad ? 'wait' : 'pointer', marginBottom: 8,
-              }}
-            >
-              {installingScad ? 'Instalez OpenSCAD…' : 'Instalează OpenSCAD'}
-            </button>
-          )}
-          {cadError && phase === 'failed' && (
-            <button
-              type="button"
-              onClick={() => void retryCadJob()}
-              style={{
-                width: '100%', padding: '6px 0', borderRadius: 6, border: 'none',
-                background: 'rgba(0,224,255,0.12)', color: 'var(--caval-accent)',
-                fontSize: 11.5, fontWeight: 600, cursor: 'pointer', marginBottom: 8,
-              }}
-            >
-              Reîncearcă generarea CAD
-            </button>
-          )}
-          {cadError && (
-            <div style={{ fontSize: 11, color: '#ff7070', marginBottom: 6 }}>{cadError}</div>
-          )}
-          {generateMessage && (
-            <div style={{ fontSize: 11, color: 'var(--caval-accent)', marginBottom: 6 }}>{generateMessage}</div>
-          )}
-        </div>
-      )}
-
-      {projectPath && (
-        <button
-          onClick={() => void saveAll()}
-          disabled={savingAll}
-          style={{
-            width: '100%', marginBottom: 10, padding: '8px 0', borderRadius: 6, border: 'none',
-            background: savedAll ? 'rgba(47,191,113,0.15)' : 'var(--caval-accent)',
-            color: savedAll ? '#2FBF71' : '#0E0E0F',
-            fontWeight: 700, fontSize: 12.5, cursor: savingAll ? 'wait' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-          }}
-        >
-          {savedAll ? 'Salvate ✓' : savingAll ? 'Salvez…' : 'Salvează toate în proiect'}
-        </button>
-      )}
-
-      {build.map((f, i) => (
-        <Card key={i}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ fontSize: 18, flexShrink: 0 }}>{BUILD_ICONS[f.kind]}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)', fontFamily: "'JetBrains Mono', monospace" }}>
-                {f.name}
-              </div>
-              <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2 }}>
-                {f.note}
-              </div>
-            </div>
-            <button
-              onClick={() => void saveOne(f, i)}
-              title={projectPath ? 'Salvează în proiect' : 'Deschide un proiect mai întâi'}
-              disabled={!projectPath}
-              style={{
-                flexShrink: 0, width: 30, height: 30, borderRadius: 5,
-                background: savedFiles[i] === 'ok'
-                  ? 'rgba(47,191,113,0.2)'
-                  : projectPath ? 'var(--caval-accent)' : 'rgba(255,255,255,0.07)',
-                border: 'none',
-                color: savedFiles[i] === 'ok'
-                  ? '#2FBF71'
-                  : projectPath ? '#0E0E0F' : 'var(--caval-text-muted)',
-                cursor: projectPath ? 'pointer' : 'not-allowed',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}
-            >
-              {savedFiles[i] === 'ok' ? '✓' : '↓'}
-            </button>
-          </div>
-        </Card>
-      ))}
-
-      {msg && (
-        <div style={{
-          fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2,
-          wordBreak: 'break-all', lineHeight: 1.45,
-        }}>
-          {msg}
-        </div>
-      )}
-
-      {!projectPath && (
-        <div style={{
-          fontSize: 11, color: 'var(--caval-text-muted)', textAlign: 'center',
-          padding: '8px 4px', lineHeight: 1.5,
-        }}>
-          Deschide un proiect ca să salvezi fișierele generate în el.
         </div>
       )}
     </div>

@@ -2,9 +2,12 @@ const path = require("path");
 const webpack = require("webpack");
 const MonacoWebpackPlugin = require("monaco-editor-webpack-plugin");
 
+const isProduction = process.env.NODE_ENV === "production";
+
 const shared = {
-  mode: process.env.NODE_ENV === "production" ? "production" : "development",
-  devtool: "source-map",
+  mode: isProduction ? "production" : "development",
+  // Source maps only in development — shipping them in Electron prod exposes main-process TS.
+  devtool: isProduction ? false : "source-map",
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".json"],
     extensionAlias: {
@@ -41,6 +44,7 @@ const shared = {
   output: {
     path: path.resolve(__dirname, "dist"),
     filename: "[name].js",
+    // clean:false is intentional: three configs share the same dist/; CI should wipe dist for a fresh build.
     clean: false
   }
 };

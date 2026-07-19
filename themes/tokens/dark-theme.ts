@@ -1,10 +1,12 @@
-import { semanticColors } from "../tokens/colors";
-import { radii } from "../tokens/radii";
-import { shadows } from "../tokens/shadows";
-import { spacing } from "../tokens/spacing";
-import { typography } from "../tokens/typography";
-import { zIndex } from "../tokens/z-index";
+import { semanticColors } from "./colors";
+import { radii } from "./radii";
+import { shadows } from "./shadows";
+import { spacing } from "./spacing";
+import { typography } from "./typography";
+import { zIndex } from "./z-index";
 
+// cssVariables are DERIVED from semanticColors so the CSS custom properties
+// stay in lockstep with the token values (no more manually duplicated strings).
 export const darkTheme = {
   name: "caval-dark",
   mode: "dark",
