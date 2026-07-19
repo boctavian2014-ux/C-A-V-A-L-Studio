@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import fs from 'node:fs';
 import * as pty from 'node-pty';
 import * as os from 'os';
+import { sanitizeEnvForTerminal } from './subprocess-env';
 
 // Map de sesiuni terminal active
 const sessions = new Map<string, pty.IPty>();
@@ -27,7 +28,7 @@ ipcMain.handle('terminal:create', async (event, id: string, options?: { cwd?: st
     cols: 120,
     rows: 30,
     cwd: resolveTerminalCwd(options?.cwd),
-    env: { ...process.env } as Record<string, string>,
+    env: sanitizeEnvForTerminal() as Record<string, string>,
   });
 
   ptyProcess.onData((data) => {

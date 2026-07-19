@@ -3,6 +3,7 @@ import os from "node:os";
 
 import { assertShellCommandAllowed } from "./shell-security";
 import { assertPathInWorkspace } from "./path-security";
+import { sanitizeEnvForTerminal } from "./subprocess-env";
 
 export interface TerminalRunResult {
   ok: boolean;
@@ -39,7 +40,7 @@ export async function runTerminalCommand(
   return new Promise((resolve) => {
     const child = spawn(shell, shellArgs, {
       cwd: workspaceRoot,
-      env: process.env,
+      env: sanitizeEnvForTerminal(),
       windowsHide: true,
     });
 
