@@ -13,10 +13,16 @@ import {
   ROBOTICS_TAB_GROUPS,
   extractScadBlock,
   markdownToSimpleHtml,
+  parseRoboticsPlan,
+  roboticsPlanToEngProject,
   roboticsPlanToMarkdown,
   tabGroupMarkdown,
   type ParsedRoboticsPlan,
 } from '../../../../ai/engineering/robotics-format';
+import {
+  createSectionCollector,
+  type SectionStreamSnapshot,
+} from '../../../../ai/engineering/streaming-sections';
 import { checkModelReadiness, type ModelReadiness } from '../../../../ai/models/model-readiness';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { CavaloAiMark } from '../brand/CavaloHorseMark';
@@ -47,11 +53,16 @@ export function EngineeringAIPanel() {
   const [project, setProject] = useState<EngProject | null>(null);
   const [plan, setPlan] = useState<ParsedRoboticsPlan | null>(null);
   const [activeTab, setActiveTab] = useState<RoboticsTabId>('overview');
-  const [openRouterKey, setOpenRouterKey] = useState<string | undefined>();
+  const [openRouterConfigured, setOpenRouterConfigured] = useState(false);
   const [tabCols, setTabCols] = useState(2);
+  const [streamProgress, setStreamProgress] = useState<SectionStreamSnapshot | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const streamIdRef = useRef<string | null>(null);
+  const collectorRef = useRef(createSectionCollector());
+  const userTabLockedRef = useRef(false);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tabsWrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,11 +84,16 @@ export function EngineeringAIPanel() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const settingsRes = await window.caval.settingsLoad?.();
-      const key = settingsRes?.settings?.['openrouter.apiKey'];
-      if (!cancelled) setOpenRouterKey(key);
+      const [settingsRes, secretsRes] = await Promise.all([
+        window.caval.settingsLoad?.(),
+        window.caval.secretsGet?.(),
+      ]);
+      const configured =
+        settingsRes?.settings?.['openrouter.configured'] === 'true' ||
+        secretsRes?.configured?.OPENROUTER_API_KEY === true;
+      if (!cancelled) setOpenRouterConfigured(configured);
       const result = await checkModelReadiness(selectedModel, apiKeys, {
-        openRouterApiKey: key,
+        openRouterApiKey: configured ? '__configured__' : undefined,
       });
       if (!cancelled) {
         setReadiness(result);
@@ -96,7 +112,7 @@ export function EngineeringAIPanel() {
     }
 
     const readyCheck = await checkModelReadiness(selectedModel, apiKeys, {
-      openRouterApiKey: openRouterKey,
+      openRouterApiKey: openRouterConfigured ? '__configured__' : undefined,
     });
     setReadiness(readyCheck);
     if (!readyCheck.ready) {
@@ -110,18 +126,63 @@ export function EngineeringAIPanel() {
     setError(null);
     setWarning(null);
     setReadinessHint(null);
+    setStreamProgress(null);
+    userTabLockedRef.current = false;
+    collectorRef.current.reset();
+    streamIdRef.current = null;
 
     const controller = new AbortController();
     abortRef.current = controller;
+
+    const flushPartial = (accumulated: string) => {
+      const snap = collectorRef.current.snapshot();
+      setStreamProgress(snap);
+      if (!accumulated.trim()) return;
+      const partialPlan = parseRoboticsPlan(accumulated);
+      setPlan(partialPlan);
+      try {
+        setProject(roboticsPlanToEngProject(partialPlan));
+      } catch {
+        /* partial plans may lack structured fields — keep markdown tabs */
+      }
+    };
+
+    let accumulated = '';
+    const scheduleFlush = () => {
+      if (flushTimerRef.current) return;
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        flushPartial(accumulated);
+      }, 150);
+    };
+
     const result = await generateEngineering({
       prompt,
       modelId: selectedModel,
       apiKeys,
       workspaceRoot: projectPath,
       signal: controller.signal,
+      onStreamStart: (id) => {
+        streamIdRef.current = id;
+      },
+      onDelta: (chunk) => {
+        accumulated += chunk;
+        collectorRef.current.push(chunk);
+        scheduleFlush();
+      },
     });
 
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    collectorRef.current.finish();
+    setStreamProgress(null);
+
     if (controller.signal.aborted) {
+      abortRef.current = null;
+      streamIdRef.current = null;
+      setLoading(false);
       return;
     }
 
@@ -129,19 +190,29 @@ export function EngineeringAIPanel() {
       setProject(result.project);
       setPlan(result.plan ?? null);
       setWarning(result.warning ?? null);
-      setActiveTab('overview');
+      if (!userTabLockedRef.current) {
+        setActiveTab('overview');
+      }
     } else {
       setWarning(null);
       setError(result.error ?? 'Generare eșuată.');
     }
     abortRef.current = null;
+    streamIdRef.current = null;
     setLoading(false);
-  }, [prompt, selectedModel, apiKeys, openRouterKey, projectPath]);
+  }, [prompt, selectedModel, apiKeys, openRouterConfigured, projectPath]);
 
   const handleStop = useCallback(() => {
+    const streamId = streamIdRef.current;
     abortRef.current?.abort();
     abortRef.current = null;
+    streamIdRef.current = null;
+    if (streamId) {
+      void window.caval.abortChatStream?.(streamId);
+    }
+    void useEngineeringCadStore.getState().cancelCadJob();
     setLoading(false);
+    setStreamProgress(null);
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -319,10 +390,19 @@ export function EngineeringAIPanel() {
                 key={id}
                 label={label}
                 active={activeTab === id}
-                onClick={() => setActiveTab(id)}
+                onClick={() => {
+                  userTabLockedRef.current = true;
+                  setActiveTab(id);
+                }}
               />
             ))}
             </div>
+            {streamProgress && streamProgress.total > 0 && (
+              <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', padding: '4px 2px 6px' }}>
+                Secțiuni: {streamProgress.completed}/{streamProgress.total}
+                {streamProgress.activeKey ? ` · generează ${streamProgress.activeKey}` : ''}
+              </div>
+            )}
             <button
               type="button"
               onClick={handleSoftwareHandoff}

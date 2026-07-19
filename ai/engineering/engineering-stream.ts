@@ -11,6 +11,10 @@ export async function completeViaChatStream(params: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
+  /** Incremental markdown deltas for progressive section UI. */
+  onDelta?: (chunk: string) => void;
+  /** Fired once when the stream id is known (for abortChatStream). */
+  onStreamStart?: (streamId: string) => void;
 }): Promise<
   | { ok: true; text: string; resolvedModel?: string }
   | { ok: false; error: string }
@@ -33,6 +37,7 @@ export async function completeViaChatStream(params: {
         },
         onChunk: (chunk: CavalStreamChunk) => void
       ) => () => void;
+      abortChatStream?: (streamId: string) => void | Promise<unknown>;
     };
   }).caval;
 
@@ -53,6 +58,7 @@ export async function completeViaChatStream(params: {
 
   return new Promise((resolve) => {
     const streamId = generateStreamId();
+    params.onStreamStart?.(streamId);
     let buffer = '';
     let reasoningBuffer = '';
     let resolvedModel: string | undefined;
@@ -66,10 +72,12 @@ export async function completeViaChatStream(params: {
       if (settled) return;
       settled = true;
       cleanup?.();
+      params.signal?.removeEventListener('abort', onAbort);
       resolve(result);
     };
 
     const onAbort = () => {
+      void Promise.resolve(caval.abortChatStream?.(streamId)).catch(() => undefined);
       finish({ ok: false, error: 'Generare anulată.' });
     };
 
@@ -102,6 +110,7 @@ export async function completeViaChatStream(params: {
         }
         if (chunk.type === 'delta' && chunk.delta) {
           buffer += chunk.delta;
+          params.onDelta?.(chunk.delta);
         }
         if (chunk.type === 'error') {
           finish({ ok: false, error: chunk.error ?? 'Eroare necunoscută' });

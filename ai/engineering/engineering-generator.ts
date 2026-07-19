@@ -105,6 +105,8 @@ async function runRoboticsCompletion(params: {
   workspaceRoot?: string | null;
   signal?: AbortSignal;
   retryIncomplete?: boolean;
+  onDelta?: (chunk: string) => void;
+  onStreamStart?: (streamId: string) => void;
 }): Promise<
   | { ok: true; text: string; resolvedModel?: string }
   | { ok: false; error: string }
@@ -130,6 +132,8 @@ async function runRoboticsCompletion(params: {
     messages,
     workspaceRoot: params.workspaceRoot,
     signal: params.signal,
+    onDelta: params.onDelta,
+    onStreamStart: params.onStreamStart,
   });
 
   if (streamResult.ok) return { ...streamResult, text: bestText(streamResult) };
@@ -165,8 +169,10 @@ export async function generateEngineering(params: {
   apiKeys: ApiKeys;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
+  onDelta?: (chunk: string) => void;
+  onStreamStart?: (streamId: string) => void;
 }): Promise<GenerateResult> {
-  const { prompt, modelId, apiKeys, workspaceRoot, signal } = params;
+  const { prompt, modelId, apiKeys, workspaceRoot, signal, onDelta, onStreamStart } = params;
 
   if (signal?.aborted) {
     return { ok: false, error: 'Generare anulată.' };
@@ -202,6 +208,8 @@ export async function generateEngineering(params: {
     apiKeys,
     workspaceRoot,
     signal,
+    onDelta,
+    onStreamStart,
   });
 
   if (signal?.aborted) {
@@ -223,6 +231,8 @@ export async function generateEngineering(params: {
       workspaceRoot,
       signal,
       retryIncomplete: true,
+      onDelta,
+      onStreamStart,
     });
 
     if (signal?.aborted) {

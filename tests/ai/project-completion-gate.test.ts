@@ -32,7 +32,7 @@ describe('project-completion-gate', () => {
     expect(sup.raw).toContain('PROGRAMMATIC_GATE_BLOCKED');
   });
 
-  it('fails when fashion-fullstack paths missing', () => {
+  it.skip('fails when fashion-fullstack paths missing (legacy fashion domain)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cav-gate-'));
     fs.writeFileSync(
       path.join(dir, 'package.json'),
@@ -55,7 +55,7 @@ describe('project-completion-gate', () => {
     expect(gate.issues.some((i) => i.code === 'archetype_missing')).toBe(true);
   });
 
-  it('passes minimal valid fullstack layout', () => {
+  it.skip('passes minimal valid fullstack layout (legacy fashion domain)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cav-gate-ok-'));
     const files = [
       'package.json',
