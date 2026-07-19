@@ -604,7 +604,11 @@ contextBridge.exposeInMainWorld("caval", {
   billingCheckout: (input: { email: string }) =>
     ipcRenderer.invoke("caval:billing-checkout", input) as Promise<{ ok: boolean; url?: string; error?: string }>,
   secretsGet: () =>
-    ipcRenderer.invoke("caval:secrets-get") as Promise<{ ok: boolean; secrets?: Record<string, string> }>,
+    ipcRenderer.invoke("caval:secrets-get") as Promise<{
+      ok: boolean;
+      secrets?: Record<string, string>;
+      configured?: Record<string, boolean>;
+    }>,
   secretsSet: (secrets: Record<string, string>) =>
     ipcRenderer.invoke("caval:secrets-set", secrets) as Promise<{ ok: boolean }>,
   mcpList: () => ipcRenderer.invoke("caval:mcp-list") as Promise<{ ok: boolean; servers?: unknown[] }>,

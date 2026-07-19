@@ -94,23 +94,23 @@ function abortSubmit(): void {
 }
 
 async function loadCadCredentials(): Promise<{
-  openRouterApiKey?: string;
-  meshApiKey?: string;
+  openRouterConfigured: boolean;
+  meshConfigured: boolean;
   cadApiUrl?: string;
 }> {
   const caval = window.caval;
   const [settingsResult, secretsResult] = await Promise.all([
     caval.settingsLoad?.() ?? Promise.resolve({ ok: true, settings: {} }),
-    caval.secretsGet?.() ?? Promise.resolve({ ok: true, secrets: {} }),
+    caval.secretsGet?.() ?? Promise.resolve({ ok: true, secrets: {}, configured: {} }),
   ]);
   const settings = (settingsResult?.settings ?? {}) as Record<string, string>;
-  const secrets = (secretsResult?.secrets ?? {}) as Record<string, string>;
+  const configured = (secretsResult?.configured ?? {}) as Record<string, boolean>;
   return {
-    openRouterApiKey:
-      settings['openrouter.apiKey'] ||
-      settings['openRouter.apiKey'] ||
-      secrets.OPENROUTER_API_KEY,
-    meshApiKey: settings['mesh.apiKey'] || secrets.MESHY_API_KEY,
+    openRouterConfigured:
+      configured.OPENROUTER_API_KEY === true ||
+      settings['openrouter.configured'] === 'true',
+    meshConfigured:
+      configured.MESHY_API_KEY === true || settings['mesh.configured'] === 'true',
     cadApiUrl: settings['cad.apiUrl'],
   };
 }
@@ -402,6 +402,9 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   },
 
   createCadJob: async (plan: CadJobPlan) => {
+    if (get().cadBusy) {
+      return;
+    }
     const caval = window.caval;
     const cad = caval?.cad;
     if (!cad?.createJob || typeof cad.plan !== 'function') {
@@ -492,8 +495,6 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       planResult = await cad.plan({
         messages: planMessages,
         latestUserText: technicalPrompt,
-        openRouterApiKey: credentials.openRouterApiKey,
-        meshApiKey: credentials.meshApiKey,
         previousMeshTaskId: plan.previousMeshTaskId,
       });
     } catch (err) {
@@ -524,7 +525,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
     const pipeline = planResult.plan.pipeline;
     const planWarnings = planResult.plan.warnings?.filter(Boolean) ?? [];
-    if (pipeline === 'mesh' && !credentials.meshApiKey) {
+    if (pipeline === 'mesh' && !credentials.meshConfigured) {
       patch({
         phase: 'failed',
         error:
@@ -547,8 +548,6 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           prompt: jobPrompt,
           projectType,
           cavalId: userIdResult?.userId,
-          openRouterApiKey: credentials.openRouterApiKey,
-          meshApiKey: credentials.meshApiKey,
           constraints: mapEngProjectToConstraints(project.spec) as Record<string, string | undefined>,
           planContext: mapEngProjectToPlanContext(project),
           conversationHistory: planMessages,

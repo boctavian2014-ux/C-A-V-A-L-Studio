@@ -54,6 +54,8 @@ import { registerMarketplaceHandlers } from "./marketplace-handlers";
 import { setCavalConfigExtraPaths } from "../../ai/config/caval-config";
 import { setIpcWorkspaceRoot } from "./ipc-handlers";
 import { assertTrustedSender, openSafeExternalUrl, STRIPE_CHECKOUT_HOSTS } from "./ipc-trust";
+import { assertPathInWorkspace } from "./path-security";
+import { sanitizeEnvForTerminal } from "./subprocess-env";
 import { normalizeWorkspaceRoot } from "./path-security";
 import {
   getRendererWebPreferences,
@@ -568,8 +570,25 @@ const installApplicationMenu = (): void => {
 };
 
 ipcMain.handle("caval:save-file", async (event, request: { path?: string; content: string; saveAs?: boolean }) => {
+  assertTrustedSender(event);
   const window = BrowserWindow.fromWebContents(event.sender);
   let targetPath = request.path;
+  const workspaceRoot = workspaceRoots.get(event.sender.id);
+
+  if (targetPath && !request.saveAs) {
+    if (!workspaceRoot?.trim()) {
+      return { canceled: true, error: "No workspace open" };
+    }
+    try {
+      targetPath = assertPathInWorkspace(workspaceRoot, targetPath);
+    } catch (error) {
+      return {
+        canceled: true,
+        error: error instanceof Error ? error.message : "Path outside workspace",
+      };
+    }
+  }
+
   if (!targetPath || request.saveAs) {
     const saveOptions = {
       title: "Save File",
@@ -786,7 +805,7 @@ ipcMain.handle("caval:terminal-start", (event) => {
   const { command, args } = shellCommand();
   const terminal = spawn(command, args, {
     cwd: workspaceRoots.get(id) ?? process.cwd(),
-    env: process.env,
+    env: sanitizeEnvForTerminal(),
     shell: false
   });
 
@@ -1197,6 +1216,36 @@ const SECRET_ENV_KEYS = [
   "SEMGREP_APP_TOKEN",
 ] as const;
 
+/** Never returned to the renderer as plaintext (main/env only). */
+const RENDERER_REDACTED_SECRET_KEYS = new Set([
+  "OPENROUTER_API_KEY",
+  "MESHY_API_KEY",
+  "CAD_API_KEY",
+]);
+
+const buildSecretsConfiguredMap = (
+  stored: Record<string, string>
+): Record<string, boolean> => {
+  const configured: Record<string, boolean> = {};
+  for (const key of SECRET_ENV_KEYS) {
+    configured[key] = Boolean(
+      stored[key]?.trim() || process.env[key]?.trim()
+    );
+  }
+  return configured;
+};
+
+const redactSecretsForRenderer = (
+  stored: Record<string, string>
+): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(stored)) {
+    if (RENDERER_REDACTED_SECRET_KEYS.has(key)) continue;
+    if (value?.trim()) out[key] = value;
+  }
+  return out;
+};
+
 const readApiSecrets = (): Record<string, string> => {
   try {
     if (!fsSync.existsSync(secretsFilePath())) return {};
@@ -1280,12 +1329,7 @@ const applySettingsToEnv = (settings: Record<string, string>): void => {
   if (settings["cad.apiUrl"]?.trim()) {
     process.env.CAD_API_URL = settings["cad.apiUrl"].trim();
   }
-  if (settings["cad.apiKey"]?.trim()) {
-    process.env.CAD_API_KEY = settings["cad.apiKey"].trim();
-  }
-  if (settings["mesh.apiKey"]?.trim()) {
-    process.env.MESHY_API_KEY = settings["mesh.apiKey"].trim();
-  }
+  // Meshy / OpenRouter / CAD keys live only in secrets → applyStoredSecretsToEnv.
   if (settings["caval.cloud.apiKey"]?.trim()) {
     process.env.CAVAL_CLOUD_API_KEY = settings["caval.cloud.apiKey"].trim();
   }
@@ -1314,7 +1358,16 @@ ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) 
     applyStoredSecretsToEnv();
   }
   writePersistedAppSettings(merged);
-  appSettings.set(event.sender.id, merged);
+  const forRenderer = { ...merged };
+  for (const key of SETTINGS_SENSITIVE_KEYS) {
+    delete forRenderer[key];
+  }
+  const secrets = normalizeSecretsMap(readApiSecrets());
+  const configured = buildSecretsConfiguredMap(secrets);
+  forRenderer["openrouter.configured"] = configured.OPENROUTER_API_KEY ? "true" : "false";
+  forRenderer["mesh.configured"] = configured.MESHY_API_KEY ? "true" : "false";
+  forRenderer["cad.configured"] = configured.CAD_API_KEY ? "true" : "false";
+  appSettings.set(event.sender.id, forRenderer);
   applySettingsToEnv(merged);
   return { ok: true };
 });
@@ -1322,13 +1375,15 @@ ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) 
 ipcMain.handle("caval:settings-load", (event) => {
   persistedAppSettings = readPersistedAppSettings();
   const secrets = normalizeSecretsMap(readApiSecrets());
+  const configured = buildSecretsConfiguredMap(secrets);
   const settings = { ...persistedAppSettings };
-  if (secrets.OPENROUTER_API_KEY && !settings["openrouter.apiKey"]) {
-    settings["openrouter.apiKey"] = secrets.OPENROUTER_API_KEY;
-  }
-  if (secrets.MESHY_API_KEY && !settings["mesh.apiKey"]) {
-    settings["mesh.apiKey"] = secrets.MESHY_API_KEY;
-  }
+  // Never inject API key values — only configured flags for the renderer.
+  delete settings["openrouter.apiKey"];
+  delete settings["mesh.apiKey"];
+  delete settings["cad.apiKey"];
+  settings["openrouter.configured"] = configured.OPENROUTER_API_KEY ? "true" : "false";
+  settings["mesh.configured"] = configured.MESHY_API_KEY ? "true" : "false";
+  settings["cad.configured"] = configured.CAD_API_KEY ? "true" : "false";
   applyCadCloudEnvDefaults();
   if (!settings["cad.apiUrl"] && process.env.CAD_API_URL) {
     settings["cad.apiUrl"] = process.env.CAD_API_URL;
@@ -1428,7 +1483,14 @@ ipcMain.handle("caval:secrets-get", (event) => {
   if (process.env.MESHY_API_KEY && !merged.MESHY_API_KEY) {
     merged.MESHY_API_KEY = process.env.MESHY_API_KEY;
   }
-  return { ok: true, secrets: merged };
+  if (process.env.CAD_API_KEY && !merged.CAD_API_KEY) {
+    merged.CAD_API_KEY = process.env.CAD_API_KEY;
+  }
+  return {
+    ok: true,
+    secrets: redactSecretsForRenderer(merged),
+    configured: buildSecretsConfiguredMap(merged),
+  };
 });
 
 ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => {

@@ -364,10 +364,19 @@ function SectionCadCloud() {
       ]);
       const s = settingsRes?.settings ?? {};
       setApiUrl(s['cad.apiUrl'] ?? '');
-      setApiKey(s['cad.apiKey'] ?? '');
+      setApiKey(''); // write-only; never reload plaintext CAD key into renderer
       const secrets = normalizeSecretsMap(secretsRes?.secrets ?? {});
-      setMeshyOk(Boolean(secrets.MESHY_API_KEY?.trim()));
-      setOpenRouterOk(Boolean(secrets.OPENROUTER_API_KEY?.trim()));
+      const configured = secretsRes?.configured ?? {};
+      setMeshyOk(
+        Boolean(configured.MESHY_API_KEY) ||
+          s['mesh.configured'] === 'true' ||
+          Boolean(secrets.MESHY_API_KEY?.trim())
+      );
+      setOpenRouterOk(
+        Boolean(configured.OPENROUTER_API_KEY) ||
+          s['openrouter.configured'] === 'true' ||
+          Boolean(secrets.OPENROUTER_API_KEY?.trim())
+      );
       const mode = await window.caval.cad?.isCloudOnly?.();
       if (mode?.cloudOnly !== undefined) setCloudOnly(mode.cloudOnly);
     })();

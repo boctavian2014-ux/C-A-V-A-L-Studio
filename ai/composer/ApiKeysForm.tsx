@@ -95,14 +95,20 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
       window.caval.secretsGet?.(),
     ]).then(([settingsRes, secretsRes]) => {
       const secrets = normalizeSecretsMap(secretsRes?.secrets ?? {});
-      setOpenRouterDraft(secrets.OPENROUTER_API_KEY ?? '');
-      setOpenRouterSaved(Boolean(secrets.OPENROUTER_API_KEY?.trim()));
+      const configured = secretsRes?.configured ?? {};
+      setOpenRouterDraft('');
+      setOpenRouterSaved(
+        Boolean(configured.OPENROUTER_API_KEY) || Boolean(secrets.OPENROUTER_API_KEY?.trim())
+      );
       setOllamaUrlDraft(settingsRes?.settings?.[OLLAMA_URL_SETTING] ?? 'http://localhost:11434');
       const providerInitial: Record<string, string> = {};
       const saved: Record<string, boolean> = {};
       for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
-        providerInitial[secretKey] = secrets[secretKey] ?? '';
-        saved[secretKey] = Boolean(secrets[secretKey]?.trim());
+        const redacted =
+          secretKey === 'OPENROUTER_API_KEY' || secretKey === 'MESHY_API_KEY';
+        providerInitial[secretKey] = redacted ? '' : (secrets[secretKey] ?? '');
+        saved[secretKey] =
+          Boolean(configured[secretKey]) || Boolean(secrets[secretKey]?.trim());
       }
       setProviderDraft(providerInitial);
       setProviderSaved(saved);
@@ -129,10 +135,14 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     await window.caval.secretsSet?.(patch);
     const res = await window.caval.secretsGet?.();
     const secrets = normalizeSecretsMap(res?.secrets ?? {});
-    setOpenRouterSaved(Boolean(secrets.OPENROUTER_API_KEY?.trim()));
+    const configured = res?.configured ?? {};
+    setOpenRouterSaved(
+      Boolean(configured.OPENROUTER_API_KEY) || Boolean(secrets.OPENROUTER_API_KEY?.trim())
+    );
     const saved: Record<string, boolean> = {};
     for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
-      saved[secretKey] = Boolean(secrets[secretKey]?.trim());
+      saved[secretKey] =
+        Boolean(configured[secretKey]) || Boolean(secrets[secretKey]?.trim());
     }
     setProviderSaved(saved);
   };

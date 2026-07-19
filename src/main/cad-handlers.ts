@@ -180,17 +180,27 @@ export const registerCadHandlers = (): void => {
     defaultUrl: DEFAULT_CAD_CLOUD_URL,
   }));
 
+  /** Keys stay in main env — ignore any values the renderer may still send. */
+  const attachMainCadSecrets = <T extends { openRouterApiKey?: string; meshApiKey?: string }>(
+    input: T
+  ): T => ({
+    ...input,
+    openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim() || undefined,
+    meshApiKey: process.env.MESHY_API_KEY?.trim() || undefined,
+  });
+
   ipcMain.handle("cad:plan", async (_event: IpcMainInvokeEvent, input: CadPlanInput) => {
     if (!input?.latestUserText?.trim()) {
       return { ok: false, error: "latestUserText is required" };
     }
     try {
+      const body = attachMainCadSecrets(input);
       const { ok, status, json } = await cadFetchJson<{ ok: boolean; plan?: CadPlanResult; error?: string }>(
         "/cad/plan",
         {
           method: "POST",
           cavalId: resolveCavalId(input.cavalId),
-          body: JSON.stringify(input),
+          body: JSON.stringify(body),
         }
       );
       if (!ok) {
@@ -233,10 +243,11 @@ export const registerCadHandlers = (): void => {
     }
     try {
       const cavalId = resolveCavalId(input.cavalId);
+      const secured = attachMainCadSecrets({ ...input, cavalId });
       const { ok, status, json } = await cadFetchJson<CadJobResponse>("/cad/jobs", {
         method: "POST",
         cavalId,
-        body: JSON.stringify({ ...input, cavalId }),
+        body: JSON.stringify(secured),
       });
       if (!ok) {
         return { ok: false, error: json.error ?? `CAD API error (${status})` };

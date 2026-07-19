@@ -77,15 +77,27 @@ export async function resolveSecretsFromClient(): Promise<Record<string, string>
   if (typeof window === 'undefined') return {};
   const w = window as {
     caval?: {
-      secretsGet?: () => Promise<{ secrets?: Record<string, string> }>;
+      secretsGet?: () => Promise<{
+        secrets?: Record<string, string>;
+        configured?: Record<string, boolean>;
+      }>;
     };
   };
   const secretsRes = await w.caval?.secretsGet?.().catch(() => undefined);
-  return { ...(secretsRes?.secrets ?? {}) };
+  const secrets = { ...(secretsRes?.secrets ?? {}) };
+  // Map configured flags to presence markers for readiness checks (never real key material).
+  for (const [key, isSet] of Object.entries(secretsRes?.configured ?? {})) {
+    if (isSet && !secrets[key]?.trim()) {
+      secrets[key] = '__configured__';
+    }
+  }
+  return secrets;
 }
 
 export async function resolveOpenRouterKeyFromClient(): Promise<string | undefined> {
+  // OpenRouter key stays in main — renderer only knows configured state.
   const secrets = await resolveSecretsFromClient();
+  if (secrets.OPENROUTER_API_KEY === '__configured__') return undefined;
   return secrets.OPENROUTER_API_KEY?.trim();
 }
 

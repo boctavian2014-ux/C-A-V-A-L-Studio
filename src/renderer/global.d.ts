@@ -447,7 +447,11 @@ interface CavalBridge {
     error?: string;
   }>;
   billingCheckout?: (input: { email: string }) => Promise<{ ok: boolean; url?: string; error?: string }>;
-  secretsGet?: () => Promise<{ ok: boolean; secrets?: Record<string, string> }>;
+  secretsGet?: () => Promise<{
+    ok: boolean;
+    secrets?: Record<string, string>;
+    configured?: Record<string, boolean>;
+  }>;
   secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean }>;
