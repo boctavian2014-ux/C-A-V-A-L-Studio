@@ -5,7 +5,11 @@
 import { modelProfiles } from "../model-profiles";
 import { MODELS as BYOK_MODELS } from "../multi-model/provider";
 import { sortFeaturedFree, sortFeaturedPaid } from "./featured-models";
-import { fetchOpenRouterCatalog, type OpenRouterCatalogEntry } from "./openrouter-catalog";
+import {
+  fetchOpenRouterCatalog,
+  OPENROUTER_CATALOG_TTL_MS,
+  type OpenRouterCatalogEntry,
+} from "./openrouter-catalog";
 
 export type AutoTierId = "caval-auto/free" | "caval-auto/balanced" | "caval-auto/frontier";
 
@@ -192,7 +196,11 @@ function dedupeById(entries: CatalogEntry[]): CatalogEntry[] {
 let catalogCache: ModelCatalogSnapshot | null = null;
 
 export async function buildModelCatalog(forceRefresh = false): Promise<ModelCatalogSnapshot> {
-  if (!forceRefresh && catalogCache) {
+  if (
+    !forceRefresh &&
+    catalogCache &&
+    Date.now() - catalogCache.fetchedAt < OPENROUTER_CATALOG_TTL_MS
+  ) {
     return catalogCache;
   }
 

@@ -4,7 +4,6 @@ import { useSettingsStore, type SettingsSection } from '../../store/settings-sto
 import { useEditorStore } from '../../store/editor-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
 import { ApiKeysForm } from '../../../../ai/composer/ApiKeysForm';
-import { normalizeSecretsMap } from '../../../../ai/models/api-secrets';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 
 const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
@@ -365,17 +364,12 @@ function SectionCadCloud() {
       const s = settingsRes?.settings ?? {};
       setApiUrl(s['cad.apiUrl'] ?? '');
       setApiKey(''); // write-only; never reload plaintext CAD key into renderer
-      const secrets = normalizeSecretsMap(secretsRes?.secrets ?? {});
       const configured = secretsRes?.configured ?? {};
       setMeshyOk(
-        Boolean(configured.MESHY_API_KEY) ||
-          s['mesh.configured'] === 'true' ||
-          Boolean(secrets.MESHY_API_KEY?.trim())
+        Boolean(configured.MESHY_API_KEY) || s['mesh.configured'] === 'true'
       );
       setOpenRouterOk(
-        Boolean(configured.OPENROUTER_API_KEY) ||
-          s['openrouter.configured'] === 'true' ||
-          Boolean(secrets.OPENROUTER_API_KEY?.trim())
+        Boolean(configured.OPENROUTER_API_KEY) || s['openrouter.configured'] === 'true'
       );
       const mode = await window.caval.cad?.isCloudOnly?.();
       if (mode?.cloudOnly !== undefined) setCloudOnly(mode.cloudOnly);

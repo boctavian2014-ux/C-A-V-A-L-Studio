@@ -3,6 +3,7 @@ import type { ModelSelectionId } from './model-catalog';
 import { getModelProfile } from '../model-profiles';
 import { MODELS, type ApiKeys } from '../multi-model/provider';
 import { providerApiKeyEnv } from './provider-credentials';
+import { BYOK_TO_SECRET } from './api-secrets';
 
 export const BYOK_MODEL_IDS = [
   'claude-opus-4',
@@ -175,6 +176,13 @@ export async function checkModelReadiness(
       return { ready: true, reason: 'Cheie BYOK configurată' };
     }
     const meta = MODELS.find((m) => m.id === modelId);
+    const byokSecretKey =
+      meta?.provider === 'anthropic' || meta?.provider === 'openai' || meta?.provider === 'google'
+        ? BYOK_TO_SECRET[meta.provider]
+        : undefined;
+    if (byokSecretKey && secrets[byokSecretKey]?.trim()) {
+      return { ready: true, reason: 'Cheie BYOK configurată (main)' };
+    }
     return {
       ready: false,
       reason: `Lipsește cheia ${meta?.provider ?? 'provider'}`,

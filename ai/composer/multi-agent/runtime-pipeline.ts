@@ -1102,7 +1102,7 @@ export async function runCavalloMultiAgentPipeline(
       config.enableDevToolsIntegration &&
       finalWrittenFiles.length > 0
     ) {
-      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker');
+      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker.js');
       scheduleBackgroundVerify(sender, {
         workspaceRoot,
         runId,
@@ -1374,7 +1374,7 @@ export async function resumeCavalloMultiAgentPipeline(
       config.enableDevToolsIntegration &&
       writtenFiles.length > 0
     ) {
-      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker');
+      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker.js');
       scheduleBackgroundVerify(_sender, {
         workspaceRoot,
         runId,

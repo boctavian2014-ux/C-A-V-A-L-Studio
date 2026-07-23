@@ -7,7 +7,7 @@ import {
 } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
-import { apiKeysToSecrets, secretsToApiKeys, BYOK_TO_SECRET } from '../models/api-secrets';
+import { apiKeysToSecrets, BYOK_TO_SECRET } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
@@ -326,7 +326,11 @@ interface CavalWindow {
       ok: boolean;
       resolved?: { modelId: string; provider: string; reason: string };
     }>;
-    secretsGet?: () => Promise<{ ok: boolean; secrets?: Record<string, string> }>;
+    secretsGet?: () => Promise<{
+      ok: boolean;
+      secrets?: Record<string, string>;
+      configured?: Record<string, boolean>;
+    }>;
     secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
     workspaceVerify?: (workspaceRoot: string) => Promise<{
       ok: boolean;
@@ -608,7 +612,13 @@ const persistApiKeys = async (apiKeys: ApiKeys, extraPatch?: Record<string, stri
 
 const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
   const result = await getCaval()?.secretsGet?.();
-  return secretsToApiKeys(result?.secrets ?? {});
+  const configured = result?.configured ?? {};
+  // Never hydrate plaintext — only presence markers for readiness / UI badges.
+  return {
+    anthropic: configured.ANTHROPIC_API_KEY ? '__configured__' : undefined,
+    openai: configured.OPENAI_API_KEY ? '__configured__' : undefined,
+    google: configured.GOOGLE_API_KEY ? '__configured__' : undefined,
+  };
 };
 
 /** Load persisted API keys from disk into the AI store (call on app mount). */
@@ -2253,7 +2263,11 @@ export const useAIStore = create<AIStore>()(
         }
         if (state.selectedModel === 'caval-auto/free') {
           void getCaval()?.secretsGet?.().then((res) => {
-            if (hasOpenRouterKey(undefined, res?.secrets)) {
+            const secrets = { ...(res?.secrets ?? {}) };
+            for (const [key, isSet] of Object.entries(res?.configured ?? {})) {
+              if (isSet && !secrets[key]?.trim()) secrets[key] = '__configured__';
+            }
+            if (hasOpenRouterKey(undefined, secrets)) {
               useAIStore.setState({ selectedModel: 'caval-auto/balanced' });
             }
           });

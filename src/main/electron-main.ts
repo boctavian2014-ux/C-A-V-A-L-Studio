@@ -717,7 +717,8 @@ const callOllama = async (request: CavalChatRequest): Promise<CavalChatResponse>
   }, Number(process.env.CAVAL_OLLAMA_TIMEOUT_MS ?? 180_000));
 };
 
-ipcMain.handle("caval:ai-chat", async (_event, request: CavalChatRequest): Promise<CavalChatResponse> => {
+ipcMain.handle("caval:ai-chat", async (event, request: CavalChatRequest): Promise<CavalChatResponse> => {
+  assertTrustedSender(event);
   const errors: string[] = [];
   const profile = getModelProfile(request.model);
 
@@ -796,6 +797,7 @@ const shellCommand = (): { command: string; args: string[] } => {
 };
 
 ipcMain.handle("caval:terminal-start", (event) => {
+  assertTrustedSender(event);
   const id = event.sender.id;
   const existing = terminals.get(id);
   if (existing && !existing.killed) {
@@ -822,6 +824,7 @@ ipcMain.handle("caval:terminal-start", (event) => {
 });
 
 ipcMain.handle("caval:terminal-write", (event, data: string) => {
+  assertTrustedSender(event);
   const terminal = terminals.get(event.sender.id);
   if (!terminal || terminal.killed) {
     return { ok: false, error: "Terminal is not running." };
@@ -831,6 +834,7 @@ ipcMain.handle("caval:terminal-write", (event, data: string) => {
 });
 
 ipcMain.handle("caval:terminal-stop", (event) => {
+  assertTrustedSender(event);
   const terminal = terminals.get(event.sender.id);
   if (terminal && !terminal.killed) {
     terminal.kill();
@@ -1166,11 +1170,13 @@ ipcMain.handle("caval:workspace-open", async (event, folderPath: string, options
   return { ok: true, path: folderPath };
 });
 
-ipcMain.handle("workspace:list-recent", () => {
+ipcMain.handle("workspace:list-recent", (event) => {
+  assertTrustedSender(event);
   return { ok: true, entries: listRecentWorkspaces() };
 });
 
-ipcMain.handle("workspace:remove-recent", (_event, folderPath: string) => {
+ipcMain.handle("workspace:remove-recent", (event, folderPath: string) => {
+  assertTrustedSender(event);
   if (!folderPath || typeof folderPath !== "string") {
     return { ok: false, error: "Invalid folder path" };
   }
@@ -1214,13 +1220,15 @@ const SECRET_ENV_KEYS = [
   "POSTGRES_CONNECTION_STRING",
   "GITHUB_PERSONAL_ACCESS_TOKEN",
   "SEMGREP_APP_TOKEN",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "BILLING_API_KEY",
 ] as const;
 
 /** Never returned to the renderer as plaintext (main/env only). */
-const RENDERER_REDACTED_SECRET_KEYS = new Set([
-  "OPENROUTER_API_KEY",
-  "MESHY_API_KEY",
-  "CAD_API_KEY",
+const RENDERER_REDACTED_SECRET_KEYS = new Set<string>([
+  ...SECRET_ENV_KEYS,
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "BILLING_API_KEY",
 ]);
 
 const buildSecretsConfiguredMap = (
@@ -1235,12 +1243,17 @@ const buildSecretsConfiguredMap = (
   return configured;
 };
 
+/** Strip all secret material — renderer gets only `configured` flags. */
 const redactSecretsForRenderer = (
   stored: Record<string, string>
 ): Record<string, string> => {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(stored)) {
     if (RENDERER_REDACTED_SECRET_KEYS.has(key)) continue;
+    // Also block any *API_KEY / *_TOKEN / SERVICE_ROLE patterns.
+    if (/(_API_KEY|_TOKEN|_SECRET|SERVICE_ROLE|CONNECTION_STRING)$/i.test(key)) {
+      continue;
+    }
     if (value?.trim()) out[key] = value;
   }
   return out;

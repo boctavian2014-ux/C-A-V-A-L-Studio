@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAIStore } from './ai-store';
 import type { ApiKeys } from '../multi-model/provider';
-import { buildSecretsPatch, normalizeSecretsMap, secretsToApiKeys } from '../models/api-secrets';
+import { buildSecretsPatch, apiKeysToSecrets } from '../models/api-secrets';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -87,33 +87,35 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   useEffect(() => {
     const initial: Record<string, string> = {};
     for (const { key } of KEY_FIELDS) {
-      initial[key] = apiKeys[key] ?? '';
+      initial[key] = '';
     }
     setDraft(initial);
     void Promise.all([
       window.caval.settingsLoad?.(),
       window.caval.secretsGet?.(),
     ]).then(([settingsRes, secretsRes]) => {
-      const secrets = normalizeSecretsMap(secretsRes?.secrets ?? {});
       const configured = secretsRes?.configured ?? {};
       setOpenRouterDraft('');
-      setOpenRouterSaved(
-        Boolean(configured.OPENROUTER_API_KEY) || Boolean(secrets.OPENROUTER_API_KEY?.trim())
-      );
+      setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
       setOllamaUrlDraft(settingsRes?.settings?.[OLLAMA_URL_SETTING] ?? 'http://localhost:11434');
       const providerInitial: Record<string, string> = {};
       const saved: Record<string, boolean> = {};
       for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
-        const redacted =
-          secretKey === 'OPENROUTER_API_KEY' || secretKey === 'MESHY_API_KEY';
-        providerInitial[secretKey] = redacted ? '' : (secrets[secretKey] ?? '');
-        saved[secretKey] =
-          Boolean(configured[secretKey]) || Boolean(secrets[secretKey]?.trim());
+        providerInitial[secretKey] = '';
+        saved[secretKey] = Boolean(configured[secretKey]);
       }
       setProviderDraft(providerInitial);
       setProviderSaved(saved);
+      useAIStore.setState({
+        apiKeys: {
+          ...useAIStore.getState().apiKeys,
+          anthropic: configured.ANTHROPIC_API_KEY ? '__configured__' : undefined,
+          openai: configured.OPENAI_API_KEY ? '__configured__' : undefined,
+          google: configured.GOOGLE_API_KEY ? '__configured__' : undefined,
+        },
+      });
     });
-  }, [apiKeys]);
+  }, []);
 
   const buildFullSecretsPatch = (): Record<string, string> => {
     const providerSecrets: Record<string, string> = {};
@@ -132,27 +134,39 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   };
 
   const persistSecretsPatch = async (patch: Record<string, string>) => {
-    await window.caval.secretsSet?.(patch);
+    // Skip empty-string clears for keys the user didn't touch this session (preserve main-side secrets).
+    const filtered: Record<string, string> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value.trim() || value === '') {
+        // Only send explicit empty if user cleared a field they edited — for blur-save of empty on
+        // already-configured providers, omit the key so mergeSecrets won't delete.
+        if (!value.trim()) continue;
+        filtered[key] = value;
+      }
+    }
+    if (Object.keys(filtered).length === 0) return;
+    await window.caval.secretsSet?.(filtered);
     const res = await window.caval.secretsGet?.();
-    const secrets = normalizeSecretsMap(res?.secrets ?? {});
     const configured = res?.configured ?? {};
-    setOpenRouterSaved(
-      Boolean(configured.OPENROUTER_API_KEY) || Boolean(secrets.OPENROUTER_API_KEY?.trim())
-    );
+    setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
     const saved: Record<string, boolean> = {};
     for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
-      saved[secretKey] =
-        Boolean(configured[secretKey]) || Boolean(secrets[secretKey]?.trim());
+      saved[secretKey] = Boolean(configured[secretKey]);
     }
     setProviderSaved(saved);
   };
 
   const handleSave = (key: keyof ApiKeys) => {
-    setApiKey(key, draft[key] ?? '');
+    const value = draft[key] ?? '';
+    if (!value.trim()) return; // don't wipe main-side secret on empty blur
+    setApiKey(key, value);
+    void persistSecretsPatch(apiKeysToSecrets({ [key]: value } as ApiKeys));
   };
 
   const saveOpenRouter = async (value: string) => {
+    if (!value.trim()) return;
     await persistSecretsPatch({ OPENROUTER_API_KEY: value });
+    setOpenRouterDraft('');
   };
 
   const saveOllamaUrl = async (value: string) => {
@@ -164,7 +178,9 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   };
 
   const saveProviderSecret = async (secretKey: string, value: string) => {
+    if (!value.trim()) return;
     await persistSecretsPatch({ [secretKey]: value });
+    setProviderDraft((d) => ({ ...d, [secretKey]: '' }));
   };
 
   const runHealthCheck = async () => {
@@ -185,7 +201,21 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   const handleSaveAll = async () => {
     await persistSecretsPatch(buildFullSecretsPatch());
     const res = await window.caval.secretsGet?.();
-    useAIStore.setState({ apiKeys: secretsToApiKeys(normalizeSecretsMap(res?.secrets ?? {})) });
+    const configured = res?.configured ?? {};
+    useAIStore.setState({
+      apiKeys: {
+        anthropic: draft.anthropic.trim() || (configured.ANTHROPIC_API_KEY ? '__configured__' : undefined),
+        openai: draft.openai.trim() || (configured.OPENAI_API_KEY ? '__configured__' : undefined),
+        google: draft.google.trim() || (configured.GOOGLE_API_KEY ? '__configured__' : undefined),
+      },
+    });
+    setDraft({ anthropic: '', openai: '', google: '' });
+    setOpenRouterDraft('');
+    setProviderDraft((prev) => {
+      const cleared: Record<string, string> = {};
+      for (const k of Object.keys(prev)) cleared[k] = '';
+      return cleared;
+    });
     await saveOllamaUrl(ollamaUrlDraft);
     onSaved?.();
   };
@@ -255,7 +285,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
 
       {KEY_FIELDS.map(({ key, label, placeholder, hint }) => {
         const value = draft[key] ?? '';
-        const isSet = Boolean(apiKeys[key]);
+        const isSet = Boolean(apiKeys[key]?.trim());
         return (
           <div key={key}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>

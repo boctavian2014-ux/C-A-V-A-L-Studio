@@ -18,6 +18,28 @@ interface RecentEntry {
   source: 'folder' | 'clone';
 }
 
+function RecentProjectsIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      focusable="false"
+    >
+      <path d="M4 8.5a2 2 0 0 1 2-2h4l1.5 2H18a2 2 0 0 1 2 2v1.4" />
+      <path d="M4 8.5V17a2 2 0 0 0 2 2h5.3" />
+      <circle cx="17" cy="16.5" r="4" />
+      <path d="M17 14.8v1.7l1.3 0.9" />
+    </svg>
+  );
+}
+
 export function WelcomeWorkspacePanel() {
   const { theme } = useCavalTheme();
   const { openWorkspace } = useOpenWorkspace();
@@ -82,6 +104,40 @@ export function WelcomeWorkspacePanel() {
     [loadRecent]
   );
 
+  const setActionHover = useCallback(
+    (el: HTMLElement, active: boolean) => {
+      el.style.color = active ? '#00E0FF' : theme.colors.textMuted;
+      el.style.background = active ? 'rgba(0,224,255,0.08)' : 'rgba(255,255,255,0.03)';
+      el.style.borderColor = active ? 'rgba(0,224,255,0.35)' : 'rgba(255,255,255,0.08)';
+    },
+    [theme.colors.textMuted]
+  );
+
+  const actionButtonStyle: React.CSSProperties = {
+    flex: '1 1 150px',
+    maxWidth: 220,
+    minHeight: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.03)',
+    color: theme.colors.textMuted,
+    cursor: 'pointer',
+    fontSize: 12.5,
+    fontWeight: 600,
+    transition: 'color 0.15s, background 0.15s, border-color 0.15s',
+  };
+
+  const actionLabelStyle: React.CSSProperties = {
+    letterSpacing: '0.02em',
+    textTransform: 'capitalize',
+    whiteSpace: 'nowrap',
+  };
+
   return (
     <div
       style={{
@@ -99,34 +155,52 @@ export function WelcomeWorkspacePanel() {
     >
       <CavaloHorseMark size={88} />
 
-      <div style={{ fontSize: 13, textAlign: 'center', lineHeight: 1.6, maxWidth: 520 }}>
-        <button
-          type="button"
-          aria-label="Clonează de pe GitHub"
-          disabled={cloning}
-          onClick={revealCloneInput}
+      <div style={{ fontSize: 13, textAlign: 'center', lineHeight: 1.6, maxWidth: 520, width: '100%' }}>
+        <div
           style={{
             display: 'flex',
-            alignItems: 'center',
+            flexWrap: 'wrap',
+            alignItems: 'stretch',
             justifyContent: 'center',
-            margin: '0 auto 12px',
-            background: 'transparent',
-            border: 'none',
-            cursor: cloning ? 'wait' : 'pointer',
-            padding: 8,
-            borderRadius: 12,
-            color: theme.colors.textMuted,
-            transition: 'color 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#00E0FF';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = theme.colors.textMuted;
+            gap: 16,
+            maxWidth: 460,
+            margin: '0 auto',
           }}
         >
-          <GitHubMark size={36} />
-        </button>
+          <button
+            type="button"
+            aria-expanded={showRecentList}
+            aria-label={WELCOME_RECENT_PROJECTS_LABEL}
+            onClick={() => setShowRecentList((current) => toggleWelcomeRecentList(current))}
+            style={{ ...actionButtonStyle, marginRight: 'auto' }}
+            onMouseEnter={(e) => setActionHover(e.currentTarget, true)}
+            onMouseLeave={(e) => setActionHover(e.currentTarget, false)}
+            onFocus={(e) => setActionHover(e.currentTarget, true)}
+            onBlur={(e) => setActionHover(e.currentTarget, false)}
+          >
+            <RecentProjectsIcon size={20} />
+            <span style={actionLabelStyle}>{WELCOME_RECENT_PROJECTS_LABEL}</span>
+          </button>
+          <button
+            type="button"
+            aria-label="Clonează de pe GitHub"
+            aria-expanded={showCloneInput}
+            disabled={cloning}
+            onClick={revealCloneInput}
+            style={{
+              ...actionButtonStyle,
+              marginLeft: 'auto',
+              cursor: cloning ? 'wait' : 'pointer',
+            }}
+            onMouseEnter={(e) => setActionHover(e.currentTarget, true)}
+            onMouseLeave={(e) => setActionHover(e.currentTarget, false)}
+            onFocus={(e) => setActionHover(e.currentTarget, true)}
+            onBlur={(e) => setActionHover(e.currentTarget, false)}
+          >
+            <GitHubMark size={26} />
+            <span style={actionLabelStyle}>GitHub</span>
+          </button>
+        </div>
 
         {showCloneInput && (
           <input
@@ -154,7 +228,7 @@ export function WelcomeWorkspacePanel() {
             style={{
               width: '100%',
               maxWidth: 340,
-              margin: '0 auto 8px',
+              margin: '12px auto 8px',
               display: 'block',
               padding: '8px 12px',
               borderRadius: 8,
@@ -168,97 +242,94 @@ export function WelcomeWorkspacePanel() {
         )}
 
         {error && (
-          <div style={{ color: '#f87171', fontSize: 12, marginBottom: 8 }}>{error}</div>
+          <div style={{ color: '#f87171', fontSize: 12, marginTop: 8, marginBottom: 8 }}>{error}</div>
         )}
 
         {cloning && (
-          <div style={{ fontSize: 12, color: '#00E0FF', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: '#00E0FF', marginTop: 8, marginBottom: 8 }}>
             Se clonează repository-ul…
           </div>
         )}
 
-        <div style={{ marginTop: 12, textAlign: 'left', width: '100%', maxWidth: 420 }}>
-          <button
-            type="button"
-            aria-expanded={showRecentList}
-            onClick={() => setShowRecentList((current) => toggleWelcomeRecentList(current))}
+        {showRecentList && (
+          <div
             style={{
-              display: 'block',
+              marginTop: 14,
+              textAlign: 'left',
               width: '100%',
-              fontSize: 11,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'rgba(245,247,250,0.55)',
-              marginBottom: 8,
-              textAlign: 'center',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px 8px',
+              maxWidth: 420,
+              marginLeft: 'auto',
+              marginRight: 'auto',
             }}
           >
-            {WELCOME_RECENT_PROJECTS_LABEL}
-          </button>
-          {showRecentList && recent.length === 0 && (
-            <p style={{ fontSize: 12, textAlign: 'center', color: theme.colors.textMuted, margin: '0 0 8px' }}>
-              {WELCOME_NO_RECENT_PROJECTS}
-            </p>
-          )}
-          {showRecentList && recent.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {recent.map((entry) => (
-                <div
-                  key={entry.path}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => void openWorkspace(entry.path, entry.source)}
+            {recent.length === 0 && (
+              <p
+                style={{
+                  fontSize: 12,
+                  textAlign: 'center',
+                  color: theme.colors.textMuted,
+                  margin: '0 0 8px',
+                }}
+              >
+                {WELCOME_NO_RECENT_PROJECTS}
+              </p>
+            )}
+            {recent.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {recent.map((entry) => (
+                  <div
+                    key={entry.path}
                     style={{
-                      flex: 1,
-                      textAlign: 'left',
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#F5F7FA',
-                      cursor: 'pointer',
-                      padding: 0,
-                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.06)',
                     }}
                   >
-                    <div style={{ fontWeight: 600 }}>{entry.name}</div>
-                    <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                      {entry.path}
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Elimină din recente"
-                    onClick={() => void handleRemoveRecent(entry.path)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: theme.colors.textMuted,
-                      cursor: 'pointer',
-                      fontSize: 16,
-                      lineHeight: 1,
-                      padding: '0 4px',
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <button
+                      type="button"
+                      onClick={() => void openWorkspace(entry.path, entry.source)}
+                      style={{
+                        flex: 1,
+                        textAlign: 'left',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#F5F7FA',
+                        cursor: 'pointer',
+                        padding: 0,
+                        fontSize: 13,
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{entry.name}</div>
+                      <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
+                        {entry.path}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Elimină din recente"
+                      onClick={() => void handleRemoveRecent(entry.path)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: theme.colors.textMuted,
+                        cursor: 'pointer',
+                        fontSize: 16,
+                        lineHeight: 1,
+                        padding: '0 4px',
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

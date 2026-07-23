@@ -250,13 +250,17 @@ describe('arena-wait contextual messages', () => {
   });
 
   it('picker with context can surface project name', () => {
-    const picker = createWaitMessagePicker('compose', {
-      project: 'caval-shop',
-      file: 'Cart.tsx',
-    });
-    const samples = new Set<string>();
-    for (let i = 0; i < 12; i++) samples.add(picker.next());
-    expect([...samples].some((m) => m.includes('caval-shop'))).toBe(true);
+    const ctx = { project: 'caval-shop', file: 'Cart.tsx' };
+    const pool = buildContextualPool('compose', ctx);
+    const withProject = pool.filter((m) => m.includes('caval-shop'));
+    expect(withProject.length).toBeGreaterThan(0);
+
+    const picker = createWaitMessagePicker('compose', ctx);
+    // Contextual templates are prepended before generics — first bag entries include project.
+    const firstBatch = Array.from({ length: Math.max(withProject.length, 8) }, () =>
+      picker.next()
+    );
+    expect(firstBatch.some((m) => m.includes('caval-shop'))).toBe(true);
   });
 
   it('buildWaitSceneContext maps steps and modules', () => {

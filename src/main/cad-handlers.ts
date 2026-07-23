@@ -8,6 +8,7 @@ import {
 } from "./cad-config";
 import { ensureCadLocalServer, localCadUrl } from "./cad-local-server";
 import { tryInstallOpenScad } from "../../engineering/cad-server/openscad-install";
+import { assertTrustedSender } from "./ipc-trust";
 
 let resolvedBaseUrl: string | null = null;
 
@@ -174,7 +175,17 @@ const mapFetchError = async (error: unknown): Promise<{ ok: false; error: string
 };
 
 export const registerCadHandlers = (): void => {
-  ipcMain.handle("cad:isCloudOnly", () => ({
+  const handle = (
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
+  ) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      assertTrustedSender(event);
+      return listener(event, ...args);
+    });
+  };
+
+  handle("cad:isCloudOnly", () => ({
     ok: true,
     cloudOnly: isCadCloudOnly(),
     defaultUrl: DEFAULT_CAD_CLOUD_URL,
@@ -189,17 +200,18 @@ export const registerCadHandlers = (): void => {
     meshApiKey: process.env.MESHY_API_KEY?.trim() || undefined,
   });
 
-  ipcMain.handle("cad:plan", async (_event: IpcMainInvokeEvent, input: CadPlanInput) => {
-    if (!input?.latestUserText?.trim()) {
+  handle("cad:plan", async (_event, input: unknown) => {
+    const bodyInput = input as CadPlanInput;
+    if (!bodyInput?.latestUserText?.trim()) {
       return { ok: false, error: "latestUserText is required" };
     }
     try {
-      const body = attachMainCadSecrets(input);
+      const body = attachMainCadSecrets(bodyInput);
       const { ok, status, json } = await cadFetchJson<{ ok: boolean; plan?: CadPlanResult; error?: string }>(
         "/cad/plan",
         {
           method: "POST",
-          cavalId: resolveCavalId(input.cavalId),
+          cavalId: resolveCavalId(bodyInput.cavalId),
           body: JSON.stringify(body),
         }
       );
@@ -212,7 +224,7 @@ export const registerCadHandlers = (): void => {
     }
   });
 
-  ipcMain.handle("cad:health", async () => {
+  handle("cad:health", async () => {
     try {
       const base = await resolveCadBaseUrl();
       const ok = await probeHealth(base, 5_000);
@@ -237,13 +249,14 @@ export const registerCadHandlers = (): void => {
     }
   });
 
-  ipcMain.handle("cad:createJob", async (_event: IpcMainInvokeEvent, input: CadCreateJobInput) => {
-    if (!input?.prompt?.trim()) {
+  handle("cad:createJob", async (_event, input: unknown) => {
+    const jobInput = input as CadCreateJobInput;
+    if (!jobInput?.prompt?.trim()) {
       return { ok: false, error: "prompt is required" } satisfies CadJobResponse;
     }
     try {
-      const cavalId = resolveCavalId(input.cavalId);
-      const secured = attachMainCadSecrets({ ...input, cavalId });
+      const cavalId = resolveCavalId(jobInput.cavalId);
+      const secured = attachMainCadSecrets({ ...jobInput, cavalId });
       const { ok, status, json } = await cadFetchJson<CadJobResponse>("/cad/jobs", {
         method: "POST",
         cavalId,
@@ -258,11 +271,12 @@ export const registerCadHandlers = (): void => {
     }
   });
 
-  ipcMain.handle(
+  handle(
     "cad:getJob",
-    async (_event: IpcMainInvokeEvent, input: string | { jobId: string; cavalId?: string }) => {
-      const jobId = typeof input === "string" ? input : input?.jobId;
-      const cavalId = typeof input === "string" ? undefined : input?.cavalId;
+    async (_event, input: unknown) => {
+      const payload = input as string | { jobId: string; cavalId?: string };
+      const jobId = typeof payload === "string" ? payload : payload?.jobId;
+      const cavalId = typeof payload === "string" ? undefined : payload?.cavalId;
       if (!jobId) return { ok: false, error: "jobId is required" } satisfies CadJobResponse;
       try {
         const { ok, status, json } = await cadFetchJson<CadJobResponse>(
@@ -279,16 +293,17 @@ export const registerCadHandlers = (): void => {
     }
   );
 
-  ipcMain.handle(
+  handle(
     "cad:cancelJob",
-    async (_event: IpcMainInvokeEvent, input: { jobId: string; cavalId?: string }) => {
-      if (!input?.jobId) return { ok: false, error: "jobId is required" };
+    async (_event, input: unknown) => {
+      const payload = input as { jobId: string; cavalId?: string };
+      if (!payload?.jobId) return { ok: false, error: "jobId is required" };
       try {
         const { ok, status, json } = await cadFetchJson<CadJobResponse>(
-          `/cad/jobs/${encodeURIComponent(input.jobId)}`,
+          `/cad/jobs/${encodeURIComponent(payload.jobId)}`,
           {
             method: "DELETE",
-            cavalId: resolveCavalId(input.cavalId),
+            cavalId: resolveCavalId(payload.cavalId),
           }
         );
         if (!ok) {
@@ -301,14 +316,15 @@ export const registerCadHandlers = (): void => {
     }
   );
 
-  ipcMain.handle(
+  handle(
     "cad:getJobLogs",
-    async (_event: IpcMainInvokeEvent, input: { jobId: string; cavalId?: string }) => {
-      if (!input?.jobId) return { ok: false, error: "jobId is required" };
+    async (_event, input: unknown) => {
+      const payload = input as { jobId: string; cavalId?: string };
+      if (!payload?.jobId) return { ok: false, error: "jobId is required" };
       try {
         const { ok, status, json } = await cadFetchJson<CadJobResponse>(
-          `/cad/jobs/${encodeURIComponent(input.jobId)}/logs`,
-          { method: "GET", cavalId: resolveCavalId(input.cavalId) }
+          `/cad/jobs/${encodeURIComponent(payload.jobId)}/logs`,
+          { method: "GET", cavalId: resolveCavalId(payload.cavalId) }
         );
         if (!ok) {
           return { ok: false, error: json.error ?? `CAD logs error (${status})` };
@@ -320,22 +336,23 @@ export const registerCadHandlers = (): void => {
     }
   );
 
-  ipcMain.handle(
+  handle(
     "cad:downloadStl",
-    async (event, input: { url: string; defaultName?: string }) => {
-      if (!input?.url) return { ok: false, error: "url is required" };
+    async (event, input: unknown) => {
+      const payload = input as { url: string; defaultName?: string };
+      if (!payload?.url) return { ok: false, error: "url is required" };
       try {
-        const res = await fetch(input.url);
+        const res = await fetch(payload.url);
         if (!res.ok) return { ok: false, error: `Download failed (${res.status})` };
         const buffer = Buffer.from(await res.arrayBuffer());
         const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
         const saveResult = window
           ? await dialog.showSaveDialog(window, {
-              defaultPath: input.defaultName ?? "model.stl",
+              defaultPath: payload.defaultName ?? "model.stl",
               filters: [{ name: "STL", extensions: ["stl"] }],
             })
           : await dialog.showSaveDialog({
-              defaultPath: input.defaultName ?? "model.stl",
+              defaultPath: payload.defaultName ?? "model.stl",
               filters: [{ name: "STL", extensions: ["stl"] }],
             });
         if (saveResult.canceled || !saveResult.filePath) {
@@ -352,19 +369,20 @@ export const registerCadHandlers = (): void => {
     }
   );
 
-  ipcMain.handle(
+  handle(
     "cad:downloadScad",
-    async (event, input: { content: string; defaultName?: string }) => {
-      if (!input?.content?.trim()) return { ok: false, error: "content is required" };
+    async (event, input: unknown) => {
+      const payload = input as { content: string; defaultName?: string };
+      if (!payload?.content?.trim()) return { ok: false, error: "content is required" };
       try {
         const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
         const saveResult = window
           ? await dialog.showSaveDialog(window, {
-              defaultPath: input.defaultName ?? "model.scad",
+              defaultPath: payload.defaultName ?? "model.scad",
               filters: [{ name: "OpenSCAD", extensions: ["scad"] }],
             })
           : await dialog.showSaveDialog({
-              defaultPath: input.defaultName ?? "model.scad",
+              defaultPath: payload.defaultName ?? "model.scad",
               filters: [{ name: "OpenSCAD", extensions: ["scad"] }],
             });
         if (saveResult.canceled || !saveResult.filePath) {
@@ -373,7 +391,7 @@ export const registerCadHandlers = (): void => {
         const target = saveResult.filePath.endsWith(".scad")
           ? saveResult.filePath
           : `${saveResult.filePath}.scad`;
-        await fs.writeFile(target, input.content, "utf8");
+        await fs.writeFile(target, payload.content, "utf8");
         return { ok: true, path: path.normalize(target) };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -381,7 +399,7 @@ export const registerCadHandlers = (): void => {
     }
   );
 
-  ipcMain.handle("cad:installOpenScad", async () => {
+  handle("cad:installOpenScad", async () => {
     if (isCadCloudOnly()) {
       return {
         ok: false,

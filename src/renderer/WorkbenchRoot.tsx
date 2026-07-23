@@ -3,7 +3,7 @@ import { CavalThemeProvider } from '../../themes/theme-provider';
 import { FileTree } from './components/sidebar/FileTree';
 import { TabBar } from './components/editor/TabBar';
 const MonacoEditor = lazy(() =>
-  import('./components/editor/MonacoEditor').then((m) => ({ default: m.MonacoEditor }))
+  import('./components/editor/MonacoEditor.js').then((m) => ({ default: m.MonacoEditor }))
 );
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { useEditorStore } from './store/editor-store';

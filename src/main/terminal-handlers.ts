@@ -1,8 +1,9 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import fs from 'node:fs';
 import * as pty from 'node-pty';
 import * as os from 'os';
 import { sanitizeEnvForTerminal } from './subprocess-env';
+import { assertTrustedSender } from './ipc-trust';
 
 // Map de sesiuni terminal active
 const sessions = new Map<string, pty.IPty>();
@@ -20,6 +21,7 @@ function resolveTerminalCwd(cwd?: string): string {
 }
 
 ipcMain.handle('terminal:create', async (event, id: string, options?: { cwd?: string }) => {
+  assertTrustedSender(event);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return { ok: false, error: 'No window' };
 
@@ -39,14 +41,16 @@ ipcMain.handle('terminal:create', async (event, id: string, options?: { cwd?: st
   return { ok: true };
 });
 
-ipcMain.handle('terminal:write', async (_event, id: string, data: string) => {
+ipcMain.handle('terminal:write', async (event, id: string, data: string) => {
+  assertTrustedSender(event);
   const session = sessions.get(id);
   if (!session) return { ok: false, error: 'Session not found' };
   session.write(data);
   return { ok: true };
 });
 
-ipcMain.handle('terminal:resize', async (_event, id: string, cols: number, rows: number) => {
+ipcMain.handle('terminal:resize', async (event, id: string, cols: number, rows: number) => {
+  assertTrustedSender(event);
   const session = sessions.get(id);
   if (!session) return { ok: false };
   const safeCols = Math.floor(cols);
@@ -56,7 +60,8 @@ ipcMain.handle('terminal:resize', async (_event, id: string, cols: number, rows:
   return { ok: true };
 });
 
-ipcMain.handle('terminal:destroy', async (_event, id: string) => {
+ipcMain.handle('terminal:destroy', async (event, id: string) => {
+  assertTrustedSender(event);
   const session = sessions.get(id);
   if (session) {
     session.kill();

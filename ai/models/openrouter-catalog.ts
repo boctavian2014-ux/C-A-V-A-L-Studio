@@ -26,7 +26,8 @@ export interface OpenRouterCatalogEntry {
   color: string;
 }
 
-const CACHE_TTL_MS = 60 * 60 * 1000;
+/** Shared with unified catalog cache — keep in sync with model-catalog TTL checks. */
+export const OPENROUTER_CATALOG_TTL_MS = 60 * 60 * 1000;
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
 let cached: { fetchedAt: number; models: OpenRouterCatalogEntry[] } | null = null;
@@ -74,7 +75,7 @@ function mapEntry(model: OpenRouterModel): OpenRouterCatalogEntry {
 }
 
 export async function fetchOpenRouterCatalog(force = false): Promise<OpenRouterCatalogEntry[]> {
-  if (!force && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+  if (!force && cached && Date.now() - cached.fetchedAt < OPENROUTER_CATALOG_TTL_MS) {
     return cached.models;
   }
 

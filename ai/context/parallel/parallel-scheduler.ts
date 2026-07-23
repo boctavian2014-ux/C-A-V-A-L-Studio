@@ -33,7 +33,7 @@ export class ParallelScheduler {
 
   constructor(
     workerCount = Math.min(8, Math.max(4, Math.ceil((globalThis.navigator?.hardwareConcurrency ?? 4) / 2))),
-    private readonly workerPath = path.join(__dirname, "context-parallel-worker.js")
+    private readonly workerPath = path.join(__dirname, "parallel-worker.js")
   ) {
     for (let index = 0; index < workerCount; index += 1) {
       this.workers.push(this.createWorker(index));

@@ -31,6 +31,22 @@ vi.mock("electron", () => ({
   ipcMain: harness.ipcMain,
 }));
 
+/** Avoid spawning real context/preload workers (missing .js next to .ts in vitest). */
+vi.mock("node:worker_threads", () => {
+  const { EventEmitter } = require("node:events") as typeof import("node:events");
+  class FakeWorker extends EventEmitter {
+    constructor() {
+      super();
+      queueMicrotask(() => this.emit("online"));
+    }
+    postMessage(): void {}
+    terminate(): Promise<number> {
+      return Promise.resolve(0);
+    }
+  }
+  return { Worker: FakeWorker, parentPort: null, workerData: {} };
+});
+
 vi.mock("../../ai/ai-client", () => ({
   AIClient: class {
     stream = aiMocks.stream;
@@ -88,7 +104,7 @@ describe("Electron main IPC integration", () => {
     const { registerPreloadHandlers } = await import("../../src/main/preload-handlers");
     registerModelHandlers();
     registerPreloadHandlers(() => "/tmp/caval-workspace");
-  });
+  }, 30_000);
 
   it("caval:resolve-model returns resolved selection", async () => {
     const result = await harness.invoke<{ ok: boolean; resolved: { modelId: string } }>(

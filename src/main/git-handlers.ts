@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron';
+import { ipcMain, BrowserWindow, dialog, type IpcMainInvokeEvent } from 'electron';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import { applyHunkToContent } from '../shared/diff-utils';
 import { normalizeGithubRepoUrl, repoTargetPath } from './github-clone';
+import { assertTrustedSender } from './ipc-trust';
 
 // ──────────────────────────────────────────────
 //  Git IPC Handlers — CAVALLO Studio
@@ -158,10 +159,19 @@ async function gitShowFile(projectPath: string, rev: string, filePath: string): 
 // ──────────────────────────────────────────────
 
 export function registerGitHandlers() {
+  const handle: typeof ipcMain.handle = ((channel, listener) => {
+    return ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
+      assertTrustedSender(event);
+      return (listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown)(
+        event,
+        ...args
+      );
+    });
+  }) as typeof ipcMain.handle;
 
   // ── git:status ────────────────────────────
   // Returnează branch, ahead/behind, lista fișiere modificate
-  ipcMain.handle('git:status', async (_e, projectPath: string): Promise<GitStatus> => {
+  handle('git:status', async (_e, projectPath: string): Promise<GitStatus> => {
     try {
       // Verifică dacă e repo git
       await execAsync('git rev-parse --git-dir', { cwd: projectPath });
@@ -207,7 +217,7 @@ export function registerGitHandlers() {
   // Returnează diff text pentru un fișier specific
   // staged=true → diff față de HEAD (ce e în index)
   // staged=false → diff față de index (working tree)
-  ipcMain.handle(
+  handle(
     'git:diff',
     async (_e, projectPath: string, filePath: string, staged: boolean): Promise<string> => {
       const flag = staged ? '--staged' : '';
@@ -233,7 +243,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:filePair ──────────────────────────
-  ipcMain.handle(
+  handle(
     'git:filePair',
     async (
       _e,
@@ -272,7 +282,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:revertHunk ────────────────────────
-  ipcMain.handle(
+  handle(
     'git:revertHunk',
     async (
       _e,
@@ -296,7 +306,7 @@ export function registerGitHandlers() {
 
   // ── git:stage ─────────────────────────────
   // Stage un fișier (git add)
-  ipcMain.handle(
+  handle(
     'git:stage',
     async (_e, projectPath: string, filePath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -311,7 +321,7 @@ export function registerGitHandlers() {
 
   // ── git:unstage ───────────────────────────
   // Unstage un fișier (git restore --staged)
-  ipcMain.handle(
+  handle(
     'git:unstage',
     async (_e, projectPath: string, filePath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -332,7 +342,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:stageAll ──────────────────────────
-  ipcMain.handle(
+  handle(
     'git:stageAll',
     async (_e, projectPath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -345,7 +355,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:unstageAll ────────────────────────
-  ipcMain.handle(
+  handle(
     'git:unstageAll',
     async (_e, projectPath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -359,7 +369,7 @@ export function registerGitHandlers() {
 
   // ── git:discard ───────────────────────────
   // Discard modificări working tree pentru un fișier
-  ipcMain.handle(
+  handle(
     'git:discard',
     async (_e, projectPath: string, filePath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -373,7 +383,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:commit ────────────────────────────
-  ipcMain.handle(
+  handle(
     'git:commit',
     async (_e, projectPath: string, message: string): Promise<{ ok: boolean; error?: string; hash?: string }> => {
       if (!message.trim()) return { ok: false, error: 'Mesajul commit-ului este gol.' };
@@ -390,7 +400,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:push ──────────────────────────────
-  ipcMain.handle(
+  handle(
     'git:push',
     async (_e, projectPath: string, setUpstream?: boolean): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -404,7 +414,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:pull ──────────────────────────────
-  ipcMain.handle(
+  handle(
     'git:pull',
     async (_e, projectPath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -418,7 +428,7 @@ export function registerGitHandlers() {
 
   // ── git:log ───────────────────────────────
   // Returnează ultimele N commit-uri
-  ipcMain.handle(
+  handle(
     'git:log',
     async (_e, projectPath: string, limit = 50): Promise<GitCommit[]> => {
       const format = '%H%x1f%s%x1f%an%x1f%aI%x1f%D%x00';
@@ -429,7 +439,7 @@ export function registerGitHandlers() {
 
   // ── git:branches ──────────────────────────
   // Lista de branch-uri locale
-  ipcMain.handle(
+  handle(
     'git:branches',
     async (_e, projectPath: string): Promise<string[]> => {
       const raw = await git(projectPath, 'branch --format=%(refname:short)');
@@ -438,7 +448,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:checkout ──────────────────────────
-  ipcMain.handle(
+  handle(
     'git:checkout',
     async (_e, projectPath: string, branch: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -452,7 +462,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:createBranch ──────────────────────
-  ipcMain.handle(
+  handle(
     'git:createBranch',
     async (_e, projectPath: string, name: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -466,7 +476,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:init ──────────────────────────────
-  ipcMain.handle(
+  handle(
     'git:init',
     async (_e, projectPath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -479,7 +489,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:stash ─────────────────────────────
-  ipcMain.handle(
+  handle(
     'git:stash',
     async (_e, projectPath: string, message?: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -493,7 +503,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:stashPop ──────────────────────────
-  ipcMain.handle(
+  handle(
     'git:stashPop',
     async (_e, projectPath: string): Promise<{ ok: boolean; error?: string }> => {
       try {
@@ -506,7 +516,7 @@ export function registerGitHandlers() {
   );
 
   // ── git:clone ─────────────────────────────
-  ipcMain.handle(
+  handle(
     'git:clone',
     async (
       _e,
