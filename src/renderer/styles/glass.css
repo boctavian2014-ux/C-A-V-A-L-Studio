@@ -1,0 +1,102 @@
+/* Glass / Obsidian tokens — reusable floating surfaces for CAVALLO workbench */
+
+:root {
+  --caval-glass-bg: rgba(13, 14, 20, 0.72);
+  --caval-glass-bg-strong: rgba(22, 24, 35, 0.6);
+  --caval-glass-bg-hover: rgba(30, 33, 48, 0.8);
+  --caval-glass-border: rgba(255, 255, 255, 0.08);
+  --caval-glass-border-hover: rgba(255, 255, 255, 0.18);
+  --caval-glass-blur: 16px;
+  --caval-glass-blur-sm: 12px;
+}
+
+/* Sticlă dark pentru panouri plutitoare */
+.glass-panel {
+  background: var(--caval-glass-bg);
+  backdrop-filter: blur(var(--caval-glass-blur));
+  -webkit-backdrop-filter: blur(var(--caval-glass-blur));
+  border: 1px solid var(--caval-glass-border);
+}
+
+/* Sticlă mai opacă pentru elemente active / hover */
+.glass-panel-interactive {
+  background: var(--caval-glass-bg-strong);
+  backdrop-filter: blur(var(--caval-glass-blur-sm));
+  -webkit-backdrop-filter: blur(var(--caval-glass-blur-sm));
+  border: 1px solid var(--caval-glass-border);
+  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-panel-interactive:hover {
+  background: var(--caval-glass-bg-hover);
+  border-color: var(--caval-glass-border-hover);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* Glow subtil — AI streaming / accent */
+.glow-accent {
+  box-shadow: 0 0 15px rgba(0, 224, 255, 0.25);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+}
+
+/* Robotics markdown / code polish inside glass bubbles */
+.glass-ai-bubble {
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-ai-bubble::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--caval-accent, #00e0ff), #7c3aed);
+  border-radius: 0 2px 2px 0;
+}
+
+.glass-ai-bubble pre,
+.glass-markdown pre,
+.glass-markdown code {
+  background: rgba(8, 10, 14, 0.85) !important;
+  border: 1px solid var(--caval-glass-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  color: #67e8f9;
+  overflow-x: auto;
+}
+
+.glass-stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: text-bottom;
+  background: var(--caval-accent, #00e0ff);
+  animation: glass-cursor-pulse 1s ease-in-out infinite;
+}
+
+@keyframes glass-cursor-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.glass-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+}

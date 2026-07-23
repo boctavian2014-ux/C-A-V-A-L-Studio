@@ -1,5 +1,6 @@
 appId: com.caval.studio
 productName: CAVALLO
+copyright: "Copyright (c) 2026 \"Dev AI\" EOOD. All rights reserved."
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 directories:
   output: release/${channel}
@@ -40,7 +41,7 @@ win:
     - target: msi
       arch:
         - x64
-  publisherName: CAVALLO Studio
+  publisherName: '"Dev AI" EOOD'
   verifyUpdateCodeSignature: true
 nsis:
   oneClick: false

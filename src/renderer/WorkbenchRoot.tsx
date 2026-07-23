@@ -15,7 +15,9 @@ import { CAVAL_OPEN_CODING_CHAT_EVENT } from '../../ai/engineering/engineering-h
 import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
 import { EngineeringCadPreview } from './components/engineering/EngineeringCadPreview';
 import { CadViewer } from './components/engineering/CadViewer';
+import { RoboticsResponseStage } from './components/engineering/RoboticsResponseStage';
 import { useEngineeringCadStore } from './store/engineering-cad-store';
+import { useRoboticsSessionStore } from './store/robotics-session-store';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPanel } from './components/search/SearchPanel';
 import { ExtensionsHub } from './components/extensions/ExtensionsHub';
@@ -157,13 +159,18 @@ function ActivityBar({
   const isSettingsActive = active === 'settings';
 
   return (
-    <div style={{
+    <div
+      className="glass-panel"
+      style={{
       width: ACTIVITY_BAR_WIDTH,
-      background: 'var(--caval-surface)',
-      borderRight: '1px solid var(--caval-border)',
+      borderRight: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
+      borderTop: 'none',
+      borderBottom: 'none',
+      borderLeft: 'none',
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', padding: '10px 0', gap: 4,
       flexShrink: 0,
+      zIndex: 20,
     }}>
       {ITEMS.map((item) => (
         <button
@@ -172,16 +179,18 @@ function ActivityBar({
           onClick={() => onChange(item.id)}
           style={{
             width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-            border: 'none', cursor: 'pointer',
+            border: active === item.id ? '1px solid rgba(0,224,255,0.3)' : 'none',
+            cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: active === item.id ? 'var(--caval-accent-glow)' : 'transparent',
+            background: active === item.id ? 'rgba(255,255,255,0.1)' : 'transparent',
             color: active === item.id ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+            boxShadow: active === item.id ? '0 0 12px rgba(0,224,255,0.15)' : 'none',
             transition: 'all 0.15s',
             position: 'relative',
           }}
           onMouseEnter={(e) => {
             if (active !== item.id) {
-              e.currentTarget.style.background = 'var(--caval-surface-raised)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
               e.currentTarget.style.color = 'var(--caval-text)';
             }
           }}
@@ -197,15 +206,16 @@ function ActivityBar({
           {active === item.id && (
             <span style={{
               position: 'absolute', left: 0, top: 6, bottom: 6,
-              width: 2, borderRadius: '0 2px 2px 0',
+              width: 3, borderRadius: '0 2px 2px 0',
               background: 'var(--caval-accent)',
+              boxShadow: '0 0 8px var(--caval-accent)',
             }} />
           )}
         </button>
       ))}
 
       {/* Separator */}
-      <div style={{ width: 20, height: 1, background: 'var(--caval-border)', margin: '4px 0' }} />
+      <div style={{ width: 20, height: 1, background: 'var(--caval-glass-border, rgba(255,255,255,0.08))', margin: '4px 0' }} />
 
       {/* Buton AI Panel — special, cu glow cyan când activ */}
       <button
@@ -217,15 +227,16 @@ function ActivityBar({
           cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: aiPanelOpen
-            ? 'var(--caval-accent-glow)'
+            ? 'rgba(255,255,255,0.1)'
             : 'transparent',
           color: aiPanelOpen ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+          boxShadow: aiPanelOpen ? '0 0 12px rgba(0,224,255,0.2)' : 'none',
           transition: 'all 0.15s',
           position: 'relative',
         }}
         onMouseEnter={(e) => {
           if (!aiPanelOpen) {
-            e.currentTarget.style.background = 'var(--caval-surface-raised)';
+            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
             e.currentTarget.style.color = 'var(--caval-text)';
           }
         }}
@@ -239,31 +250,30 @@ function ActivityBar({
         <IconSparkle size={ACTIVITY_ICON} />
         {/* Punct indicator glow când AI e activ */}
         {aiPanelOpen && (
-          <span style={{
+          <span className="glow-accent" style={{
             position: 'absolute', top: 3, right: 3,
             width: 5, height: 5, borderRadius: '50%',
             background: 'var(--caval-accent)',
-            boxShadow: '0 0 4px var(--caval-accent)',
           }} />
         )}
       </button>
 
       {/* Bottom icons */}
-      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
         <button
           title="Setări Caval (Ctrl+,)"
           onClick={() => onChange('settings')}
           style={{
             width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
             border: isSettingsActive ? '1px solid var(--caval-accent)' : 'none',
-            background: isSettingsActive ? 'var(--caval-accent-glow)' : 'transparent',
+            background: isSettingsActive ? 'rgba(255,255,255,0.1)' : 'transparent',
             color: isSettingsActive ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
             cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
             transition: 'all 0.15s', position: 'relative',
           }}
           onMouseEnter={(e) => {
             if (!isSettingsActive) {
-              e.currentTarget.style.background = 'var(--caval-surface-raised)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
               e.currentTarget.style.color = 'var(--caval-text)';
             }
           }}
@@ -279,7 +289,7 @@ function ActivityBar({
           {isSettingsActive && (
             <span style={{
               position: 'absolute', left: 0, top: 6, bottom: 6,
-              width: 2, borderRadius: '0 2px 2px 0',
+              width: 3, borderRadius: '0 2px 2px 0',
               background: 'var(--caval-accent)',
             }} />
           )}
@@ -296,6 +306,11 @@ function ActivityBar({
         >
           OB
         </button>
+        <div
+          className="glass-status-dot glow-emerald"
+          title="Railway & MCP"
+          aria-label="Status conexiune"
+        />
       </div>
     </div>
   );
@@ -409,8 +424,12 @@ function StatusItem({ children, ...props }: React.HTMLAttributes<HTMLDivElement>
 
 function RoboticsCadStage() {
   const hasModel = useEngineeringCadStore((s) => Boolean(s.stlUrl));
-  // Cu model → preview complet (titlu + download + viewer). Fără model → placeholder-ul viewer-ului.
+  const hasPlan = useRoboticsSessionStore((s) => Boolean(s.plan && s.project));
+  const loading = useRoboticsSessionStore((s) => s.loading);
+
+  // Cu model STL → preview 3D. Altfel răspunsul Robotics (plan/BOM) în centru.
   if (hasModel) return <EngineeringCadPreview />;
+  if (hasPlan || loading) return <RoboticsResponseStage />;
   return (
     <div style={{
       flex: 1,

@@ -865,23 +865,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     syncTextareaHeight(e.target);
   };
 
-  const QUICK_PROMPTS = [
-    { label: 'Fashion Match', text: 'AI Product Matching Engine (Fashion) — enterprise matching barcode OCR image NFC' },
-    { label: 'Explică', text: 'Explică ce face acest cod' },
-    { label: 'Refactor', text: 'Refactorizează pentru claritate' },
-    { label: 'Teste', text: 'Scrie teste unitare pentru acest fișier' },
-    { label: 'Bug?', text: 'Există bug-uri în acest cod?' },
-  ];
-
-  const handleQuickPrompt = useCallback((text: string) => {
-    setInput(text);
-    setTimeout(() => {
-      const el = textareaRef.current;
-      if (el) syncTextareaHeight(el);
-      el?.focus();
-    }, 50);
-  }, [syncTextareaHeight]);
-
   return (
     <div style={{
       width: panelWidth,
@@ -1018,10 +1001,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         flexShrink: 0,
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        <ChatModeSelect
-          quickPrompts={QUICK_PROMPTS}
-          onQuickPrompt={handleQuickPrompt}
-        />
+        <ChatModeSelect />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {editorSelection?.text && (
             <button

@@ -201,7 +201,7 @@ const handlers: Record<MenuCommandId, Handler> = {
     ctx.setActiveActivity('settings');
     ctx.setSidebarOpen(true);
     useSettingsStore.getState().setActiveSection('about');
-    showWorkbenchToast('Cavallo IDE — CAVALLO Studio');
+    showWorkbenchToast('CAVALLO™ — © "Dev AI" EOOD');
   },
 };
 

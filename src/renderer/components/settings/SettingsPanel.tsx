@@ -5,6 +5,16 @@ import { useEditorStore } from '../../store/editor-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
 import { ApiKeysForm } from '../../../../ai/composer/ApiKeysForm';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
+import {
+  PUBLISHER_ADDRESS_LINES,
+  PUBLISHER_COPYRIGHT_LINE,
+  PUBLISHER_EMAIL,
+  PUBLISHER_LEGAL_NAME,
+  PUBLISHER_LICENSE_SUMMARY,
+  PUBLISHER_REGISTER_NOTE,
+  PUBLISHER_TRADEMARK_LINE,
+  PUBLISHER_UIC,
+} from '../../../shared/publisher-legal';
 
 const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
   {
@@ -527,7 +537,7 @@ function SectionAbout() {
         <CavaloHorseMark size={52} />
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', letterSpacing: '0.06em' }}>
-            CAVALLO
+            CAVALLO™
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginTop: 2 }}>
             Version 0.1.0 · Build 2026.07
@@ -538,6 +548,37 @@ function SectionAbout() {
           OpenRouter multi-model, Robotics CAD și Git integrat.
         </div>
       </div>
+
+      <Section title="Copyright & trademark">
+        <div style={{
+          fontSize: 12, color: 'var(--caval-text)', lineHeight: 1.55,
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div>{PUBLISHER_COPYRIGHT_LINE}</div>
+          <div style={{ color: 'var(--caval-text-muted)' }}>{PUBLISHER_TRADEMARK_LINE}</div>
+          <div style={{ color: 'var(--caval-text-muted)' }}>{PUBLISHER_LICENSE_SUMMARY}</div>
+        </div>
+      </Section>
+
+      <Section title="Publisher">
+        <div style={{
+          fontSize: 12, color: 'var(--caval-text)', lineHeight: 1.55,
+          display: 'flex', flexDirection: 'column', gap: 4,
+        }}>
+          <div style={{ fontWeight: 600 }}>{PUBLISHER_LEGAL_NAME}</div>
+          <div style={{ color: 'var(--caval-text-muted)' }}>UIC {PUBLISHER_UIC}</div>
+          <div style={{ color: 'var(--caval-text-muted)', marginTop: 4 }}>{PUBLISHER_REGISTER_NOTE}</div>
+          {PUBLISHER_ADDRESS_LINES.map((line) => (
+            <div key={line} style={{ color: 'var(--caval-text-muted)' }}>{line}</div>
+          ))}
+          <a
+            href={`mailto:${PUBLISHER_EMAIL}`}
+            style={{ color: 'var(--caval-accent)', marginTop: 6, textDecoration: 'none' }}
+          >
+            {PUBLISHER_EMAIL}
+          </a>
+        </div>
+      </Section>
 
       <Section title="Stack">
         {[

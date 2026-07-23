@@ -23,6 +23,9 @@ import {
   extractScadBlock,
   type ParsedRoboticsPlan,
 } from './robotics-format';
+import { decomposeRoboticsComponents } from './robotics-decompose';
+import { ROBOTICS_STANDARD_CATALOG } from './robotics-standard-catalog';
+import type { RoboticsComponentBom } from './robotics-components-schema';
 
 export interface SpecData {
   title: string;
@@ -74,6 +77,7 @@ export interface GenerateResult {
   ok: boolean;
   project?: EngProject;
   plan?: ParsedRoboticsPlan;
+  bom?: RoboticsComponentBom;
   error?: string;
   warning?: string;
   raw?: string;
@@ -171,8 +175,10 @@ export async function generateEngineering(params: {
   signal?: AbortSignal;
   onDelta?: (chunk: string) => void;
   onStreamStart?: (streamId: string) => void;
+  /** Fired when markdown plan is ready, before BOM decompose (so UI can end loading). */
+  onPlanReady?: (partial: GenerateResult) => void;
 }): Promise<GenerateResult> {
-  const { prompt, modelId, apiKeys, workspaceRoot, signal, onDelta, onStreamStart } = params;
+  const { prompt, modelId, apiKeys, workspaceRoot, signal, onDelta, onStreamStart, onPlanReady } = params;
 
   if (signal?.aborted) {
     return { ok: false, error: 'Generare anulată.' };
@@ -180,13 +186,16 @@ export async function generateEngineering(params: {
 
   if (isCavalloModesTestRequest(prompt)) {
     const plan = parseRoboticsPlan(CAVALLO_MODES_TEST_ROBOTICS_FIXTURE);
-    return {
+    const project = roboticsPlanToEngProject(plan);
+    const partial: GenerateResult = {
       ok: true,
       plan,
-      project: roboticsPlanToEngProject(plan),
+      project,
       raw: CAVALLO_MODES_TEST_ROBOTICS_FIXTURE,
       resolvedModel: 'cavallo-modes-test',
     };
+    onPlanReady?.(partial);
+    return partial;
   }
 
   try {
@@ -262,13 +271,38 @@ export async function generateEngineering(params: {
 
     if (hasUsableContent) {
       const project = roboticsPlanToEngProject(plan);
-      return {
+      const partialWarning = `Plan parțial — lipsesc: ${missing.join(', ')}. Poți regenera sau completa manual în tab-uri.`;
+      onPlanReady?.({
         ok: true,
         project,
         plan,
         raw: result.text,
         resolvedModel: result.resolvedModel,
-        warning: `Plan parțial — lipsesc: ${missing.join(', ')}. Poți regenera sau completa manual în tab-uri.`,
+        warning: partialWarning,
+      });
+      let bom: RoboticsComponentBom | undefined;
+      try {
+        const decomp = await decomposeRoboticsComponents({
+          prompt,
+          planMarkdown: plan.rawMarkdown,
+          modelId,
+          apiKeys,
+          workspaceRoot,
+          signal,
+          catalog: ROBOTICS_STANDARD_CATALOG,
+        });
+        if (decomp.ok) bom = decomp.bom;
+      } catch {
+        /* soft */
+      }
+      return {
+        ok: true,
+        project,
+        plan,
+        bom,
+        raw: result.text,
+        resolvedModel: result.resolvedModel,
+        warning: partialWarning,
       };
     }
 
@@ -286,16 +320,50 @@ export async function generateEngineering(params: {
   // may have silently dropped recommended sections (simulation, collision,
   // animation, etc.). Surface them instead of letting them vanish.
   const missingRecommended = missingRecommendedRoboticsSections(plan);
+  const recommendedWarning =
+    missingRecommended.length > 0
+      ? `Secțiuni recomandate lipsă: ${missingRecommended.join(', ')}. Planul e utilizabil, dar poți regenera pentru acoperire completă.`
+      : undefined;
 
-  return {
+  onPlanReady?.({
     ok: true,
     project,
     plan,
     raw: result.text,
     resolvedModel: result.resolvedModel,
-    warning:
-      missingRecommended.length > 0
-        ? `Secțiuni recomandate lipsă: ${missingRecommended.join(', ')}. Planul e utilizabil, dar poți regenera pentru acoperire completă.`
-        : undefined,
+    warning: recommendedWarning,
+  });
+
+  let bom: RoboticsComponentBom | undefined;
+  let bomWarning: string | undefined;
+  try {
+    const decomp = await decomposeRoboticsComponents({
+      prompt,
+      planMarkdown: plan.rawMarkdown,
+      modelId,
+      apiKeys,
+      workspaceRoot,
+      signal,
+      catalog: ROBOTICS_STANDARD_CATALOG,
+    });
+    if (decomp.ok) {
+      bom = decomp.bom;
+    } else {
+      bomWarning = `Decompose componente: ${decomp.error}`;
+    }
+  } catch (err) {
+    bomWarning = err instanceof Error ? err.message : String(err);
+  }
+
+  const warnings = [recommendedWarning, bomWarning].filter(Boolean);
+
+  return {
+    ok: true,
+    project,
+    plan,
+    bom,
+    raw: result.text,
+    resolvedModel: result.resolvedModel,
+    warning: warnings.length > 0 ? warnings.join(' ') : undefined,
   };
 }

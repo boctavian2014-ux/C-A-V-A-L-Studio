@@ -18,6 +18,7 @@ export function WorkbenchHeader({
 }: WorkbenchHeaderProps) {
   return (
     <header
+      className="glass-panel"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -25,12 +26,14 @@ export function WorkbenchHeader({
         gap: 12,
         padding: '0 12px',
         minHeight: 38,
-        borderBottom: '1px solid var(--caval-border)',
+        borderBottom: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
         borderTop: '2px solid var(--caval-accent)',
-        background: '#111214',
+        borderLeft: 'none',
+        borderRight: 'none',
         color: 'var(--caval-text-muted)',
         fontSize: 12,
         flexShrink: 0,
+        zIndex: 15,
       }}
     >
       <div
@@ -51,6 +54,7 @@ export function WorkbenchHeader({
         <SidebarToggleButton sidebarOpen={sidebarOpen} onClick={onToggleSidebar} />
         <button
           type="button"
+          className="glass-panel-interactive"
           title="Terminal nou (Ctrl+Shift+`)"
           aria-label="Terminal nou"
           onClick={() => dispatchTerminalNew()}
@@ -62,13 +66,11 @@ export function WorkbenchHeader({
             height: 30,
             width: 30,
             padding: 0,
-            border: '1px solid var(--caval-border)',
             borderRadius: 8,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'var(--caval-surface)',
             color: 'var(--caval-text-muted)',
           }}
         >
@@ -79,6 +81,7 @@ export function WorkbenchHeader({
         </button>
         <button
           type="button"
+          className={engineeringOpen ? 'glow-accent' : 'glass-panel-interactive'}
           title="Robotics AI ULTRA"
           aria-label="Robotics AI ULTRA"
           aria-pressed={engineeringOpen}
@@ -86,14 +89,14 @@ export function WorkbenchHeader({
           style={{
             height: 30,
             padding: '0 10px',
-            border: engineeringOpen ? '1px solid var(--caval-accent)' : '1px solid var(--caval-border)',
+            border: engineeringOpen ? '1px solid var(--caval-accent)' : undefined,
             borderRadius: 8,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 6,
-            background: engineeringOpen ? 'var(--caval-accent)' : 'var(--caval-surface)',
+            background: engineeringOpen ? 'var(--caval-accent)' : undefined,
             color: engineeringOpen ? '#0E0E0F' : 'var(--caval-text-muted)',
             fontSize: 11,
             fontWeight: 600,

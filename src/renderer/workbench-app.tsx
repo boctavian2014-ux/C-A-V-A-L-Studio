@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "xterm/css/xterm.css";
+import "./styles/glass.css";
 import { WorkbenchRoot } from "./WorkbenchRoot";
 
 class WorkbenchErrorBoundary extends React.Component<

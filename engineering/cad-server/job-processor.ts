@@ -51,21 +51,35 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
     appendJobLog(jobId, { level: "info", event: "job_updated", message: "generating" });
 
     let mode = generationMode;
-    if (mode === "openscad" && !(await isOpenScadInstalled())) {
-      await tryInstallOpenScad();
-    }
-    if (mode === "openscad" && !(await isOpenScadInstalled())) {
-      if (meshApiKey) {
-        appendJobLog(jobId, {
-          level: "warn",
-          event: "pipeline_fallback",
-          message: "openscad missing → mesh",
-        });
-        mode = "mesh";
-      } else {
-        await updateCadJob(jobId, { status: "failed", errorMessage: OPENSCAD_INSTALL_HINT_RO });
-        appendJobLog(jobId, { level: "error", event: "job_failed", message: OPENSCAD_INSTALL_HINT_RO });
-        return;
+    if (mode === "openscad" || mode === "library") {
+      if (!(await isOpenScadInstalled())) {
+        await tryInstallOpenScad();
+      }
+      if (!(await isOpenScadInstalled())) {
+        if (mode === "library") {
+          await updateCadJob(jobId, {
+            status: "failed",
+            errorMessage: OPENSCAD_INSTALL_HINT_RO,
+          });
+          appendJobLog(jobId, {
+            level: "error",
+            event: "job_failed",
+            message: OPENSCAD_INSTALL_HINT_RO,
+          });
+          return;
+        }
+        if (meshApiKey) {
+          appendJobLog(jobId, {
+            level: "warn",
+            event: "pipeline_fallback",
+            message: "openscad missing → mesh",
+          });
+          mode = "mesh";
+        } else {
+          await updateCadJob(jobId, { status: "failed", errorMessage: OPENSCAD_INSTALL_HINT_RO });
+          appendJobLog(jobId, { level: "error", event: "job_failed", message: OPENSCAD_INSTALL_HINT_RO });
+          return;
+        }
       }
     }
 
@@ -150,29 +164,44 @@ const processOpenScadJob = async (
 ): Promise<void> => {
   failIfAborted(jobId);
 
-  const llm = await generateOpenScad({
-    prompt: job.prompt,
-    projectType: job.projectType ?? undefined,
-    constraints: job.constraints,
-    planContext: input.planContext,
-    openRouterApiKey: input.openRouterApiKey,
-    quality: input.quality,
-    conversationHistory: input.conversationHistory,
-    previousScad: input.previousScad,
-  });
+  let scad: string;
+  let usedFallback = false;
+  let llmError: string | undefined;
 
-  if (signal.aborted) throw new Error("Job cancelled");
-
-  if (!llm.ok || !llm.scad) {
-    await updateCadJob(jobId, {
-      status: "failed",
-      errorMessage: llm.error ?? "LLM failed to generate OpenSCAD",
+  if (input.generationMode === "library" && input.previousScad?.trim()) {
+    scad = input.previousScad.trim();
+    appendJobLog(jobId, {
+      level: "info",
+      event: "library_scad",
+      message: "Using standard-library OpenSCAD (skip LLM)",
     });
-    appendJobLog(jobId, { level: "error", event: "job_failed", message: llm.error });
-    return;
+  } else {
+    const llm = await generateOpenScad({
+      prompt: job.prompt,
+      projectType: job.projectType ?? undefined,
+      constraints: job.constraints,
+      planContext: input.planContext,
+      openRouterApiKey: input.openRouterApiKey,
+      quality: input.quality,
+      conversationHistory: input.conversationHistory,
+      previousScad: input.previousScad,
+    });
+
+    if (signal.aborted) throw new Error("Job cancelled");
+
+    if (!llm.ok || !llm.scad) {
+      await updateCadJob(jobId, {
+        status: "failed",
+        errorMessage: llm.error ?? "LLM failed to generate OpenSCAD",
+      });
+      appendJobLog(jobId, { level: "error", event: "job_failed", message: llm.error });
+      return;
+    }
+    scad = llm.scad;
+    usedFallback = Boolean(llm.usedFallback);
+    llmError = llm.error;
   }
 
-  let scad = llm.scad;
   await updateCadJob(jobId, { status: "rendering", generatedScad: scad });
   appendJobLog(jobId, { level: "info", event: "job_updated", message: "rendering" });
 
@@ -181,6 +210,7 @@ const processOpenScadJob = async (
 
   while (!rendered.ok && repairAttempts < MAX_RENDER_REPAIRS) {
     failIfAborted(jobId);
+    if (input.generationMode === "library") break;
     const fixed = await repairOpenScad({
       originalPrompt: job.prompt,
       brokenScad: scad,
@@ -199,6 +229,7 @@ const processOpenScadJob = async (
     const renderErr = rendered.error ?? "OpenSCAD render failed after repair attempts";
     const canMesh =
       Boolean(meshApiKey) &&
+      input.generationMode !== "library" &&
       (/OpenSCAD nu e instalat|not installed|ENOENT/i.test(renderErr) ||
         repairAttempts >= MAX_RENDER_REPAIRS);
 
@@ -231,7 +262,7 @@ const processOpenScadJob = async (
   });
 
   const warnings: string[] = [];
-  if (llm.usedFallback) warnings.push(llm.error ?? "Used fallback mock geometry");
+  if (usedFallback) warnings.push(llmError ?? "Used fallback mock geometry");
   if (repairAttempts > 0) warnings.push(`OpenSCAD repaired ${repairAttempts} time(s) before render`);
 
   await updateCadJob(jobId, {

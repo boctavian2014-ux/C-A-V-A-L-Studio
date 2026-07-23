@@ -1,0 +1,242 @@
+{
+  "mg996r_servo_bracket": {
+    "path": "brackets/mg996r.scad",
+    "format": "scad",
+    "tags": [
+      "mg996r",
+      "servo",
+      "bracket"
+    ],
+    "label": "mg996r servo bracket"
+  },
+  "sg90_servo_bracket": {
+    "path": "brackets/sg90.scad",
+    "format": "scad",
+    "tags": [
+      "sg90",
+      "servo",
+      "bracket"
+    ],
+    "label": "sg90 servo bracket"
+  },
+  "ds3218_servo_bracket": {
+    "path": "brackets/ds3218.scad",
+    "format": "scad",
+    "tags": [
+      "ds3218",
+      "servo",
+      "bracket"
+    ],
+    "label": "ds3218 servo bracket"
+  },
+  "wheel_65mm": {
+    "path": "wheels/wheel_65mm.scad",
+    "format": "scad",
+    "tags": [
+      "wheel",
+      "65mm"
+    ],
+    "label": "wheel 65mm"
+  },
+  "wheel_80mm": {
+    "path": "wheels/wheel_80mm.scad",
+    "format": "scad",
+    "tags": [
+      "wheel",
+      "80mm"
+    ],
+    "label": "wheel 80mm"
+  },
+  "omni_100mm": {
+    "path": "wheels/omni_100mm.scad",
+    "format": "scad",
+    "tags": [
+      "omni",
+      "100mm"
+    ],
+    "label": "omni 100mm"
+  },
+  "mecanum_80mm": {
+    "path": "wheels/mecanum_80mm.scad",
+    "format": "scad",
+    "tags": [
+      "mecanum",
+      "80mm"
+    ],
+    "label": "mecanum 80mm"
+  },
+  "planetary_37gb": {
+    "path": "gearbox/planetary_37gb.scad",
+    "format": "scad",
+    "tags": [
+      "planetary",
+      "37gb"
+    ],
+    "label": "planetary 37gb"
+  },
+  "spur_775": {
+    "path": "gearbox/spur_775.scad",
+    "format": "scad",
+    "tags": [
+      "spur",
+      "775"
+    ],
+    "label": "spur 775"
+  },
+  "worm_gearbox": {
+    "path": "gearbox/worm_gearbox.scad",
+    "format": "scad",
+    "tags": [
+      "worm",
+      "gearbox"
+    ],
+    "label": "worm gearbox"
+  },
+  "tof_mount": {
+    "path": "mounts/tof_mount.scad",
+    "format": "scad",
+    "tags": [
+      "tof",
+      "mount"
+    ],
+    "label": "tof mount"
+  },
+  "lidar_mount": {
+    "path": "mounts/lidar_mount.scad",
+    "format": "scad",
+    "tags": [
+      "lidar",
+      "mount"
+    ],
+    "label": "lidar mount"
+  },
+  "camera_mount": {
+    "path": "mounts/camera_mount.scad",
+    "format": "scad",
+    "tags": [
+      "camera",
+      "mount"
+    ],
+    "label": "camera mount"
+  },
+  "pcb_holder_universal": {
+    "path": "mounts/pcb_holder.scad",
+    "format": "scad",
+    "tags": [
+      "pcb",
+      "holder",
+      "universal"
+    ],
+    "label": "pcb holder universal"
+  },
+  "profile_2020": {
+    "path": "profiles/2020.scad",
+    "format": "scad",
+    "tags": [
+      "profile",
+      "2020"
+    ],
+    "label": "profile 2020"
+  },
+  "profile_2040": {
+    "path": "profiles/2040.scad",
+    "format": "scad",
+    "tags": [
+      "profile",
+      "2040"
+    ],
+    "label": "profile 2040"
+  },
+  "corner_connector": {
+    "path": "profiles/connectors/corner.scad",
+    "format": "scad",
+    "tags": [
+      "corner",
+      "connector"
+    ],
+    "label": "corner connector"
+  },
+  "t_connector": {
+    "path": "profiles/connectors/t_connector.scad",
+    "format": "scad",
+    "tags": [
+      "t",
+      "connector"
+    ],
+    "label": "t connector"
+  },
+  "holder_18650": {
+    "path": "batteries/18650_holder.scad",
+    "format": "scad",
+    "tags": [
+      "holder",
+      "18650"
+    ],
+    "label": "holder 18650"
+  },
+  "lipo_3s_holder": {
+    "path": "batteries/lipo_3s_holder.scad",
+    "format": "scad",
+    "tags": [
+      "lipo",
+      "3s",
+      "holder"
+    ],
+    "label": "lipo 3s holder"
+  },
+  "holder_9v": {
+    "path": "batteries/9v_holder.scad",
+    "format": "scad",
+    "tags": [
+      "holder",
+      "9v"
+    ],
+    "label": "holder 9v"
+  },
+  "n20_mount": {
+    "path": "motors/n20_mount.scad",
+    "format": "scad",
+    "tags": [
+      "n20",
+      "mount"
+    ],
+    "label": "n20 mount"
+  },
+  "37gb_mount": {
+    "path": "motors/37gb_mount.scad",
+    "format": "scad",
+    "tags": [
+      "37gb",
+      "mount"
+    ],
+    "label": "37gb mount"
+  },
+  "775_mount": {
+    "path": "motors/775_mount.scad",
+    "format": "scad",
+    "tags": [
+      "775",
+      "mount"
+    ],
+    "label": "775 mount"
+  },
+  "wheel_hub_universal": {
+    "path": "hubs/wheel_hub_universal.scad",
+    "format": "scad",
+    "tags": [
+      "wheel",
+      "hub",
+      "universal"
+    ],
+    "label": "wheel hub universal"
+  },
+  "axle_adapter": {
+    "path": "hubs/axle_adapter.scad",
+    "format": "scad",
+    "tags": [
+      "axle",
+      "adapter"
+    ],
+    "label": "axle adapter"
+  }
+}

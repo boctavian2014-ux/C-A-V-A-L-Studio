@@ -10,7 +10,7 @@ export type CadJobStatus =
 
 export type CadQuality = "standard" | "high";
 
-export type CadGenerationMode = "openscad" | "mesh";
+export type CadGenerationMode = "openscad" | "mesh" | "library";
 
 export interface CadChatMessage {
   role: "user" | "assistant";

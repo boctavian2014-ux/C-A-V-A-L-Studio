@@ -39,9 +39,16 @@ function renderOptions(
 interface ChatModelSelectProps {
   catalog: CavalModelCatalog | null;
   loading: boolean;
+  /** `stacked` = full-width Robotics layout; `inline` = compact coding chat (default). */
+  variant?: 'inline' | 'stacked';
 }
 
-export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
+export function ChatModelSelect({
+  catalog,
+  loading,
+  variant = 'inline',
+}: ChatModelSelectProps) {
+  const stacked = variant === 'stacked';
   const { selectedModel, setModel, activeResolvedModel, modelLabels, agentMode } = useAIStore();
   const [showKeys, setShowKeys] = useState(false);
   const [modelHealth, setModelHealth] = useState<Record<string, ModelHealthStatus>>({});
@@ -93,16 +100,49 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
   const selectedHealth = modelHealth[activeResolvedModel ?? selectedModel];
   const healthColor = modelHealthColor(selectedHealth ?? 'unknown');
 
+  const pathLabel =
+    codingGuide.path === 'tools'
+      ? 'Tools'
+      : codingGuide.path === 'agentic-pipeline'
+        ? 'Pipeline'
+        : 'Fences';
+
+  const codingMetaTitle = codingGuide.canCode
+    ? codingGuide.hint || `${pathLabel} · ${codingGuide.requirement}`
+    : codingGuide.requirement;
+
+  const stackedMetaParts: string[] = [];
+  if (profileSummary.chips.length > 0) {
+    stackedMetaParts.push(formatProfileChips(profileSummary.chips));
+  }
+  if (showResolved && resolvedLabel) {
+    stackedMetaParts.push(`→ ${resolvedLabel}`);
+  }
+  const stackedMetaLine = stackedMetaParts.join(' · ');
+
+  const metaFontSize = stacked ? 11 : 9;
+  const metaAlign = stacked ? 'left' as const : 'right' as const;
+  const metaMaxWidth = stacked ? undefined : 220;
+
   return (
     <>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 0, maxWidth: 240 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', minWidth: 0 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: stacked ? 'stretch' : 'flex-end',
+          minWidth: 0,
+          width: stacked ? '100%' : undefined,
+          maxWidth: stacked ? 'none' : 240,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: stacked ? 8 : 4, width: '100%', minWidth: 0 }}>
           {selectedHealth && (
             <span
               title={modelHealthLabel(selectedHealth)}
               style={{
-                width: 7,
-                height: 7,
+                width: stacked ? 8 : 7,
+                height: stacked ? 8 : 7,
                 borderRadius: '50%',
                 background: healthColor,
                 flexShrink: 0,
@@ -118,13 +158,13 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
               style={{
                 width: '100%',
                 minWidth: 0,
-                maxWidth: 200,
-                padding: '6px 28px 6px 12px',
+                maxWidth: stacked ? 'none' : 200,
+                padding: stacked ? '8px 28px 8px 12px' : '6px 28px 6px 12px',
                 borderRadius: 8,
                 border: '1px solid var(--caval-border)',
                 background: 'var(--caval-bg)',
                 color: 'var(--caval-text)',
-                fontSize: 12,
+                fontSize: stacked ? 13 : 12,
                 fontWeight: 500,
                 cursor: loading ? 'wait' : 'pointer',
                 appearance: 'none',
@@ -160,7 +200,7 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
                 right: 8,
                 top: '50%',
                 transform: 'translateY(-50%)',
-                fontSize: 8,
+                fontSize: stacked ? 10 : 8,
                 color: 'var(--caval-text-muted)',
                 pointerEvents: 'none',
               }}
@@ -174,14 +214,14 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
             onClick={() => setShowKeys(true)}
             title="API Keys (BYOK)"
             style={{
-              width: 24,
-              height: 24,
-              borderRadius: 4,
+              width: stacked ? 32 : 24,
+              height: stacked ? 32 : 24,
+              borderRadius: 6,
               border: '1px solid var(--caval-border)',
               background: 'none',
               color: 'var(--caval-text-muted)',
               cursor: 'pointer',
-              fontSize: 11,
+              fontSize: stacked ? 13 : 11,
               flexShrink: 0,
               display: 'flex',
               alignItems: 'center',
@@ -193,70 +233,117 @@ export function ChatModelSelect({ catalog, loading }: ChatModelSelectProps) {
         </div>
 
         {selectedHealth && selectedHealth !== 'ready' && (
-          <div style={{ fontSize: 9, color: healthColor, marginTop: 2, textAlign: 'right', maxWidth: 220 }}>
+          <div
+            style={{
+              fontSize: metaFontSize,
+              color: healthColor,
+              marginTop: stacked ? 6 : 2,
+              textAlign: metaAlign,
+              maxWidth: metaMaxWidth,
+              lineHeight: 1.4,
+            }}
+          >
             {modelHealthLabel(selectedHealth)}
           </div>
         )}
 
-        {codingGuide.canCode && (
-          <div
-            style={{
-              fontSize: 9,
-              color: 'var(--caval-text-muted)',
-              marginTop: 2,
-              maxWidth: 220,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              paddingRight: 4,
-              textAlign: 'right',
-            }}
-            title={codingGuide.hint}
-          >
-            {codingGuide.path === 'tools' ? 'Tools' : codingGuide.path === 'agentic-pipeline' ? 'Pipeline' : 'Fences'} · {codingGuide.requirement}
-          </div>
-        )}
+        {stacked ? (
+          <>
+            {!codingGuide.canCode && agentMode !== 'ask' && (
+              <div
+                style={{
+                  fontSize: metaFontSize,
+                  color: 'var(--caval-warning, #e6a700)',
+                  marginTop: 6,
+                  textAlign: 'left',
+                  lineHeight: 1.4,
+                }}
+                title={codingMetaTitle}
+              >
+                {codingGuide.requirement}
+              </div>
+            )}
+            {stackedMetaLine && (
+              <div
+                style={{
+                  fontSize: metaFontSize,
+                  color: 'var(--caval-text-muted)',
+                  marginTop: 6,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  textAlign: 'left',
+                  lineHeight: 1.4,
+                }}
+                title={[codingMetaTitle, profileSummary.description].filter(Boolean).join('\n')}
+              >
+                {stackedMetaLine}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {codingGuide.canCode && (
+              <div
+                style={{
+                  fontSize: 9,
+                  color: 'var(--caval-text-muted)',
+                  marginTop: 2,
+                  maxWidth: 220,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  paddingRight: 4,
+                  textAlign: 'right',
+                }}
+                title={codingGuide.hint}
+              >
+                {pathLabel} · {codingGuide.requirement}
+              </div>
+            )}
 
-        {!codingGuide.canCode && agentMode !== 'ask' && (
-          <div style={{ fontSize: 9, color: 'var(--caval-warning, #e6a700)', marginTop: 2, textAlign: 'right', maxWidth: 220 }}>
-            {codingGuide.requirement}
-          </div>
-        )}
+            {!codingGuide.canCode && agentMode !== 'ask' && (
+              <div style={{ fontSize: 9, color: 'var(--caval-warning, #e6a700)', marginTop: 2, textAlign: 'right', maxWidth: 220 }}>
+                {codingGuide.requirement}
+              </div>
+            )}
 
-        {profileSummary.chips.length > 0 && (
-          <div
-            style={{
-              fontSize: 9,
-              color: 'var(--caval-text-muted)',
-              marginTop: 2,
-              maxWidth: 220,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              paddingRight: 4,
-              textAlign: 'right',
-            }}
-            title={profileSummary.description}
-          >
-            {formatProfileChips(profileSummary.chips)}
-          </div>
-        )}
+            {profileSummary.chips.length > 0 && (
+              <div
+                style={{
+                  fontSize: 9,
+                  color: 'var(--caval-text-muted)',
+                  marginTop: 2,
+                  maxWidth: 220,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  paddingRight: 4,
+                  textAlign: 'right',
+                }}
+                title={profileSummary.description}
+              >
+                {formatProfileChips(profileSummary.chips)}
+              </div>
+            )}
 
-        {showResolved && resolvedLabel && (
-          <div
-            style={{
-              fontSize: 9,
-              color: 'var(--caval-text-muted)',
-              marginTop: 2,
-              maxWidth: 220,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              paddingRight: 4,
-            }}
-          >
-            → {resolvedLabel}
-          </div>
+            {showResolved && resolvedLabel && (
+              <div
+                style={{
+                  fontSize: 9,
+                  color: 'var(--caval-text-muted)',
+                  marginTop: 2,
+                  maxWidth: 220,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  paddingRight: 4,
+                }}
+              >
+                → {resolvedLabel}
+              </div>
+            )}
+          </>
         )}
       </div>
 

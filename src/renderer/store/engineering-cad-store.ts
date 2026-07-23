@@ -15,6 +15,12 @@ import type {
   CadJobStatus,
   StlDimensions,
 } from '../../../engineering/cad-server/types';
+import type { RoboticsComponentBom } from '../../../ai/engineering/robotics-components-schema';
+import {
+  exportBatchZip,
+  runRoboticsCadBatch,
+  type CadBatchPart,
+} from './engineering-cad-batch';
 
 export type { CadJobStatus };
 
@@ -174,6 +180,10 @@ interface EngineeringCadState {
   downloadMessage: string | null;
   retryCount: number;
   lastPlan: CadJobPlan | null;
+  batchParts: CadBatchPart[];
+  activePartId: string | null;
+  batchSummary: string | null;
+  batchBusy: boolean;
 
   /** @deprecated use phase !== 'idle' */
   cadBusy: boolean;
@@ -185,6 +195,14 @@ interface EngineeringCadState {
   generateMessage: string | null;
 
   createCadJob: (plan: CadJobPlan) => Promise<void>;
+  createBatchFromBom: (input: {
+    bom: RoboticsComponentBom;
+    project: EngProject;
+    userPrompt: string;
+    projectPath?: string | null;
+  }) => Promise<void>;
+  setActivePartId: (id: string | null) => void;
+  exportBatchZip: () => Promise<{ ok: boolean; savedPath?: string; error?: string; canceled?: boolean }>;
   pollCadJob: (jobId: string) => Promise<void>;
   cancelCadJob: () => void;
   retryCadJob: () => Promise<void>;
@@ -210,7 +228,7 @@ function syncLegacyFields(
     patch.statusMessage !== undefined ? patch.statusMessage : (current?.statusMessage ?? null);
   return {
     ...patch,
-    cadBusy: phase === 'submitting' || phase === 'processing',
+    cadBusy: phase === 'submitting' || phase === 'processing' || Boolean(patch.batchBusy),
     cadStatus: serverStatus,
     cadError: error,
     generateMessage: statusMessage,
@@ -231,6 +249,10 @@ function resetJobFields(): Partial<EngineeringCadState> {
     error: null,
     statusMessage: null,
     downloadMessage: null,
+    batchParts: [],
+    activePartId: null,
+    batchSummary: null,
+    batchBusy: false,
   });
 }
 
@@ -254,6 +276,10 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   downloadMessage: null,
   retryCount: 0,
   lastPlan: null,
+  batchParts: [],
+  activePartId: null,
+  batchSummary: null,
+  batchBusy: false,
 
   cadBusy: false,
   cadStatus: null,
@@ -629,6 +655,108 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       userPrompt: input.userPrompt,
       projectPath: editorState.projectPath,
     });
+  },
+
+  setActivePartId: (id) => {
+    const part = get().batchParts.find((p) => p.id === id);
+    patch({
+      activePartId: id,
+      stlUrl: part?.stlUrl ?? get().stlUrl,
+      stlFileName: part ? `${part.id}.stl` : get().stlFileName,
+      cadTitle: part?.name ?? get().cadTitle,
+    });
+  },
+
+  exportBatchZip: async () => {
+    const { batchParts } = get();
+    const editorState = useEditorStore.getState();
+    const result = await exportBatchZip(batchParts, editorState.projectPath);
+    if (!result.canceled) {
+      set({
+        downloadMessage: result.ok
+          ? `ZIP salvat: ${result.savedPath}`
+          : `Zip: ${result.error ?? 'failed'}`,
+      });
+    }
+    return result;
+  },
+
+  createBatchFromBom: async (input) => {
+    if (get().cadBusy || get().batchBusy) return;
+    const cad = window.caval?.cad;
+    if (!cad?.createJob) {
+      patch({ phase: 'failed', error: 'CAD API indisponibil.' });
+      return;
+    }
+    const cloudCheck = await preflightCadCloud(cad);
+    if (!cloudCheck.ok) {
+      patch({ phase: 'failed', error: cloudCheck.error });
+      return;
+    }
+
+    stopPolling();
+    abortSubmit();
+    submitAbort = new AbortController();
+
+    patch({
+      phase: 'processing',
+      batchBusy: true,
+      batchParts: [],
+      batchSummary: null,
+      activePartId: null,
+      error: null,
+      statusMessage: 'Batch STL: standard librărie + custom OpenSCAD…',
+      stlUrl: null,
+    });
+
+    try {
+      const { parts, summary } = await runRoboticsCadBatch({
+        bom: input.bom,
+        project: input.project,
+        userPrompt: input.userPrompt,
+        projectPath: input.projectPath,
+        signal: submitAbort.signal,
+        onPartUpdate: (next) => {
+          const firstDone = next.find((p) => p.status === 'done' && p.stlUrl);
+          patch({
+            batchParts: next,
+            statusMessage: `Batch: ${next.filter((p) => p.status === 'done').length}/${next.length}`,
+            ...(firstDone && !get().stlUrl
+              ? {
+                  stlUrl: firstDone.stlUrl,
+                  stlFileName: `${firstDone.id}.stl`,
+                  cadTitle: firstDone.name,
+                  activePartId: firstDone.id,
+                  phase: 'completed' as const,
+                }
+              : {}),
+          });
+        },
+      });
+
+      const first = parts.find((p) => p.status === 'done' && p.stlUrl);
+      const anyFail = parts.some((p) => p.status === 'failed');
+      patch({
+        batchParts: parts,
+        batchSummary: summary,
+        batchBusy: false,
+        phase: first ? 'completed' : 'failed',
+        stlUrl: first?.stlUrl ?? null,
+        stlFileName: first ? `${first.id}.stl` : null,
+        cadTitle: first?.name ?? null,
+        activePartId: first?.id ?? null,
+        statusMessage: summary,
+        error: first ? null : anyFail ? 'Niciun STL generat.' : 'Batch anulat.',
+      });
+    } catch (err) {
+      patch({
+        batchBusy: false,
+        phase: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      submitAbort = null;
+    }
   },
   };
 });

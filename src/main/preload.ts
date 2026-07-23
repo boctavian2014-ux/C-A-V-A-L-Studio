@@ -791,7 +791,7 @@ contextBridge.exposeInMainWorld("caval", {
       quality?: 'standard' | 'high';
       conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
       previousScad?: string;
-      generationMode?: 'openscad' | 'mesh';
+      generationMode?: 'openscad' | 'mesh' | 'library';
       meshPrompt?: string;
       previousMeshTaskId?: string;
     }) =>
@@ -844,6 +844,52 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.invoke("cad:installOpenScad") as Promise<{
         ok: boolean;
         installed?: boolean;
+        error?: string;
+      }>,
+  },
+
+  roboticsLibrary: {
+    cdnBase: () =>
+      ipcRenderer.invoke("roboticsLibrary:cdnBase") as Promise<{ ok: boolean; base?: string }>,
+    getCatalog: () =>
+      ipcRenderer.invoke("roboticsLibrary:getCatalog") as Promise<{
+        ok: boolean;
+        catalog?: Record<string, { path: string; format: "scad" | "stl"; tags: string[]; label?: string }>;
+        source?: string;
+        error?: string;
+      }>,
+    ensureCached: (relPath: string) =>
+      ipcRenderer.invoke("roboticsLibrary:ensureCached", relPath) as Promise<{
+        ok: boolean;
+        localPath?: string;
+        fromCache?: boolean;
+        error?: string;
+      }>,
+    resolve: (standardKey: string) =>
+      ipcRenderer.invoke("roboticsLibrary:resolve", standardKey) as Promise<{
+        ok: boolean;
+        key?: string;
+        path?: string;
+        format?: "scad" | "stl";
+        localPath?: string;
+        contentText?: string;
+        contentBase64?: string;
+        error?: string;
+      }>,
+    saveStlToProject: (input: { projectPath: string; fileName: string; base64: string }) =>
+      ipcRenderer.invoke("roboticsLibrary:saveStlToProject", input) as Promise<{
+        ok: boolean;
+        savedPath?: string;
+        error?: string;
+      }>,
+    exportZip: (input: {
+      projectPath?: string;
+      files: Array<{ name: string; base64: string }>;
+    }) =>
+      ipcRenderer.invoke("roboticsLibrary:exportZip", input) as Promise<{
+        ok: boolean;
+        savedPath?: string;
+        canceled?: boolean;
         error?: string;
       }>,
   },

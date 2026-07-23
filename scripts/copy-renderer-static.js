@@ -10,6 +10,13 @@ const shimTarget = path.join(targetDir, "global-shim.js");
 fs.mkdirSync(targetDir, { recursive: true });
 fs.copyFileSync(shimSource, shimTarget);
 
+const glassSource = path.join(__dirname, "..", "src", "renderer", "styles", "glass.css");
+const glassTargetDir = path.join(targetDir, "styles");
+if (fs.existsSync(glassSource)) {
+  fs.mkdirSync(glassTargetDir, { recursive: true });
+  fs.copyFileSync(glassSource, path.join(glassTargetDir, "glass.css"));
+}
+
 let html = fs.readFileSync(source, "utf8");
 const cacheBust = Date.now();
 

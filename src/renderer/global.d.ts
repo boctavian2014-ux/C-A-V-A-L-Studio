@@ -263,7 +263,7 @@ interface CavalCadApi {
     quality?: 'standard' | 'high';
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     previousScad?: string;
-    generationMode?: 'openscad' | 'mesh';
+    generationMode?: 'openscad' | 'mesh' | 'library';
     meshPrompt?: string;
     previousMeshTaskId?: string;
   }) => Promise<{ ok: boolean; jobId?: string; status?: string; error?: string }>;
@@ -302,6 +302,41 @@ interface CavalCadApi {
     error?: string;
   }>;
   installOpenScad?: () => Promise<{ ok: boolean; installed?: boolean; error?: string }>;
+}
+
+interface CavalRoboticsLibraryApi {
+  cdnBase: () => Promise<{ ok: boolean; base?: string }>;
+  getCatalog: () => Promise<{
+    ok: boolean;
+    catalog?: Record<string, { path: string; format: 'scad' | 'stl'; tags: string[]; label?: string }>;
+    source?: string;
+    error?: string;
+  }>;
+  ensureCached: (relPath: string) => Promise<{
+    ok: boolean;
+    localPath?: string;
+    fromCache?: boolean;
+    error?: string;
+  }>;
+  resolve: (standardKey: string) => Promise<{
+    ok: boolean;
+    key?: string;
+    path?: string;
+    format?: 'scad' | 'stl';
+    localPath?: string;
+    contentText?: string;
+    contentBase64?: string;
+    error?: string;
+  }>;
+  saveStlToProject: (input: {
+    projectPath: string;
+    fileName: string;
+    base64: string;
+  }) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
+  exportZip: (input: {
+    projectPath?: string;
+    files: Array<{ name: string; base64: string }>;
+  }) => Promise<{ ok: boolean; savedPath?: string; canceled?: boolean; error?: string }>;
 }
 
 interface CavalSchematicApi {
@@ -598,6 +633,7 @@ interface CavalBridge {
   git: CavalGitApi;
   preload: CavalPreloadApi;
   cad: CavalCadApi;
+  roboticsLibrary?: CavalRoboticsLibraryApi;
   schematic: CavalSchematicApi;
   window: CavalWindowApi;
 }
