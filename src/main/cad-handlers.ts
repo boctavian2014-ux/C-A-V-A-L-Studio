@@ -124,7 +124,7 @@ export interface CadCreateJobInput {
   quality?: "standard" | "high";
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   previousScad?: string;
-  generationMode?: "openscad" | "mesh";
+  generationMode?: "openscad" | "mesh" | "library";
   meshPrompt?: string;
   previousMeshTaskId?: string;
   attachments?: Array<{ path: string; name: string; content: string }>;
@@ -163,6 +163,33 @@ export interface CadJobResponse {
   meshTaskId?: string | null;
   logs?: Array<{ at: string; level: string; event: string; message?: string }>;
 }
+
+const isCloudInternalCadError = (error: string | null | undefined, status?: number): boolean => {
+  if (status === 500 || status === 502 || status === 503) return true;
+  if (!error?.trim()) return false;
+  return /Internal server error|internal_error|Failed to create CAD job/i.test(error);
+};
+
+const postCadJob = async (
+  secured: CadCreateJobInput,
+  cavalId: string
+): Promise<{ ok: boolean; status: number; json: CadJobResponse }> =>
+  cadFetchJson<CadJobResponse>("/cad/jobs", {
+    method: "POST",
+    cavalId,
+    body: JSON.stringify(secured),
+  });
+
+const tryLocalCadFallback = async (): Promise<boolean> => {
+  const started = await ensureCadLocalServer();
+  if (!started) return false;
+  resetCadBaseUrlCache();
+  process.env.CAD_API_URL = localCadUrl();
+  process.env.CAD_USE_LOCAL = "1";
+  process.env.CAD_CLOUD_ONLY = "0";
+  console.warn("[cad] cloud createJob failed — switched to local CAD at", localCadUrl());
+  return true;
+};
 
 const mapFetchError = async (error: unknown): Promise<{ ok: false; error: string }> => {
   const message = error instanceof Error ? error.message : String(error);
@@ -257,16 +284,44 @@ export const registerCadHandlers = (): void => {
     try {
       const cavalId = resolveCavalId(jobInput.cavalId);
       const secured = attachMainCadSecrets({ ...jobInput, cavalId });
-      const { ok, status, json } = await cadFetchJson<CadJobResponse>("/cad/jobs", {
-        method: "POST",
-        cavalId,
-        body: JSON.stringify(secured),
-      });
+      let { ok, status, json } = await postCadJob(secured, cavalId);
+
+      if (
+        !ok &&
+        isCloudInternalCadError(json.error, status) &&
+        !process.env.CAD_USE_LOCAL
+      ) {
+        const localReady = await tryLocalCadFallback();
+        if (localReady) {
+          ({ ok, status, json } = await postCadJob(secured, cavalId));
+        }
+      }
+
       if (!ok) {
         return { ok: false, error: json.error ?? `CAD API error (${status})` };
       }
       return json;
     } catch (error) {
+      if (!process.env.CAD_USE_LOCAL) {
+        try {
+          const localReady = await tryLocalCadFallback();
+          if (localReady) {
+            const cavalId = resolveCavalId((input as CadCreateJobInput).cavalId);
+            const secured = attachMainCadSecrets({
+              ...(input as CadCreateJobInput),
+              cavalId,
+            });
+            const retry = await postCadJob(secured, cavalId);
+            if (retry.ok) return retry.json;
+            return {
+              ok: false,
+              error: retry.json.error ?? `CAD API error (${retry.status})`,
+            };
+          }
+        } catch {
+          /* fall through */
+        }
+      }
       return await mapFetchError(error);
     }
   });

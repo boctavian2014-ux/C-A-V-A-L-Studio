@@ -43,7 +43,16 @@ export const uploadPrivateCadStl = async (input: {
     upsert: true,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Keep job usable via local STL endpoint when bucket/RLS is broken.
+    cadLog({
+      level: "warn",
+      event: "stl_upload_fallback_local",
+      message: error.message,
+      meta: { path },
+    });
+    return { path };
+  }
   return { path };
 };
 

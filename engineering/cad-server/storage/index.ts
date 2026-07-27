@@ -54,6 +54,18 @@ const rowToJob = (row: DbRow): CadJob => ({
 
 export const isCadPersistenceConfigured = (): boolean => isSupabaseConfigured();
 
+const createMemoryJobRecord = (
+  input: CreateCadJobInput,
+  ownerCavalId: string
+): CadJob =>
+  createMemoryCadJob({
+    prompt: input.prompt,
+    projectType: input.projectType,
+    constraints: input.constraints,
+    cavalId: input.cavalId ?? ownerCavalId,
+    generationMode: input.generationMode,
+  });
+
 export const createCadJob = async (
   input: CreateCadJobInput,
   ownerCavalId: string
@@ -61,13 +73,7 @@ export const createCadJob = async (
   const cavalId = input.cavalId ?? ownerCavalId;
   const supabase = getSupabaseAdmin();
   if (!supabase) {
-    return createMemoryCadJob({
-      prompt: input.prompt,
-      projectType: input.projectType,
-      constraints: input.constraints,
-      cavalId,
-      generationMode: input.generationMode,
-    });
+    return createMemoryJobRecord(input, ownerCavalId);
   }
 
   const expiresAt = new Date(Date.now() + JOB_TTL_MS).toISOString();
@@ -85,13 +91,24 @@ export const createCadJob = async (
     .select("*")
     .single();
 
-  if (error || !data) throw new Error(error?.message ?? "Failed to create CAD job");
+  if (error || !data) {
+    // Cloud DB can be misconfigured while health still reports supabaseConfigured.
+    // Keep CAD usable via in-memory jobs + local STL serving.
+    console.warn(
+      "[cad] supabase createCadJob failed — using memory store:",
+      error?.message ?? "no data"
+    );
+    return createMemoryJobRecord(input, ownerCavalId);
+  }
   return rowToJob(data as DbRow);
 };
 
 export const getCadJob = async (id: string): Promise<CadJob | null> => {
+  const memory = getMemoryCadJob(id);
+  if (memory) return memory;
+
   const supabase = getSupabaseAdmin();
-  if (!supabase) return getMemoryCadJob(id);
+  if (!supabase) return null;
 
   const { data, error } = await supabase
     .from("cad_generations")
@@ -112,6 +129,10 @@ export const updateCadJob = async (
     meshTaskId: string | null;
   }>
 ): Promise<CadJob | null> => {
+  if (getMemoryCadJob(id)) {
+    return updateMemoryCadJob(id, patch);
+  }
+
   const supabase = getSupabaseAdmin();
   if (!supabase) {
     return updateMemoryCadJob(id, patch);

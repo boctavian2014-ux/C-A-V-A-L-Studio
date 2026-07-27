@@ -20,8 +20,8 @@ export function normalizeCadErrorMessage(error: string | null | undefined): stri
   if (isLibraryModeUnsupportedError(error)) {
     return 'Serverul CAD cloud nu suportă încă mode-ul librărie. Reîncearcă — fallback OpenSCAD ar trebui să ruleze automat.';
   }
-  if (/Internal server error|internal_error/i.test(error)) {
-    return 'Eroare pe serverul CAD cloud. Reîncearcă peste câteva secunde sau verifică Setări → CAD Cloud 3D / cheile OpenRouter.';
+  if (/Internal server error|internal_error|Failed to create CAD job/i.test(error)) {
+    return 'Serverul CAD cloud are o eroare la crearea job-ului (deseori Supabase). App-ul încearcă automat CAD local — verifică OpenSCAD + cheia OpenRouter, sau Setări → CAD Cloud 3D.';
   }
   return error;
 }
