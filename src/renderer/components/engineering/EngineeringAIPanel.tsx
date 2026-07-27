@@ -127,6 +127,8 @@ export function EngineeringAIPanel() {
     }
 
     useEngineeringCadStore.getState().clearCadPreview();
+    const submittedPrompt = prompt.trim();
+    session.setLastPrompt(submittedPrompt);
     session.beginGenerate();
     setLocalReadinessHint(null);
     collectorRef.current.reset();
@@ -134,6 +136,7 @@ export function EngineeringAIPanel() {
     const controller = new AbortController();
     abortRef.current = controller;
     let planReadyFired = false;
+    let generationSucceeded = false;
 
     const flushPartial = (accumulated: string) => {
       const snap = collectorRef.current.snapshot();
@@ -174,6 +177,7 @@ export function EngineeringAIPanel() {
         },
         onPlanReady: (partial) => {
           planReadyFired = true;
+          if (partial.ok) generationSucceeded = true;
           applyPlanReady(partial);
         },
       });
@@ -188,12 +192,14 @@ export function EngineeringAIPanel() {
 
       // BOM / final warning after decompose (loading already off via onPlanReady).
       if (result.ok && result.project) {
+        generationSucceeded = true;
         const s = useRoboticsSessionStore.getState();
         s.setProject(result.project);
         s.setPlan(result.plan ?? null);
         s.setBom(result.bom ?? null);
         s.setWarning(result.warning ?? null);
         s.setError(null);
+        s.clearPromptAfterResponse();
         if (!s.userTabLocked && result.bom?.components.length) {
           s.setActiveTab('cad');
         }
@@ -213,11 +219,16 @@ export function EngineeringAIPanel() {
       }
     } finally {
       abortRef.current = null;
-      // Always clear loading when generateEngineering settles (plan, error, or hang end).
       useRoboticsSessionStore.getState().finalizeStream({
         callAbortChat: true,
         abortSignal: false,
       });
+      // Always clear composer after a successful run (even if onPlanReady was missed).
+      if (generationSucceeded || useRoboticsSessionStore.getState().project) {
+        const s = useRoboticsSessionStore.getState();
+        if (!s.lastPrompt.trim() && submittedPrompt) s.setLastPrompt(submittedPrompt);
+        s.clearPromptAfterResponse();
+      }
     }
   }, [prompt, selectedModel, apiKeys, openRouterConfigured, projectPath, applyPlanReady]);
 

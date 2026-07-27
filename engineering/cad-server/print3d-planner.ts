@@ -1,5 +1,10 @@
 import type { CadChatMessage } from "./types";
-import { adjustPlanPipeline } from "./cad-capabilities";
+import {
+  adjustPlanPipeline,
+  FREEFORM_MESH_RE,
+  isClearlyMechanicalPrompt,
+  suggestMeshFromPrompt,
+} from "./cad-capabilities";
 
 export type Print3DPlannerAction = "clarify" | "generate";
 export type Print3DUserLanguage = "ro" | "en";
@@ -51,16 +56,17 @@ Rules:
 - userLanguage = language of the user's LATEST message (ro or en). assistantMessage and questions MUST use that language.
 - action=clarify ONLY when critical info is missing: size/dimensions, object type (bust vs full figure vs part type), detail level, or ambiguous intent. Do NOT clarify if conversation history already answers these.
 - action=generate when enough context exists (including from prior messages).
-- CRITICAL OBJECT FIDELITY: technicalPrompt MUST describe the SAME object the user asked for. NEVER substitute furniture (dulap/cabinet/wardrobe/closet) or a plain box/wedge when the user asked for a vehicle, toy car, helicopter, robot, drone, wheel, or mechanical part. Prefer the LATEST user message over older unrelated objects in history.
-- pipeline=openscad for mechanical/parametric parts (brackets, gears, wheels, enclosures, mounts, toy cars/vehicles, helicopters).
-- pipeline=mesh ONLY when the user explicitly wants free-form furniture (dulap/cabinet), figurines, sculptures, animals, faces, or decorative organics.
-- Vehicles / toy cars (mașină jucărie, toy car, truck, tractor): pipeline=openscad, intent=mechanical. technicalPrompt must include body/chassis, cabin or hood, 4 wheels with axles (~Ø20–40 mm), length ~100–180 mm unless user gave size.
-- Helicopters (elicopter, helicopter, heli): pipeline=openscad, intent=mechanical. technicalPrompt MUST include fuselage/cabin, main rotor disk with hub, tail boom + tail rotor, and landing skids. NEVER a single rectangular prism or wedge.
-- For IoT/sensor enclosures (air quality, OLED display, WiFi alert): pipeline=openscad. technicalPrompt MUST list every physical feature: OLED window mm, vent slot pattern, buzzer hole, PCB standoffs, antenna clearance. Never describe only "a box".
-- pipeline=mesh when the user wants a visual/organic result rather than exact drill patterns.
-- For trademarked characters (Mickey Mouse, etc.): warn in warnings, use generic description in technicalPrompt (e.g. "cartoon mouse with round ears"), never reproduce exact IP.
-- technicalPrompt must always be English with explicit mm dimensions when known or reasonable defaults stated.
-- quickReplies: 2-4 short clickable answers when clarifying (e.g. "Bust 80mm", "Full figure 120mm").
+- CRITICAL OBJECT FIDELITY: technicalPrompt MUST describe the SAME object the user asked for. NEVER substitute furniture or a plain box when the user asked for something else. Prefer the LATEST user message over older unrelated objects in history.
+- DEFAULT PIPELINE CHOICE:
+  - pipeline=mesh for ANY free-form / visual object the user describes in plain language: animals, insects, plants, characters, figurines, sculptures, faces, fantasy creatures, toy robots (looks), organic furniture, food, everyday objects without precise mechanical drawings.
+  - pipeline=openscad ONLY for parametric/mechanical parts: brackets, gears, wheels with bore sizes, PCB/IoT enclosures with cutouts, mounts, frames, toy cars/helicopters built from primitives, CNC fixtures.
+- Animals / insects / creatures (câine, pisică, fluture, păianjen, dragon, etc.): pipeline=mesh, intent=organic or figurine. technicalPrompt = rich English visual description for text-to-3D (pose, proportions, style, approx size mm), NOT OpenSCAD instructions.
+- Toy cars / helicopters (mașină jucărie, elicopter): pipeline=openscad, intent=mechanical, with chassis/wheels or fuselage/rotors/skids.
+- Mechanical robots (arm, chassis, actuators, joints): pipeline=openscad. Cute/toy/figurine robots: pipeline=mesh.
+- For IoT/sensor enclosures: pipeline=openscad with OLED window, vents, standoffs — never a blank box.
+- For trademarked characters: warn in warnings, use generic description in technicalPrompt, never reproduce exact IP.
+- technicalPrompt must always be English. For mesh: detailed visual description + approximate bounding size in mm + "suitable for FDM 3D printing, single solid". For openscad: explicit mm dimensions and features.
+- quickReplies: 2-4 short clickable answers when clarifying.
 - If user refines a previous mesh request, keep pipeline=mesh and incorporate changes in technicalPrompt.`;
 
 function resolveApiKey(override?: string): string | undefined {
@@ -133,7 +139,7 @@ export function buildClarifyMessage(plan: Print3DPlannerResult): string {
 }
 
 const VEHICLE_USER_RE =
-  /(mașin[aăi]|masina|masini|toy\s*car|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil|jucăr(?:ie|ii))/iu;
+  /(mașin[aăi]|masina|masini|toy\s*car|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil)/iu;
 const HELICOPTER_USER_RE = /(elicopter|helicopter|\bheli\b|elicopter(?:e|ul)?)/iu;
 const FURNITURE_TECH_RE =
   /(dulap|cabinet|wardrobe|closet|drawer unit|chest of drawers|mobilier|bookshelf|shelving unit)/iu;
@@ -164,7 +170,18 @@ function vehicleTechnicalPrompt(user: string): string {
   ].join(" ");
 }
 
-/** Safety net when the LLM substitutes the wrong object (furniture/box) for vehicle/helicopter. */
+function meshObjectTechnicalPrompt(user: string): string {
+  return [
+    "Text-to-3D mesh for FDM printing (single solid, manifold).",
+    `Subject: ${user.slice(0, 500)}`,
+    "Describe the exact object the user named — match species/pose/style.",
+    "Approx bounding size 60–120 mm unless user specified.",
+    "Clean silhouette, printable without thin hair-like features under 1 mm.",
+    "Do NOT invent a cabinet, box, or unrelated furniture.",
+  ].join(" ");
+}
+
+/** Safety net: keep vehicles/helicopters on OpenSCAD; free-form objects on mesh. */
 export function alignPlanWithLatestUserIntent(
   latestUserText: string,
   plan: Print3DPlannerResult
@@ -206,36 +223,66 @@ export function alignPlanWithLatestUserIntent(
     };
   }
 
-  if (!VEHICLE_USER_RE.test(user)) return plan;
-  if (!FURNITURE_TECH_RE.test(tech) && !FURNITURE_TECH_RE.test(assistant)) {
-    if (plan.pipeline === "mesh" || plan.intent === "organic") {
-      return {
-        ...plan,
-        action: "generate",
-        intent: "mechanical",
-        pipeline: "openscad",
-      };
+  if (VEHICLE_USER_RE.test(user) && !FREEFORM_MESH_RE.test(user)) {
+    if (!FURNITURE_TECH_RE.test(tech) && !FURNITURE_TECH_RE.test(assistant)) {
+      if (plan.pipeline === "mesh" || plan.intent === "organic") {
+        return {
+          ...plan,
+          action: "generate",
+          intent: "mechanical",
+          pipeline: "openscad",
+        };
+      }
+      return plan;
     }
-    return plan;
+
+    return {
+      ...plan,
+      action: "generate",
+      intent: "mechanical",
+      pipeline: "openscad",
+      assistantMessage:
+        plan.userLanguage === "ro"
+          ? "Generez o mașină jucărie (caroserie + roți), nu mobilier."
+          : "Generating a toy car (body + wheels), not furniture.",
+      technicalPrompt: vehicleTechnicalPrompt(user),
+      warnings: [
+        ...(plan.warnings ?? []),
+        plan.userLanguage === "ro"
+          ? "Am corectat planul: cererea era mașină/vehicul, nu dulap."
+          : "Corrected plan: user asked for a vehicle, not a cabinet.",
+      ],
+    };
   }
 
-  return {
-    ...plan,
-    action: "generate",
-    intent: "mechanical",
-    pipeline: "openscad",
-    assistantMessage:
-      plan.userLanguage === "ro"
-        ? "Generez o mașină jucărie (caroserie + roți), nu mobilier."
-        : "Generating a toy car (body + wheels), not furniture.",
-    technicalPrompt: vehicleTechnicalPrompt(user),
-    warnings: [
-      ...(plan.warnings ?? []),
-      plan.userLanguage === "ro"
-        ? "Am corectat planul: cererea era mașină/vehicul, nu dulap."
-        : "Corrected plan: user asked for a vehicle, not a cabinet.",
-    ],
-  };
+  if (
+    (FREEFORM_MESH_RE.test(user) || suggestMeshFromPrompt(user)) &&
+    !isClearlyMechanicalPrompt(user)
+  ) {
+    const intent: Print3DPlannerResult["intent"] =
+      /(figurin|character|personaj|bust|human|om\b)/iu.test(user) ? "figurine" : "organic";
+    return {
+      ...plan,
+      action: "generate",
+      intent,
+      pipeline: "mesh",
+      assistantMessage:
+        plan.assistantMessage && !FURNITURE_TECH_RE.test(plan.assistantMessage)
+          ? plan.assistantMessage
+          : plan.userLanguage === "ro"
+            ? "Generez modelul 3D liber din text (Meshy) — animal / insectă / obiect vizual."
+            : "Generating a free-form 3D model from text (Meshy).",
+      technicalPrompt:
+        plan.pipeline === "mesh" &&
+        tech.length > 40 &&
+        !FURNITURE_TECH_RE.test(tech) &&
+        !GENERIC_BOX_TECH_RE.test(tech)
+          ? tech
+          : meshObjectTechnicalPrompt(user),
+    };
+  }
+
+  return plan;
 }
 
 async function callPlannerLlm(

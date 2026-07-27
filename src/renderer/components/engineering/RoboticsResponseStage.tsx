@@ -439,7 +439,7 @@ function CadActions({
       >
         {cadBusy && !batchBusy
           ? `Generez STL… (${phase}${cadStatus ? ` / ${cadStatus}` : ''})`
-          : 'Generează STL 3D (o piesă / cloud)'}
+          : 'Generează STL 3D (mecanice = OpenSCAD · animale/insecte = Meshy)'}
       </button>
 
       {batchParts.length > 0 && (

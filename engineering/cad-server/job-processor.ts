@@ -19,6 +19,7 @@ import {
 } from "./services/job-registry";
 import { cadLog } from "./middleware/logger";
 import { setLocalStl } from "./storage/local-artifacts";
+import { sanitizeScadBuiltinShadows } from "./scad-prompt";
 
 const MAX_RENDER_REPAIRS = Number(process.env.CAD_MAX_RENDER_REPAIRS ?? 2);
 
@@ -169,7 +170,7 @@ const processOpenScadJob = async (
   let llmError: string | undefined;
 
   if (input.generationMode === "library" && input.previousScad?.trim()) {
-    scad = input.previousScad.trim();
+    scad = sanitizeScadBuiltinShadows(input.previousScad.trim());
     appendJobLog(jobId, {
       level: "info",
       event: "library_scad",
@@ -197,7 +198,7 @@ const processOpenScadJob = async (
       appendJobLog(jobId, { level: "error", event: "job_failed", message: llm.error });
       return;
     }
-    scad = llm.scad;
+    scad = sanitizeScadBuiltinShadows(llm.scad);
     usedFallback = Boolean(llm.usedFallback);
     llmError = llm.error;
   }
@@ -211,6 +212,18 @@ const processOpenScadJob = async (
   while (!rendered.ok && repairAttempts < MAX_RENDER_REPAIRS) {
     failIfAborted(jobId);
     if (input.generationMode === "library") break;
+
+    // Deterministic fix for builtin-shadow recursion before spending another LLM call.
+    if (/Recursion detected/i.test(rendered.error ?? "")) {
+      const sanitized = sanitizeScadBuiltinShadows(scad);
+      if (sanitized !== scad) {
+        scad = sanitized;
+        await updateCadJob(jobId, { generatedScad: scad });
+        rendered = await renderScadToStl(scad, jobId);
+        if (rendered.ok) break;
+      }
+    }
+
     const fixed = await repairOpenScad({
       originalPrompt: job.prompt,
       brokenScad: scad,
@@ -220,7 +233,7 @@ const processOpenScadJob = async (
     });
     repairAttempts += 1;
     if (!fixed.ok || !fixed.scad) break;
-    scad = fixed.scad;
+    scad = sanitizeScadBuiltinShadows(fixed.scad);
     await updateCadJob(jobId, { generatedScad: scad });
     rendered = await renderScadToStl(scad, jobId);
   }

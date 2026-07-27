@@ -14,8 +14,14 @@ export function normalizeCadErrorMessage(error: string | null | undefined): stri
   if (/OpenSCAD CLI not installed|OpenSCAD nu e instalat/i.test(error)) {
     return OPENSCAD_MISSING_HINT_RO;
   }
+  if (/MESHY_API_KEY not configured|mesh\.apiKey|Meshy/i.test(error) && /lipsește|missing|adaugă|add|required|neconfigurat|free-form|libere/i.test(error)) {
+    return error;
+  }
   if (/MESHY_API_KEY not configured/i.test(error)) {
-    return 'Cheia Meshy lipsește. Adaugă mesh.apiKey în Setări pentru obiecte 3D libere (dulap, figurine).';
+    return 'Cheia Meshy lipsește. Adaugă mesh.apiKey în Setări → AI & Chei API pentru animale, insecte, figurine și orice obiect 3D liber.';
+  }
+  if (/Recursion detected|Current top level object is empty/i.test(error)) {
+    return 'Modelul OpenSCAD generat era invalid (modul recursiv / geometrie goală). Reîncearcă Generează STL — serverul repară automat modulele care umbresc hull/difference.';
   }
   if (isLibraryModeUnsupportedError(error)) {
     return 'Serverul CAD cloud nu suportă încă mode-ul librărie. Reîncearcă — fallback OpenSCAD ar trebui să ruleze automat.';

@@ -99,4 +99,25 @@ describe("print3d-planner", () => {
     expect(aligned.technicalPrompt.toLowerCase()).toMatch(/helicopter|rotor|fuselage/);
     expect(aligned.technicalPrompt.toLowerCase()).toMatch(/skid|tail/);
   });
+
+  it("routes animals and insects to mesh pipeline", () => {
+    const dog = alignPlanWithLatestUserIntent("generează un câine", {
+      action: "generate",
+      userLanguage: "ro",
+      intent: "mechanical",
+      pipeline: "openscad",
+      technicalPrompt: "Parametric bracket M3",
+    });
+    expect(dog.pipeline).toBe("mesh");
+    expect(dog.intent).toBe("organic");
+
+    const bug = alignPlanWithLatestUserIntent("o insectă fluture", {
+      action: "generate",
+      userLanguage: "ro",
+      intent: "mixed",
+      pipeline: "openscad",
+      technicalPrompt: "cube 20mm",
+    });
+    expect(bug.pipeline).toBe("mesh");
+  });
 });

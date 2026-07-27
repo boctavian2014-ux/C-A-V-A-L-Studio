@@ -136,7 +136,9 @@ export function buildCadLlmPrompt(input: {
     "Units: millimeters. Use $fn = 64 or higher for curved parts.",
     "Start with parametric variables (dimensions, counts, thicknesses).",
     "Use modules for logical sub-parts. End with a top-level render call.",
-    "Primitives: cube, cylinder, sphere, hull, difference, union, linear_extrude, rotate_extrude.",
+    "Primitives: cube, cylinder, sphere, hull(), difference(), union(), linear_extrude, rotate_extrude.",
+    "CRITICAL: NEVER name a module after an OpenSCAD built-in (hull, difference, union, intersection, minkowski, cube, cylinder, translate, rotate, etc.). Use names like body_hull, cabin, wheel_hub.",
+    "CRITICAL: Call built-in hull as hull() { children... } — do not define module hull().",
     "CRITICAL: Model EXACTLY what the user asked for. Never substitute a generic cylindrical cap unless explicitly requested.",
     "CRITICAL: Never substitute furniture (cabinet/wardrobe/dulap) when the user asked for a vehicle, toy car, robot, or mechanical part.",
     "Include mounting holes, fillets (via offset/minkowski sparingly), and wall thickness when relevant.",
@@ -180,6 +182,7 @@ export function buildScadRepairPrompt(input: {
     "You fix broken OpenSCAD scripts for CAVALLO Studio.",
     "Return ONLY corrected OpenSCAD source — no markdown, no commentary.",
     "Fix syntax errors, undefined variables, non-manifold geometry, and zero-thickness walls.",
+    "If the error is Recursion detected on hull/difference/union: you MUST rename that module (e.g. body_hull) — never shadow OpenSCAD built-ins.",
     "Keep the design intent from the original request.",
   ].join("\n");
 
@@ -200,10 +203,83 @@ export function stripScadFences(raw: string): string {
   return text.replace(/^```(?:openscad|scad)?/i, "").replace(/```$/, "").trim();
 }
 
+/** Built-ins that must never be used as custom module names (causes recursion). */
+export const OPENSCAD_RESERVED_MODULE_NAMES = [
+  "hull",
+  "difference",
+  "union",
+  "intersection",
+  "minkowski",
+  "cube",
+  "cylinder",
+  "sphere",
+  "polyhedron",
+  "polygon",
+  "circle",
+  "square",
+  "text",
+  "linear_extrude",
+  "rotate_extrude",
+  "translate",
+  "rotate",
+  "scale",
+  "mirror",
+  "multmatrix",
+  "color",
+  "offset",
+  "resize",
+  "render",
+  "surface",
+  "import",
+  "children",
+  "echo",
+  "assert",
+] as const;
+
+export function findShadowedBuiltinModules(scad: string): string[] {
+  const found: string[] = [];
+  for (const name of OPENSCAD_RESERVED_MODULE_NAMES) {
+    if (new RegExp(`\\bmodule\\s+${name}\\b`, "i").test(scad)) {
+      found.push(name);
+    }
+  }
+  return found;
+}
+
+/**
+ * Rename modules that shadow OpenSCAD built-ins (e.g. module hull → module cavallo_hull)
+ * and rewrite semicolon-terminated call sites. Leaves builtin forms like hull() { ... }.
+ */
+export function sanitizeScadBuiltinShadows(scad: string): string {
+  const shadowed = findShadowedBuiltinModules(scad);
+  if (!shadowed.length) return scad;
+
+  let out = scad;
+  for (const name of shadowed) {
+    const safe = `cavallo_${name}`;
+    out = out.replace(new RegExp(`\\bmodule\\s+${name}\\b`, "gi"), `module ${safe}`);
+    // Custom-module style calls end with `;`. Builtin CSG uses `name() { ... }`.
+    out = out.replace(
+      new RegExp(`\\b${name}\\s*\\(([^;]*?)\\)\\s*;`, "gi"),
+      `${safe}($1);`
+    );
+  }
+  return out;
+}
+
 export function validateScadSource(source: string): { ok: boolean; reason?: string } {
-  const trimmed = source.trim();
+  const trimmed = sanitizeScadBuiltinShadows(source.trim());
   if (!trimmed) return { ok: false, reason: "Empty OpenSCAD source" };
   if (trimmed.length < 40) return { ok: false, reason: "OpenSCAD source too short" };
+
+  const stillShadowed = findShadowedBuiltinModules(trimmed);
+  if (stillShadowed.length) {
+    return {
+      ok: false,
+      reason: `Module name(s) shadow OpenSCAD built-ins (${stillShadowed.join(", ")}). Rename them (e.g. body_hull).`,
+    };
+  }
+
   const hasPrimitive =
     /\b(cube|cylinder|sphere|polyhedron|linear_extrude|rotate_extrude|hull|minkowski)\s*\(/i.test(
       trimmed

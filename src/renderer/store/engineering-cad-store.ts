@@ -557,7 +557,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         phase: 'failed',
         error:
           planWarnings.join(' ') ||
-          'Pentru obiecte 3D libere (dulap, figurine, carcase) adaugă cheia Meshy în Setări (mesh.apiKey). Alternativ instalează OpenSCAD pentru piese mecanice precise.',
+          'Pentru obiecte 3D libere (animale, insecte, figurine, robot jucărie, mobilier) adaugă cheia Meshy în Setări → AI & Chei API (mesh.apiKey). OpenSCAD e doar pentru piese mecanice precise.',
       });
       return;
     }
@@ -581,7 +581,10 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           previousScad: plan.previousScad,
           previousMeshTaskId: plan.previousMeshTaskId,
           generationMode: planResult.plan.pipeline,
-          meshPrompt: planResult.plan.pipeline === 'mesh' ? jobPrompt : undefined,
+          meshPrompt:
+            planResult.plan.pipeline === 'mesh'
+              ? [userPrompt.trim(), jobPrompt].filter(Boolean).join('\n\n').slice(0, 12_000)
+              : undefined,
           quality: 'standard',
         });
         if (created.ok && created.jobId) break;

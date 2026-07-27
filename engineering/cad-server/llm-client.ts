@@ -1,6 +1,7 @@
 import {
   buildCadLlmPrompt,
   buildScadRepairPrompt,
+  sanitizeScadBuiltinShadows,
   stripScadFences,
   validateScadMatchesIntent,
   validateScadSource,
@@ -110,7 +111,7 @@ async function generateWithRetries(input: {
       continue;
     }
 
-    const scad = stripScadFences(result.content!);
+    const scad = sanitizeScadBuiltinShadows(stripScadFences(result.content!));
     const validation = validateScadSource(scad);
     if (!validation.ok) {
       lastError = validation.reason ?? "Validation failed";
@@ -194,7 +195,7 @@ export async function repairOpenScad(input: {
     return { ok: false, error: result.error };
   }
 
-  const scad = stripScadFences(result.content!);
+  const scad = sanitizeScadBuiltinShadows(stripScadFences(result.content!));
   const validation = validateScadSource(scad);
   if (!validation.ok) {
     return { ok: false, error: validation.reason ?? "Repaired SCAD failed validation" };

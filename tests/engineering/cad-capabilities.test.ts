@@ -21,6 +21,14 @@ describe("cad-capabilities", () => {
     expect(suggestMeshFromPrompt("motor mount M3 30mm")).toBe(false);
   });
 
+  it("suggests mesh for animals, insects, and toy robots", () => {
+    expect(suggestMeshFromPrompt("un câine jucărie")).toBe(true);
+    expect(suggestMeshFromPrompt("fluture colorat")).toBe(true);
+    expect(suggestMeshFromPrompt("păianjen realist")).toBe(true);
+    expect(suggestMeshFromPrompt("cute toy robot figurine")).toBe(true);
+    expect(suggestMeshFromPrompt("robot arm with M3 mounts")).toBe(false);
+  });
+
   it("falls back to mesh when openscad missing and mesh key present", async () => {
     process.env.MESHY_API_KEY = "test-key";
     const plan = await adjustPlanPipeline({
