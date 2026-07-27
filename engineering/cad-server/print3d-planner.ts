@@ -51,8 +51,11 @@ Rules:
 - userLanguage = language of the user's LATEST message (ro or en). assistantMessage and questions MUST use that language.
 - action=clarify ONLY when critical info is missing: size/dimensions, object type (bust vs full figure vs part type), detail level, or ambiguous intent. Do NOT clarify if conversation history already answers these.
 - action=generate when enough context exists (including from prior messages).
-- pipeline=openscad for mechanical/parametric parts (brackets, gears, wheels, enclosures, mounts).
-- pipeline=mesh for furniture (dulap, cabinet, wardrobe), decorative objects, figurines, sculptures, animals, faces, and any free-form shape the user describes in plain language (like "draw a cabinet").
+- CRITICAL OBJECT FIDELITY: technicalPrompt MUST describe the SAME object the user asked for. NEVER substitute furniture (dulap/cabinet/wardrobe/closet) or a plain box/wedge when the user asked for a vehicle, toy car, helicopter, robot, drone, wheel, or mechanical part. Prefer the LATEST user message over older unrelated objects in history.
+- pipeline=openscad for mechanical/parametric parts (brackets, gears, wheels, enclosures, mounts, toy cars/vehicles, helicopters).
+- pipeline=mesh ONLY when the user explicitly wants free-form furniture (dulap/cabinet), figurines, sculptures, animals, faces, or decorative organics.
+- Vehicles / toy cars (mașină jucărie, toy car, truck, tractor): pipeline=openscad, intent=mechanical. technicalPrompt must include body/chassis, cabin or hood, 4 wheels with axles (~Ø20–40 mm), length ~100–180 mm unless user gave size.
+- Helicopters (elicopter, helicopter, heli): pipeline=openscad, intent=mechanical. technicalPrompt MUST include fuselage/cabin, main rotor disk with hub, tail boom + tail rotor, and landing skids. NEVER a single rectangular prism or wedge.
 - For IoT/sensor enclosures (air quality, OLED display, WiFi alert): pipeline=openscad. technicalPrompt MUST list every physical feature: OLED window mm, vent slot pattern, buzzer hole, PCB standoffs, antenna clearance. Never describe only "a box".
 - pipeline=mesh when the user wants a visual/organic result rather than exact drill patterns.
 - For trademarked characters (Mickey Mouse, etc.): warn in warnings, use generic description in technicalPrompt (e.g. "cartoon mouse with round ears"), never reproduce exact IP.
@@ -129,6 +132,112 @@ export function buildClarifyMessage(plan: Print3DPlannerResult): string {
   return parts.join("\n\n") || (plan.userLanguage === "ro" ? "Am nevoie de câteva detalii." : "I need a few details.");
 }
 
+const VEHICLE_USER_RE =
+  /(mașin[aăi]|masina|masini|toy\s*car|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil|jucăr(?:ie|ii))/iu;
+const HELICOPTER_USER_RE = /(elicopter|helicopter|\bheli\b|elicopter(?:e|ul)?)/iu;
+const FURNITURE_TECH_RE =
+  /(dulap|cabinet|wardrobe|closet|drawer unit|chest of drawers|mobilier|bookshelf|shelving unit)/iu;
+const GENERIC_BOX_TECH_RE =
+  /(plain\s+box|rectangular\s+prism|simple\s+wedge|hollow\s+box|featureless|generic\s+block)/iu;
+const HELICOPTER_FEATURE_RE = /(rotor|fuselage|tail\s*boom|skid|blade|cabin|elicopter|helicopter)/iu;
+
+function helicopterTechnicalPrompt(user: string): string {
+  return [
+    "FDM-printable TOY HELICOPTER (NOT a box, NOT furniture, NOT a wedge).",
+    `User request: ${user.slice(0, 400)}`,
+    "Required parts as ONE unioned solid:",
+    "- fuselage/cabin body ~80-120 mm long with rounded nose;",
+    "- main rotor: hub cylinder + 2–4 thin blade plates Ø60-90 mm;",
+    "- tail boom + small vertical fin + tail rotor disk;",
+    "- two landing skids under the fuselage.",
+    "Parametric OpenSCAD with modules (fuselage, main_rotor, tail, skids). Use cube+cylinder+hull. $fn>=64.",
+  ].join(" ");
+}
+
+function vehicleTechnicalPrompt(user: string): string {
+  return [
+    "FDM-printable TOY CAR / vehicle body (NOT furniture, NOT a cabinet).",
+    `User request: ${user.slice(0, 400)}`,
+    "Include: chassis/body ~120-160 mm long, cabin or hood, 4 wheels Ø25-35 mm with axles, simple wheel wells.",
+    "Parametric OpenSCAD: body hull + wheel cylinders. Single printable solid or body+wheels as one assembly.",
+    "Wall thickness >= 1.6 mm. Flat bottom for bed adhesion.",
+  ].join(" ");
+}
+
+/** Safety net when the LLM substitutes the wrong object (furniture/box) for vehicle/helicopter. */
+export function alignPlanWithLatestUserIntent(
+  latestUserText: string,
+  plan: Print3DPlannerResult
+): Print3DPlannerResult {
+  const user = latestUserText.trim();
+  const tech = plan.technicalPrompt;
+  const assistant = plan.assistantMessage ?? "";
+
+  if (HELICOPTER_USER_RE.test(user)) {
+    const wrongObject =
+      FURNITURE_TECH_RE.test(tech) ||
+      FURNITURE_TECH_RE.test(assistant) ||
+      GENERIC_BOX_TECH_RE.test(tech) ||
+      !HELICOPTER_FEATURE_RE.test(tech);
+    if (wrongObject || plan.pipeline === "mesh") {
+      return {
+        ...plan,
+        action: "generate",
+        intent: "mechanical",
+        pipeline: "openscad",
+        assistantMessage:
+          plan.userLanguage === "ro"
+            ? "Generez un elicopter jucărie (fuselaj + rotor + skids)."
+            : "Generating a toy helicopter (fuselage + rotor + skids).",
+        technicalPrompt: helicopterTechnicalPrompt(user),
+        warnings: [
+          ...(plan.warnings ?? []),
+          plan.userLanguage === "ro"
+            ? "Am forțat planul pentru elicopter (nu cutie/dulap)."
+            : "Forced helicopter plan (not a plain box/cabinet).",
+        ],
+      };
+    }
+    return {
+      ...plan,
+      action: "generate",
+      intent: "mechanical",
+      pipeline: "openscad",
+    };
+  }
+
+  if (!VEHICLE_USER_RE.test(user)) return plan;
+  if (!FURNITURE_TECH_RE.test(tech) && !FURNITURE_TECH_RE.test(assistant)) {
+    if (plan.pipeline === "mesh" || plan.intent === "organic") {
+      return {
+        ...plan,
+        action: "generate",
+        intent: "mechanical",
+        pipeline: "openscad",
+      };
+    }
+    return plan;
+  }
+
+  return {
+    ...plan,
+    action: "generate",
+    intent: "mechanical",
+    pipeline: "openscad",
+    assistantMessage:
+      plan.userLanguage === "ro"
+        ? "Generez o mașină jucărie (caroserie + roți), nu mobilier."
+        : "Generating a toy car (body + wheels), not furniture.",
+    technicalPrompt: vehicleTechnicalPrompt(user),
+    warnings: [
+      ...(plan.warnings ?? []),
+      plan.userLanguage === "ro"
+        ? "Am corectat planul: cererea era mașină/vehicul, nu dulap."
+        : "Corrected plan: user asked for a vehicle, not a cabinet.",
+    ],
+  };
+}
+
 async function callPlannerLlm(
   apiKey: string,
   userContent: string
@@ -200,7 +309,8 @@ export async function planPrint3DRequest(
 
     const plan = parsePlannerResponse(result.content!);
     if (plan) {
-      const adjusted = await adjustPlanPipeline(plan, input.meshApiKey);
+      const aligned = alignPlanWithLatestUserIntent(input.latestUserText, plan);
+      const adjusted = await adjustPlanPipeline(aligned, input.meshApiKey);
       return { ok: true, plan: adjusted };
     }
     lastError = "Planner returned unparseable JSON";

@@ -493,12 +493,11 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     await warmCadPipeline(resolvedModel, workspaceRoot);
 
     const credentials = await loadCadCredentials();
+    // Do NOT leak Coding Chat history into Robotics CAD — it causes wrong objects
+    // (e.g. previous "dulap" polluting a "mașină jucărie" request).
     const conversationHistory: CadChatMessage[] = plan.conversationHistory?.length
       ? plan.conversationHistory
-      : aiState.messages
-          .filter((m) => m.role === 'user' || m.role === 'assistant')
-          .slice(-8)
-          .map((m) => ({ role: m.role, content: m.content.slice(0, 4_000) }));
+      : [];
 
     const attachmentBlock = (plan.attachments ?? aiState.attachedFiles)
       .slice(0, 4)
@@ -520,7 +519,9 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     try {
       planResult = await cad.plan({
         messages: planMessages,
-        latestUserText: technicalPrompt,
+        // Prefer raw Robotics prompt so planner intent guards match the user's words
+        // (not polluted coding-chat or stale furniture context).
+        latestUserText: userPrompt.trim() || technicalPrompt,
         previousMeshTaskId: plan.previousMeshTaskId,
       });
     } catch (err) {

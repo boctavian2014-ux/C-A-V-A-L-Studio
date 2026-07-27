@@ -99,6 +99,7 @@ export function EngineeringAIPanel() {
       if (partial.bom !== undefined) s.setBom(partial.bom ?? null);
       s.setWarning(partial.warning ?? null);
       s.setError(null);
+      s.clearPromptAfterResponse();
       if (!s.userTabLocked) {
         s.setActiveTab(partial.bom?.components?.length ? 'cad' : 'overview');
       }

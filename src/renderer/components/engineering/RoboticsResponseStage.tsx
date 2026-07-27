@@ -27,6 +27,7 @@ export function RoboticsResponseStage() {
   const handoffFromEngineering = useAIStore((s) => s.handoffFromEngineering);
 
   const prompt = useRoboticsSessionStore((s) => s.prompt);
+  const lastPrompt = useRoboticsSessionStore((s) => s.lastPrompt);
   const loading = useRoboticsSessionStore((s) => s.loading);
   const project = useRoboticsSessionStore((s) => s.project);
   const plan = useRoboticsSessionStore((s) => s.plan);
@@ -37,6 +38,8 @@ export function RoboticsResponseStage() {
   const error = useRoboticsSessionStore((s) => s.error);
   const setActiveTab = useRoboticsSessionStore((s) => s.setActiveTab);
   const setUserTabLocked = useRoboticsSessionStore((s) => s.setUserTabLocked);
+
+  const userPrompt = lastPrompt.trim() || prompt.trim();
 
   const [tabCols, setTabCols] = useState(2);
   const tabsWrapRef = useRef<HTMLDivElement>(null);
@@ -54,7 +57,7 @@ export function RoboticsResponseStage() {
 
   const handleSoftwareHandoff = () => {
     if (!project) return;
-    const result = handoffFromEngineering({ project, userPrompt: prompt });
+    const result = handoffFromEngineering({ project, userPrompt });
     if (!result.ok) {
       useRoboticsSessionStore.getState().setError(result.error);
     }
@@ -184,7 +187,7 @@ export function RoboticsResponseStage() {
               project={project}
               bom={bom}
               projectPath={projectPath}
-              userPrompt={prompt}
+              userPrompt={userPrompt}
             />
             {Boolean(streamProgress) && <span className="glass-stream-cursor" aria-hidden />}
           </div>

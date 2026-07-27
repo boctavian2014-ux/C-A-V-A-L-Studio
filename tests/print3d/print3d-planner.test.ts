@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  alignPlanWithLatestUserIntent,
   buildClarifyMessage,
   extractJsonObject,
   parsePlannerResponse,
@@ -68,5 +69,34 @@ describe("print3d-planner", () => {
     expect(msg).toContain("Spune-mi dimensiunea.");
     expect(msg).toContain("1. Înălțime");
     expect(msg).toContain("generică");
+  });
+
+  it("rewrites furniture substitution when user asked for a toy car", () => {
+    const aligned = alignPlanWithLatestUserIntent("generează o mașină jucărie", {
+      action: "generate",
+      userLanguage: "ro",
+      intent: "organic",
+      pipeline: "mesh",
+      assistantMessage: "Generez un dulap.",
+      technicalPrompt: "FDM cabinet wardrobe with doors and shelves 800mm tall",
+    });
+    expect(aligned.pipeline).toBe("openscad");
+    expect(aligned.intent).toBe("mechanical");
+    expect(aligned.technicalPrompt.toLowerCase()).toMatch(/toy car|vehicle/);
+    expect(aligned.technicalPrompt).toMatch(/NOT a cabinet|NOT furniture/i);
+  });
+
+  it("forces helicopter plan when user asked for elicopter but got a box", () => {
+    const aligned = alignPlanWithLatestUserIntent("generează un elicopter jucărie", {
+      action: "generate",
+      userLanguage: "ro",
+      intent: "mechanical",
+      pipeline: "openscad",
+      assistantMessage: "Generez piesa.",
+      technicalPrompt: "Simple rectangular prism wedge 90x42x35 mm hollow box",
+    });
+    expect(aligned.pipeline).toBe("openscad");
+    expect(aligned.technicalPrompt.toLowerCase()).toMatch(/helicopter|rotor|fuselage/);
+    expect(aligned.technicalPrompt.toLowerCase()).toMatch(/skid|tail/);
   });
 });

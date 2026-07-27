@@ -14,6 +14,10 @@ export function inferCadProjectType(userPrompt: string, spec: SpecData): string 
     return 'iot';
   }
   if (/dron|drone|fpv|quad|copter/i.test(text)) return 'drone';
+  if (/elicopter|helicopter|\bheli\b/i.test(text)) return 'helicopter';
+  if (/mașin|masina|toy\s*car|vehicle|camion|truck|tractor|automobil|kart|buggy/i.test(text)) {
+    return 'vehicle';
+  }
   if (/robot/i.test(text)) return 'robot';
   return 'custom';
 }
@@ -68,7 +72,7 @@ export function buildCadTechnicalPrompt(project: EngProject, userPrompt: string)
   return [
     `USER INTENT (must match geometry): ${userPrompt.trim()}`,
     'Design ONE functional 3D-printable mechanical part (OpenSCAD pipeline).',
-    'FORBIDDEN: plain hollow box, generic cube, or unrelated shape when user asked for sensor/display/enclosure features.',
+    'FORBIDDEN: plain hollow box, generic cube, cabinet/wardrobe, or unrelated shape when user asked for a vehicle, toy, sensor/display/enclosure features.',
     `Title: ${spec.title}`,
     spec.summary,
     spec.dimensions ? `Overall dimensions: ${spec.dimensions}` : '',

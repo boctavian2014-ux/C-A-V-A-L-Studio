@@ -9,6 +9,8 @@ export type RoboticsTabId = (typeof ROBOTICS_TAB_GROUPS)[number]['id'];
 
 interface RoboticsSessionState {
   prompt: string;
+  /** Last successfully submitted prompt (kept after textarea clears, for CAD/handoff). */
+  lastPrompt: string;
   loading: boolean;
   error: string | null;
   warning: string | null;
@@ -22,6 +24,7 @@ interface RoboticsSessionState {
   streamId: string | null;
 
   setPrompt: (prompt: string) => void;
+  setLastPrompt: (prompt: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setWarning: (warning: string | null) => void;
@@ -40,11 +43,14 @@ interface RoboticsSessionState {
     /** When true, abort the AbortController (manual Stop only). */
     abortSignal?: boolean;
   }) => void;
+  /** Clear composer after a successful response (keeps lastPrompt for CAD). */
+  clearPromptAfterResponse: () => void;
   resetResults: () => void;
 }
 
 export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get) => ({
   prompt: '',
+  lastPrompt: '',
   loading: false,
   error: null,
   warning: null,
@@ -57,6 +63,7 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
   streamId: null,
 
   setPrompt: (prompt) => set({ prompt }),
+  setLastPrompt: (lastPrompt) => set({ lastPrompt }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   setWarning: (warning) => set({ warning }),
@@ -94,6 +101,14 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
       loading: false,
       streamProgress: null,
       streamId: null,
+    });
+  },
+
+  clearPromptAfterResponse: () => {
+    const current = get().prompt.trim();
+    set({
+      lastPrompt: current || get().lastPrompt,
+      prompt: '',
     });
   },
 

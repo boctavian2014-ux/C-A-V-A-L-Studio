@@ -9,13 +9,14 @@ const MESH_KEYWORDS =
   /\b(dulap|cabinet|wardrobe|mobilier|furniture|figurin[aă]|sculptur[aă]|animal|fa[tț][aă]|bust|character|organic|decorative|ornament|vaz[aă]|vase|lamp[aă]|lamp shade|cosmetic)\b/i;
 
 const OPENSCAD_KEYWORDS =
-  /\b(bracket|mount|suport|prindere|gear|roat[aă]|wheel|enclosure|cutie|case|cadru|frame|plate|drone|fpv|landing|motor mount|g[aă]uri|holes|m3|parametric|pcb|esp32)\b/i;
+  /(bracket|mount|suport|prindere|gear|roat[aă]|wheel|enclosure|cutie|case|cadru|frame|plate|drone|fpv|landing|motor mount|g[aă]uri|holes|m3|parametric|pcb|esp32|mașin[aă]|masina|toy\s*car|vehicle|camion|truck|tractor|robot|elicopter|helicopter|\bheli\b)/iu;
 
 /** Heuristic when planner picks openscad but mesh is a better fit for free-form objects. */
 export function suggestMeshFromPrompt(text: string): boolean {
   const lower = text.toLowerCase();
-  if (MESH_KEYWORDS.test(lower)) return true;
+  // Vehicles / toys must stay OpenSCAD — never push to furniture mesh.
   if (OPENSCAD_KEYWORDS.test(lower)) return false;
+  if (MESH_KEYWORDS.test(lower)) return true;
   // Enclosures / housings without precision cues → mesh is more forgiving
   if (/\b(housing|enclosure|cutie|case|carcas[aă])\b/i.test(lower)) return true;
   return false;

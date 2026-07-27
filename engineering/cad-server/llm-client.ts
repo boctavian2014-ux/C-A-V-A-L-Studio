@@ -2,6 +2,7 @@ import {
   buildCadLlmPrompt,
   buildScadRepairPrompt,
   stripScadFences,
+  validateScadMatchesIntent,
   validateScadSource,
 } from "./scad-prompt";
 import { fallbackScadForPrompt } from "./scad-runner";
@@ -94,7 +95,7 @@ async function generateWithRetries(input: {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const retryNote =
       attempt > 1
-        ? `\n\nPrevious attempt failed validation. Return ONLY valid OpenSCAD with primitives and a top-level render. Match the part request exactly.`
+        ? `\n\nPrevious attempt failed validation (${lastError}). Return ONLY valid OpenSCAD. If the request is a helicopter/vehicle, include all required parts (fuselage/body, rotors/wheels, skids/axles) — never a single cube/wedge.`
         : "";
     const result = await callOpenRouter(
       input.apiKey,
@@ -111,10 +112,16 @@ async function generateWithRetries(input: {
 
     const scad = stripScadFences(result.content!);
     const validation = validateScadSource(scad);
-    if (validation.ok) {
-      return { ok: true, scad, model: input.model, attempts: attempt };
+    if (!validation.ok) {
+      lastError = validation.reason ?? "Validation failed";
+      continue;
     }
-    lastError = validation.reason ?? "Validation failed";
+    const intentCheck = validateScadMatchesIntent(input.prompt, scad);
+    if (!intentCheck.ok) {
+      lastError = intentCheck.reason ?? "Intent mismatch";
+      continue;
+    }
+    return { ok: true, scad, model: input.model, attempts: attempt };
   }
 
   if (allowFallback()) {

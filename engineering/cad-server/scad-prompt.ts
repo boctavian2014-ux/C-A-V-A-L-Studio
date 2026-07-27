@@ -5,49 +5,61 @@ const PROJECT_CAD_GUIDANCE: Record<string, string> = {
     "Drone parts: motor mounts, prop guards, landing gear, battery trays, camera mounts, antenna holders, frame plates, arms. For propellers use rotate_extrude blade profile or twisted extrude — NOT a plain hollow cylinder unless user asked for a cap. NEVER output a hollow rectangular cabinet/wardrobe/box when user asked for a drone — model a frame plate, arm, or mount instead.",
   robot:
     "Robot parts: wheels (hub + tire profile via rotate_extrude), chassis plates, encoder mounts, LiDAR brackets, gear holders. Wheels need hub bore, tire outer diameter, and tread.",
+  vehicle:
+    "Toy/vehicle parts: car body or chassis with cabin/hood silhouette, wheel wells, 4 wheels with axles. NEVER output a cabinet, wardrobe, drawer unit, or hollow furniture box when user asked for a car/mașină/toy vehicle.",
+  helicopter:
+    "Toy helicopter: fuselage/cabin, main rotor (hub + blades), tail boom + tail rotor, landing skids. NEVER a single rectangular prism, wedge, or cabinet. Use multiple modules and cylinders.",
   iot:
     "IoT/sensor enclosures: MUST include feature-specific cutouts from the request (OLED window, vent slots, buzzer hole, USB port, antenna clearance). PCB standoffs M2.5, wall thickness 2 mm, two-part base+lid. NEVER output a featureless rectangular box when user mentioned display, sensor, WiFi, or alert.",
   cnc:
     "CNC parts: spindle mounts, limit-switch brackets, cable chains, control panel bezels, extrusion adapters.",
   custom:
-    "Match the user's described geometry precisely. Use parametric modules and meaningful variable names.",
+    "Match the user's described geometry precisely. Use parametric modules and meaningful variable names. NEVER substitute an unrelated object (e.g. cabinet) for what the user asked.",
 };
 
 const PART_KEYWORD_HINTS: Array<{ pattern: RegExp; hint: string }> = [
   {
-    pattern: /\b(roata|roată|wheel|tire|anvelopă|anvelopa)\b/i,
+    pattern: /(elicopter|helicopter|\bheli\b)/iu,
+    hint: "Design a TOY HELICOPTER: fuselage/cabin, main rotor hub+blades, tail boom + tail rotor, landing skids. NOT a plain box or wedge.",
+  },
+  {
+    pattern: /(mașin[aăi]|masina|toy\s*car|vehicle|camion|truck|tractor|automobil|jucăr(?:ie|ii))/iu,
+    hint: "Design a TOY CAR / VEHICLE: body/chassis hull, cabin or hood, 4 wheels with axles, wheel wells. NOT a cabinet, wardrobe, or furniture box.",
+  },
+  {
+    pattern: /(roata|roată|wheel|tire|anvelopă|anvelopa)/iu,
     hint: "Design a WHEEL: hub cylinder + tire (rotate_extrude torus-like profile or rounded outer ring), optional spokes. Include bore diameter and width parameters.",
   },
   {
-    pattern: /\b(elice|propeller|prop|helice)\b/i,
+    pattern: /(elice|propeller|prop|helice)/iu,
     hint: "Design a PROPELLER: 2–4 blades with rotate_extrude or linear_extrude twisted airfoil, central hub with motor bore.",
   },
   {
-    pattern: /\b(angrenaj|gear|pinion)\b/i,
+    pattern: /(angrenaj|gear|pinion)/iu,
     hint: "Design a GEAR: use rotate_extrude tooth profile or simplified involute approximation with tooth count, module/pitch, bore.",
   },
   {
-    pattern: /\b(suport telefon|phone stand|phone holder|incarcare wireless|wireless charging)\b/i,
+    pattern: /(suport telefon|phone stand|phone holder|incarcare wireless|wireless charging)/iu,
     hint: "Design a PHONE STAND/HOLDER: angled phone slot, stable base, cable channel, optional Qi coil recess and ESP32/PCB bay — NOT a generic empty box.",
   },
   {
-    pattern: /\b(bracket|suport|mount|prindere)\b/i,
+    pattern: /(bracket|suport|mount|prindere)/iu,
     hint: "Design a BRACKET: L or U shape with mounting holes, ribbing, screw countersinks.",
   },
   {
-    pattern: /\b(enclosure|carcase|capac|cutie|case)\b/i,
+    pattern: /(enclosure|carcase|capac|cutie|case)/iu,
     hint: "Design an ENCLOSURE: box with wall thickness, lid lip, standoffs, ventilation slots if needed.",
   },
   {
-    pattern: /\b(oled|ecran|display|0\.96)\b/i,
+    pattern: /(oled|ecran|display|0\.96)/iu,
     hint: "Include OLED DISPLAY WINDOW: rectangular cutout ~27.3×27.3 mm on front face with 2 mm bezel recess — visible opening, not solid plastic.",
   },
   {
-    pattern: /\b(senzor.*aer|calitate.*aer|air quality|pm2\.?5|pms5003|sgp30|voc)\b/i,
+    pattern: /(senzor.*aer|calitate.*aer|air quality|pm2\.?5|pms5003|sgp30|voc)/iu,
     hint: "AIR QUALITY SENSOR ENCLOSURE: side ventilation grille (slots or perforations) for airflow to sensor module — NOT sealed walls.",
   },
   {
-    pattern: /\b(wifi|esp32|wireless|alert|alertă|buzzer)\b/i,
+    pattern: /(wifi|esp32|wireless|alert|alertă|buzzer)/iu,
     hint: "IoT ALERT DEVICE: thin antenna wall or cutout for ESP32 WiFi; buzzer hole Ø12 mm; optional LED hole Ø5 mm.",
   },
 ];
@@ -126,6 +138,7 @@ export function buildCadLlmPrompt(input: {
     "Use modules for logical sub-parts. End with a top-level render call.",
     "Primitives: cube, cylinder, sphere, hull, difference, union, linear_extrude, rotate_extrude.",
     "CRITICAL: Model EXACTLY what the user asked for. Never substitute a generic cylindrical cap unless explicitly requested.",
+    "CRITICAL: Never substitute furniture (cabinet/wardrobe/dulap) when the user asked for a vehicle, toy car, robot, or mechanical part.",
     "Include mounting holes, fillets (via offset/minkowski sparingly), and wall thickness when relevant.",
     "Ensure the model is a single watertight solid suitable for 3D printing.",
     ...fdmRulesForQuality(input.quality),
@@ -204,5 +217,42 @@ export function validateScadSource(source: string): { ok: boolean; reason?: stri
   if (!hasRender) {
     return { ok: false, reason: "OpenSCAD must include a top-level render (module call or CSG)" };
   }
+  return { ok: true };
+}
+
+/** Reject oversimplified solids when the user clearly asked for a complex vehicle/heli. */
+export function validateScadMatchesIntent(
+  prompt: string,
+  scad: string
+): { ok: boolean; reason?: string } {
+  const p = prompt;
+  const cubeCount = (scad.match(/\bcube\s*\(/gi) ?? []).length;
+  const cylCount = (scad.match(/\bcylinder\s*\(/gi) ?? []).length;
+  const hullCount = (scad.match(/\bhull\s*\(/gi) ?? []).length;
+  const moduleCount = (scad.match(/\bmodule\s+\w+/gi) ?? []).length;
+  const tooSimple = cubeCount <= 2 && cylCount < 2 && hullCount < 1 && moduleCount < 2;
+
+  if (/(elicopter|helicopter|\bheli\b)/iu.test(p)) {
+    const named =
+      /(rotor|fuselage|tail|skid|blade|cabin|boom)/i.test(scad) || cylCount >= 3;
+    if (tooSimple || !named) {
+      return {
+        ok: false,
+        reason:
+          "Helicopter model too simple — need fuselage + main rotor + tail/skids (cylinders/hulls/modules), not a single box.",
+      };
+    }
+  }
+
+  if (/(mașin[aăi]|masina|toy\s*car|vehicle|camion|truck|tractor)/iu.test(p)) {
+    if (tooSimple && cylCount < 4) {
+      return {
+        ok: false,
+        reason:
+          "Vehicle model too simple — need body + wheels (cylinders), not a single prism.",
+      };
+    }
+  }
+
   return { ok: true };
 }
