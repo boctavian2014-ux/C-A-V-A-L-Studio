@@ -4,13 +4,13 @@ import * as pty from 'node-pty';
 import * as os from 'os';
 import { sanitizeEnvForTerminal } from './subprocess-env';
 import { assertTrustedSender } from './ipc-trust';
+import {
+  ensureLatestPowerShellInstalled,
+  resolvePreferredShell,
+} from './powershell-shell';
 
 // Map de sesiuni terminal active
 const sessions = new Map<string, pty.IPty>();
-
-const SHELL = os.platform() === 'win32'
-  ? 'powershell.exe'
-  : process.env.SHELL || '/bin/bash';
 
 function resolveTerminalCwd(cwd?: string): string {
   const trimmed = cwd?.trim();
@@ -25,7 +25,16 @@ ipcMain.handle('terminal:create', async (event, id: string, options?: { cwd?: st
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return { ok: false, error: 'No window' };
 
-  const ptyProcess = pty.spawn(SHELL, [], {
+  // Prefer PowerShell 7; install latest via winget on Windows when missing.
+  if (process.platform === 'win32') {
+    const ensured = await ensureLatestPowerShellInstalled();
+    if (!ensured.ok && ensured.error) {
+      console.warn('[terminal] PowerShell 7 install:', ensured.error);
+    }
+  }
+
+  const shell = resolvePreferredShell();
+  const ptyProcess = pty.spawn(shell.command, shell.interactiveArgs, {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
@@ -38,7 +47,7 @@ ipcMain.handle('terminal:create', async (event, id: string, options?: { cwd?: st
   });
 
   sessions.set(id, ptyProcess);
-  return { ok: true };
+  return { ok: true, shell: shell.label, kind: shell.kind };
 });
 
 ipcMain.handle('terminal:write', async (event, id: string, data: string) => {
@@ -68,4 +77,9 @@ ipcMain.handle('terminal:destroy', async (event, id: string) => {
     sessions.delete(id);
   }
   return { ok: true };
+});
+
+ipcMain.handle('terminal:ensurePowerShell', async (event) => {
+  assertTrustedSender(event);
+  return ensureLatestPowerShellInstalled();
 });

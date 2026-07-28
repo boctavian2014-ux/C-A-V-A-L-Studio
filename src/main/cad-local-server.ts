@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fsSync from "node:fs";
 import path from "node:path";
 
@@ -22,11 +22,34 @@ async function probeHealth(baseUrl: string, timeoutMs = 1_500): Promise<boolean>
   }
 }
 
+function resolveNodeExecutable(): string {
+  const override = process.env.CAVAL_NODE_PATH?.trim();
+  if (override) return override;
+  // Under Electron, process.execPath is Electron.exe — CAD must run with system Node.
+  if (typeof process.versions.electron === "string") {
+    try {
+      const result = spawnSync(process.platform === "win32" ? "where.exe" : "which", ["node"], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      const first = (result.stdout || "")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find(Boolean);
+      if (first) return first;
+    } catch {
+      /* fall through */
+    }
+    return "node";
+  }
+  return process.execPath;
+}
+
 function resolveTsxLaunch(): { command: string; args: string[]; shell: boolean } {
   const entry = path.join(process.cwd(), "engineering", "cad-server", "standalone.ts");
   const tsxCli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
   if (fsExists(tsxCli)) {
-    return { command: process.execPath, args: [tsxCli, entry], shell: false };
+    return { command: resolveNodeExecutable(), args: [tsxCli, entry], shell: false };
   }
   return {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
@@ -48,6 +71,7 @@ export async function ensureCadLocalServer(): Promise<boolean> {
     if (cadChild) return probeHealth(LOCAL_URL, 3_000);
 
     const { command, args, shell } = resolveTsxLaunch();
+    console.info(`[cad] starting local server: ${command} ${args.join(" ")}`);
 
     cadChild = spawn(command, args, {
       cwd: process.cwd(),

@@ -6,13 +6,24 @@ export interface TerminalSessionMeta {
 
 let terminalCounter = 0;
 
+function defaultTitle(index: number): string {
+  // Prefer PowerShell 7 label on Windows (shell is resolved/installed in main).
+  if (typeof navigator !== 'undefined' && /Win/i.test(navigator.platform)) {
+    return `pwsh ${index}`;
+  }
+  if (typeof process !== 'undefined' && process.platform === 'win32') {
+    return `pwsh ${index}`;
+  }
+  return `terminal ${index}`;
+}
+
 export function createTerminalSessionMeta(existingCount = 0): TerminalSessionMeta {
   terminalCounter += 1;
   const id = `terminal-${terminalCounter}`;
   const index = existingCount + 1;
   return {
     id,
-    title: `powershell ${index}`,
+    title: defaultTitle(index),
     containerId: `caval-terminal-${id}`,
   };
 }

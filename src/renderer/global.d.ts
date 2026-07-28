@@ -19,10 +19,20 @@ interface CavalFsApi {
 }
 
 interface CavalTerminalApi {
-  create: (id: string, options?: { cwd?: string }) => Promise<{ ok: boolean; error?: string }>;
+  create: (
+    id: string,
+    options?: { cwd?: string }
+  ) => Promise<{ ok: boolean; error?: string; shell?: string; kind?: string }>;
   write: (id: string, data: string) => Promise<{ ok: boolean; error?: string }>;
   resize: (id: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
   destroy: (id: string) => Promise<{ ok: boolean }>;
+  ensurePowerShell: () => Promise<{
+    ok: boolean;
+    already?: boolean;
+    upgraded?: boolean;
+    error?: string;
+    path?: string;
+  }>;
   onData: (id: string, cb: (data: string) => void) => () => void;
 }
 
@@ -144,6 +154,7 @@ interface CavalStreamChunk {
   multiAgentModel?: string;
   multiAgentStepId?: string;
   multiAgentAuditBadge?: string;
+  multiAgentParallelGroup?: string;
   goal?: string;
   approach?: string;
   modules?: string[];
@@ -223,6 +234,9 @@ interface CavalCadApi {
     openscadInstalled?: boolean;
     openRouterConfigured?: boolean;
     meshyConfigured?: boolean;
+    piapiConfigured?: boolean;
+    meshWorkerConfigured?: boolean;
+    meshConfigured?: boolean;
     error?: string;
   }>;
   plan: (input: {
@@ -289,10 +303,22 @@ interface CavalCadApi {
     logs?: Array<{ at: string; level: string; event: string; message?: string }>;
     error?: string;
   }>;
-  downloadStl: (input: { url: string; defaultName?: string }) => Promise<{
+  downloadStl: (input: { url: string; defaultName?: string; cavalId?: string }) => Promise<{
     ok: boolean;
     canceled?: boolean;
     path?: string;
+    error?: string;
+  }>;
+  saveStlBase64: (input: { base64: string; defaultName?: string }) => Promise<{
+    ok: boolean;
+    canceled?: boolean;
+    path?: string;
+    error?: string;
+  }>;
+  fetchStl: (input: { url: string; cavalId?: string }) => Promise<{
+    ok: boolean;
+    base64?: string;
+    bytes?: number;
     error?: string;
   }>;
   downloadScad: (input: { content: string; defaultName?: string }) => Promise<{
@@ -522,6 +548,11 @@ interface CavalBridge {
         lastOpened: string;
         source: 'folder' | 'clone';
       }>;
+      error?: string;
+    }>;
+    createOnDesktop: (input: { name: string }) => Promise<{
+      ok: boolean;
+      path?: string;
       error?: string;
     }>;
   };

@@ -121,6 +121,7 @@ export interface CadCreateJobInput {
   };
   openRouterApiKey?: string;
   meshApiKey?: string;
+  piapiApiKey?: string;
   quality?: "standard" | "high";
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   previousScad?: string;
@@ -135,6 +136,7 @@ export interface CadPlanInput {
   latestUserText: string;
   openRouterApiKey?: string;
   meshApiKey?: string;
+  piapiApiKey?: string;
   previousMeshTaskId?: string;
   cavalId?: string;
 }
@@ -170,6 +172,33 @@ const isCloudInternalCadError = (error: string | null | undefined, status?: numb
   return /Internal server error|internal_error|Failed to create CAD job/i.test(error);
 };
 
+/** Old Railway CAD rejects newer body fields (e.g. piapiApiKey) via Zod .strict(). */
+const isCadSchemaCompatError = (error: string | null | undefined): boolean =>
+  /Unrecognized key/i.test(error ?? "");
+
+/** True when remote /health advertises PiAPI support (field present). */
+async function cadServerSupportsPiapiField(baseUrl: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4_000);
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const body = (await res.json()) as Record<string, unknown>;
+    return Object.prototype.hasOwnProperty.call(body, "piapiConfigured");
+  } catch {
+    return false;
+  }
+}
+
+const omitPiapiKey = <T extends { piapiApiKey?: string }>(input: T): T => {
+  if (!input.piapiApiKey) return input;
+  const { piapiApiKey: _drop, ...rest } = input;
+  return rest as T;
+};
+
 const postCadJob = async (
   secured: CadCreateJobInput,
   cavalId: string
@@ -187,8 +216,20 @@ const tryLocalCadFallback = async (): Promise<boolean> => {
   process.env.CAD_API_URL = localCadUrl();
   process.env.CAD_USE_LOCAL = "1";
   process.env.CAD_CLOUD_ONLY = "0";
-  console.warn("[cad] cloud createJob failed — switched to local CAD at", localCadUrl());
+  console.warn("[cad] switched to local CAD at", localCadUrl());
   return true;
+};
+
+/** Prefer local CAD when cloud is too old for PiAPI Trellis keys. */
+const ensurePiapiCompatibleCad = async (hasPiapiKey: boolean): Promise<"local" | "cloud-legacy" | "cloud"> => {
+  if (!hasPiapiKey || process.env.CAD_USE_LOCAL === "1") {
+    return process.env.CAD_USE_LOCAL === "1" ? "local" : "cloud";
+  }
+  const base = await resolveCadBaseUrl();
+  if (base.includes("127.0.0.1") || base.includes("localhost")) return "local";
+  if (await cadServerSupportsPiapiField(base)) return "cloud";
+  if (await tryLocalCadFallback()) return "local";
+  return "cloud-legacy";
 };
 
 const mapFetchError = async (error: unknown): Promise<{ ok: false; error: string }> => {
@@ -219,12 +260,18 @@ export const registerCadHandlers = (): void => {
   }));
 
   /** Keys stay in main env — ignore any values the renderer may still send. */
-  const attachMainCadSecrets = <T extends { openRouterApiKey?: string; meshApiKey?: string }>(
+  const attachMainCadSecrets = <
+    T extends { openRouterApiKey?: string; meshApiKey?: string; piapiApiKey?: string }
+  >(
     input: T
   ): T => ({
     ...input,
     openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim() || undefined,
     meshApiKey: process.env.MESHY_API_KEY?.trim() || undefined,
+    piapiApiKey:
+      process.env.PIAPI_API_KEY?.trim() ||
+      process.env.TRELLIS_API_KEY?.trim() ||
+      undefined,
   });
 
   handle("cad:plan", async (_event, input: unknown) => {
@@ -233,8 +280,13 @@ export const registerCadHandlers = (): void => {
       return { ok: false, error: "latestUserText is required" };
     }
     try {
-      const body = attachMainCadSecrets(bodyInput);
-      const { ok, status, json } = await cadFetchJson<{ ok: boolean; plan?: CadPlanResult; error?: string }>(
+      let body = attachMainCadSecrets(bodyInput);
+      const mode = await ensurePiapiCompatibleCad(Boolean(body.piapiApiKey));
+      if (mode === "cloud-legacy") {
+        body = omitPiapiKey(body);
+      }
+
+      let { ok, status, json } = await cadFetchJson<{ ok: boolean; plan?: CadPlanResult; error?: string }>(
         "/cad/plan",
         {
           method: "POST",
@@ -242,6 +294,38 @@ export const registerCadHandlers = (): void => {
           body: JSON.stringify(body),
         }
       );
+
+      if (
+        !ok &&
+        isCadSchemaCompatError(json.error) &&
+        !process.env.CAD_USE_LOCAL
+      ) {
+        const localReady = await tryLocalCadFallback();
+        if (localReady) {
+          body = attachMainCadSecrets(bodyInput);
+          ({ ok, status, json } = await cadFetchJson<{
+            ok: boolean;
+            plan?: CadPlanResult;
+            error?: string;
+          }>("/cad/plan", {
+            method: "POST",
+            cavalId: resolveCavalId(bodyInput.cavalId),
+            body: JSON.stringify(body),
+          }));
+        } else {
+          body = omitPiapiKey(attachMainCadSecrets(bodyInput));
+          ({ ok, status, json } = await cadFetchJson<{
+            ok: boolean;
+            plan?: CadPlanResult;
+            error?: string;
+          }>("/cad/plan", {
+            method: "POST",
+            cavalId: resolveCavalId(bodyInput.cavalId),
+            body: JSON.stringify(body),
+          }));
+        }
+      }
+
       if (!ok) {
         return { ok: false, error: json.error ?? `CAD plan error (${status})` };
       }
@@ -283,16 +367,25 @@ export const registerCadHandlers = (): void => {
     }
     try {
       const cavalId = resolveCavalId(jobInput.cavalId);
-      const secured = attachMainCadSecrets({ ...jobInput, cavalId });
+      let secured = attachMainCadSecrets({ ...jobInput, cavalId });
+      const mode = await ensurePiapiCompatibleCad(Boolean(secured.piapiApiKey));
+      if (mode === "cloud-legacy") {
+        secured = omitPiapiKey(secured);
+      }
+
       let { ok, status, json } = await postCadJob(secured, cavalId);
 
       if (
         !ok &&
-        isCloudInternalCadError(json.error, status) &&
+        (isCloudInternalCadError(json.error, status) || isCadSchemaCompatError(json.error)) &&
         !process.env.CAD_USE_LOCAL
       ) {
         const localReady = await tryLocalCadFallback();
         if (localReady) {
+          secured = attachMainCadSecrets({ ...jobInput, cavalId });
+          ({ ok, status, json } = await postCadJob(secured, cavalId));
+        } else if (isCadSchemaCompatError(json.error)) {
+          secured = omitPiapiKey(attachMainCadSecrets({ ...jobInput, cavalId }));
           ({ ok, status, json } = await postCadJob(secured, cavalId));
         }
       }
@@ -394,10 +487,12 @@ export const registerCadHandlers = (): void => {
   handle(
     "cad:downloadStl",
     async (event, input: unknown) => {
-      const payload = input as { url: string; defaultName?: string };
+      const payload = input as { url: string; defaultName?: string; cavalId?: string };
       if (!payload?.url) return { ok: false, error: "url is required" };
       try {
-        const res = await fetch(payload.url);
+        const res = await fetch(payload.url, {
+          headers: cadAuthHeaders(resolveCavalId(payload.cavalId)),
+        });
         if (!res.ok) return { ok: false, error: `Download failed (${res.status})` };
         const buffer = Buffer.from(await res.arrayBuffer());
         const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
@@ -418,6 +513,68 @@ export const registerCadHandlers = (): void => {
           : `${saveResult.filePath}.stl`;
         await fs.writeFile(target, buffer);
         return { ok: true, path: path.normalize(target) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
+  handle(
+    "cad:saveStlBase64",
+    async (event, input: unknown) => {
+      const payload = input as { base64: string; defaultName?: string };
+      if (!payload?.base64?.trim()) return { ok: false, error: "base64 is required" };
+      try {
+        const buffer = Buffer.from(payload.base64, "base64");
+        if (buffer.length < 84) {
+          return { ok: false, error: "STL buffer too small" };
+        }
+        const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+        const saveResult = window
+          ? await dialog.showSaveDialog(window, {
+              defaultPath: payload.defaultName ?? "model-edited.stl",
+              filters: [{ name: "STL", extensions: ["stl"] }],
+            })
+          : await dialog.showSaveDialog({
+              defaultPath: payload.defaultName ?? "model-edited.stl",
+              filters: [{ name: "STL", extensions: ["stl"] }],
+            });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { ok: false, canceled: true };
+        }
+        const target = saveResult.filePath.endsWith(".stl")
+          ? saveResult.filePath
+          : `${saveResult.filePath}.stl`;
+        await fs.writeFile(target, buffer);
+        return { ok: true, path: path.normalize(target) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
+  handle(
+    "cad:fetchStl",
+    async (_event, input: unknown) => {
+      const payload = input as { url: string; cavalId?: string };
+      if (!payload?.url?.trim()) return { ok: false, error: "url is required" };
+      try {
+        const headers = cadAuthHeaders(resolveCavalId(payload.cavalId));
+        headers.accept = "model/stl,*/*";
+        const res = await fetch(payload.url, { headers });
+        if (!res.ok) {
+          return { ok: false, error: `STL fetch failed (${res.status})` };
+        }
+        const buffer = Buffer.from(await res.arrayBuffer());
+        // Guard: JSON error body mistaken for STL
+        if (buffer.length >= 2 && buffer[0] === 0x7b /* { */) {
+          return { ok: false, error: "STL endpoint returned JSON, not binary mesh" };
+        }
+        return {
+          ok: true,
+          base64: buffer.toString("base64"),
+          bytes: buffer.length,
+        };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }

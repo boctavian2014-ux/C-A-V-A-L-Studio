@@ -67,9 +67,14 @@ export function planExecutionWithRoles(
   runId: string,
   tasks: PipelineTask[],
   rotator: ModelRotator,
-  primaryModel: string
+  primaryModel: string,
+  opts?: { complexity?: import('./arena-model-orchestrator').ArenaPromptComplexity }
 ): ExecutionPlan {
   const base = planExecution(runId, tasks, rotator);
-  const arenaPlan = buildArenaModelPlan(primaryModel as import('../../models/model-catalog').ModelSelectionId, rotator);
+  const arenaPlan = buildArenaModelPlan(
+    primaryModel as import('../../models/model-catalog').ModelSelectionId,
+    rotator,
+    { complexity: opts?.complexity }
+  );
   return applyRoleModelsToPlan(base, tasks, arenaPlan.roleModelMap, rotator);
 }

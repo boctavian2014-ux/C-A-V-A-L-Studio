@@ -471,11 +471,11 @@ export async function runCavalloMultiAgentPipeline(
 
     ...callbacks,
 
-    onMultiAgentStatus: (stage, status, detail, modelId, stepId) => {
+    onMultiAgentStatus: (stage, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
 
       markStage(stages, stage, status === 'active' ? 'active' : 'done', detail);
 
-      callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId);
+      callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId, auditBadge, parallelGroup);
 
     },
 
@@ -559,7 +559,8 @@ export async function runCavalloMultiAgentPipeline(
       '',
       rotator,
       workspaceRoot,
-      pipelineCallbacks
+      pipelineCallbacks,
+      { config }
     );
     markStage(stages, 'modelOrch', 'done', arenaModels.summary.slice(0, 80));
     state.roleModelMap = arenaModels.roleModelMap;
@@ -615,7 +616,9 @@ export async function runCavalloMultiAgentPipeline(
 
 
 
-    const basePlan = planExecutionWithRoles(runId, decomp.tasks, rotator, model);
+    const basePlan = planExecutionWithRoles(runId, decomp.tasks, rotator, model, {
+      complexity: arenaModels.complexity ?? (config.fastPipeline ? 'simple' : 'complex'),
+    });
     const plan = applyRoleModelsToPlan(
       basePlan,
       decomp.tasks,
@@ -1244,6 +1247,7 @@ export async function resumeCavalloMultiAgentPipeline(
     primaryModel: model,
     roleModelMap: cp.plan.roleModelMap ?? {},
     summary: 'resume',
+    complexity: (config.fastPipeline ? 'simple' : 'complex') as import('./arena-model-orchestrator').ArenaPromptComplexity,
   };
   const resumeMergeModel = stageModelForRole('merge', resumeArenaPlan, model);
   const resumeSupervisorModel = stageModelForRole('supervisor', resumeArenaPlan, model);
@@ -1251,8 +1255,8 @@ export async function resumeCavalloMultiAgentPipeline(
 
   const pipelineCallbacks: MultiAgentPipelineCallbacks = {
     ...callbacks,
-    onMultiAgentStatus: (stage, status, detail, modelId, stepId) => {
-      callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId);
+    onMultiAgentStatus: (stage, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
+      callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId, auditBadge, parallelGroup);
     },
   };
 

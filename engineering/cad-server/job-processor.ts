@@ -1,5 +1,5 @@
 import { generateOpenScad, repairOpenScad } from "./llm-client";
-import { resolveMeshApiKey } from "./cad-capabilities";
+import { isMeshGenerationConfigured, resolveMeshApiKey } from "./cad-capabilities";
 import { generateMeshFromPrompt } from "./mesh-client";
 import {
   createCadJob,
@@ -45,6 +45,7 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
 
   const generationMode = input.generationMode ?? job.generationMode ?? "openscad";
   const meshApiKey = resolveMeshApiKey(input.meshApiKey);
+  const meshReady = isMeshGenerationConfigured(input.meshApiKey, input.piapiApiKey);
 
   try {
     failIfAborted(jobId);
@@ -69,7 +70,7 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
           });
           return;
         }
-        if (meshApiKey) {
+        if (meshReady) {
           appendJobLog(jobId, {
             level: "warn",
             event: "pipeline_fallback",
@@ -118,12 +119,48 @@ const processMeshJob = async (
   const mesh = await generateMeshFromPrompt({
     prompt: meshPrompt,
     meshApiKey: input.meshApiKey,
+    piapiApiKey: input.piapiApiKey,
     previousMeshTaskId: input.previousMeshTaskId,
   });
 
   if (signal.aborted) throw new Error("Job cancelled");
 
   if (!mesh.ok || !mesh.stlBuffer) {
+    // Keep generating a preview via OpenSCAD when TRELLIS/Meshy are unavailable.
+    let openscadReady = await isOpenScadInstalled();
+    if (!openscadReady) {
+      await tryInstallOpenScad();
+      openscadReady = await isOpenScadInstalled();
+    }
+    const canOpenScadFallback = !input.previousMeshTaskId && input.generationMode !== "library" && openscadReady;
+
+    if (canOpenScadFallback) {
+      appendJobLog(jobId, {
+        level: "warn",
+        event: "pipeline_fallback",
+        message: `mesh failed → openscad: ${(mesh.error ?? "unknown").slice(0, 160)}`,
+      });
+      await processOpenScadJob(
+        jobId,
+        job,
+        {
+          ...input,
+          generationMode: "openscad",
+          planContext: undefined,
+          conversationHistory: undefined,
+          prompt: [
+            `USER OBJECT (exact): ${meshPrompt}`,
+            "Approximate THIS exact object with OpenSCAD primitives (cube/cylinder/sphere/hull).",
+            "FORBIDDEN: furniture, cabinets, drawers, dulap, sertare, shelves, or unrelated objects.",
+            "Watertight, flat base, mm units.",
+          ].join("\n"),
+        },
+        signal,
+        resolveMeshApiKey(input.meshApiKey)
+      );
+      return;
+    }
+
     await updateCadJob(jobId, {
       status: "failed",
       errorMessage: mesh.error ?? "Mesh generation failed",
@@ -133,7 +170,11 @@ const processMeshJob = async (
   }
 
   await updateCadJob(jobId, { status: "rendering", meshTaskId: mesh.meshTaskId ?? null });
-  appendJobLog(jobId, { level: "info", event: "job_updated", message: "rendering" });
+  appendJobLog(jobId, {
+    level: "info",
+    event: "job_updated",
+    message: `rendering (${mesh.provider ?? "mesh"})`,
+  });
 
   const dimensions = computeStlBoundingBox(mesh.stlBuffer);
   setLocalStl(jobId, mesh.stlBuffer, dimensions, mesh.meshTaskId ?? null);
@@ -241,7 +282,7 @@ const processOpenScadJob = async (
   if (!rendered.ok || !rendered.stlBuffer) {
     const renderErr = rendered.error ?? "OpenSCAD render failed after repair attempts";
     const canMesh =
-      Boolean(meshApiKey) &&
+      isMeshGenerationConfigured(input.meshApiKey, input.piapiApiKey) &&
       input.generationMode !== "library" &&
       (/OpenSCAD nu e instalat|not installed|ENOENT/i.test(renderErr) ||
         repairAttempts >= MAX_RENDER_REPAIRS);

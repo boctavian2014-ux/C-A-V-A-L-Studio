@@ -12,6 +12,7 @@ import { AIPanel } from '../../ai/composer/AIPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { useGitStore } from './store/git-store';
 import { CAVAL_OPEN_CODING_CHAT_EVENT } from '../../ai/engineering/engineering-handoff';
+import { CAVAL_OPEN_EXPLORER_SIDEBAR_EVENT } from './components/engineering/bootstrap-robotics-project';
 import { EngineeringAIPanel } from './components/engineering/EngineeringAIPanel';
 import { EngineeringCadPreview } from './components/engineering/EngineeringCadPreview';
 import { CadViewer } from './components/engineering/CadViewer';
@@ -471,7 +472,16 @@ export function WorkbenchRoot() {
   const gitChangesCount = useGitStore((s) => s.files.length);
 
   const toggleAI = useCallback(() => setAiPanelOpen((v) => !v), []);
-  const toggleEngineering = useCallback(() => setEngineeringOpen((v) => !v), []);
+  const toggleEngineering = useCallback(() => {
+    setEngineeringOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setSidebarOpen(true);
+        setActiveActivity('explorer');
+      }
+      return next;
+    });
+  }, []);
   const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
@@ -623,6 +633,15 @@ export function WorkbenchRoot() {
     };
     window.addEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
     return () => window.removeEventListener(CAVAL_OPEN_CODING_CHAT_EVENT, openCodingChat);
+  }, []);
+
+  useEffect(() => {
+    const openExplorer = () => {
+      setSidebarOpen(true);
+      setActiveActivity('explorer');
+    };
+    window.addEventListener(CAVAL_OPEN_EXPLORER_SIDEBAR_EVENT, openExplorer);
+    return () => window.removeEventListener(CAVAL_OPEN_EXPLORER_SIDEBAR_EVENT, openExplorer);
   }, []);
 
   useEffect(() => {
@@ -962,9 +981,45 @@ export function WorkbenchRoot() {
         {/* Main area */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
           {engineeringOpen ? (
-            /* ── Robotics AI — workspace dedicat: viewport CAD 3D (centru) + chat Robotics (dreapta).
-               Coding Arena / pipeline / editor / sidebar-uri NU se montează. ── */
+            /* ── Robotics AI: ActivityBar + sidebars + CAD centru + chat Robotics dreapta ── */
             <>
+              <ActivityBar
+                active={activeActivity}
+                onChange={handleActivityChange}
+                aiPanelOpen
+                onToggleAI={() => undefined}
+                gitChangesCount={gitChangesCount}
+                onOpenAccount={openAccountSettings}
+              />
+
+              {sidebarOpen && activeActivity === 'explorer' && (
+                <FileTree onClose={closeSidebar} />
+              )}
+
+              {sidebarOpen && activeActivity === 'search' && (
+                <SidebarShell width={280} onClose={closeSidebar}>
+                  <SearchPanel />
+                </SidebarShell>
+              )}
+
+              {sidebarOpen && activeActivity === 'git' && (
+                <SidebarShell width={280} onClose={closeSidebar}>
+                  <GitPanel />
+                </SidebarShell>
+              )}
+
+              {sidebarOpen && activeActivity === 'extensions' && (
+                <SidebarShell width={320} onClose={closeSidebar}>
+                  <ExtensionsHub />
+                </SidebarShell>
+              )}
+
+              {sidebarOpen && activeActivity === 'settings' && (
+                <SidebarShell width={520} onClose={closeSidebar}>
+                  <SettingsPanel onClose={() => setActiveActivity('explorer')} />
+                </SidebarShell>
+              )}
+
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, position: 'relative' }}>
                 <RoboticsCadStage />
               </div>

@@ -351,8 +351,16 @@ export function tabGroupMarkdown(plan: ParsedRoboticsPlan, sectionKeys: Robotics
     .join('\n\n');
 }
 
+export function stripOpenScadFencesFromMarkdown(markdown: string): string {
+  return markdown
+    .replace(/```(?:openscad|scad)\s*[\s\S]*?```/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function markdownToSimpleHtml(markdown: string): string {
-  const escaped = markdown
+  const cleaned = stripOpenScadFencesFromMarkdown(markdown);
+  const escaped = cleaned
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -382,7 +390,7 @@ export function markdownToSimpleHtml(markdown: string): string {
         return `<tr>${cells}</tr>`;
       }
       if (/^```/.test(line)) {
-        return `<pre style="background:var(--caval-bg);padding:8px;border-radius:4px;font-size:11px;overflow-x:auto">${line}</pre>`;
+        return '';
       }
       return `<p style="font-size:12px;line-height:1.55;margin:4px 0;color:var(--caval-text)">${line}</p>`;
     })

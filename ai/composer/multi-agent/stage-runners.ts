@@ -14,7 +14,7 @@ import {
   SELF_AUDIT_PROTOCOL,
 } from '../../prompts/multi-agent';
 import type { ArenaModelPlan } from './arena-model-orchestrator';
-import { buildArenaModelPlan } from './arena-model-orchestrator';
+import { buildArenaModelPlan, complexityFromFastPipeline } from './arena-model-orchestrator';
 import {
   mergeArenaModelPlans,
   parseModelOrchestratorOutput,
@@ -137,18 +137,23 @@ export async function runModelOrchestrator(
     ...planningPool.map((id) => id.split('/').pop() ?? id),
   ]);
 
-  const heuristic = buildArenaModelPlan(primaryModel, rotator);
+  const complexity = complexityFromFastPipeline(opts?.config?.fastPipeline !== false);
+  const heuristic = buildArenaModelPlan(primaryModel, rotator, { complexity });
   const orchModel = (heuristic.roleModelMap.coordinator ?? planningPool[0] ?? primaryModel) as ModelSelectionId;
 
   const user = [
     `User request:\n${userMessage.slice(0, 2_000)}`,
     taskHint ? `\nPipeline hint:\n${taskHint.slice(0, 800)}` : '',
     opts?.capabilityHint ? `\n${opts.capabilityHint}` : '',
+    `\nComplexity profile: ${complexity} (fastPipeline=${opts?.config?.fastPipeline !== false})`,
     '\n**Available models**',
     `Planning: ${[...new Set(planningPool)].join(', ')}`,
     `Coding: ${[...new Set(codingPool)].join(', ')}`,
     `Analysis: ${[...new Set(analysisPool)].join(', ')}`,
     `Primary (user selection): ${primaryModel}`,
+    complexity === 'simple'
+      ? '\nPrefer flash/fast models for tester/scans; keep primary on implementer.'
+      : '\nPrefer strong planning models for architect/coordinator; primary on implementer; flash for scans.',
     '\nAssign distinct models per role when possible.',
   ].join('\n');
 
@@ -189,7 +194,18 @@ export async function runModelOrchestrator(
 }
 
 export function stageModelForRole(
-  role: 'architect' | 'coordinator' | 'implementer' | 'merge' | 'supervisor' | 'compose' | 'decompose',
+  role:
+    | 'architect'
+    | 'coordinator'
+    | 'implementer'
+    | 'merge'
+    | 'supervisor'
+    | 'compose'
+    | 'decompose'
+    | 'userSim'
+    | 'security'
+    | 'performance'
+    | 'tester',
   arenaPlan: ArenaModelPlan,
   fallback: ModelSelectionId
 ): ModelSelectionId {
@@ -201,10 +217,15 @@ export function stageModelForRole(
     case 'merge':
     case 'supervisor':
     case 'coordinator':
-      return (map.coordinator ?? map.architect ?? fallback) as ModelSelectionId;
+      return (map.merge ?? map.supervisor ?? map.coordinator ?? map.architect ?? fallback) as ModelSelectionId;
     case 'compose':
     case 'implementer':
-      return (map.implementer ?? fallback) as ModelSelectionId;
+      return (map.compose ?? map.implementer ?? fallback) as ModelSelectionId;
+    case 'userSim':
+    case 'security':
+    case 'performance':
+    case 'tester':
+      return (map[role] ?? map.security ?? map.tester ?? fallback) as ModelSelectionId;
     default:
       return fallback;
   }
@@ -580,7 +601,8 @@ function emitStage(
   detail?: string,
   modelId?: string,
   stepId?: string,
-  auditBadge?: string
+  auditBadge?: string,
+  parallelGroup?: string
 ): void {
-  callbacks?.onMultiAgentStatus?.(stage, status, detail, modelId, stepId, auditBadge);
+  callbacks?.onMultiAgentStatus?.(stage, status, detail, modelId, stepId, auditBadge, parallelGroup);
 }

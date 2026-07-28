@@ -14,6 +14,7 @@ import { checkModelReadiness, type ModelReadiness } from '../../../../ai/models/
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { useRoboticsSessionStore } from '../../store/robotics-session-store';
 import { CavaloAiMark } from '../brand/CavaloHorseMark';
+import { bootstrapRoboticsDesktopProject } from './bootstrap-robotics-project';
 
 // ──────────────────────────────────────────────────────────────
 //  Robotics AI ULTRA — composer (dreapta); răspunsul e în centru
@@ -103,6 +104,11 @@ export function EngineeringAIPanel() {
       if (!s.userTabLocked) {
         s.setActiveTab(partial.bom?.components?.length ? 'cad' : 'overview');
       }
+      void bootstrapRoboticsDesktopProject({
+        project: partial.project,
+        plan: partial.plan ?? s.plan,
+        userPrompt: s.lastPrompt || s.prompt,
+      });
     } else if (!partial.ok) {
       s.setWarning(null);
       s.setError(partial.error ?? 'Generare eșuată.');
@@ -203,6 +209,11 @@ export function EngineeringAIPanel() {
         if (!s.userTabLocked && result.bom?.components.length) {
           s.setActiveTab('cad');
         }
+        void bootstrapRoboticsDesktopProject({
+          project: result.project,
+          plan: result.plan ?? null,
+          userPrompt: submittedPrompt,
+        });
       } else if (!planReadyFired) {
         applyPlanReady({
           ok: false,

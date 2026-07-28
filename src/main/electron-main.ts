@@ -22,6 +22,10 @@ import type { AgentExecuteStepRequest, AgentAuditReport, Goal } from "../../ai/a
 import { toolSandbox } from "../../ai/pipeline/tool-sandbox";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { assertShellCommandAllowed } from "./shell-security";
+import {
+  ensureLatestPowerShellInstalled,
+  resolvePreferredShell,
+} from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
 import {
   addRecentWorkspace,
@@ -29,6 +33,7 @@ import {
   removeRecentWorkspace,
   type RecentWorkspaceSource,
 } from "./recent-workspaces";
+import { createProjectOnDesktop } from "./desktop-project";
 import { registerEngineeringHandlers } from "./engineering-handlers";
 import { registerModelHandlers, abortAllStreamsForSender } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
@@ -793,13 +798,20 @@ ipcMain.handle("caval:ai-chat", async (event, request: CavalChatRequest): Promis
 
 const shellCommand = (): { command: string; args: string[] } => {
   if (process.platform === "win32") {
-    return { command: "powershell.exe", args: ["-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass"] };
+    const shell = resolvePreferredShell();
+    return {
+      command: shell.command,
+      args: [...shell.interactiveArgs, "-NoExit"],
+    };
   }
   return { command: process.env.SHELL ?? "bash", args: ["-l"] };
 };
 
-ipcMain.handle("caval:terminal-start", (event) => {
+ipcMain.handle("caval:terminal-start", async (event) => {
   assertTrustedSender(event);
+  if (process.platform === "win32") {
+    await ensureLatestPowerShellInstalled();
+  }
   const id = event.sender.id;
   const existing = terminals.get(id);
   if (existing && !existing.killed) {
@@ -1177,6 +1189,17 @@ ipcMain.handle("workspace:list-recent", (event) => {
   return { ok: true, entries: listRecentWorkspaces() };
 });
 
+ipcMain.handle("workspace:createOnDesktop", (event, input: { name?: string }) => {
+  assertTrustedSender(event);
+  const result = createProjectOnDesktop(
+    typeof input?.name === "string" ? input.name : "Cavallo-Project"
+  );
+  if (result.ok && result.path) {
+    void shell.openPath(result.path);
+  }
+  return result;
+});
+
 ipcMain.handle("workspace:remove-recent", (event, folderPath: string) => {
   assertTrustedSender(event);
   if (!folderPath || typeof folderPath !== "string") {
@@ -1214,6 +1237,8 @@ const SECRET_ENV_KEYS = [
   "NORTH_API_KEY",
   "NVIDIA_API_KEY",
   "MESHY_API_KEY",
+  "PIAPI_API_KEY",
+  "TRELLIS_API_KEY",
   "CAD_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
@@ -1381,6 +1406,8 @@ ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) 
   const configured = buildSecretsConfiguredMap(secrets);
   forRenderer["openrouter.configured"] = configured.OPENROUTER_API_KEY ? "true" : "false";
   forRenderer["mesh.configured"] = configured.MESHY_API_KEY ? "true" : "false";
+  forRenderer["trellis.configured"] =
+    configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false";
   forRenderer["cad.configured"] = configured.CAD_API_KEY ? "true" : "false";
   appSettings.set(event.sender.id, forRenderer);
   applySettingsToEnv(merged);
@@ -1398,6 +1425,8 @@ ipcMain.handle("caval:settings-load", (event) => {
   delete settings["cad.apiKey"];
   settings["openrouter.configured"] = configured.OPENROUTER_API_KEY ? "true" : "false";
   settings["mesh.configured"] = configured.MESHY_API_KEY ? "true" : "false";
+  settings["trellis.configured"] =
+    configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false";
   settings["cad.configured"] = configured.CAD_API_KEY ? "true" : "false";
   applyCadCloudEnvDefaults();
   if (!settings["cad.apiUrl"] && process.env.CAD_API_URL) {
@@ -1528,6 +1557,9 @@ app.whenReady().then(() => {
   applyCadCloudEnvDefaults();
   warmOpenRouterConnection(true);
   preloadCoreModels();
+  void ensureLatestPowerShellInstalled().catch((err) => {
+    console.warn("[shell] PowerShell 7 ensure skipped:", err instanceof Error ? err.message : err);
+  });
   void startMarketplaceServer().catch((err) => {
     console.warn("[marketplace] auto-start skipped:", err instanceof Error ? err.message : err);
   });

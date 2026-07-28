@@ -9,7 +9,6 @@ import type { RoboticsComponentBom } from '../../../../ai/engineering/robotics-c
 import { summarizeBomModes } from '../../../../ai/engineering/robotics-decompose';
 import {
   ROBOTICS_TAB_GROUPS,
-  extractScadBlock,
   markdownToSimpleHtml,
   roboticsPlanToMarkdown,
   tabGroupMarkdown,
@@ -18,6 +17,7 @@ import {
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import {
   useRoboticsSessionStore,
+  resolveRoboticsCadUserPrompt,
   type RoboticsTabId,
 } from '../../store/robotics-session-store';
 
@@ -39,7 +39,12 @@ export function RoboticsResponseStage() {
   const setActiveTab = useRoboticsSessionStore((s) => s.setActiveTab);
   const setUserTabLocked = useRoboticsSessionStore((s) => s.setUserTabLocked);
 
-  const userPrompt = lastPrompt.trim() || prompt.trim();
+  const userPrompt = resolveRoboticsCadUserPrompt({
+    lastPrompt,
+    prompt,
+    project,
+    plan,
+  });
 
   const [tabCols, setTabCols] = useState(2);
   const tabsWrapRef = useRef<HTMLDivElement>(null);
@@ -57,10 +62,12 @@ export function RoboticsResponseStage() {
 
   const handleSoftwareHandoff = () => {
     if (!project) return;
-    const result = handoffFromEngineering({ project, userPrompt });
-    if (!result.ok) {
-      useRoboticsSessionStore.getState().setError(result.error);
-    }
+    void (async () => {
+      const result = await handoffFromEngineering({ project, userPrompt });
+      if (!result.ok) {
+        useRoboticsSessionStore.getState().setError(result.error);
+      }
+    })();
   };
 
   if (!project || !plan) {
@@ -234,7 +241,6 @@ function RoboticsTabContent({
           project={project}
           projectPath={projectPath}
           userPrompt={userPrompt}
-          plan={plan}
           bom={bom}
         />
       </>
@@ -362,13 +368,11 @@ function CadActions({
   project,
   projectPath,
   userPrompt,
-  plan,
   bom,
 }: {
   project: EngProject;
   projectPath: string | null;
   userPrompt: string;
-  plan: ParsedRoboticsPlan;
   bom: RoboticsComponentBom | null;
 }) {
   const phase = useEngineeringCadStore((s) => s.phase);
@@ -383,29 +387,28 @@ function CadActions({
   const createBatchFromBom = useEngineeringCadStore((s) => s.createBatchFromBom);
   const exportBatchZip = useEngineeringCadStore((s) => s.exportBatchZip);
   const retryCadJob = useEngineeringCadStore((s) => s.retryCadJob);
-  const scad = extractScadBlock(plan.rawMarkdown);
   const busy = cadBusy || batchBusy;
-
-  const saveScad = async () => {
-    if (!scad || !projectPath) return;
-    await window.caval.engineering.saveFile(projectPath, { name: 'model.scad', content: scad });
-  };
 
   return (
     <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {scad && projectPath && (
-        <button
-          type="button"
-          onClick={() => void saveScad()}
-          style={{
-            padding: '8px 0', borderRadius: 6, border: '1px solid var(--caval-border)',
-            background: 'var(--caval-surface)', color: 'var(--caval-text)',
-            fontWeight: 600, fontSize: 12, cursor: 'pointer',
-          }}
-        >
-          Salvează model.scad în proiect
-        </button>
-      )}
+      <div
+        style={{
+          fontSize: 11,
+          lineHeight: 1.45,
+          color: 'var(--caval-text-muted)',
+          padding: '8px 10px',
+          borderRadius: 8,
+          border: '1px solid var(--caval-border)',
+          background: 'rgba(255,255,255,0.03)',
+        }}
+      >
+        <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--caval-text)' }}>
+          Prompt salvat pentru STL
+        </div>
+        {userPrompt.trim()
+          ? userPrompt.trim().slice(0, 280) + (userPrompt.trim().length > 280 ? '…' : '')
+          : 'Nicio cerere salvată — scrie în chat Robotics și apasă Generează (plan), apoi Generează 3D.'}
+      </div>
 
       {bom && bom.components.length > 0 && (
         <button
@@ -428,18 +431,21 @@ function CadActions({
 
       <button
         type="button"
-        onClick={() => void createCadJob({ project, userPrompt, projectPath })}
-        disabled={busy}
+        onClick={() => {
+          if (!userPrompt.trim()) return;
+          void createCadJob({ project, userPrompt, projectPath });
+        }}
+        disabled={busy || !userPrompt.trim()}
         style={{
           padding: '9px 0', borderRadius: 6, border: 'none',
-          background: busy ? 'rgba(0,224,255,0.25)' : 'rgba(124,58,237,0.85)',
+          background: busy || !userPrompt.trim() ? 'rgba(0,224,255,0.25)' : 'rgba(124,58,237,0.85)',
           color: '#fff', fontWeight: 700, fontSize: 12.5,
-          cursor: busy ? 'wait' : 'pointer',
+          cursor: busy || !userPrompt.trim() ? 'not-allowed' : 'pointer',
         }}
       >
         {cadBusy && !batchBusy
           ? `Generez STL… (${phase}${cadStatus ? ` / ${cadStatus}` : ''})`
-          : 'Generează STL 3D (mecanice = OpenSCAD · animale/insecte = Meshy)'}
+          : 'Generează STL 3D (mecanice = OpenSCAD · obiecte libere = text-to-3D cloud)'}
       </button>
 
       {batchParts.length > 0 && (

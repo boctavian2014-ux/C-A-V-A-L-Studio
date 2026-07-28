@@ -44,6 +44,7 @@ export const createCadJobSchema = z
     planContext: planContextSchema,
     openRouterApiKey: z.string().max(256).optional(),
     meshApiKey: z.string().max(256).optional(),
+    piapiApiKey: z.string().max(256).optional(),
     quality: z.enum(["standard", "high"]).optional(),
     conversationHistory: z.array(chatMessageSchema).max(32).optional(),
     previousScad: z.string().max(64_000).optional(),
@@ -52,7 +53,8 @@ export const createCadJobSchema = z
     previousMeshTaskId: z.string().max(128).optional(),
     attachments: z.array(attachmentSchema).max(8).optional(),
   })
-  .strict();
+  // Strip unknown keys so older clients / extra fields don't 400.
+  ;
 
 export const planPrint3DSchema = z
   .object({
@@ -60,9 +62,10 @@ export const planPrint3DSchema = z
     latestUserText: z.string().trim().min(1).max(12_000),
     openRouterApiKey: z.string().max(256).optional(),
     meshApiKey: z.string().max(256).optional(),
+    piapiApiKey: z.string().max(256).optional(),
     previousMeshTaskId: z.string().max(128).optional(),
   })
-  .strict();
+  ;
 
 export const jobIdParamSchema = z.object({
   id: z.string().uuid(),

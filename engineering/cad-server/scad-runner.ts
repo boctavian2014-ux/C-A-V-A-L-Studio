@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 let openscadBinaryCache: string | null | undefined;
 
 export const OPENSCAD_INSTALL_HINT_RO =
-  "OpenSCAD nu e instalat pe acest PC. Instalează de la openscad.org sau: winget install OpenSCAD.OpenSCAD — alternativ, adaugă cheia Meshy (Setări → mesh.apiKey) pentru a genera 3D direct din text, fără OpenSCAD.";
+  "OpenSCAD nu e instalat pe acest PC. Instalează de la openscad.org sau: winget install OpenSCAD.OpenSCAD — alternativ, text-to-3D pe cloud (TRELLIS pe serverul CAD) sau cheia Meshy (Setări → mesh.apiKey) pentru generare 3D din text.";
 
 export function discoverOpenScadBinary(): string | null {
   const envPath = process.env.OPENSCAD_PATH?.trim();

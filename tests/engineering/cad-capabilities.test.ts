@@ -14,6 +14,7 @@ describe("cad-capabilities", () => {
   beforeEach(() => {
     resetOpenScadProbeCacheForTests();
     delete process.env.MESHY_API_KEY;
+    delete process.env.MESH_WORKER_URL;
   });
 
   it("suggests mesh for furniture prompts", () => {
@@ -29,8 +30,8 @@ describe("cad-capabilities", () => {
     expect(suggestMeshFromPrompt("robot arm with M3 mounts")).toBe(false);
   });
 
-  it("falls back to mesh when openscad missing and mesh key present", async () => {
-    process.env.MESHY_API_KEY = "test-key";
+  it("falls back to mesh when openscad missing and mesh worker present", async () => {
+    process.env.MESH_WORKER_URL = "https://mesh.example.test";
     const plan = await adjustPlanPipeline({
       action: "generate",
       userLanguage: "ro",
@@ -39,6 +40,18 @@ describe("cad-capabilities", () => {
       technicalPrompt: "Weather station enclosure 120x80x40mm",
     });
     expect(plan.pipeline).toBe("mesh");
-    expect(plan.warnings?.some((w) => /OpenSCAD|Meshy/i.test(w))).toBe(true);
+    expect(plan.warnings?.some((w) => /OpenSCAD|Meshy|OSS|text/i.test(w))).toBe(true);
+  });
+
+  it("keeps mesh pipeline with warning when no provider configured", async () => {
+    const plan = await adjustPlanPipeline({
+      action: "generate",
+      userLanguage: "ro",
+      intent: "organic",
+      pipeline: "mesh",
+      technicalPrompt: "un fluture colorat",
+    });
+    expect(plan.pipeline).toBe("mesh");
+    expect(plan.warnings?.some((w) => /MESH_WORKER|Meshy|TRELLIS|text-to-3D/i.test(w))).toBe(true);
   });
 });

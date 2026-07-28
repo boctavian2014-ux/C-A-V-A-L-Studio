@@ -5,9 +5,7 @@ import { runCavaloConsistencyScan, type ConsistencyScanResult } from '../consist
 import { applyPipelineScaffold } from '../scaffold-apply-node';
 import { runWorkspaceVerify } from '../../tools/workspace-verify.js';
 import type { ModelSelectionId } from '../../models/model-catalog';
-import { runStaticPerformanceScan } from './arena-performance-scan';
-import { runStaticSecurityScan } from './arena-security-scan';
-import { runArenaUserSimulator } from './arena-user-simulator';
+import { runParallelArenaScans } from './arena-parallel-scans';
 import {
   buildFixTasksFromIssues,
   buildPerfTasksFromPlan,
@@ -77,28 +75,31 @@ export async function runArenaPostCompose(opts: {
     callbacks.onMultiAgentStatus?.('subagent', 'done', 'tester');
   }
 
-  callbacks.onMultiAgentStatus?.('userSim', 'active');
-  const userSim = await runArenaUserSimulator(workspaceRoot, writtenFiles);
-  summaries.userSim = userSim.summary;
-  allIssues.push(...userSim.issues);
-  callbacks.onMultiAgentStatus?.('userSim', 'done', userSim.summary.slice(0, 80));
+  if (isAborted()) {
+    return { writtenFiles, summaries, issues: allIssues, consistencyOk: false };
+  }
+
+  const scanModelId =
+    plan.roleModelMap?.security ??
+    plan.roleModelMap?.userSim ??
+    plan.roleModelMap?.performance;
+  const parallel = await runParallelArenaScans({
+    workspaceRoot,
+    writtenFiles,
+    callbacks,
+    scanModelId,
+    isAborted,
+  });
+  summaries.userSim = parallel.summaries.userSim;
+  summaries.security = parallel.summaries.security;
+  summaries.performance = parallel.summaries.performance;
+  allIssues.push(...parallel.issues);
 
   if (isAborted()) {
     return { writtenFiles, summaries, issues: allIssues, consistencyOk: false };
   }
 
-  callbacks.onMultiAgentStatus?.('security', 'active');
-  const security = runStaticSecurityScan(workspaceRoot, writtenFiles);
-  summaries.security = security.summary;
-  allIssues.push(...security.issues);
-  callbacks.onMultiAgentStatus?.('security', 'done', security.summary.slice(0, 80));
-
-  callbacks.onMultiAgentStatus?.('performance', 'active');
-  const perf = runStaticPerformanceScan(workspaceRoot, writtenFiles);
-  summaries.performance = perf.summary;
-  allIssues.push(...perf.issues);
-  callbacks.onMultiAgentStatus?.('performance', 'done', perf.summary.slice(0, 80));
-
+  const perf = parallel.performance;
   const fixTasks = [
     ...buildFixTasksFromIssues(
       allIssues.filter((i) => i.severity === 'critical' || i.severity === 'major'),

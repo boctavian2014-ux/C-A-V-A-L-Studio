@@ -14,6 +14,7 @@ export const PROVIDER_SECRET_KEYS = [
   'NVIDIA_API_KEY',
   'NORTH_API_KEY',
   'MESHY_API_KEY',
+  'PIAPI_API_KEY',
 ] as const;
 
 export type ProviderSecretKey = (typeof PROVIDER_SECRET_KEYS)[number];
@@ -103,4 +104,21 @@ export function buildSecretsPatch(input: {
     }
   }
   return patch;
+}
+
+/**
+ * Keep only non-empty secret values so empty drafts do not wipe stored keys.
+ * Returns the filtered patch and the list of keys that will be written.
+ */
+export function filterNonEmptySecretsPatch(patch: Record<string, string>): {
+  filtered: Record<string, string>;
+  savedKeys: string[];
+} {
+  const filtered: Record<string, string> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    const trimmed = value?.trim() ?? '';
+    if (!trimmed) continue;
+    filtered[key] = trimmed;
+  }
+  return { filtered, savedKeys: Object.keys(filtered) };
 }

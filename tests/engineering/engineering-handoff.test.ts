@@ -53,8 +53,11 @@ describe('engineering-handoff', () => {
   });
 
   it('builds a software prompt from project title', () => {
-    const prompt = buildSoftwareHandoffPrompt(sampleProject);
+    const prompt = buildSoftwareHandoffPrompt(sampleProject, 'Vreau senzor aer cu WiFi');
     expect(prompt).toContain('Senzor aer ESP32');
     expect(prompt).toContain('Robotics AI');
+    expect(prompt).toMatch(/firmware|ESP/i);
+    expect(prompt).toMatch(/dashboard|API|aplicație/i);
+    expect(prompt).toContain('Vreau senzor aer cu WiFi');
   });
 });

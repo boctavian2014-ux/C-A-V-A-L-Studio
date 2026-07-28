@@ -45,6 +45,9 @@ import {
 import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import {
+  bootstrapRoboticsDesktopProject,
+} from '../../src/renderer/components/engineering/bootstrap-robotics-project';
 import { useOutputStore } from '../../src/renderer/store/output-store';
 import { parseProblemsFromOutput } from '../../src/renderer/store/parse-problems';
 import { useProblemsStore } from '../../src/renderer/store/problems-store';
@@ -505,7 +508,10 @@ interface AIStore {
   pendingAutoSend: boolean;
   clearPendingChatDraft: () => void;
   queueChatFromPanel: (text: string, options?: { autoSend?: boolean }) => void;
-  handoffFromEngineering: (input: { project: EngProject; userPrompt: string }) => { ok: true } | { ok: false; error: string };
+  handoffFromEngineering: (input: {
+    project: EngProject;
+    userPrompt: string;
+  }) => Promise<{ ok: true } | { ok: false; error: string }>;
 
   runWorkspaceVerifyAndReport: () => Promise<void>;
   runBuildAndReport: () => Promise<void>;
@@ -959,6 +965,7 @@ export const useAIStore = create<AIStore>()(
         const editorState = useEditorStore.getState();
         const boundWorkspace = editorState.projectPath;
 
+        // Desktop DIY folders are created only from Robotics (plan success / software handoff).
         if (isAgenticPipelineMode(get().agentMode) && !boundWorkspace?.trim()) {
           const userMsg: ChatMessage = {
             id: generateId(),
@@ -1606,7 +1613,8 @@ export const useAIStore = create<AIStore>()(
               chunk.detail,
               chunk.multiAgentModel,
               chunk.multiAgentStepId,
-              chunk.multiAgentAuditBadge
+              chunk.multiAgentAuditBadge,
+              chunk.multiAgentParallelGroup
             );
             updateAssistant({ multiAgentStatus: label, multiAgentSteps });
             if (phase === 'compose') {
@@ -2206,18 +2214,24 @@ export const useAIStore = create<AIStore>()(
         window.dispatchEvent(new CustomEvent(CAVAL_OPEN_CODING_CHAT_EVENT));
       },
 
-      handoffFromEngineering: ({ project, userPrompt }) => {
-        const projectPath = useEditorStore.getState().projectPath;
-        if (!projectPath) {
+      handoffFromEngineering: async ({ project, userPrompt }) => {
+        const boot = await bootstrapRoboticsDesktopProject({
+          project,
+          userPrompt,
+        });
+        const projectPath = useEditorStore.getState().projectPath || boot.path;
+        if (!boot.ok || !projectPath) {
           return {
             ok: false as const,
-            error: 'Deschide un folder de proiect (File → Open Folder) înainte de a genera software.',
+            error:
+              boot.error ??
+              'Nu am putut crea/deschide folderul de proiect pe Desktop.',
           };
         }
 
         const title = project.spec.title.trim().slice(0, 48) || 'Software din Engineering';
         const contextMarkdown = formatEngineeringContextForCoding(project, userPrompt);
-        const suggestedPrompt = buildSoftwareHandoffPrompt(project);
+        const suggestedPrompt = buildSoftwareHandoffPrompt(project, userPrompt);
         const thread = createThread(title, projectPath);
 
         get().clearPrepareState();

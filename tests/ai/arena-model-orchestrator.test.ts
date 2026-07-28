@@ -9,5 +9,7 @@ describe('arena-model-orchestrator', () => {
     const plan = buildArenaModelPlan('stepfun-step-3-7-flash', rotator);
     expect(plan.roleModelMap.implementer).toBe('stepfun-step-3-7-flash');
     expect(plan.roleModelMap.architect).toBeTruthy();
+    expect(plan.complexity).toBe('simple');
+    expect(plan.roleModelMap.security).toBeTruthy();
   });
 });

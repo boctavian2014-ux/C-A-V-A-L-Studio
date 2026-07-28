@@ -127,6 +127,7 @@ export interface CavalStreamChunk {
   multiAgentModel?: string;
   multiAgentStepId?: string;
   multiAgentAuditBadge?: string;
+  multiAgentParallelGroup?: string;
   goal?: string;
   approach?: string;
   modules?: string[];
@@ -531,6 +532,12 @@ contextBridge.exposeInMainWorld("caval", {
           source: 'folder' | 'clone';
         }>;
       }>,
+    createOnDesktop: (input: { name: string }) =>
+      ipcRenderer.invoke("workspace:createOnDesktop", input) as Promise<{
+        ok: boolean;
+        path?: string;
+        error?: string;
+      }>,
   },
   getWorkspaceBootstrap: (workspaceRoot: string) =>
     ipcRenderer.invoke("caval:workspace-bootstrap", workspaceRoot) as Promise<{
@@ -647,6 +654,7 @@ contextBridge.exposeInMainWorld("caval", {
     write: (id: string, data: string) => ipcRenderer.invoke("terminal:write", id, data),
     resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke("terminal:resize", id, cols, rows),
     destroy: (id: string) => ipcRenderer.invoke("terminal:destroy", id),
+    ensurePowerShell: () => ipcRenderer.invoke("terminal:ensurePowerShell"),
     onData: (id: string, cb: (data: string) => void) => {
       const channel = `terminal:data:${id}`;
       const listener = (_event: Electron.IpcRendererEvent, data: string) => cb(data);
@@ -750,6 +758,9 @@ contextBridge.exposeInMainWorld("caval", {
         openscadInstalled?: boolean;
         openRouterConfigured?: boolean;
         meshyConfigured?: boolean;
+        piapiConfigured?: boolean;
+        meshWorkerConfigured?: boolean;
+        meshConfigured?: boolean;
         error?: string;
       }>,
     plan: (input: {
@@ -826,11 +837,25 @@ contextBridge.exposeInMainWorld("caval", {
         logs?: Array<{ at: string; level: string; event: string; message?: string }>;
         error?: string;
       }>,
-    downloadStl: (input: { url: string; defaultName?: string }) =>
+    downloadStl: (input: { url: string; defaultName?: string; cavalId?: string }) =>
       ipcRenderer.invoke("cad:downloadStl", input) as Promise<{
         ok: boolean;
         canceled?: boolean;
         path?: string;
+        error?: string;
+      }>,
+    saveStlBase64: (input: { base64: string; defaultName?: string }) =>
+      ipcRenderer.invoke("cad:saveStlBase64", input) as Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        path?: string;
+        error?: string;
+      }>,
+    fetchStl: (input: { url: string; cavalId?: string }) =>
+      ipcRenderer.invoke("cad:fetchStl", input) as Promise<{
+        ok: boolean;
+        base64?: string;
+        bytes?: number;
         error?: string;
       }>,
     downloadScad: (input: { content: string; defaultName?: string }) =>

@@ -112,7 +112,12 @@ export interface PipelineRecapMeta {
   /** Snapshot of fullDelivery config used by the pipeline (for renderer autonomous loop). */
   fullDelivery?: FullDeliveryConfig;
   /** Final role → model map from Model Orchestrator LLM. */
-  roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
+  roleModelMap?: Partial<
+    Record<
+      ArenaAgentRole | 'architect' | 'coordinator' | 'merge' | 'supervisor' | 'compose' | 'userSim' | 'security' | 'performance',
+      string
+    >
+  >;
   /** Per-model capability scores after self-audit pass. */
   capabilitySnapshot?: Record<
     string,
@@ -175,7 +180,12 @@ export interface ExecutionPlan {
   runId: string;
   agentOrder: MultiAgentStageId[];
   taskDistributionMap: Record<string, string>;
-  roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
+  roleModelMap?: Partial<
+    Record<
+      ArenaAgentRole | 'architect' | 'coordinator' | 'merge' | 'supervisor' | 'compose' | 'userSim' | 'security' | 'performance',
+      string
+    >
+  >;
   createdAt: number;
 }
 
@@ -205,7 +215,12 @@ export interface PipelineState {
   devTools?: DevToolsIntegrationResult;
   integrationSummary?: IntegrationSummary;
   reasoningBrief?: ReasoningBrief;
-  roleModelMap?: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>;
+  roleModelMap?: Partial<
+    Record<
+      ArenaAgentRole | 'architect' | 'coordinator' | 'merge' | 'supervisor' | 'compose' | 'userSim' | 'security' | 'performance',
+      string
+    >
+  >;
 }
 
 export interface DevToolsIntegrationResult {
@@ -308,7 +323,9 @@ export interface MultiAgentPipelineCallbacks {
     detail?: string,
     modelId?: string,
     stepId?: string,
-    auditBadge?: string
+    auditBadge?: string,
+    /** When set, peer stages in the same group may stay active together (parallel scans). */
+    parallelGroup?: string
   ) => void;
   onReasoningBrief?: (brief: ReasoningBrief) => void;
   onMeta?: (resolvedModel: string, reason: string) => void;

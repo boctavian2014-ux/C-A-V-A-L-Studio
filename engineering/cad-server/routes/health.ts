@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
-import { resolveMeshApiKey } from "../cad-capabilities";
+import {
+  isMeshGenerationConfigured,
+  resolveMeshApiKey,
+  resolveMeshWorkerUrl,
+  resolvePiapiApiKey,
+} from "../mesh-client";
 import { isOpenScadInstalled } from "../scad-runner";
 import { isCadPersistenceConfigured } from "../storage/index";
 
@@ -9,6 +14,9 @@ export const cadHealthCheck = async () => ({
   supabaseConfigured: isCadPersistenceConfigured(),
   openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY),
   meshyConfigured: Boolean(resolveMeshApiKey()),
+  piapiConfigured: Boolean(resolvePiapiApiKey()),
+  meshWorkerConfigured: Boolean(resolveMeshWorkerUrl()),
+  meshConfigured: isMeshGenerationConfigured(),
   openscadInstalled: await isOpenScadInstalled(),
   llmModel: process.env.CAD_LLM_MODEL ?? "openai/gpt-4o-mini",
   allowFallback: process.env.CAD_ALLOW_FALLBACK === "1",

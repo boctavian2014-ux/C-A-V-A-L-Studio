@@ -61,7 +61,9 @@ module.exports = [
       "main/electron-main": "./src/main/electron-main.ts",
       "main/preload": "./src/main/preload.ts",
       "main/preload-worker": "./ai/preload/preload-worker.ts",
-      "main/context-parallel-worker": "./ai/context/parallel/parallel-worker.ts"
+      "main/context-parallel-worker": "./ai/context/parallel/parallel-worker.ts",
+      // Legacy path expected by context parallel spawn
+      "main/parallel-worker": "./ai/context/parallel/parallel-worker.ts"
     }
   },
   {

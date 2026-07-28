@@ -4,6 +4,7 @@ import os from "node:os";
 import { assertShellCommandAllowed } from "./shell-security";
 import { assertPathInWorkspace } from "./path-security";
 import { sanitizeEnvForTerminal } from "./subprocess-env";
+import { oneShotShellInvocation } from "./powershell-shell";
 
 export interface TerminalRunResult {
   ok: boolean;
@@ -34,8 +35,7 @@ export async function runTerminalCommand(
     };
   }
 
-  const shell = os.platform() === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/bash";
-  const shellArgs = os.platform() === "win32" ? ["-NoProfile", "-Command", command] : ["-lc", command];
+  const { file: shell, args: shellArgs } = oneShotShellInvocation(command);
 
   return new Promise((resolve) => {
     const child = spawn(shell, shellArgs, {

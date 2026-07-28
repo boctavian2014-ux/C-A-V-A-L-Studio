@@ -92,18 +92,23 @@ export function applyMultiAgentOverrides(
 }
 
 /** Long multi-module prompts get full pipeline + context synthesis. */
-export function applyComplexPromptOverrides(
-  config: MultiAgentConfig,
-  message: string
-): MultiAgentConfig {
-  if (config.applyComplexPromptOverrides === false) return config;
+export function classifyArenaPromptComplexity(message: string): 'simple' | 'complex' {
   const lines = message.split('\n').filter((l) => l.trim()).length;
   const isComplex =
     message.length > 600 ||
     lines >= 8 ||
     (/\b(module|frontend|backend|dashboard|scraper|api|docker|deploy|forexebug|seap)\b/i.test(message) &&
       lines >= 4);
-  if (!isComplex) return config;
+  return isComplex ? 'complex' : 'simple';
+}
+
+/** Long multi-module prompts get full pipeline + context synthesis. */
+export function applyComplexPromptOverrides(
+  config: MultiAgentConfig,
+  message: string
+): MultiAgentConfig {
+  if (config.applyComplexPromptOverrides === false) return config;
+  if (classifyArenaPromptComplexity(message) !== 'complex') return config;
   return {
     ...config,
     fastPipeline: false,

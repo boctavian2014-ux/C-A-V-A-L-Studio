@@ -29,6 +29,7 @@ export interface PlanPrint3DInput {
   latestUserText: string;
   openRouterApiKey?: string;
   meshApiKey?: string;
+  piapiApiKey?: string;
   previousMeshTaskId?: string;
 }
 
@@ -56,12 +57,13 @@ Rules:
 - userLanguage = language of the user's LATEST message (ro or en). assistantMessage and questions MUST use that language.
 - action=clarify ONLY when critical info is missing: size/dimensions, object type (bust vs full figure vs part type), detail level, or ambiguous intent. Do NOT clarify if conversation history already answers these.
 - action=generate when enough context exists (including from prior messages).
-- CRITICAL OBJECT FIDELITY: technicalPrompt MUST describe the SAME object the user asked for. NEVER substitute furniture or a plain box when the user asked for something else. Prefer the LATEST user message over older unrelated objects in history.
+- CRITICAL OBJECT FIDELITY: technicalPrompt MUST describe the SAME object the user asked for. NEVER substitute furniture, drawers, sertare, cabinets, wardrobes, shelf units, bathtubs, tubs, basins, or sinks when the user asked for something else (hammer, prop, toy car, animal, etc.). Prefer the LATEST user message over older unrelated objects in history.
+- If the user asks for ciocan / hammer / Mjolnir: pipeline=mesh, intent=figurine, technicalPrompt = visual hammer prop description (head + handle). NEVER furniture.
 - DEFAULT PIPELINE CHOICE:
   - pipeline=mesh for ANY free-form / visual object the user describes in plain language: animals, insects, plants, characters, figurines, sculptures, faces, fantasy creatures, toy robots (looks), organic furniture, food, everyday objects without precise mechanical drawings.
   - pipeline=openscad ONLY for parametric/mechanical parts: brackets, gears, wheels with bore sizes, PCB/IoT enclosures with cutouts, mounts, frames, toy cars/helicopters built from primitives, CNC fixtures.
 - Animals / insects / creatures (câine, pisică, fluture, păianjen, dragon, etc.): pipeline=mesh, intent=organic or figurine. technicalPrompt = rich English visual description for text-to-3D (pose, proportions, style, approx size mm), NOT OpenSCAD instructions.
-- Toy cars / helicopters (mașină jucărie, elicopter): pipeline=openscad, intent=mechanical, with chassis/wheels or fuselage/rotors/skids.
+- Toy cars / sports cars / Ferrari / helicopters (mașină jucărie, ferrari, elicopter): pipeline=openscad, intent=mechanical, with car body+4 wheels or fuselage/rotors/skids. NEVER a bathtub with wheels.
 - Mechanical robots (arm, chassis, actuators, joints): pipeline=openscad. Cute/toy/figurine robots: pipeline=mesh.
 - For IoT/sensor enclosures: pipeline=openscad with OLED window, vents, standoffs — never a blank box.
 - For trademarked characters: warn in warnings, use generic description in technicalPrompt, never reproduce exact IP.
@@ -139,13 +141,22 @@ export function buildClarifyMessage(plan: Print3DPlannerResult): string {
 }
 
 const VEHICLE_USER_RE =
-  /(mașin[aăi]|masina|masini|toy\s*car|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil)/iu;
+  /(mașin[aăi]|masina|masini|toy\s*car|diecast|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil|ferrari|porsche|lamborghini|sports?\s*car|coupe|sedan|hot\s*wheels|mașinu[tț][aă]|masinuta)/iu;
 const HELICOPTER_USER_RE = /(elicopter|helicopter|\bheli\b|elicopter(?:e|ul)?)/iu;
+const HAMMER_USER_RE =
+  /(ciocan|hammer|mjolnir|mjölnir|thor[\s'-]?hammer|ciocanul|prop\s*hammer)/iu;
+const USER_WANTS_FURNITURE_RE =
+  /(dulap|cabinet|wardrobe|mobilier|furniture|sertar|sertare|drawer|comod[aă]|bibliotec[aă]|bookshelf|rafturi|noptier)/iu;
 const FURNITURE_TECH_RE =
-  /(dulap|cabinet|wardrobe|closet|drawer unit|chest of drawers|mobilier|bookshelf|shelving unit)/iu;
+  /(dulap|cabinet|wardrobe|closet|drawer|drawers|sertar|chest of drawers|comod[aă]|mobilier|bookshelf|shelving|shelf unit|nightstand|dresser|cupboard)/iu;
+/** Bathtub / plumbing / unrelated household shapes often hallucinated instead of cars. */
+const WRONG_HOUSEHOLD_TECH_RE =
+  /(bathtub|bath\s*tub|\btub\b|basin|sink|toilet|cad[aă]\b|cada\b|vas\s+de\s+baie|chiuvet|bathtub\s+with\s+wheels)/iu;
 const GENERIC_BOX_TECH_RE =
   /(plain\s+box|rectangular\s+prism|simple\s+wedge|hollow\s+box|featureless|generic\s+block)/iu;
 const HELICOPTER_FEATURE_RE = /(rotor|fuselage|tail\s*boom|skid|blade|cabin|elicopter|helicopter)/iu;
+const VEHICLE_FEATURE_RE =
+  /(chassis|caroserie|wheel|wheels|axle|hood|cabin|coupe|sedan|spoiler|grille|vehicle|toy\s*car|ferrari|sports?\s*car)/iu;
 
 function helicopterTechnicalPrompt(user: string): string {
   return [
@@ -161,12 +172,17 @@ function helicopterTechnicalPrompt(user: string): string {
 }
 
 function vehicleTechnicalPrompt(user: string): string {
+  const sports =
+    /(ferrari|porsche|lamborghini|sports?\s*car|coupe|hot\s*wheels)/iu.test(user);
   return [
-    "FDM-printable TOY CAR / vehicle body (NOT furniture, NOT a cabinet).",
+    "FDM-printable TOY CAR — look like a small diecast car (NOT a bathtub, NOT a tub, NOT a basin, NOT furniture, NOT a cabinet).",
     `User request: ${user.slice(0, 400)}`,
-    "Include: chassis/body ~120-160 mm long, cabin or hood, 4 wheels Ø25-35 mm with axles, simple wheel wells.",
-    "Parametric OpenSCAD: body hull + wheel cylinders. Single printable solid or body+wheels as one assembly.",
-    "Wall thickness >= 1.6 mm. Flat bottom for bed adhesion.",
+    sports
+      ? "Sports-car silhouette: low sleek coupe body, short cabin, long hood, optional rear spoiler, rounded fenders."
+      : "Classic toy-car silhouette: chassis/body, cabin or hood, clear car proportions.",
+    "Required: body ~120-160 mm long, 4 wheels Ø25-35 mm with axles through wheel wells (wheels under the body, not a tub on rollers).",
+    "Parametric OpenSCAD: hull/cube body + cylinder wheels. ONE printable solid assembly.",
+    "Wall thickness >= 1.6 mm. Flat underside for bed adhesion. NEVER model a bathtub, sink, or furniture.",
   ].join(" ");
 }
 
@@ -177,11 +193,21 @@ function meshObjectTechnicalPrompt(user: string): string {
     "Describe the exact object the user named — match species/pose/style.",
     "Approx bounding size 60–120 mm unless user specified.",
     "Clean silhouette, printable without thin hair-like features under 1 mm.",
-    "Do NOT invent a cabinet, box, or unrelated furniture.",
+    "Do NOT invent a cabinet, drawers, sertare, wardrobe, shelf unit, bathtub, tub, basin, or unrelated furniture.",
   ].join(" ");
 }
 
-/** Safety net: keep vehicles/helicopters on OpenSCAD; free-form objects on mesh. */
+function hammerMeshTechnicalPrompt(user: string): string {
+  return [
+    "Text-to-3D FDM prop: mythic war hammer inspired by Thor's hammer (generic, not exact IP).",
+    `User request: ${user.slice(0, 500)}`,
+    "Blocky rectangular metal head, short leather-wrapped handle, optional wrist strap loop.",
+    "Single solid ~120–180 mm tall, flat base on handle bottom or head side, manifold, no furniture/drawers.",
+    "Suitable for FDM 3D printing, watertight.",
+  ].join(" ");
+}
+
+/** Safety net: keep vehicles/helicopters on OpenSCAD; free-form objects on mesh; kill furniture swaps. */
 export function alignPlanWithLatestUserIntent(
   latestUserText: string,
   plan: Print3DPlannerResult
@@ -189,6 +215,32 @@ export function alignPlanWithLatestUserIntent(
   const user = latestUserText.trim();
   const tech = plan.technicalPrompt;
   const assistant = plan.assistantMessage ?? "";
+
+  if (HAMMER_USER_RE.test(user)) {
+    return {
+      ...plan,
+      action: "generate",
+      intent: "figurine",
+      pipeline: "mesh",
+      assistantMessage:
+        plan.userLanguage === "ro"
+          ? "Generez un ciocan/prop tip Mjolnir (text-to-3D), nu mobilier."
+          : "Generating a Mjolnir-style hammer prop (text-to-3D), not furniture.",
+      technicalPrompt:
+        plan.pipeline === "mesh" &&
+        tech.length > 40 &&
+        !FURNITURE_TECH_RE.test(tech) &&
+        /(hammer|mjolnir|head|handle|ciocan)/i.test(tech)
+          ? tech
+          : hammerMeshTechnicalPrompt(user),
+      warnings: [
+        ...(plan.warnings ?? []).filter((w) => !/dulap|cabinet|mobilier|furniture/i.test(w)),
+        plan.userLanguage === "ro"
+          ? "Am forțat modelul pe ciocan/prop (nu dulap/sertare)."
+          : "Forced hammer prop plan (not cabinet/drawers).",
+      ],
+    };
+  }
 
   if (HELICOPTER_USER_RE.test(user)) {
     const wrongObject =
@@ -223,17 +275,38 @@ export function alignPlanWithLatestUserIntent(
     };
   }
 
-  if (VEHICLE_USER_RE.test(user) && !FREEFORM_MESH_RE.test(user)) {
-    if (!FURNITURE_TECH_RE.test(tech) && !FURNITURE_TECH_RE.test(assistant)) {
-      if (plan.pipeline === "mesh" || plan.intent === "organic") {
-        return {
-          ...plan,
-          action: "generate",
-          intent: "mechanical",
-          pipeline: "openscad",
-        };
-      }
-      return plan;
+  // Vehicles always win over free-form mesh (even when "jucărie" also matches FREEFORM).
+  if (VEHICLE_USER_RE.test(user)) {
+    const wrongObject =
+      FURNITURE_TECH_RE.test(tech) ||
+      FURNITURE_TECH_RE.test(assistant) ||
+      WRONG_HOUSEHOLD_TECH_RE.test(tech) ||
+      WRONG_HOUSEHOLD_TECH_RE.test(assistant) ||
+      GENERIC_BOX_TECH_RE.test(tech) ||
+      !VEHICLE_FEATURE_RE.test(tech) ||
+      plan.pipeline === "mesh" ||
+      plan.intent === "organic";
+
+    if (wrongObject) {
+      return {
+        ...plan,
+        action: "generate",
+        intent: "mechanical",
+        pipeline: "openscad",
+        assistantMessage:
+          plan.userLanguage === "ro"
+            ? "Generez o mașină jucărie (caroserie + 4 roți) — nu cadă, nu mobilier."
+            : "Generating a toy car (body + 4 wheels) — not a bathtub, not furniture.",
+        technicalPrompt: vehicleTechnicalPrompt(user),
+        warnings: [
+          ...(plan.warnings ?? []).filter(
+            (w) => !/dulap|cabinet|mobilier|furniture|cad[aă]|bathtub/i.test(w)
+          ),
+          plan.userLanguage === "ro"
+            ? "Am forțat planul pe mașină jucărie (caroserie+roți), nu cadă/dulap."
+            : "Forced toy-car plan (body+wheels), not bathtub/cabinet.",
+        ],
+      };
     }
 
     return {
@@ -241,16 +314,34 @@ export function alignPlanWithLatestUserIntent(
       action: "generate",
       intent: "mechanical",
       pipeline: "openscad",
+      technicalPrompt: tech.length > 40 ? tech : vehicleTechnicalPrompt(user),
+    };
+  }
+
+  // Planner hallucinated furniture/drawers/bathtub while user asked for something else.
+  if (
+    (FURNITURE_TECH_RE.test(tech) ||
+      FURNITURE_TECH_RE.test(assistant) ||
+      WRONG_HOUSEHOLD_TECH_RE.test(tech) ||
+      WRONG_HOUSEHOLD_TECH_RE.test(assistant)) &&
+    !USER_WANTS_FURNITURE_RE.test(user) &&
+    !/(cad[aă]|bathtub|tub|basin|sink)/iu.test(user)
+  ) {
+    return {
+      ...plan,
+      action: "generate",
+      intent: "organic",
+      pipeline: "mesh",
       assistantMessage:
         plan.userLanguage === "ro"
-          ? "Generez o mașină jucărie (caroserie + roți), nu mobilier."
-          : "Generating a toy car (body + wheels), not furniture.",
-      technicalPrompt: vehicleTechnicalPrompt(user),
+          ? `Generez obiectul cerut („${user.slice(0, 80)}”), nu mobilă/cadă/sertare.`
+          : `Generating the requested object (“${user.slice(0, 80)}”), not furniture/bathtub/drawers.`,
+      technicalPrompt: meshObjectTechnicalPrompt(user),
       warnings: [
         ...(plan.warnings ?? []),
         plan.userLanguage === "ro"
-          ? "Am corectat planul: cererea era mașină/vehicul, nu dulap."
-          : "Corrected plan: user asked for a vehicle, not a cabinet.",
+          ? "Am respins planul greșit (mobilier/cadă) — nu era în cererea ta."
+          : "Rejected wrong-object plan (furniture/bathtub) — not what you asked for.",
       ],
     };
   }
@@ -270,8 +361,8 @@ export function alignPlanWithLatestUserIntent(
         plan.assistantMessage && !FURNITURE_TECH_RE.test(plan.assistantMessage)
           ? plan.assistantMessage
           : plan.userLanguage === "ro"
-            ? "Generez modelul 3D liber din text (Meshy) — animal / insectă / obiect vizual."
-            : "Generating a free-form 3D model from text (Meshy).",
+            ? "Generez modelul 3D liber din text (Trellis/Meshy)."
+            : "Generating a free-form 3D model from text (Trellis/Meshy).",
       technicalPrompt:
         plan.pipeline === "mesh" &&
         tech.length > 40 &&
@@ -357,7 +448,7 @@ export async function planPrint3DRequest(
     const plan = parsePlannerResponse(result.content!);
     if (plan) {
       const aligned = alignPlanWithLatestUserIntent(input.latestUserText, plan);
-      const adjusted = await adjustPlanPipeline(aligned, input.meshApiKey);
+      const adjusted = await adjustPlanPipeline(aligned, input.meshApiKey, input.piapiApiKey);
       return { ok: true, plan: adjusted };
     }
     lastError = "Planner returned unparseable JSON";

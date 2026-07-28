@@ -3,8 +3,6 @@ import { assertRendererChatAllowed } from '../../../ai/safety/renderer-chat-guar
 import {
   buildCadTechnicalPrompt,
   inferCadProjectType,
-  mapEngProjectToConstraints,
-  mapEngProjectToPlanContext,
 } from '../../../ai/engineering/cad-prompt';
 import { normalizeCadErrorMessage } from '../../../ai/engineering/cad-errors';
 import type { EngProject } from '../../../ai/engineering/engineering-generator';
@@ -105,18 +103,32 @@ async function loadCadCredentials(): Promise<{
   cadApiUrl?: string;
 }> {
   const caval = window.caval;
-  const [settingsResult, secretsResult] = await Promise.all([
+  const [settingsResult, secretsResult, health] = await Promise.all([
     caval.settingsLoad?.() ?? Promise.resolve({ ok: true, settings: {} }),
     caval.secretsGet?.() ?? Promise.resolve({ ok: true, secrets: {}, configured: {} }),
+    caval.cad?.health?.() ?? Promise.resolve(null),
   ]);
   const settings = (settingsResult?.settings ?? {}) as Record<string, string>;
   const configured = (secretsResult?.configured ?? {}) as Record<string, boolean>;
+  const cloudMesh =
+    Boolean(health?.ok) &&
+    Boolean(
+      health?.meshConfigured ||
+        health?.meshWorkerConfigured ||
+        health?.piapiConfigured ||
+        health?.meshyConfigured
+    );
   return {
     openRouterConfigured:
       configured.OPENROUTER_API_KEY === true ||
       settings['openrouter.configured'] === 'true',
     meshConfigured:
-      configured.MESHY_API_KEY === true || settings['mesh.configured'] === 'true',
+      cloudMesh ||
+      configured.PIAPI_API_KEY === true ||
+      configured.TRELLIS_API_KEY === true ||
+      configured.MESHY_API_KEY === true ||
+      settings['mesh.configured'] === 'true' ||
+      settings['trellis.configured'] === 'true',
     cadApiUrl: settings['cad.apiUrl'],
   };
 }
@@ -171,6 +183,8 @@ interface EngineeringCadState {
   serverStatus: CadJobStatus | null;
   stlUrl: string | null;
   stlFileName: string | null;
+  /** Baked STL after viewer edits (base64). Preferred for download. */
+  editedStlBase64: string | null;
   scadContent: string | null;
   dimensions: StlDimensions | null;
   meshTaskId: string | null;
@@ -208,6 +222,8 @@ interface EngineeringCadState {
   retryCadJob: () => Promise<void>;
   clearCadJob: () => void;
   downloadStl: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
+  setEditedStl: (base64: string) => void;
+  clearEditedStl: () => void;
 
   /** @deprecated use createCadJob */
   generateCad3d: (input: GenerateCadInput) => Promise<void>;
@@ -242,6 +258,7 @@ function resetJobFields(): Partial<EngineeringCadState> {
     serverStatus: null,
     stlUrl: null,
     stlFileName: null,
+    editedStlBase64: null,
     scadContent: null,
     dimensions: null,
     meshTaskId: null,
@@ -267,6 +284,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   serverStatus: null,
   stlUrl: null,
   stlFileName: null,
+  editedStlBase64: null,
   scadContent: null,
   dimensions: null,
   meshTaskId: null,
@@ -322,13 +340,38 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   },
 
   downloadStl: async () => {
-    const { stlUrl, stlFileName } = get();
+    const { stlUrl, stlFileName, editedStlBase64 } = get();
+    const defaultName = stlFileName
+      ? (editedStlBase64 && !stlFileName.includes('-edited')
+          ? stlFileName.replace(/\.stl$/i, '-edited.stl')
+          : stlFileName)
+      : editedStlBase64
+        ? 'model-edited.stl'
+        : 'model.stl';
+
+    if (editedStlBase64 && window.caval?.cad?.saveStlBase64) {
+      const result = await window.caval.cad.saveStlBase64({
+        base64: editedStlBase64,
+        defaultName,
+      });
+      if (!result.canceled) {
+        set({
+          downloadMessage: result.ok
+            ? `STL (cu modificări) salvat: ${result.path}`
+            : `Eroare: ${result.error ?? 'download failed'}`,
+        });
+      }
+      return result;
+    }
+
     if (!stlUrl || !window.caval?.cad?.downloadStl) {
       return { ok: false, error: 'Niciun STL disponibil.' };
     }
+    const userIdResult = await window.caval.billingUserId?.();
     const result = await window.caval.cad.downloadStl({
       url: stlUrl,
-      defaultName: stlFileName ?? 'model.stl',
+      defaultName,
+      cavalId: userIdResult?.userId,
     });
     if (!result.canceled) {
       set({
@@ -338,6 +381,43 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       });
     }
     return result;
+  },
+
+  setEditedStl: (base64: string) => {
+    const prev = get().stlUrl;
+    if (prev?.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(prev);
+      } catch {
+        /* ignore */
+      }
+    }
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'model/stl' }));
+    const name = get().stlFileName ?? 'model.stl';
+    const editedName = name.replace(/\.stl$/i, '') + '-edited.stl';
+    patch({
+      editedStlBase64: base64,
+      stlUrl: blobUrl,
+      stlFileName: editedName,
+      downloadMessage: 'Modificări salvate local — Download STL include transformările.',
+    });
+    log('edited stl saved', `${Math.round(base64.length * 0.75)} bytes`);
+  },
+
+  clearEditedStl: () => {
+    const prev = get().stlUrl;
+    const edited = get().editedStlBase64;
+    if (edited && prev?.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(prev);
+      } catch {
+        /* ignore */
+      }
+    }
+    patch({ editedStlBase64: null });
   },
 
   pollCadJob: async (jobId: string) => {
@@ -387,13 +467,16 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
         const status = (job.status ?? 'queued') as CadJobStatus;
         const phase = serverStatusToPhase(status);
+        const nextStl = job.stlUrl ?? get().stlUrl;
+        const clearEdit = Boolean(job.stlUrl && job.stlUrl !== get().stlUrl);
         patch({
           serverStatus: status,
           phase,
-          stlUrl: job.stlUrl ?? get().stlUrl,
+          stlUrl: nextStl,
           scadContent: job.scad ?? get().scadContent,
           dimensions: job.dimensions ?? get().dimensions,
           meshTaskId: job.meshTaskId ?? get().meshTaskId,
+          ...(clearEdit ? { editedStlBase64: null } : {}),
           error: status === 'failed' ? normalizeCadErrorMessage(job.error ?? 'Generarea modelului a eșuat.') : null,
           statusMessage:
             status === 'done' && job.stlUrl
@@ -457,12 +540,24 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     const modelId = plan.modelId ?? aiState.selectedModel ?? 'caval-auto/free';
     const resolvedModel = await resolveCadModel(modelId);
 
-    const technicalPrompt = buildCadTechnicalPrompt(project, userPrompt);
+    const rawUser = userPrompt.trim();
+    if (!rawUser) {
+      patch({
+        phase: 'failed',
+        error: 'Nicio cerere salvată pentru STL. Scrie în chat Robotics, Generează planul, apoi Generează 3D.',
+      });
+      return;
+    }
+
+    // Geometry must follow the chat prompt only — EngProject title/BOM often
+    // hallucinate furniture and must NOT drive Trellis / OpenSCAD.
+    const geometryPrompt = rawUser.slice(0, 4_000);
+    const technicalPrompt = buildCadTechnicalPrompt(project, geometryPrompt);
     const workspaceRoot = plan.projectPath ?? editorState.projectPath;
 
     try {
       assertRendererChatAllowed({
-        prompt: technicalPrompt,
+        prompt: geometryPrompt,
         workspaceRoot,
         capability: 'planning',
         intent: 'planning',
@@ -482,7 +577,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       dimensions: null,
       meshTaskId: null,
       error: null,
-      statusMessage: 'Planificare CAD pe server cloud…',
+      statusMessage: 'Planificare CAD…',
       downloadMessage: null,
       stlFileName: primaryStl?.name ?? 'model.stl',
       cadTitle: primaryStl?.name ?? project.spec.title,
@@ -493,24 +588,9 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     await warmCadPipeline(resolvedModel, workspaceRoot);
 
     const credentials = await loadCadCredentials();
-    // Do NOT leak Coding Chat history into Robotics CAD — it causes wrong objects
-    // (e.g. previous "dulap" polluting a "mașină jucărie" request).
-    const conversationHistory: CadChatMessage[] = plan.conversationHistory?.length
-      ? plan.conversationHistory
-      : [];
-
-    const attachmentBlock = (plan.attachments ?? aiState.attachedFiles)
-      .slice(0, 4)
-      .map((f) => `[${f.name}]\n${f.content.slice(0, 2_000)}`)
-      .join('\n\n');
+    // Never feed polluted Robotics plan / Coding attachments into CAD geometry.
     const planMessages: CadChatMessage[] = [
-      ...conversationHistory,
-      {
-        role: 'user',
-        content: attachmentBlock
-          ? `${technicalPrompt}\n\n<<ATTACHMENTS>>\n${attachmentBlock}`
-          : technicalPrompt,
-      },
+      { role: 'user', content: geometryPrompt },
     ];
 
     if (submitAbort.signal.aborted) return;
@@ -519,9 +599,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     try {
       planResult = await cad.plan({
         messages: planMessages,
-        // Prefer raw Robotics prompt so planner intent guards match the user's words
-        // (not polluted coding-chat or stale furniture context).
-        latestUserText: userPrompt.trim() || technicalPrompt,
+        latestUserText: geometryPrompt,
         previousMeshTaskId: plan.previousMeshTaskId,
       });
     } catch (err) {
@@ -552,19 +630,58 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
     const pipeline = planResult.plan.pipeline;
     const planWarnings = planResult.plan.warnings?.filter(Boolean) ?? [];
-    if (pipeline === 'mesh' && !credentials.meshConfigured) {
-      patch({
-        phase: 'failed',
-        error:
-          planWarnings.join(' ') ||
-          'Pentru obiecte 3D libere (animale, insecte, figurine, robot jucărie, mobilier) adaugă cheia Meshy în Setări → AI & Chei API (mesh.apiKey). OpenSCAD e doar pentru piese mecanice precise.',
-      });
-      return;
-    }
+    const forceOpenScadFallback = pipeline === 'mesh' && !credentials.meshConfigured;
+    const generationMode = forceOpenScadFallback ? 'openscad' : pipeline;
+
+    // Prefer planner tech only when it still mentions the user's subject; else raw chat.
+    const plannerTech = planResult.plan.technicalPrompt?.trim() ?? '';
+    const userTokens = geometryPrompt
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((t) => t.length >= 4)
+      .slice(0, 8);
+    const plannerPolluted =
+      /(dulap|cabinet|wardrobe|drawer|sertar|bookshelf|comod|bathtub|bath\s*tub|\btub\b|basin|cad[aă]\b|cada\b|sink|toilet)/i.test(
+        plannerTech
+      );
+    const plannerMatchesUser =
+      plannerTech.length > 20 &&
+      userTokens.some((t) => plannerTech.toLowerCase().includes(t)) &&
+      !plannerPolluted;
+
+    const meshPrompt = [
+      geometryPrompt,
+      'FDM printable, single watertight solid, flat base, manifold, mm scale ~80-180 mm.',
+      'Match ONLY this subject — do not invent furniture, drawers, cabinets, bathtubs, tubs, basins, or unrelated objects.',
+    ].join('\n');
+
+    const jobPrompt = forceOpenScadFallback
+      ? [
+          `USER OBJECT (exact): ${geometryPrompt}`,
+          'Approximate THIS exact object with OpenSCAD primitives (cubes, cylinders, spheres, hull).',
+          'FORBIDDEN: cabinets, drawers, dulap, sertare, shelf units, bathtubs, tubs, or any furniture unless the user asked for that.',
+          'Watertight, flat base, mm units. Silhouette fidelity over mechanical precision.',
+        ].join('\n\n')
+      : generationMode === 'mesh'
+        ? meshPrompt
+        : plannerMatchesUser
+          ? plannerTech
+          : [
+              `USER OBJECT (exact): ${geometryPrompt}`,
+              plannerTech && !plannerPolluted ? plannerTech : technicalPrompt,
+            ]
+              .filter(Boolean)
+              .join('\n\n')
+              .slice(0, 12_000);
+
+    log('geometry prompt', {
+      user: geometryPrompt.slice(0, 120),
+      mode: generationMode,
+      meshConfigured: credentials.meshConfigured,
+    });
 
     const userIdResult = await caval.billingUserId?.();
-    const projectType = inferCadProjectType(userPrompt, project.spec);
-    const jobPrompt = planResult.plan.technicalPrompt || technicalPrompt;
+    const projectType = inferCadProjectType(geometryPrompt, project.spec);
 
     let created;
     let createAttempt = 0;
@@ -572,19 +689,15 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       if (submitAbort.signal.aborted) return;
       try {
         created = await cad.createJob({
-          prompt: jobPrompt,
+          prompt: jobPrompt.slice(0, 12_000),
           projectType,
           cavalId: userIdResult?.userId,
-          constraints: mapEngProjectToConstraints(project.spec) as Record<string, string | undefined>,
-          planContext: mapEngProjectToPlanContext(project),
+          // Do not pass EngProject planContext — it often describes the wrong object.
           conversationHistory: planMessages,
-          previousScad: plan.previousScad,
-          previousMeshTaskId: plan.previousMeshTaskId,
-          generationMode: planResult.plan.pipeline,
-          meshPrompt:
-            planResult.plan.pipeline === 'mesh'
-              ? [userPrompt.trim(), jobPrompt].filter(Boolean).join('\n\n').slice(0, 12_000)
-              : undefined,
+          previousScad: undefined,
+          previousMeshTaskId: forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
+          generationMode,
+          meshPrompt: generationMode === 'mesh' ? meshPrompt.slice(0, 12_000) : undefined,
           quality: 'standard',
         });
         if (created.ok && created.jobId) break;
@@ -614,17 +727,21 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     const jobId = created.jobId;
     const status = (created.status as CadJobStatus) ?? 'queued';
     const meshTaskId = (created as { meshTaskId?: string | null }).meshTaskId ?? null;
+    const fallbackHint = forceOpenScadFallback
+      ? 'TRELLIS/Meshy indisponibil — generez previzualizare 3D cu OpenSCAD…'
+      : null;
     patch({
       phase: 'processing',
       jobId,
       serverStatus: status,
       meshTaskId,
       statusMessage:
-        planWarnings.length > 0
+        fallbackHint ||
+        (planWarnings.length > 0
           ? planWarnings.join(' · ')
-          : pipeline === 'mesh'
-            ? 'Generez model 3D din text pe cloud (Meshy)…'
-            : 'Generez STL pe server cloud (OpenSCAD)…',
+          : generationMode === 'mesh'
+            ? 'Generez model 3D din text pe cloud (PiAPI Trellis / Meshy)…'
+            : 'Generez STL pe server cloud (OpenSCAD)…'),
     });
 
     log('job created', { jobId, status, projectType });
@@ -663,11 +780,20 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
   setActivePartId: (id) => {
     const part = get().batchParts.find((p) => p.id === id);
+    const prev = get().stlUrl;
+    if (get().editedStlBase64 && prev?.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(prev);
+      } catch {
+        /* ignore */
+      }
+    }
     patch({
       activePartId: id,
       stlUrl: part?.stlUrl ?? get().stlUrl,
       stlFileName: part ? `${part.id}.stl` : get().stlFileName,
       cadTitle: part?.name ?? get().cadTitle,
+      editedStlBase64: null,
     });
   },
 

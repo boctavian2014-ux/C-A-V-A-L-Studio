@@ -428,8 +428,16 @@ export function planToMarkdown(parsed: ParsedEngineeringPlan, title: string): st
   return parts.join('\n').trim();
 }
 
+export function stripOpenScadFencesFromMarkdown(markdown: string): string {
+  return markdown
+    .replace(/```(?:openscad|scad)\s*[\s\S]*?```/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function markdownToSimpleHtml(markdown: string): string {
-  const escaped = markdown
+  const cleaned = stripOpenScadFencesFromMarkdown(markdown);
+  const escaped = cleaned
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');

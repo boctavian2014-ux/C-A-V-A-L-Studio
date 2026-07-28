@@ -108,7 +108,12 @@ export const getJobResultHandlers = [
       const result = await buildCadJobResult(job);
       const localBuffer = getLocalStlBuffer(id);
 
-      if (localBuffer && request.header("accept")?.includes("model/stl")) {
+      // Three.js STLLoader and browsers send Accept: */* — always serve binary when
+      // we have a local artifact (JSON metadata is on GET /cad/jobs/:id).
+      const wantsJson =
+        request.query.format === "json" ||
+        (request.header("accept") ?? "").includes("application/json");
+      if (localBuffer && !wantsJson) {
         response.setHeader("Content-Type", "model/stl");
         response.setHeader("Cache-Control", "private, max-age=60");
         response.send(localBuffer);

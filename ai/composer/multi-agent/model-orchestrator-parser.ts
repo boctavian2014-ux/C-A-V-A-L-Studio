@@ -86,13 +86,18 @@ export function mergeArenaModelPlans(
   llmMap: Partial<Record<ArenaAgentRole | 'architect' | 'coordinator', string>>
 ): ArenaModelPlan {
   const roleModelMap = { ...heuristic.roleModelMap, ...llmMap };
+  // Keep scan roles on the heuristic fast pool even if LLM omitted them.
+  if (!roleModelMap.userSim) roleModelMap.userSim = heuristic.roleModelMap.userSim;
+  if (!roleModelMap.security) roleModelMap.security = heuristic.roleModelMap.security;
+  if (!roleModelMap.performance) roleModelMap.performance = heuristic.roleModelMap.performance;
   const parts = Object.entries(roleModelMap)
-    .slice(0, 6)
+    .slice(0, 8)
     .map(([r, m]) => `${r}=${m?.split('/').pop() ?? m}`)
     .join(', ');
   return {
     primaryModel: heuristic.primaryModel,
     roleModelMap,
-    summary: `Models: ${parts}`,
+    complexity: heuristic.complexity,
+    summary: `Models(${heuristic.complexity}): ${parts}`,
   };
 }

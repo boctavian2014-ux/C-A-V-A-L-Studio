@@ -506,7 +506,8 @@ function sendMultiAgentStatusChunk(
   detail?: string,
   modelId?: string,
   stepId?: string,
-  auditBadge?: string
+  auditBadge?: string,
+  parallelGroup?: string
 ): boolean {
   return stream.send({
     type: "multiagent",
@@ -516,6 +517,7 @@ function sendMultiAgentStatusChunk(
     multiAgentModel: modelId,
     multiAgentStepId: stepId,
     multiAgentAuditBadge: auditBadge,
+    multiAgentParallelGroup: parallelGroup,
   });
 }
 
@@ -676,9 +678,9 @@ async function streamToRenderer(
     sendMultiAgentStatusChunk(stream, "context", "active", "pipeline start");
 
     const result = await runCavalloMultiAgentPipeline(sender, streamId, request, {
-      onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge) => {
+      onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge);
+        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
       },
       onReasoningBrief: (brief) => {
         if (!stream.isAlive()) return;
@@ -853,9 +855,9 @@ async function streamResumeToRenderer(
     sendMultiAgentStatusChunk(stream, "subagent", "active", "UI delivery resume");
 
     const result = await resumeCavalloMultiAgentPipeline(sender, streamId, input, {
-      onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge) => {
+      onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge);
+        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
       },
       onMeta: (resolvedModel, reason) => {
         if (!stream.isAlive()) return;

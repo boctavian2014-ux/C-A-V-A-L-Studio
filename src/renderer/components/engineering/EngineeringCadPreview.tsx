@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { CadViewer } from './CadViewer';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 
@@ -16,6 +16,7 @@ const PHASE_LABELS: Record<CadStorePhase, string> = {
 export function EngineeringCadPreview() {
   const stlUrl = useEngineeringCadStore((s) => s.stlUrl);
   const stlFileName = useEngineeringCadStore((s) => s.stlFileName);
+  const editedStlBase64 = useEngineeringCadStore((s) => s.editedStlBase64);
   const cadTitle = useEngineeringCadStore((s) => s.cadTitle);
   const phase = useEngineeringCadStore((s) => s.phase);
   const serverStatus = useEngineeringCadStore((s) => s.serverStatus);
@@ -24,15 +25,39 @@ export function EngineeringCadPreview() {
   const activePartId = useEngineeringCadStore((s) => s.activePartId);
   const batchSummary = useEngineeringCadStore((s) => s.batchSummary);
   const downloadStl = useEngineeringCadStore((s) => s.downloadStl);
+  const setEditedStl = useEngineeringCadStore((s) => s.setEditedStl);
   const clearCadJob = useEngineeringCadStore((s) => s.clearCadJob);
   const cancelCadJob = useEngineeringCadStore((s) => s.cancelCadJob);
   const setActivePartId = useEngineeringCadStore((s) => s.setActivePartId);
   const exportBatchZip = useEngineeringCadStore((s) => s.exportBatchZip);
+  const [editDirty, setEditDirty] = useState(false);
+
+  const handleClose = useCallback(() => {
+    if (editDirty) {
+      const ok = window.confirm(
+        'Ai modificări nesalvate în viewer. Închizi fără a salva transformările?'
+      );
+      if (!ok) return;
+    }
+    clearCadJob();
+  }, [editDirty, clearCadJob]);
+
+  const handleSaveEdited = useCallback(
+    (base64: string) => {
+      setEditedStl(base64);
+      setEditDirty(false);
+    },
+    [setEditedStl]
+  );
 
   if (!stlUrl) return null;
 
   const doneParts = batchParts.filter((p) => p.status === 'done' && p.stlUrl);
+  const viewerParts = doneParts
+    .filter((p): p is typeof p & { stlUrl: string } => Boolean(p.stlUrl))
+    .map((p) => ({ id: p.id, name: p.name, stlUrl: p.stlUrl }));
   const title = stlFileName ?? cadTitle ?? 'Model 3D';
+  const hasEdited = Boolean(editedStlBase64);
 
   return (
     <div style={{
@@ -68,6 +93,11 @@ export function EngineeringCadPreview() {
           {batchSummary && (
             <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--caval-accent)', fontWeight: 500 }}>
               {batchSummary}
+            </span>
+          )}
+          {hasEdited && (
+            <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--caval-accent)', fontWeight: 600 }}>
+              · editat
             </span>
           )}
         </div>
@@ -107,7 +137,7 @@ export function EngineeringCadPreview() {
               cursor: 'pointer',
             }}
           >
-            Salvează STL
+            {hasEdited ? 'STL (cu modificări)' : 'Salvează STL'}
           </button>
           {(phase === 'submitting' || phase === 'processing') && (
             <button
@@ -128,7 +158,7 @@ export function EngineeringCadPreview() {
           )}
           <button
             type="button"
-            onClick={() => clearCadJob()}
+            onClick={handleClose}
             style={{
               padding: '6px 12px',
               borderRadius: 6,
@@ -178,7 +208,13 @@ export function EngineeringCadPreview() {
       )}
 
       <div style={{ flex: 1, minHeight: 0 }}>
-        <CadViewer stlUrl={stlUrl} />
+        <CadViewer
+          stlUrl={stlUrl}
+          batchParts={viewerParts}
+          hasEditedStl={hasEdited}
+          onSaveEditedStl={handleSaveEdited}
+          onEditDirtyChange={setEditDirty}
+        />
       </div>
     </div>
   );

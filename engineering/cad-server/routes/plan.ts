@@ -14,6 +14,7 @@ export const planRouterHandlers = [
         latestUserText: string;
         openRouterApiKey?: string;
         meshApiKey?: string;
+        piapiApiKey?: string;
         previousMeshTaskId?: string;
       };
 
@@ -22,6 +23,7 @@ export const planRouterHandlers = [
         latestUserText: body.latestUserText.trim(),
         openRouterApiKey: body.openRouterApiKey,
         meshApiKey: body.meshApiKey,
+        piapiApiKey: body.piapiApiKey,
         previousMeshTaskId: body.previousMeshTaskId,
       });
 

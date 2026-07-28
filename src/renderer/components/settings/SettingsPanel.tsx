@@ -363,6 +363,7 @@ function SectionCadCloud() {
   const [testing, setTesting] = useState(false);
   const [cloudOnly, setCloudOnly] = useState(true);
   const [meshyOk, setMeshyOk] = useState(false);
+  const [piapiOk, setPiapiOk] = useState(false);
   const [openRouterOk, setOpenRouterOk] = useState(false);
 
   useEffect(() => {
@@ -377,6 +378,11 @@ function SectionCadCloud() {
       const configured = secretsRes?.configured ?? {};
       setMeshyOk(
         Boolean(configured.MESHY_API_KEY) || s['mesh.configured'] === 'true'
+      );
+      setPiapiOk(
+        Boolean(configured.PIAPI_API_KEY) ||
+          Boolean(configured.TRELLIS_API_KEY) ||
+          s['trellis.configured'] === 'true'
       );
       setOpenRouterOk(
         Boolean(configured.OPENROUTER_API_KEY) || s['openrouter.configured'] === 'true'
@@ -414,8 +420,13 @@ function SectionCadCloud() {
       `Conectat: ${health.url}`,
       health.openscadInstalled ? 'OpenSCAD ✓' : 'OpenSCAD ✗',
       health.openRouterConfigured ? 'OpenRouter ✓' : 'OpenRouter ✗',
-      health.meshyConfigured ? 'Meshy ✓' : 'Meshy —',
-    ];
+      health.meshConfigured || health.meshyConfigured || health.piapiConfigured
+        ? 'Text-to-3D ✓'
+        : 'Text-to-3D —',
+      health.piapiConfigured ? 'PiAPI Trellis ✓' : null,
+      health.meshWorkerConfigured ? 'Worker ✓' : null,
+      health.meshyConfigured ? 'Meshy ✓' : null,
+    ].filter(Boolean);
     setHealthMsg(parts.join(' · '));
   };
 
@@ -470,7 +481,9 @@ function SectionCadCloud() {
 
       <Section title="Chei conexe">
         <InfoBox>
-          Meshy: {meshyOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          PiAPI Trellis: {piapiOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          {' · '}
+          Meshy (fallback): {meshyOk ? 'configurat ✓' : 'opțional'}
           <br />
           OpenRouter: {openRouterOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
         </InfoBox>
@@ -586,7 +599,7 @@ function SectionAbout() {
           ['UI', 'React + TypeScript'],
           ['Editor', 'Monaco Editor'],
           ['AI', 'OpenRouter · Ollama · BYOK'],
-          ['Engineering', 'CAD cloud · OpenSCAD · Meshy'],
+          ['Engineering', 'CAD cloud · OpenSCAD · TRELLIS / Meshy'],
           ['Git', 'Integrat în workbench'],
         ].map(([k, v]) => (
           <Row key={k} label={k}>

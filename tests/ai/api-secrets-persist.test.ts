@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apiKeysToSecrets,
   buildSecretsPatch,
+  filterNonEmptySecretsPatch,
   mergeSecrets,
   normalizeSecretsMap,
   secretsToApiKeys,
@@ -63,5 +64,28 @@ describe('api secrets persistence helpers', () => {
       OPENAI_API_KEY: '',
       GOOGLE_API_KEY: '',
     });
+  });
+
+  it('filterNonEmptySecretsPatch drops empty values and lists saved keys', () => {
+    const { filtered, savedKeys } = filterNonEmptySecretsPatch({
+      OPENROUTER_API_KEY: 'sk-or',
+      PIAPI_API_KEY: '  ',
+      MESHY_API_KEY: '',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+    expect(filtered).toEqual({
+      OPENROUTER_API_KEY: 'sk-or',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+    expect(savedKeys.sort()).toEqual(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']);
+  });
+
+  it('filterNonEmptySecretsPatch returns empty list for all-blank patch', () => {
+    const { filtered, savedKeys } = filterNonEmptySecretsPatch({
+      OPENROUTER_API_KEY: '',
+      PIAPI_API_KEY: '   ',
+    });
+    expect(filtered).toEqual({});
+    expect(savedKeys).toEqual([]);
   });
 });

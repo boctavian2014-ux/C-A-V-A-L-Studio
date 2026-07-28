@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 
 import { assertShellCommandAllowed } from '../../src/main/shell-security';
+import { oneShotShellInvocation } from '../../src/main/powershell-shell';
 
 export interface CommandRunResult {
   command: string;
@@ -26,11 +27,7 @@ export async function runAllowedWorkspaceCommand(
   assertShellCommandAllowed(trimmed);
 
   return new Promise((resolve) => {
-    const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-    const shellArgs =
-      process.platform === 'win32'
-        ? ['-NoProfile', '-Command', trimmed]
-        : ['-lc', trimmed];
+    const { file: shell, args: shellArgs } = oneShotShellInvocation(trimmed);
 
     const child = spawn(shell, shellArgs, {
       cwd: workspaceRoot,

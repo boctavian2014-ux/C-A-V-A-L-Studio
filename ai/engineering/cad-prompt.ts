@@ -72,7 +72,7 @@ export function buildCadTechnicalPrompt(project: EngProject, userPrompt: string)
   return [
     `USER INTENT (must match geometry): ${userPrompt.trim()}`,
     'Design ONE functional 3D-printable mechanical part (OpenSCAD pipeline).',
-    'FORBIDDEN: plain hollow box, generic cube, cabinet/wardrobe, or unrelated shape when user asked for a vehicle, toy, sensor/display/enclosure features.',
+    'FORBIDDEN: plain hollow box, generic cube, cabinet/wardrobe, drawers/sertare, or unrelated furniture when the user asked for a hammer, prop, vehicle, toy, or other object.',
     `Title: ${spec.title}`,
     spec.summary,
     spec.dimensions ? `Overall dimensions: ${spec.dimensions}` : '',

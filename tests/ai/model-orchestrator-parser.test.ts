@@ -35,6 +35,7 @@ describe('model-orchestrator-parser', () => {
     });
     expect(merged.roleModelMap.architect).toBe('nex-n2-pro');
     expect(merged.roleModelMap.implementer).toBe('gemini-2.5-flash');
+    expect(merged.complexity).toBe(heuristic.complexity);
     expect(merged.summary).toContain('architect=nex-n2-pro');
   });
 });

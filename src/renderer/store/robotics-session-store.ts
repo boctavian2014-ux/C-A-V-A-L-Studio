@@ -7,6 +7,30 @@ import type { SectionStreamSnapshot } from '../../../ai/engineering/streaming-se
 
 export type RoboticsTabId = (typeof ROBOTICS_TAB_GROUPS)[number]['id'];
 
+/** Resolve text used by Generează 3D after the composer is cleared. */
+export function resolveRoboticsCadUserPrompt(input: {
+  lastPrompt?: string | null;
+  prompt?: string | null;
+  project?: EngProject | null;
+  plan?: ParsedRoboticsPlan | null;
+}): string {
+  const fromComposer = input.lastPrompt?.trim() || input.prompt?.trim();
+  if (fromComposer) return fromComposer;
+
+  const summary = input.plan?.sections?.summary?.trim();
+  if (summary) {
+    const firstLine = summary.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+    if (firstLine) return firstLine.slice(0, 500);
+  }
+
+  const title = input.project?.spec?.title?.trim();
+  const projectSummary = input.project?.spec?.summary?.trim();
+  if (title && projectSummary) return `${title}. ${projectSummary}`.slice(0, 500);
+  if (title) return title;
+  if (projectSummary) return projectSummary.slice(0, 500);
+  return '';
+}
+
 interface RoboticsSessionState {
   prompt: string;
   /** Last successfully submitted prompt (kept after textarea clears, for CAD/handoff). */
@@ -105,11 +129,8 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
   },
 
   clearPromptAfterResponse: () => {
-    const current = get().prompt.trim();
-    set({
-      lastPrompt: current || get().lastPrompt,
-      prompt: '',
-    });
+    // lastPrompt is set at submit time — only clear the composer UI.
+    set({ prompt: '' });
   },
 
   resetResults: () =>

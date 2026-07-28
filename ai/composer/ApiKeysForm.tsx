@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useAIStore } from './ai-store';
 import type { ApiKeys } from '../multi-model/provider';
-import { buildSecretsPatch, apiKeysToSecrets } from '../models/api-secrets';
+import {
+  buildSecretsPatch,
+  apiKeysToSecrets,
+  filterNonEmptySecretsPatch,
+} from '../models/api-secrets';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -34,10 +38,16 @@ const PROVIDER_SECRET_FIELDS: Array<{
     hint: 'North Mini Code + autocomplete — north.ai',
   },
   {
+    secretKey: 'PIAPI_API_KEY',
+    label: 'PiAPI Trellis (text-to-3D)',
+    placeholder: 'piapi-...',
+    hint: 'Robotics text-to-3D — api.piapi.ai (Qubico/trellis)',
+  },
+  {
     secretKey: 'MESHY_API_KEY',
-    label: 'Meshy',
+    label: 'Meshy (fallback)',
     placeholder: 'meshy-...',
-    hint: 'Generare mesh organic — Robotics CAD',
+    hint: 'Fallback mesh organic — Robotics CAD',
   },
   {
     secretKey: 'GITHUB_PERSONAL_ACCESS_TOKEN',
@@ -54,6 +64,20 @@ const PROVIDER_SECRET_FIELDS: Array<{
 ];
 
 const OLLAMA_URL_SETTING = 'ollama.url';
+
+const SECRET_LABELS: Record<string, string> = {
+  OPENROUTER_API_KEY: 'OpenRouter',
+  POOLSIDE_API_KEY: 'Poolside',
+  NVIDIA_API_KEY: 'NVIDIA NIM',
+  NORTH_API_KEY: 'North',
+  PIAPI_API_KEY: 'PiAPI Trellis',
+  MESHY_API_KEY: 'Meshy',
+  GITHUB_PERSONAL_ACCESS_TOKEN: 'GitHub PAT',
+  SEMGREP_APP_TOKEN: 'Semgrep',
+  ANTHROPIC_API_KEY: 'Anthropic',
+  OPENAI_API_KEY: 'OpenAI',
+  GOOGLE_API_KEY: 'Google',
+};
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -73,6 +97,13 @@ export interface ApiKeysFormProps {
   onSaved?: () => void;
 }
 
+type PersistResult = {
+  ok: boolean;
+  savedKeys: string[];
+  error?: 'empty' | 'unavailable' | 'failed';
+  message?: string;
+};
+
 export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProps) {
   const { apiKeys, setApiKey } = useAIStore();
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -83,6 +114,22 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   const [openRouterSaved, setOpenRouterSaved] = useState(false);
   const [healthChecking, setHealthChecking] = useState(false);
   const [healthSummary, setHealthSummary] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(
+    null
+  );
+
+  const refreshConfiguredBadges = async (): Promise<Record<string, boolean>> => {
+    const res = await window.caval.secretsGet?.();
+    const configured = res?.configured ?? {};
+    setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
+    const saved: Record<string, boolean> = {};
+    for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
+      saved[secretKey] = Boolean(configured[secretKey]);
+    }
+    setProviderSaved(saved);
+    return configured;
+  };
 
   useEffect(() => {
     const initial: Record<string, string> = {};
@@ -133,40 +180,52 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     });
   };
 
-  const persistSecretsPatch = async (patch: Record<string, string>) => {
-    // Skip empty-string clears for keys the user didn't touch this session (preserve main-side secrets).
-    const filtered: Record<string, string> = {};
-    for (const [key, value] of Object.entries(patch)) {
-      if (value.trim() || value === '') {
-        // Only send explicit empty if user cleared a field they edited — for blur-save of empty on
-        // already-configured providers, omit the key so mergeSecrets won't delete.
-        if (!value.trim()) continue;
-        filtered[key] = value;
+  const persistSecretsPatch = async (patch: Record<string, string>): Promise<PersistResult> => {
+    const { filtered, savedKeys } = filterNonEmptySecretsPatch(patch);
+    if (savedKeys.length === 0) {
+      return { ok: false, savedKeys: [], error: 'empty' };
+    }
+    if (!window.caval.secretsSet) {
+      return {
+        ok: false,
+        savedKeys: [],
+        error: 'unavailable',
+        message: 'Salvarea cheilor nu e disponibilă — repornește aplicația.',
+      };
+    }
+    try {
+      const result = await window.caval.secretsSet(filtered);
+      if (result && result.ok === false) {
+        return {
+          ok: false,
+          savedKeys: [],
+          error: 'failed',
+          message: 'Salvarea a eșuat pe disc.',
+        };
       }
+      await refreshConfiguredBadges();
+      return { ok: true, savedKeys };
+    } catch (err) {
+      return {
+        ok: false,
+        savedKeys: [],
+        error: 'failed',
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
-    if (Object.keys(filtered).length === 0) return;
-    await window.caval.secretsSet?.(filtered);
-    const res = await window.caval.secretsGet?.();
-    const configured = res?.configured ?? {};
-    setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
-    const saved: Record<string, boolean> = {};
-    for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
-      saved[secretKey] = Boolean(configured[secretKey]);
-    }
-    setProviderSaved(saved);
   };
 
   const handleSave = (key: keyof ApiKeys) => {
     const value = draft[key] ?? '';
-    if (!value.trim()) return; // don't wipe main-side secret on empty blur
+    if (!value.trim()) return;
     setApiKey(key, value);
     void persistSecretsPatch(apiKeysToSecrets({ [key]: value } as ApiKeys));
   };
 
   const saveOpenRouter = async (value: string) => {
     if (!value.trim()) return;
-    await persistSecretsPatch({ OPENROUTER_API_KEY: value });
-    setOpenRouterDraft('');
+    const result = await persistSecretsPatch({ OPENROUTER_API_KEY: value });
+    if (result.ok) setOpenRouterDraft('');
   };
 
   const saveOllamaUrl = async (value: string) => {
@@ -179,8 +238,10 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
 
   const saveProviderSecret = async (secretKey: string, value: string) => {
     if (!value.trim()) return;
-    await persistSecretsPatch({ [secretKey]: value });
-    setProviderDraft((d) => ({ ...d, [secretKey]: '' }));
+    const result = await persistSecretsPatch({ [secretKey]: value });
+    if (result.ok) {
+      setProviderDraft((d) => ({ ...d, [secretKey]: '' }));
+    }
   };
 
   const runHealthCheck = async () => {
@@ -199,25 +260,56 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   };
 
   const handleSaveAll = async () => {
-    await persistSecretsPatch(buildFullSecretsPatch());
-    const res = await window.caval.secretsGet?.();
-    const configured = res?.configured ?? {};
-    useAIStore.setState({
-      apiKeys: {
-        anthropic: draft.anthropic.trim() || (configured.ANTHROPIC_API_KEY ? '__configured__' : undefined),
-        openai: draft.openai.trim() || (configured.OPENAI_API_KEY ? '__configured__' : undefined),
-        google: draft.google.trim() || (configured.GOOGLE_API_KEY ? '__configured__' : undefined),
-      },
-    });
-    setDraft({ anthropic: '', openai: '', google: '' });
-    setOpenRouterDraft('');
-    setProviderDraft((prev) => {
-      const cleared: Record<string, string> = {};
-      for (const k of Object.keys(prev)) cleared[k] = '';
-      return cleared;
-    });
-    await saveOllamaUrl(ollamaUrlDraft);
-    onSaved?.();
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const result = await persistSecretsPatch(buildFullSecretsPatch());
+      if (!result.ok) {
+        if (result.error === 'empty') {
+          setSaveMessage({
+            kind: 'info',
+            text: 'Introdu cel puțin o cheie nouă în câmpuri, apoi apasă Salvează. Cheile deja salvate apar ca „salvat”.',
+          });
+        } else {
+          setSaveMessage({
+            kind: 'err',
+            text: result.message ?? 'Salvarea a eșuat.',
+          });
+        }
+        return;
+      }
+
+      const configured = await refreshConfiguredBadges();
+      useAIStore.setState({
+        apiKeys: {
+          anthropic: configured.ANTHROPIC_API_KEY ? '__configured__' : undefined,
+          openai: configured.OPENAI_API_KEY ? '__configured__' : undefined,
+          google: configured.GOOGLE_API_KEY ? '__configured__' : undefined,
+        },
+      });
+
+      const savedSet = new Set(result.savedKeys);
+      if (savedSet.has('OPENROUTER_API_KEY')) setOpenRouterDraft('');
+      setDraft((prev) => ({
+        anthropic: savedSet.has('ANTHROPIC_API_KEY') ? '' : (prev.anthropic ?? ''),
+        openai: savedSet.has('OPENAI_API_KEY') ? '' : (prev.openai ?? ''),
+        google: savedSet.has('GOOGLE_API_KEY') ? '' : (prev.google ?? ''),
+      }));
+      setProviderDraft((prev) => {
+        const next = { ...prev };
+        for (const key of result.savedKeys) {
+          if (key in next) next[key] = '';
+        }
+        return next;
+      });
+
+      const labels = result.savedKeys.map((k) => SECRET_LABELS[k] ?? k).join(', ');
+      setSaveMessage({ kind: 'ok', text: `Salvat: ${labels}` });
+      await saveOllamaUrl(ollamaUrlDraft);
+      onSaved?.();
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -341,10 +433,33 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         </div>
       )}
 
+      {saveMessage && (
+        <div
+          role="status"
+          style={{
+            fontSize: 11,
+            lineHeight: 1.5,
+            padding: '8px 10px',
+            borderRadius: 6,
+            border: '1px solid var(--caval-border)',
+            color:
+              saveMessage.kind === 'ok'
+                ? 'var(--caval-success)'
+                : saveMessage.kind === 'err'
+                  ? 'var(--caval-error, #f87171)'
+                  : 'var(--caval-text-muted)',
+            background: 'var(--caval-bg)',
+          }}
+        >
+          {saveMessage.text}
+        </div>
+      )}
+
       {showSaveButton && (
         <button
           type="button"
           onClick={() => void handleSaveAll()}
+          disabled={saving}
           style={{
             alignSelf: 'flex-start',
             padding: '7px 16px',
@@ -354,10 +469,11 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
             color: '#0E0E0F',
             fontSize: 12,
             fontWeight: 700,
-            cursor: 'pointer',
+            cursor: saving ? 'wait' : 'pointer',
+            opacity: saving ? 0.7 : 1,
           }}
         >
-          Salvează toate cheile
+          {saving ? 'Se salvează…' : 'Salvează toate cheile'}
         </button>
       )}
     </div>

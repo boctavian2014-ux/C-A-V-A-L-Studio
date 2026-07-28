@@ -63,6 +63,8 @@ export interface CreateCadJobInput {
   openRouterApiKey?: string;
   /** Per-request Meshy key from Electron (never stored). */
   meshApiKey?: string;
+  /** Per-request PiAPI Trellis key from Electron (never stored). */
+  piapiApiKey?: string;
   quality?: CadQuality;
   conversationHistory?: CadChatMessage[];
   previousScad?: string;

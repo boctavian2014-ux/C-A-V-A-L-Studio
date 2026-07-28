@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+numpy==2.2.1
+trimesh==4.5.3
+Pillow==11.1.0
+huggingface_hub==0.27.1
+# TRELLIS + torch are installed in the CUDA Dockerfile (platform-specific wheels).

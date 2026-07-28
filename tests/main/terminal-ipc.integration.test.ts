@@ -56,6 +56,20 @@ vi.mock("node-pty", () => ({
   spawn: terminalMocks.spawn,
 }));
 
+vi.mock("../../src/main/powershell-shell", async () => {
+  const actual = await vi.importActual<typeof import("../../src/main/powershell-shell")>(
+    "../../src/main/powershell-shell"
+  );
+  return {
+    ...actual,
+    ensureLatestPowerShellInstalled: vi.fn(async () => ({
+      ok: true,
+      already: true,
+      path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    })),
+  };
+});
+
 describe("Terminal IPC integration", () => {
   beforeEach(async () => {
     harness.reset();
@@ -139,7 +153,7 @@ describe("Terminal IPC integration", () => {
     expect(created.ok).toBe(true);
     expect(terminalMocks.spawn).toHaveBeenCalledWith(
       expect.any(String),
-      [],
+      expect.any(Array),
       expect.objectContaining({ cwd: workspaceCwd })
     );
   });
@@ -149,7 +163,7 @@ describe("Terminal IPC integration", () => {
     await harness.invoke("terminal:create", "term-bad-cwd", { cwd: "Z:\\nonexistent\\path" });
     expect(terminalMocks.spawn).toHaveBeenCalledWith(
       expect.any(String),
-      [],
+      expect.any(Array),
       expect.objectContaining({ cwd: os.homedir() })
     );
   });

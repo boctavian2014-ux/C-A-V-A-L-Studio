@@ -134,6 +134,12 @@ export interface MultiAgentStepRecord {
   stepId?: string;
   /** Self-audit badge, e.g. TS:✓ · TU:78% */
   auditBadge?: string;
+  /** Peers with the same group may stay active together (parallel scans). */
+  parallelGroup?: string;
+  /** Wall-clock start when status became active. */
+  startedAt?: number;
+  /** Duration ms when status became done. */
+  latencyMs?: number;
   at: number;
 }
 
@@ -146,6 +152,12 @@ export function shortModelLabel(modelId: string): string {
   return tail.length > 22 ? `${tail.slice(0, 20)}…` : tail;
 }
 
+export function formatLatencyMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+}
+
 /** Accumulate multi-agent pipeline steps for Arena timeline UI. */
 export function patchMultiAgentSteps(
   steps: MultiAgentStepRecord[] | undefined,
@@ -154,7 +166,8 @@ export function patchMultiAgentSteps(
   detail?: string,
   modelId?: string,
   stepId?: string,
-  auditBadge?: string
+  auditBadge?: string,
+  parallelGroup?: string
 ): MultiAgentStepRecord[] {
   const next = [...(steps ?? [])];
   const now = Date.now();
@@ -165,6 +178,11 @@ export function patchMultiAgentSteps(
     for (let i = 0; i < next.length; i++) {
       const sameKey = (next[i]!.stepId ?? next[i]!.phase) === key;
       if (next[i]!.status === 'active' && !sameKey) {
+        const peerGroup = next[i]!.parallelGroup;
+        // Keep parallel peers active when joining the same group.
+        if (parallelGroup && peerGroup && peerGroup === parallelGroup) {
+          continue;
+        }
         next[i] = { ...next[i]!, status: 'done' };
       }
     }
@@ -176,15 +194,28 @@ export function patchMultiAgentSteps(
         modelId: modelId ?? next[idx]!.modelId,
         stepId: stepId ?? next[idx]!.stepId,
         auditBadge: auditBadge ?? next[idx]!.auditBadge,
+        parallelGroup: parallelGroup ?? next[idx]!.parallelGroup,
+        startedAt: next[idx]!.startedAt ?? now,
         at: now,
       };
     } else {
-      next.push({ phase, status: 'active', detail, modelId, stepId, auditBadge, at: now });
+      next.push({
+        phase,
+        status: 'active',
+        detail,
+        modelId,
+        stepId,
+        auditBadge,
+        parallelGroup,
+        startedAt: now,
+        at: now,
+      });
     }
     return next;
   }
 
   if (idx >= 0) {
+    const started = next[idx]!.startedAt ?? next[idx]!.at;
     next[idx] = {
       ...next[idx]!,
       status: 'done',
@@ -192,10 +223,23 @@ export function patchMultiAgentSteps(
       modelId: modelId ?? next[idx]!.modelId,
       stepId: stepId ?? next[idx]!.stepId,
       auditBadge: auditBadge ?? next[idx]!.auditBadge,
+      parallelGroup: parallelGroup ?? next[idx]!.parallelGroup,
+      latencyMs: Math.max(0, now - started),
       at: now,
     };
   } else {
-    next.push({ phase, status: 'done', detail, modelId, stepId, auditBadge, at: now });
+    next.push({
+      phase,
+      status: 'done',
+      detail,
+      modelId,
+      stepId,
+      auditBadge,
+      parallelGroup,
+      startedAt: now,
+      latencyMs: 0,
+      at: now,
+    });
   }
   return next;
 }

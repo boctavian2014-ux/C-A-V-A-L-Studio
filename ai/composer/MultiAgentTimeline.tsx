@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   MULTI_AGENT_LABELS,
+  formatLatencyMs,
   shortModelLabel,
   type MultiAgentStepRecord,
 } from './chat-activity-types';
@@ -57,6 +58,48 @@ function ModelBadge({ modelId }: { modelId: string }) {
       title={modelId}
     >
       {shortModelLabel(modelId)}
+    </span>
+  );
+}
+
+function ParallelBadge() {
+  return (
+    <span
+      style={{
+        fontSize: 9.5,
+        fontFamily: 'JetBrains Mono, monospace',
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: 'rgba(34, 197, 94, 0.12)',
+        border: '1px solid rgba(34, 197, 94, 0.35)',
+        color: 'var(--caval-success)',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+      title="Rulează în paralel cu alte etape din același grup"
+    >
+      ∥ parallel
+    </span>
+  );
+}
+
+function LatencyBadge({ ms }: { ms: number }) {
+  return (
+    <span
+      style={{
+        fontSize: 9.5,
+        fontFamily: 'JetBrains Mono, monospace',
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: 'var(--caval-bg-elevated)',
+        border: '1px solid var(--caval-border)',
+        color: 'var(--caval-text-muted)',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+      title={`${ms} ms`}
+    >
+      {formatLatencyMs(ms)}
     </span>
   );
 }
@@ -144,8 +187,13 @@ export function MultiAgentTimeline({
           <StepIcon status={step.status} />
           <span>{stepLabel(step)}</span>
           {step.modelId ? <ModelBadge modelId={step.modelId} /> : null}
+          {step.parallelGroup ? <ParallelBadge /> : null}
+          {typeof step.latencyMs === 'number' && step.status === 'done' ? (
+            <LatencyBadge ms={step.latencyMs} />
+          ) : null}
           {step.auditBadge ? <AuditBadge badge={step.auditBadge} /> : null}
           {step.detail &&
+          step.detail !== 'parallel' &&
           !step.stepId?.startsWith('modelOrch-') &&
           !step.stepId?.startsWith('subagent-') ? (
             <span style={{ fontSize: 10.5, opacity: 0.85 }}>{step.detail}</span>

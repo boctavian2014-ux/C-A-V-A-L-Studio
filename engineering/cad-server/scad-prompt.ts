@@ -43,6 +43,10 @@ const PART_KEYWORD_HINTS: Array<{ pattern: RegExp; hint: string }> = [
     hint: "Design a PHONE STAND/HOLDER: angled phone slot, stable base, cable channel, optional Qi coil recess and ESP32/PCB bay — NOT a generic empty box.",
   },
   {
+    pattern: /(ciocan|hammer|mjolnir|thor)/iu,
+    hint: "Design a HAMMER PROP: rectangular head + cylindrical handle + pommel. NOT furniture, NOT drawers/sertare, NOT a cabinet.",
+  },
+  {
     pattern: /(bracket|suport|mount|prindere)/iu,
     hint: "Design a BRACKET: L or U shape with mounting holes, ribbing, screw countersinks.",
   },
@@ -140,7 +144,8 @@ export function buildCadLlmPrompt(input: {
     "CRITICAL: NEVER name a module after an OpenSCAD built-in (hull, difference, union, intersection, minkowski, cube, cylinder, translate, rotate, etc.). Use names like body_hull, cabin, wheel_hub.",
     "CRITICAL: Call built-in hull as hull() { children... } — do not define module hull().",
     "CRITICAL: Model EXACTLY what the user asked for. Never substitute a generic cylindrical cap unless explicitly requested.",
-    "CRITICAL: Never substitute furniture (cabinet/wardrobe/dulap) when the user asked for a vehicle, toy car, robot, or mechanical part.",
+    "CRITICAL: NEVER output furniture — no cabinet, wardrobe, dulap, drawer unit, sertare, chest of drawers, shelf unit, nightstand, or hollow furniture box — unless the user explicitly asked for furniture.",
+    "CRITICAL: Never substitute furniture when the user asked for a hammer, prop, vehicle, toy, robot, or any other object.",
     "Include mounting holes, fillets (via offset/minkowski sparingly), and wall thickness when relevant.",
     "Ensure the model is a single watertight solid suitable for 3D printing.",
     ...fdmRulesForQuality(input.quality),

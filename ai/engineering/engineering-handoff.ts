@@ -75,14 +75,61 @@ export function formatEngineeringContextForCoding(
   ].join('\n');
 }
 
-/** Default prompt pre-filled in Coding Chat after handoff. */
-export function buildSoftwareHandoffPrompt(project: EngProject): string {
+function inferSoftwareNeeds(project: EngProject, userPrompt: string): string[] {
+  const blob = [
+    userPrompt,
+    project.spec.title,
+    project.spec.summary,
+    project.schema.nodes.map((n) => `${n.label} ${n.role}`).join(' '),
+    project.schema.protocols.join(' '),
+    project.parts.map((p) => p.name).join(' '),
+    project.build.map((b) => `${b.name} ${b.kind} ${b.note}`).join(' '),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  const needs: string[] = [];
+  if (/esp32|arduino|firmware|\.ino|mcu|stm32|pico/i.test(blob)) {
+    needs.push('firmware (Arduino/ESP-IDF/.ino/.cpp) cu setup/loop, I2C/SPI/UART după schemă');
+  }
+  if (/wifi|http|api|rest|mqtt|websocket|dashboard|web|app|ui|react|next/i.test(blob)) {
+    needs.push('aplicație web/dashboard (UI + API) pentru telemetrie și control');
+  }
+  if (/bluetooth|ble/i.test(blob)) {
+    needs.push('client BLE / pairing și comenzi wireless');
+  }
+  if (/senzor|sensor|oled|bme|imu|gps/i.test(blob)) {
+    needs.push('citire senzori + afișare/logging date');
+  }
+  if (needs.length === 0) {
+    needs.push('software minimal care leagă hardware-ul de o interfață utilă (firmware și/sau app)');
+  }
+  return needs;
+}
+
+/** Default prompt auto-sent in Coding Chat after robotics handoff. */
+export function buildSoftwareHandoffPrompt(
+  project: EngProject,
+  userPrompt = ''
+): string {
   const title = project.spec.title.trim() || 'proiectul hardware';
+  const needs = inferSoftwareNeeds(project, userPrompt);
+  const protocols = project.schema.protocols.filter(Boolean).join(', ') || 'după schemă';
+  const mcu =
+    project.schema.nodes.find((n) => /mcu|esp|arduino/i.test(`${n.role} ${n.label}`))?.label ??
+    'MCU din schemă';
+
   return [
-    `Creează proiectul software pentru „${title}” folosind contextul Robotics AI atașat (hardware, componente, conexiuni).`,
-    'Emite IMEDIAT fișiere complete ca ```typescript:src/...``` sau ```cpp:firmware/...``` — fiecare fișier = un bloc cu path relativ.',
-    'Include firmware (.ino/.cpp) dacă e cazul, plus app/API după nevoie. Cod rulabil, fără plan lung fără fișiere.',
-  ].join(' ');
+    `Generează ACUM software-ul necesar pentru proiectul hardware „${title}”, folosind contextul Robotics AI atașat (hardware, BOM, conexiuni, build).`,
+    userPrompt.trim() ? `Cererea utilizatorului: ${userPrompt.trim().slice(0, 400)}` : '',
+    `Rezumat hardware: ${project.spec.summary.slice(0, 280)}`,
+    `MCU / nod principal: ${mcu}. Protocoale: ${protocols}.`,
+    `Nevoi software de acoperit:\n${needs.map((n) => `- ${n}`).join('\n')}`,
+    'Emite IMEDIAT fișiere complete în workspace ca ```typescript:src/...```, ```cpp:firmware/...``` sau ```ino:firmware/...``` — fiecare fișier = un bloc cu path relativ.',
+    'Cod rulabil, structurat pe module; fără plan lung fără fișiere. Respectă pinii/conexiunile din context.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function dispatchOpenCodingChat(): void {
