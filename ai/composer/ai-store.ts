@@ -1,13 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import {
-  createProvider,
-  type AIMessage,
-  type ApiKeys,
-} from '../multi-model/provider';
+import type { AIMessage, ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
-import { apiKeysToSecrets, BYOK_TO_SECRET } from '../models/api-secrets';
+import { apiKeysToSecrets, BYOK_TO_SECRET, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
@@ -612,8 +608,29 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
 }
 
 const persistApiKeys = async (apiKeys: ApiKeys, extraPatch?: Record<string, string>): Promise<void> => {
-  const patch = { ...apiKeysToSecrets(apiKeys), ...extraPatch };
+  // Only persist real secret values — never write `__configured__` markers to disk.
+  const fromKeys = apiKeysToSecrets(apiKeys);
+  const patch: Record<string, string> = { ...fromKeys };
+  if (extraPatch) {
+    for (const [key, value] of Object.entries(extraPatch)) {
+      if (isPersistableSecret(value)) patch[key] = value.trim();
+      else if (value?.trim() === '') patch[key] = ''; // explicit clear only via empty string in extraPatch
+    }
+  }
+  if (Object.keys(patch).length === 0) return;
   await getCaval()?.secretsSet?.(patch);
+};
+
+/** Persist a single BYOK provider key without touching other stored secrets. */
+const persistSingleByokKey = async (
+  provider: keyof typeof BYOK_TO_SECRET,
+  key: string
+): Promise<void> => {
+  const secretKey = BYOK_TO_SECRET[provider];
+  if (!secretKey) return;
+  const trimmed = key.trim();
+  if (!trimmed || !isPersistableSecret(trimmed)) return;
+  await getCaval()?.secretsSet?.({ [secretKey]: trimmed });
 };
 
 const loadApiKeysFromSecrets = async (): Promise<ApiKeys> => {
@@ -764,15 +781,25 @@ export const useAIStore = create<AIStore>()(
 
       setApiKey: (provider, key) => {
         set((s) => {
-          const apiKeys = { ...s.apiKeys, [provider]: key };
-          const patch: Record<string, string> = {};
-          const secretKey = BYOK_TO_SECRET[provider as keyof typeof BYOK_TO_SECRET];
-          if (secretKey && !key.trim()) patch[secretKey] = '';
-          void persistApiKeys(apiKeys, patch);
+          const trimmed = key.trim();
+          const apiKeys = {
+            ...s.apiKeys,
+            [provider]: trimmed ? trimmed : undefined,
+          };
+          const byokKey = provider as keyof typeof BYOK_TO_SECRET;
+          if (BYOK_TO_SECRET[byokKey]) {
+            if (trimmed && isPersistableSecret(trimmed)) {
+              void persistSingleByokKey(byokKey, trimmed);
+              // UI keeps marker after save so plaintext is not held in store long-term
+              apiKeys[provider] = trimmed;
+            }
+            // Empty key: do not wipe disk — user must clear explicitly elsewhere
+          } else {
+            void persistApiKeys(apiKeys);
+          }
           return { apiKeys };
         });
       },
-
       loadModelLabels: async () => {
         const caval = (window as unknown as CavalWindow).caval;
         const result = await caval?.modelsList?.();
@@ -1925,7 +1952,6 @@ export const useAIStore = create<AIStore>()(
         );
 
         if (isByokModel(selectedModel)) {
-          let provider;
           try {
             assertRendererChatAllowed({
               prompt: apiPrompt,
@@ -1933,54 +1959,18 @@ export const useAIStore = create<AIStore>()(
               capability: agentMode === 'plan' ? 'planning' : 'chat',
               intent: agentMode === 'debug' ? 'debug' : 'kilocode',
             });
-            provider = createProvider(selectedModel as never, apiKeys);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             finish(`Eroare: ${msg}`, { error: msg }, activeTab?.path);
             return;
           }
-
-          updateActivity('route', 'active');
-          updateActivity('route', 'done', selectedModel);
-          updateActivity('connect', 'active');
-          updateActivity('connect', 'done');
-          updateActivity('think', 'active');
-
-          abortController = new AbortController();
-          let fullContent = '';
-          let byokFirstDelta = false;
-          try {
-            await provider.streamChat(
-              contextMessages,
-              ({ delta, done, error }) => {
-                if (error) {
-                  finish(`Eroare API: ${error}`, { error }, activeTab?.path);
-                  return;
-                }
-                if (!byokFirstDelta && delta) {
-                  byokFirstDelta = true;
-                  updateActivity('think', 'done');
-                  updateActivity('write', 'active');
-                }
-                fullContent += delta;
-                syncLiveEditorPreview(fullContent);
-                if (done) {
-                  const finalSteps = markAllActivityDone(
-                    get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
-                      createInitialActivitySteps()
-                  );
-                  finish(fullContent, { resolvedModel: selectedModel, activitySteps: finalSteps }, activeTab?.path);
-                  set({ activeResolvedModel: selectedModel });
-                }
-                else updateAssistant({ content: fullContent });
-              },
-              abortController.signal
-            );
-          } catch (err: unknown) {
-            if (err instanceof Error && err.name !== 'AbortError') {
-              finish(`Eroare de rețea: ${err.message}`, { error: err.message }, activeTab?.path);
-            }
-          }
+          // Stream via main IPC so OPENAI/ANTHROPIC/GOOGLE keys come from secrets file
+          // (renderer only holds `__configured__` markers, never plaintext Bearer tokens).
+          startIpcStream(contextMessages, {
+            filePath: attachProject ? activeTab?.path : undefined,
+            fileContent: attachProject ? activeTab?.content : undefined,
+            projectContext,
+          }, scaffoldMode);
           return;
         }
 

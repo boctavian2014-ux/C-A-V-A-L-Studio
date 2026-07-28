@@ -9,13 +9,9 @@ import {
 } from '../models/auto-router';
 import { isAutoTier, type ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey } from '../models/model-readiness';
+import { resolveByokApiKeys, isPersistableSecret } from '../models/api-secrets';
 import { getModelProfile } from '../model-profiles';
-import {
-  createProvider,
-  type ApiKeys,
-  type AIMessage,
-  type ModelId,
-} from '../multi-model/provider';
+import { MODELS, createProvider, type ApiKeys, type AIMessage, type ModelId } from '../multi-model/provider';
 import type { RoutingIntent, ModelRequest } from '../types';
 import type { ToolRegistry } from '../tools/tool-registry';
 import { runCompletionWithTools } from './tool-agent-loop';
@@ -252,15 +248,32 @@ export async function executeModelCompletion(
   const isChat = (input.capability ?? 'chat') === 'chat' || input.capability === 'code';
 
   if (isByokModel(input.model)) {
-    if (!input.apiKeys) {
-      return { ok: false, error: 'Chei API lipsă pentru modelul BYOK selectat.' };
+    const apiKeys = resolveByokApiKeys(input.apiKeys);
+    const meta = MODELS.find((m) => m.id === input.model);
+    const needed =
+      meta?.provider === 'anthropic'
+        ? apiKeys.anthropic
+        : meta?.provider === 'openai'
+          ? apiKeys.openai
+          : meta?.provider === 'google'
+            ? apiKeys.google
+            : 'ok';
+    if (meta?.provider !== 'ollama' && !isPersistableSecret(needed)) {
+      return {
+        ok: false,
+        error: [
+          `Cheie API lipsă pentru ${meta?.provider ?? 'BYOK'}.`,
+          '',
+          'Settings → AI & Chei API → salvează cheia, apoi repornește aplicația.',
+        ].join('\n'),
+      };
     }
     if (isChat) {
       callbacks.onStatus?.('route', 'active');
       callbacks.onStatus?.('route', 'done', input.model);
       callbacks.onStatus?.('connect', 'active');
     }
-    return streamByokModel(input.model as ModelId, input.apiKeys, input.messages, callbacks, isChat);
+    return streamByokModel(input.model as ModelId, apiKeys, input.messages, callbacks, isChat);
   }
 
   if (isChat) {

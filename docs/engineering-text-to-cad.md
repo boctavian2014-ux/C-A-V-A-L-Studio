@@ -78,8 +78,10 @@ Dacă vezi `libglib-2.0.so.0` / `electron`, înseamnă că Start Command e greș
 
 | Variabilă Railway | Obligatoriu | Note |
 |-------------------|-------------|------|
-| `OPENROUTER_API_KEY` | Recomandat | Fără ea → fallback SCAD simplu |
-| `MESHY_API_KEY` | Opțional | Mesh organic/figurine (Print 3D); poate fi trimis și din app |
+| `OPENROUTER_API_KEY` | Recomandat | Planner + LLM OpenSCAD; fără ea → fallback SCAD simplu |
+| `PIAPI_API_KEY` | Recomandat (text-to-3D) | PiAPI Trellis — prioritar pentru mesh organic / obiecte libere |
+| `TRELLIS_API_KEY` | Alternativă | Alias acceptat dacă `PIAPI_API_KEY` lipsește |
+| `MESHY_API_KEY` | Opțional | Fallback mesh; poate fi trimis și din app (Settings) |
 | `SUPABASE_URL` | Prod | Persistență job + STL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Prod | Upload bucket `cad-models` |
 | `CAD_PUBLIC_URL` | Opțional | Auto din `RAILWAY_PUBLIC_DOMAIN` dacă lipsește |
@@ -90,9 +92,12 @@ Dacă vezi `libglib-2.0.so.0` / `electron`, înseamnă că Start Command e greș
 6. După deploy, setează în Electron: `CAD_API_URL=https://<subdomeniu>.railway.app`
 
 ```bash
-# Verificare rapidă după deploy
+# Verificare rapidă după deploy — așteptat:
+# "openRouterConfigured": true, "piapiConfigured": true, "openscadInstalled": true
 curl https://<subdomeniu>.railway.app/health
 ```
+
+**Local vs Cloud:** cheile din Settings → AI & Chei API se trimit pe fiecare job (`attachMainCadSecrets`), dar `/health` pe Railway arată doar env-ul cloud. Pentru status dual: Settings → CAD Cloud → **Testează conexiunea**, sau AI & Chei → **Verifică CAD**.
 
 ## API
 

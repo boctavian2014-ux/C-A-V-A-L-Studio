@@ -3,7 +3,7 @@ import type { ModelSelectionId } from './model-catalog';
 import { getModelProfile } from '../model-profiles';
 import { MODELS, type ApiKeys } from '../multi-model/provider';
 import { providerApiKeyEnv } from './provider-credentials';
-import { BYOK_TO_SECRET } from './api-secrets';
+import { BYOK_TO_SECRET, isConfiguredMarker } from './api-secrets';
 
 export const BYOK_MODEL_IDS = [
   'claude-opus-4',
@@ -39,11 +39,11 @@ function byokKeyForModel(modelId: string, apiKeys: ApiKeys): boolean {
   if (!meta) return false;
   switch (meta.provider) {
     case 'anthropic':
-      return Boolean(apiKeys.anthropic?.trim());
+      return Boolean(apiKeys.anthropic?.trim()) || isConfiguredMarker(apiKeys.anthropic);
     case 'openai':
-      return Boolean(apiKeys.openai?.trim());
+      return Boolean(apiKeys.openai?.trim()) || isConfiguredMarker(apiKeys.openai);
     case 'google':
-      return Boolean(apiKeys.google?.trim());
+      return Boolean(apiKeys.google?.trim()) || isConfiguredMarker(apiKeys.google);
     case 'ollama':
       return true;
     default:

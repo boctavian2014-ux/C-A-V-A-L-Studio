@@ -15,6 +15,7 @@ import {
   PUBLISHER_TRADEMARK_LINE,
   PUBLISHER_UIC,
 } from '../../../shared/publisher-legal';
+import { formatCadDualHealth } from '../../../../ai/engineering/cad-dual-health';
 
 const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
   {
@@ -360,6 +361,7 @@ function SectionCadCloud() {
   const [apiUrl, setApiUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [healthMsg, setHealthMsg] = useState<string | null>(null);
+  const [healthTone, setHealthTone] = useState<'ok' | 'warn' | 'err'>('err');
   const [testing, setTesting] = useState(false);
   const [cloudOnly, setCloudOnly] = useState(true);
   const [meshyOk, setMeshyOk] = useState(false);
@@ -406,29 +408,44 @@ function SectionCadCloud() {
     setTesting(true);
     setHealthMsg(null);
     await saveSettings();
-    const health = await window.caval.cad?.health?.();
+    const [secretsRes, health] = await Promise.all([
+      window.caval.secretsGet?.(),
+      window.caval.cad?.health?.(),
+    ]);
     setTesting(false);
+    const configured = secretsRes?.configured ?? {};
+    const localOpenRouter = Boolean(configured.OPENROUTER_API_KEY) || openRouterOk;
+    const localPiapi =
+      Boolean(configured.PIAPI_API_KEY) ||
+      Boolean(configured.TRELLIS_API_KEY) ||
+      piapiOk;
+
     if (!health) {
+      setHealthTone('err');
       setHealthMsg('CAD API indisponibil în aplicație.');
       return;
     }
-    if (!health.ok) {
-      setHealthMsg(health.error ?? `Offline: ${health.url ?? '?'}`);
-      return;
-    }
-    const parts = [
-      `Conectat: ${health.url}`,
-      health.openscadInstalled ? 'OpenSCAD ✓' : 'OpenSCAD ✗',
-      health.openRouterConfigured ? 'OpenRouter ✓' : 'OpenRouter ✗',
-      health.meshConfigured || health.meshyConfigured || health.piapiConfigured
-        ? 'Text-to-3D ✓'
-        : 'Text-to-3D —',
-      health.piapiConfigured ? 'PiAPI Trellis ✓' : null,
+
+    const dual = formatCadDualHealth({
+      localOpenRouter,
+      localPiapi,
+      cloudOk: Boolean(health.ok),
+      cloudUrl: health.url,
+      cloudOpenRouter: health.openRouterConfigured,
+      cloudPiapi: health.piapiConfigured,
+      openscadInstalled: health.openscadInstalled,
+      cloudError: health.error,
+    });
+    setHealthTone(dual.tone);
+    const extras = [
       health.meshWorkerConfigured ? 'Worker ✓' : null,
       health.meshyConfigured ? 'Meshy ✓' : null,
     ].filter(Boolean);
-    setHealthMsg(parts.join(' · '));
+    setHealthMsg(extras.length ? `${dual.text}\n${extras.join(' · ')}` : dual.text);
   };
+
+  const healthColor =
+    healthTone === 'ok' ? '#2FBF71' : healthTone === 'warn' ? '#E6A817' : '#ff7070';
 
   return (
     <div>
@@ -471,21 +488,23 @@ function SectionCadCloud() {
         </div>
         {healthMsg && (
           <div style={{
-            marginTop: 10, fontSize: 11, lineHeight: 1.45,
-            color: healthMsg.startsWith('Conectat') ? '#2FBF71' : '#ff7070',
+            marginTop: 10, fontSize: 11, lineHeight: 1.45, whiteSpace: 'pre-wrap',
+            color: healthColor,
           }}>
             {healthMsg}
           </div>
         )}
       </Section>
 
-      <Section title="Chei conexe">
+      <Section title="Chei conexe (local)">
         <InfoBox>
-          PiAPI Trellis: {piapiOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          Local — PiAPI Trellis: {piapiOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
           {' · '}
           Meshy (fallback): {meshyOk ? 'configurat ✓' : 'opțional'}
           <br />
-          OpenRouter: {openRouterOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          Local — OpenRouter: {openRouterOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          <br />
+          Cloud (/health) arată doar variabilele Railway. Apasă „Testează conexiunea” pentru Local vs Cloud.
         </InfoBox>
       </Section>
     </div>

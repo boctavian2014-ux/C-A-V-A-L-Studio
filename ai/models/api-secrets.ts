@@ -1,5 +1,18 @@
 import type { ApiKeys } from '../multi-model/provider';
 
+/** Presence marker in the renderer — never a real API key; must not be written to disk. */
+export const CONFIGURED_MARKER = '__configured__';
+
+export function isConfiguredMarker(value: string | undefined | null): boolean {
+  return (value?.trim() ?? '') === CONFIGURED_MARKER;
+}
+
+/** True when value is a real secret (non-empty and not the UI marker). */
+export function isPersistableSecret(value: string | undefined | null): boolean {
+  const trimmed = value?.trim() ?? '';
+  return Boolean(trimmed) && trimmed !== CONFIGURED_MARKER;
+}
+
 /** BYOK store keys → env / secrets file keys */
 export const BYOK_TO_SECRET: Record<keyof Pick<ApiKeys, 'anthropic' | 'openai' | 'google'>, string> = {
   anthropic: 'ANTHROPIC_API_KEY',
@@ -38,11 +51,12 @@ export function mergeSecrets(
   const merged = { ...existing };
   for (const [key, value] of Object.entries(patch)) {
     const trimmed = value?.trim() ?? '';
-    if (!trimmed) {
-      delete merged[key];
-    } else {
-      merged[key] = trimmed;
+    if (!trimmed || trimmed === CONFIGURED_MARKER) {
+      if (!trimmed) delete merged[key];
+      // Marker values are ignored (never wipe, never write).
+      continue;
     }
+    merged[key] = trimmed;
   }
   return merged;
 }
@@ -52,7 +66,7 @@ export function normalizeSecretsMap(secrets: Record<string, string>): Record<str
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(secrets)) {
     const trimmed = value?.trim();
-    if (!trimmed) continue;
+    if (!trimmed || trimmed === CONFIGURED_MARKER) continue;
     const canonical = LEGACY_BYOK_ALIASES[key] ?? key;
     if (!out[canonical] || canonical === key) {
       out[canonical] = trimmed;
@@ -65,10 +79,10 @@ export function apiKeysToSecrets(apiKeys: ApiKeys): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [byokKey, secretKey] of Object.entries(BYOK_TO_SECRET)) {
     const value = apiKeys[byokKey as keyof ApiKeys]?.trim();
-    if (value) out[secretKey] = value;
+    if (isPersistableSecret(value)) out[secretKey] = value!;
   }
-  if (apiKeys.ollamaModel?.trim()) out.OLLAMA_MODEL = apiKeys.ollamaModel.trim();
-  if (apiKeys.ollamaBaseUrl?.trim()) out.OLLAMA_BASE_URL = apiKeys.ollamaBaseUrl.trim();
+  if (isPersistableSecret(apiKeys.ollamaModel)) out.OLLAMA_MODEL = apiKeys.ollamaModel!.trim();
+  if (isPersistableSecret(apiKeys.ollamaBaseUrl)) out.OLLAMA_BASE_URL = apiKeys.ollamaBaseUrl!.trim();
   return out;
 }
 
@@ -77,11 +91,51 @@ export function secretsToApiKeys(secrets: Record<string, string>): ApiKeys {
   const apiKeys: ApiKeys = {};
   for (const [secretKey, byokKey] of Object.entries(SECRET_TO_BYOK)) {
     const value = normalized[secretKey]?.trim();
-    if (value) apiKeys[byokKey] = value;
+    if (isPersistableSecret(value)) apiKeys[byokKey] = value!;
   }
   if (normalized.OLLAMA_MODEL) apiKeys.ollamaModel = normalized.OLLAMA_MODEL;
   if (normalized.OLLAMA_BASE_URL) apiKeys.ollamaBaseUrl = normalized.OLLAMA_BASE_URL;
   return apiKeys;
+}
+
+/**
+ * Resolve real BYOK keys from process.env (main process after applyStoredSecretsToEnv).
+ * Used for chat/completion — never use renderer `__configured__` markers as Bearer tokens.
+ */
+export function resolveByokApiKeysFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): ApiKeys {
+  const pick = (key: string): string | undefined => {
+    const v = env[key]?.trim();
+    return isPersistableSecret(v) ? v : undefined;
+  };
+  return {
+    anthropic: pick('ANTHROPIC_API_KEY'),
+    openai: pick('OPENAI_API_KEY'),
+    google: pick('GOOGLE_API_KEY'),
+  };
+}
+
+/** Merge preferred (may include markers) with env-backed real keys. */
+export function resolveByokApiKeys(
+  preferred?: ApiKeys | null,
+  env: NodeJS.ProcessEnv = process.env
+): ApiKeys {
+  const fromEnv = resolveByokApiKeysFromEnv(env);
+  const mergeField = (
+    preferredVal: string | undefined,
+    envVal: string | undefined
+  ): string | undefined => {
+    if (isPersistableSecret(preferredVal)) return preferredVal!.trim();
+    return envVal;
+  };
+  return {
+    anthropic: mergeField(preferred?.anthropic, fromEnv.anthropic),
+    openai: mergeField(preferred?.openai, fromEnv.openai),
+    google: mergeField(preferred?.google, fromEnv.google),
+    ollamaModel: preferred?.ollamaModel,
+    ollamaBaseUrl: preferred?.ollamaBaseUrl,
+  };
 }
 
 export function buildSecretsPatch(input: {
@@ -100,7 +154,11 @@ export function buildSecretsPatch(input: {
   }
   if (input.apiKeys) {
     for (const [byokKey, secretKey] of Object.entries(BYOK_TO_SECRET)) {
-      patch[secretKey] = input.apiKeys[byokKey as keyof ApiKeys]?.trim() ?? '';
+      const value = input.apiKeys[byokKey as keyof ApiKeys]?.trim() ?? '';
+      // Only include real keys; omit markers so filter/merge won't touch stored secrets.
+      if (isPersistableSecret(value)) {
+        patch[secretKey] = value;
+      }
     }
   }
   return patch;
@@ -108,7 +166,7 @@ export function buildSecretsPatch(input: {
 
 /**
  * Keep only non-empty secret values so empty drafts do not wipe stored keys.
- * Returns the filtered patch and the list of keys that will be written.
+ * Also drops `__configured__` markers so they never overwrite real keys on disk.
  */
 export function filterNonEmptySecretsPatch(patch: Record<string, string>): {
   filtered: Record<string, string>;
@@ -116,9 +174,8 @@ export function filterNonEmptySecretsPatch(patch: Record<string, string>): {
 } {
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(patch)) {
-    const trimmed = value?.trim() ?? '';
-    if (!trimmed) continue;
-    filtered[key] = trimmed;
+    if (!isPersistableSecret(value)) continue;
+    filtered[key] = value.trim();
   }
   return { filtered, savedKeys: Object.keys(filtered) };
 }

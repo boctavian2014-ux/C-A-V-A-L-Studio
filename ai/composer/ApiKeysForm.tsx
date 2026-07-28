@@ -6,6 +6,7 @@ import {
   apiKeysToSecrets,
   filterNonEmptySecretsPatch,
 } from '../models/api-secrets';
+import { formatCadDualHealthOneLine } from '../engineering/cad-dual-health';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -112,8 +113,12 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   const [openRouterDraft, setOpenRouterDraft] = useState('');
   const [ollamaUrlDraft, setOllamaUrlDraft] = useState('http://localhost:11434');
   const [openRouterSaved, setOpenRouterSaved] = useState(false);
+  const [byokSaved, setByokSaved] = useState<Record<string, boolean>>({});
   const [healthChecking, setHealthChecking] = useState(false);
   const [healthSummary, setHealthSummary] = useState<string | null>(null);
+  const [cadChecking, setCadChecking] = useState(false);
+  const [cadSummary, setCadSummary] = useState<string | null>(null);
+  const [cadTone, setCadTone] = useState<'ok' | 'warn' | 'err'>('ok');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(
     null
@@ -128,6 +133,11 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
       saved[secretKey] = Boolean(configured[secretKey]);
     }
     setProviderSaved(saved);
+    setByokSaved({
+      anthropic: Boolean(configured.ANTHROPIC_API_KEY),
+      openai: Boolean(configured.OPENAI_API_KEY),
+      google: Boolean(configured.GOOGLE_API_KEY),
+    });
     return configured;
   };
 
@@ -144,6 +154,11 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
       const configured = secretsRes?.configured ?? {};
       setOpenRouterDraft('');
       setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
+      setByokSaved({
+        anthropic: Boolean(configured.ANTHROPIC_API_KEY),
+        openai: Boolean(configured.OPENAI_API_KEY),
+        google: Boolean(configured.GOOGLE_API_KEY),
+      });
       setOllamaUrlDraft(settingsRes?.settings?.[OLLAMA_URL_SETTING] ?? 'http://localhost:11434');
       const providerInitial: Record<string, string> = {};
       const saved: Record<string, boolean> = {};
@@ -219,13 +234,21 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     const value = draft[key] ?? '';
     if (!value.trim()) return;
     setApiKey(key, value);
-    void persistSecretsPatch(apiKeysToSecrets({ [key]: value } as ApiKeys));
+    void persistSecretsPatch(apiKeysToSecrets({ [key]: value } as ApiKeys)).then((result) => {
+      if (result.ok) {
+        void refreshConfiguredBadges();
+        setDraft((d) => ({ ...d, [key]: '' }));
+      }
+    });
   };
 
   const saveOpenRouter = async (value: string) => {
     if (!value.trim()) return;
     const result = await persistSecretsPatch({ OPENROUTER_API_KEY: value });
-    if (result.ok) setOpenRouterDraft('');
+    if (result.ok) {
+      setOpenRouterDraft('');
+      await refreshConfiguredBadges();
+    }
   };
 
   const saveOllamaUrl = async (value: string) => {
@@ -241,6 +264,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     const result = await persistSecretsPatch({ [secretKey]: value });
     if (result.ok) {
       setProviderDraft((d) => ({ ...d, [secretKey]: '' }));
+      await refreshConfiguredBadges();
     }
   };
 
@@ -256,6 +280,35 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
       setHealthSummary('Verificare indisponibilă — repornește aplicația.');
     } finally {
       setHealthChecking(false);
+    }
+  };
+
+  const runCadHealthCheck = async () => {
+    setCadChecking(true);
+    setCadSummary(null);
+    try {
+      const [secretsRes, health] = await Promise.all([
+        window.caval.secretsGet?.(),
+        window.caval.cad?.health?.(),
+      ]);
+      const configured = secretsRes?.configured ?? {};
+      const dual = formatCadDualHealthOneLine({
+        localOpenRouter: Boolean(configured.OPENROUTER_API_KEY),
+        localPiapi: Boolean(configured.PIAPI_API_KEY) || Boolean(configured.TRELLIS_API_KEY),
+        cloudOk: Boolean(health?.ok),
+        cloudUrl: health?.url,
+        cloudOpenRouter: health?.openRouterConfigured,
+        cloudPiapi: health?.piapiConfigured,
+        openscadInstalled: health?.openscadInstalled,
+        cloudError: health?.error ?? (!health ? 'CAD API indisponibil în aplicație.' : undefined),
+      });
+      setCadTone(dual.tone);
+      setCadSummary(dual.text);
+    } catch {
+      setCadTone('err');
+      setCadSummary('Verificare CAD indisponibilă — repornește aplicația.');
+    } finally {
+      setCadChecking(false);
     }
   };
 
@@ -316,6 +369,8 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <p style={{ fontSize: 11, color: 'var(--caval-text-muted)', margin: 0, lineHeight: 1.5 }}>
         Cheile rămân local pe dispozitivul tău. Setezi o dată — persistă după repornire.
+        Câmpurile goale sunt normale după salvare: badge-ul <strong>salvat</strong> înseamnă că
+        cheia e pe disc (nu a dispărut).
       </p>
 
       <div>
@@ -331,7 +386,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         <input
           type="password"
           value={openRouterDraft}
-          placeholder="sk-or-..."
+          placeholder={openRouterSaved ? '•••••••• (salvat — lipește alta ca să înlocuiești)' : 'sk-or-...'}
           onChange={(e) => setOpenRouterDraft(e.target.value)}
           onBlur={() => void saveOpenRouter(openRouterDraft)}
           style={inputStyle}
@@ -377,7 +432,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
 
       {KEY_FIELDS.map(({ key, label, placeholder, hint }) => {
         const value = draft[key] ?? '';
-        const isSet = Boolean(apiKeys[key]?.trim());
+        const isSet = Boolean(byokSaved[key]) || Boolean(apiKeys[key]?.trim());
         return (
           <div key={key}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -392,7 +447,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
             <input
               type="password"
               value={value}
-              placeholder={placeholder}
+              placeholder={isSet ? '•••••••• (salvat — lipește alta ca să înlocuiești)' : placeholder}
               onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
               onBlur={() => handleSave(key)}
               style={inputStyle}
@@ -401,23 +456,42 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         );
       })}
 
-      <button
-        type="button"
-        onClick={() => void runHealthCheck()}
-        disabled={healthChecking}
-        style={{
-          padding: '8px 12px',
-          borderRadius: 6,
-          border: '1px solid var(--caval-border)',
-          background: 'var(--caval-bg)',
-          color: 'var(--caval-text)',
-          fontSize: 11,
-          cursor: healthChecking ? 'wait' : 'pointer',
-          textAlign: 'left',
-        }}
-      >
-        {healthChecking ? 'Verific modelele…' : 'Verifică toate modelele'}
-      </button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => void runHealthCheck()}
+          disabled={healthChecking}
+          style={{
+            padding: '8px 12px',
+            borderRadius: 6,
+            border: '1px solid var(--caval-border)',
+            background: 'var(--caval-bg)',
+            color: 'var(--caval-text)',
+            fontSize: 11,
+            cursor: healthChecking ? 'wait' : 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          {healthChecking ? 'Verific modelele…' : 'Verifică toate modelele'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void runCadHealthCheck()}
+          disabled={cadChecking}
+          style={{
+            padding: '8px 12px',
+            borderRadius: 6,
+            border: '1px solid var(--caval-border)',
+            background: 'var(--caval-bg)',
+            color: 'var(--caval-text)',
+            fontSize: 11,
+            cursor: cadChecking ? 'wait' : 'pointer',
+            textAlign: 'left',
+          }}
+        >
+          {cadChecking ? 'Verific CAD…' : 'Verifică CAD'}
+        </button>
+      </div>
       {healthSummary && (
         <div style={{
           fontSize: 11,
@@ -432,7 +506,25 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
           {healthSummary}
         </div>
       )}
-
+      {cadSummary && (
+        <div style={{
+          fontSize: 11,
+          lineHeight: 1.5,
+          whiteSpace: 'pre-wrap',
+          padding: '8px 10px',
+          borderRadius: 6,
+          background: 'var(--caval-bg)',
+          border: '1px solid var(--caval-border)',
+          color:
+            cadTone === 'ok'
+              ? 'var(--caval-success, #2FBF71)'
+              : cadTone === 'warn'
+                ? '#E6A817'
+                : 'var(--caval-error, #f87171)',
+        }}>
+          {cadSummary}
+        </div>
+      )}
       {saveMessage && (
         <div
           role="status"

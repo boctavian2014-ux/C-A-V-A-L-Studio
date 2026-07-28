@@ -48,7 +48,7 @@ import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
 import { registerSchematicHandlers } from "./schematic-handlers";
 import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
 import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
-import { mergeSecrets, normalizeSecretsMap } from "../../ai/models/api-secrets";
+import { mergeSecrets, normalizeSecretsMap, filterNonEmptySecretsPatch } from "../../ai/models/api-secrets";
 import { inferPreloadContext } from "../../ai/models/infer-context";
 import "./ipc-handlers";
 import "./terminal-handlers";
@@ -1383,15 +1383,15 @@ const loadPersistedAppSettings = (): void => {
 ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) => {
   const merged = { ...persistedAppSettings, ...settings };
   const secretsPatch: Record<string, string> = {};
-  if (settings["openrouter.apiKey"] !== undefined) {
-    secretsPatch.OPENROUTER_API_KEY = settings["openrouter.apiKey"];
-  }
-  if (settings["mesh.apiKey"] !== undefined) {
-    secretsPatch.MESHY_API_KEY = settings["mesh.apiKey"];
-  }
-  if (settings["cad.apiKey"] !== undefined) {
-    secretsPatch.CAD_API_KEY = settings["cad.apiKey"];
-  }
+  // Only write non-empty values — empty write-only fields must not wipe stored secrets.
+  const maybeSecret = (settingsKey: string, envKey: string) => {
+    if (settings[settingsKey] === undefined) return;
+    const trimmed = settings[settingsKey]?.trim() ?? "";
+    if (trimmed) secretsPatch[envKey] = trimmed;
+  };
+  maybeSecret("openrouter.apiKey", "OPENROUTER_API_KEY");
+  maybeSecret("mesh.apiKey", "MESHY_API_KEY");
+  maybeSecret("cad.apiKey", "CAD_API_KEY");
   if (Object.keys(secretsPatch).length > 0) {
     const mergedSecrets = mergeApiSecrets(secretsPatch);
     writeApiSecrets(mergedSecrets);
@@ -1539,7 +1539,12 @@ ipcMain.handle("caval:secrets-get", (event) => {
 
 ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => {
   assertTrustedSender(event);
-  const merged = mergeApiSecrets(secrets);
+  // Defense in depth: never apply empty / marker values that would wipe or corrupt keys.
+  const { filtered } = filterNonEmptySecretsPatch(secrets ?? {});
+  if (Object.keys(filtered).length === 0) {
+    return { ok: true };
+  }
+  const merged = mergeApiSecrets(filtered);
   writeApiSecrets(merged);
   applyStoredSecretsToEnv();
   return { ok: true };
