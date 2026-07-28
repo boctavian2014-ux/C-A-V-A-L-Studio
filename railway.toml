@@ -1,7 +1,7 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "engineering/cad-server/Dockerfile"
-watchPatterns = ["engineering/cad-server/**", "billing/supabase/**", "package.json", "package-lock.json"]
+watchPatterns = ["engineering/cad-server/**", "ai/engineering/**", "billing/supabase/**", "package.json", "package-lock.json"]
 
 [deploy]
 # Use Dockerfile CMD (npx tsx engineering/cad-server/standalone.ts)

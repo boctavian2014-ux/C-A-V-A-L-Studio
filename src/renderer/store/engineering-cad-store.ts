@@ -494,7 +494,12 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
         if (isTerminalStatus(status)) {
           stopPolling();
-          log('poll terminal', { jobId, status });
+          log('poll terminal', {
+            jobId,
+            status,
+            error: job.error ?? null,
+            hasStl: Boolean(job.stlUrl),
+          });
           return;
         }
 

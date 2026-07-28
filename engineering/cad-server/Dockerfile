@@ -10,7 +10,10 @@ COPY engineering/cad-server/package.json engineering/cad-server/package-lock.jso
 RUN npm ci --omit=dev
 
 COPY engineering/cad-server ./engineering/cad-server
-# Supabase admin client only — cad-server must not import from ai/ (not copied)
+# Shared toy OpenSCAD templates (imported by scad-prompt / job-processor)
+COPY ai/engineering/toy-vehicle-scad.ts ./ai/engineering/toy-vehicle-scad.ts
+COPY ai/engineering/toy-helicopter-scad.ts ./ai/engineering/toy-helicopter-scad.ts
+# Supabase admin client only
 COPY billing/supabase/client.ts ./billing/supabase/client.ts
 
 ENV NODE_ENV=production
