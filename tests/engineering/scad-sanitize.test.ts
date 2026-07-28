@@ -58,9 +58,10 @@ describe("toy vehicle template", () => {
 
   it("builds solid sports-car SCAD with wheels and no hollow tub", () => {
     const scad = buildToyVehicleScad("masina ferrari jucarie");
-    expect(scad).toMatch(/solid_body|toy_car/);
-    expect(scad.toLowerCase()).toMatch(/spoiler|hood/);
+    expect(scad).toMatch(/sports_body|toy_car/);
+    expect(scad.toLowerCase()).toMatch(/hood|wing|splitter|fender/);
     expect(scad.toLowerCase()).toContain("not a hollow bathtub");
+    expect(scad).not.toMatch(/\bdifference\s*\(/);
     expect(validateScadSource(scad).ok).toBe(true);
     expect(validateScadMatchesIntent("ferrari toy car", scad).ok).toBe(true);
   });
