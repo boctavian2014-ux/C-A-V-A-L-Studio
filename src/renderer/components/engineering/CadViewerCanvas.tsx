@@ -11,7 +11,6 @@ import React, {
 import { Canvas, ThreeEvent, useThree } from '@react-three/fiber';
 import {
   OrbitControls,
-  Center,
   Environment,
   Grid,
   TransformControls,
@@ -414,7 +413,6 @@ function SceneContent({
             const isPrimary = part.stlUrl === primaryUrl || i === 0;
             return (
               <group key={part.id} position={[off.x, off.y, off.z]}>
-                <Center>
                   <StlMeshObject
                     url={part.stlUrl}
                     wireframe={wireframe}
@@ -424,12 +422,10 @@ function SceneContent({
                     onDimensions={isPrimary ? handlePrimaryDims : undefined}
                     onPointerDown={isPrimary ? onPointerDown : undefined}
                   />
-                </Center>
               </group>
             );
           })
         ) : (
-          <Center>
             <StlMeshObject
               url={primaryUrl}
               wireframe={wireframe}
@@ -439,7 +435,6 @@ function SceneContent({
               onDimensions={handlePrimaryDims}
               onPointerDown={onPointerDown}
             />
-          </Center>
         )}
         <Environment preset="city" />
       </Suspense>

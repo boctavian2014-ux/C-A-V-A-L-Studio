@@ -156,10 +156,12 @@ export async function generateOpenScad(input: {
   conversationHistory?: CadChatMessage[];
   previousScad?: string;
 }): Promise<GenerateOpenScadResult> {
-  // Toy / sports cars: skip flaky LLM (often emits hollow bathtub+wheels).
-  // Deterministic solid coupe template is far more reliable for FDM.
-  if (isToyVehiclePrompt(input.prompt) && !input.previousScad?.trim()) {
-    const scad = sanitizeScadBuiltinShadows(buildToyVehicleScad(input.prompt));
+  // Toy / sports cars: always skip LLM (hollow bathtub / organic blobs).
+  // Use client template if present, else build the solid coupe.
+  if (isToyVehiclePrompt(input.prompt)) {
+    const scad = sanitizeScadBuiltinShadows(
+      input.previousScad?.trim() || buildToyVehicleScad(input.prompt)
+    );
     return {
       ok: true,
       scad,

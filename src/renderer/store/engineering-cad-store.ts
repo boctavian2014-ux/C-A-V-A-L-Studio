@@ -5,6 +5,10 @@ import {
   inferCadProjectType,
 } from '../../../ai/engineering/cad-prompt';
 import { normalizeCadErrorMessage } from '../../../ai/engineering/cad-errors';
+import {
+  buildToyVehicleScad,
+  isToyVehiclePrompt,
+} from '../../../ai/engineering/toy-vehicle-scad';
 import type { EngProject } from '../../../ai/engineering/engineering-generator';
 import { useAIStore } from '../../../ai/composer/ai-store';
 import { useEditorStore } from './editor-store';
@@ -630,8 +634,15 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
     const pipeline = planResult.plan.pipeline;
     const planWarnings = planResult.plan.warnings?.filter(Boolean) ?? [];
-    const forceOpenScadFallback = pipeline === 'mesh' && !credentials.meshConfigured;
-    const generationMode = forceOpenScadFallback ? 'openscad' : pipeline;
+    const toyVehicle = isToyVehiclePrompt(geometryPrompt);
+    const forceOpenScadFallback =
+      toyVehicle || (pipeline === 'mesh' && !credentials.meshConfigured);
+    // Toy cars: never Trellis/mesh — always OpenSCAD library template (solid coupe).
+    const generationMode = toyVehicle
+      ? 'library'
+      : forceOpenScadFallback
+        ? 'openscad'
+        : pipeline;
 
     // Prefer planner tech only when it still mentions the user's subject; else raw chat.
     const plannerTech = planResult.plan.technicalPrompt?.trim() ?? '';
@@ -645,6 +656,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         plannerTech
       );
     const plannerMatchesUser =
+      !toyVehicle &&
       plannerTech.length > 20 &&
       userTokens.some((t) => plannerTech.toLowerCase().includes(t)) &&
       !plannerPolluted;
@@ -655,7 +667,10 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       'Match ONLY this subject — do not invent furniture, drawers, cabinets, bathtubs, tubs, basins, or unrelated objects.',
     ].join('\n');
 
-    const jobPrompt = forceOpenScadFallback
+    const toyScad = toyVehicle ? buildToyVehicleScad(geometryPrompt) : undefined;
+    const jobPrompt = toyVehicle
+      ? `TOY VEHICLE (library template): ${geometryPrompt}`
+      : forceOpenScadFallback && pipeline === 'mesh'
       ? [
           `USER OBJECT (exact): ${geometryPrompt}`,
           'Approximate THIS exact object with OpenSCAD primitives (cubes, cylinders, spheres, hull).',
@@ -677,11 +692,14 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     log('geometry prompt', {
       user: geometryPrompt.slice(0, 120),
       mode: generationMode,
+      toyVehicle,
       meshConfigured: credentials.meshConfigured,
     });
 
     const userIdResult = await caval.billingUserId?.();
-    const projectType = inferCadProjectType(geometryPrompt, project.spec);
+    const projectType = toyVehicle
+      ? 'vehicle'
+      : inferCadProjectType(geometryPrompt, project.spec);
 
     let created;
     let createAttempt = 0;
@@ -692,10 +710,9 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           prompt: jobPrompt.slice(0, 12_000),
           projectType,
           cavalId: userIdResult?.userId,
-          // Do not pass EngProject planContext — it often describes the wrong object.
           conversationHistory: planMessages,
-          previousScad: undefined,
-          previousMeshTaskId: forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
+          previousScad: toyScad,
+          previousMeshTaskId: toyVehicle || forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
           generationMode,
           meshPrompt: generationMode === 'mesh' ? meshPrompt.slice(0, 12_000) : undefined,
           quality: 'standard',
@@ -727,21 +744,21 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     const jobId = created.jobId;
     const status = (created.status as CadJobStatus) ?? 'queued';
     const meshTaskId = (created as { meshTaskId?: string | null }).meshTaskId ?? null;
-    const fallbackHint = forceOpenScadFallback
-      ? 'TRELLIS/Meshy indisponibil — generez previzualizare 3D cu OpenSCAD…'
-      : null;
+    const statusMessage = toyVehicle
+      ? 'Template mașină solidă (OpenSCAD) — fără Trellis…'
+      : forceOpenScadFallback
+        ? 'TRELLIS/Meshy indisponibil — generez previzualizare 3D cu OpenSCAD…'
+        : planWarnings.length > 0
+          ? planWarnings.join(' · ')
+          : generationMode === 'mesh'
+            ? 'Generez model 3D din text pe cloud (PiAPI Trellis / Meshy)…'
+            : 'Generez STL pe server cloud (OpenSCAD)…';
     patch({
       phase: 'processing',
       jobId,
       serverStatus: status,
       meshTaskId,
-      statusMessage:
-        fallbackHint ||
-        (planWarnings.length > 0
-          ? planWarnings.join(' · ')
-          : generationMode === 'mesh'
-            ? 'Generez model 3D din text pe cloud (PiAPI Trellis / Meshy)…'
-            : 'Generez STL pe server cloud (OpenSCAD)…'),
+      statusMessage,
     });
 
     log('job created', { jobId, status, projectType });

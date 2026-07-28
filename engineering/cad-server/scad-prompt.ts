@@ -1,4 +1,10 @@
 import type { CadChatMessage, CadConstraints, CadPlanContext, CadQuality } from "./types";
+import {
+  buildToyVehicleScad,
+  isToyVehiclePrompt,
+} from "../../ai/engineering/toy-vehicle-scad";
+
+export { buildToyVehicleScad, isToyVehiclePrompt };
 
 const PROJECT_CAD_GUIDANCE: Record<string, string> = {
   drone:
@@ -300,82 +306,6 @@ export function validateScadSource(source: string): { ok: boolean; reason?: stri
     return { ok: false, reason: "OpenSCAD must include a top-level render (module call or CSG)" };
   }
   return { ok: true };
-}
-
-/** True when the request is a toy / sports car (use deterministic SCAD template). */
-export function isToyVehiclePrompt(prompt: string): boolean {
-  return /(mașin[aăi]|masina|masini|toy\s*car|diecast|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil|ferrari|porsche|lamborghini|sports?\s*car|coupe|sedan|hot\s*wheels|mașinu[tț][aă]|masinuta)/iu.test(
-    prompt
-  );
-}
-
-/**
- * Deterministic solid toy / sports-car OpenSCAD.
- * Avoids LLM hollow-box (bathtub-with-wheels) failure mode.
- */
-export function buildToyVehicleScad(prompt: string): string {
-  const sports =
-    /(ferrari|porsche|lamborghini|sports?\s*car|coupe|hot\s*wheels)/iu.test(prompt);
-  const label = prompt.slice(0, 80).replace(/"/g, "'");
-  return `// Deterministic toy car — solid body (NOT a hollow bathtub)
-// Request: ${label}
-$fn = 64;
-
-body_len = ${sports ? 150 : 140};
-body_w  = ${sports ? 58 : 62};
-body_h  = ${sports ? 22 : 26};
-cabin_len = ${sports ? 48 : 55};
-cabin_w   = ${sports ? 42 : 48};
-cabin_h   = ${sports ? 20 : 24};
-wheel_d = 28;
-wheel_w = 12;
-axle_z  = 14;
-track   = body_w / 2 + 4;
-wb_front = body_len * 0.28;
-wb_rear  = body_len * 0.30;
-
-module solid_body() {
-  // Lower chassis — CLOSED solid (no difference / no open tub)
-  hull() {
-    translate([0, 0, 10])
-      cube([body_len, body_w, 18], center = true);
-    translate([${sports ? 8 : 0}, 0, 16])
-      cube([body_len * 0.72, body_w * 0.88, 10], center = true);
-  }
-  // Cabin / windshield block — solid, sits ON the body
-  translate([${sports ? -6 : -4}, 0, body_h + cabin_h / 2 - 2])
-    hull() {
-      cube([cabin_len, cabin_w, cabin_h], center = true);
-      translate([cabin_len * 0.18, 0, -cabin_h * 0.15])
-        cube([cabin_len * 0.7, cabin_w * 0.92, cabin_h * 0.7], center = true);
-    }
-${
-  sports
-    ? `  // Rear spoiler
-  translate([-body_len / 2 + 14, 0, body_h + 10])
-    cube([6, body_w * 0.92, 3], center = true);
-  // Hood bulge
-  translate([body_len * 0.22, 0, body_h + 2])
-    cube([body_len * 0.28, body_w * 0.7, 6], center = true);
-`
-    : ""
-}}
-
-module car_wheel() {
-  rotate([90, 0, 0])
-    cylinder(h = wheel_w, d = wheel_d, center = true);
-}
-
-module toy_car() {
-  solid_body();
-  for (x = [wb_front, -wb_rear])
-    for (y = [-track, track])
-      translate([x, y, axle_z])
-        car_wheel();
-}
-
-toy_car();
-`;
 }
 
 /** Reject oversimplified solids when the user clearly asked for a complex vehicle/heli. */

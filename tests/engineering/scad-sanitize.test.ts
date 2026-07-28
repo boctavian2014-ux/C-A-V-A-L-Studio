@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildToyVehicleScad,
   findShadowedBuiltinModules,
-  isToyVehiclePrompt,
   sanitizeScadBuiltinShadows,
   validateScadMatchesIntent,
   validateScadSource,
 } from "../../engineering/cad-server/scad-prompt";
+import {
+  buildToyVehicleScad,
+  isToyVehiclePrompt,
+} from "../../ai/engineering/toy-vehicle-scad";
 
 describe("sanitizeScadBuiltinShadows", () => {
   it("renames module hull that would recurse", () => {
@@ -42,6 +44,11 @@ body();
     expect(sanitizeScadBuiltinShadows(ok)).toBe(ok);
   });
 });
+
+import {
+  buildToyVehicleScad,
+  isToyVehiclePrompt,
+} from "../../ai/engineering/toy-vehicle-scad";
 
 describe("toy vehicle template", () => {
   it("detects Ferrari / masina prompts", () => {
