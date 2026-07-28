@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildToyVehicleScad,
   findShadowedBuiltinModules,
+  isToyVehiclePrompt,
   sanitizeScadBuiltinShadows,
+  validateScadMatchesIntent,
   validateScadSource,
 } from "../../engineering/cad-server/scad-prompt";
 
@@ -37,5 +40,38 @@ module body() {
 body();
 `.trim();
     expect(sanitizeScadBuiltinShadows(ok)).toBe(ok);
+  });
+});
+
+describe("toy vehicle template", () => {
+  it("detects Ferrari / masina prompts", () => {
+    expect(isToyVehiclePrompt("masina ferrari jucarie")).toBe(true);
+    expect(isToyVehiclePrompt("a dog figurine")).toBe(false);
+  });
+
+  it("builds solid sports-car SCAD with wheels and no hollow tub", () => {
+    const scad = buildToyVehicleScad("masina ferrari jucarie");
+    expect(scad).toMatch(/solid_body|toy_car/);
+    expect(scad.toLowerCase()).toMatch(/spoiler|hood/);
+    expect(scad.toLowerCase()).toContain("not a hollow bathtub");
+    expect(validateScadSource(scad).ok).toBe(true);
+    expect(validateScadMatchesIntent("ferrari toy car", scad).ok).toBe(true);
+  });
+
+  it("rejects bathtub-with-wheels OpenSCAD", () => {
+    const tub = `
+$fn=64;
+difference() {
+  cube([170,80,70], center=true);
+  translate([0,0,10]) cube([150,60,70], center=true);
+}
+translate([40,45,0]) rotate([90,0,0]) cylinder(h=12,d=28,center=true);
+translate([-40,45,0]) rotate([90,0,0]) cylinder(h=12,d=28,center=true);
+translate([40,-45,0]) rotate([90,0,0]) cylinder(h=12,d=28,center=true);
+translate([-40,-45,0]) rotate([90,0,0]) cylinder(h=12,d=28,center=true);
+`;
+    const check = validateScadMatchesIntent("masina ferrari jucarie", tub);
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/bathtub|SOLID/i);
   });
 });

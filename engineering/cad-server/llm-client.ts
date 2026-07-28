@@ -1,6 +1,8 @@
 import {
   buildCadLlmPrompt,
   buildScadRepairPrompt,
+  buildToyVehicleScad,
+  isToyVehiclePrompt,
   sanitizeScadBuiltinShadows,
   stripScadFences,
   validateScadMatchesIntent,
@@ -154,12 +156,27 @@ export async function generateOpenScad(input: {
   conversationHistory?: CadChatMessage[];
   previousScad?: string;
 }): Promise<GenerateOpenScadResult> {
+  // Toy / sports cars: skip flaky LLM (often emits hollow bathtub+wheels).
+  // Deterministic solid coupe template is far more reliable for FDM.
+  if (isToyVehiclePrompt(input.prompt) && !input.previousScad?.trim()) {
+    const scad = sanitizeScadBuiltinShadows(buildToyVehicleScad(input.prompt));
+    return {
+      ok: true,
+      scad,
+      usedFallback: true,
+      model: "template:toy-vehicle",
+      attempts: 0,
+    };
+  }
+
   const apiKey = resolveApiKey(input.openRouterApiKey);
   const model = resolveModel(input.quality);
 
   if (!apiKey) {
     if (allowFallback()) {
-      const scad = fallbackScadForPrompt(input.prompt);
+      const scad = isToyVehiclePrompt(input.prompt)
+        ? buildToyVehicleScad(input.prompt)
+        : fallbackScadForPrompt(input.prompt);
       return {
         ok: true,
         scad,

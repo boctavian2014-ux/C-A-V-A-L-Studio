@@ -23,8 +23,8 @@ const PART_KEYWORD_HINTS: Array<{ pattern: RegExp; hint: string }> = [
     hint: "Design a TOY HELICOPTER: fuselage/cabin, main rotor hub+blades, tail boom + tail rotor, landing skids. NOT a plain box or wedge.",
   },
   {
-    pattern: /(mașin[aăi]|masina|toy\s*car|vehicle|camion|truck|tractor|automobil|jucăr(?:ie|ii))/iu,
-    hint: "Design a TOY CAR / VEHICLE: body/chassis hull, cabin or hood, 4 wheels with axles, wheel wells. NOT a cabinet, wardrobe, or furniture box.",
+    pattern: /(mașin[aăi]|masina|toy\s*car|diecast|vehicle|camion|truck|tractor|automobil|ferrari|porsche|lamborghini|sports?\s*car|coupe|jucăr(?:ie|ii))/iu,
+    hint: "Design a TOY SPORTS/CAR: SOLID closed body (chassis+cabin hull, NO hollow bathtub cavity), optional spoiler, 4 wheel cylinders with axles. FORBIDDEN: difference() scooping the body into an open tub/basin; furniture; drawers.",
   },
   {
     pattern: /(roata|roată|wheel|tire|anvelopă|anvelopa)/iu,
@@ -146,6 +146,7 @@ export function buildCadLlmPrompt(input: {
     "CRITICAL: Model EXACTLY what the user asked for. Never substitute a generic cylindrical cap unless explicitly requested.",
     "CRITICAL: NEVER output furniture — no cabinet, wardrobe, dulap, drawer unit, sertare, chest of drawers, shelf unit, nightstand, or hollow furniture box — unless the user explicitly asked for furniture.",
     "CRITICAL: Never substitute furniture when the user asked for a hammer, prop, vehicle, toy, robot, or any other object.",
+    "CRITICAL for cars/vehicles: body MUST be a SOLID closed silhouette (hull of cubes). NEVER use difference() to hollow the body into an open bathtub/tub/basin. Wheels are separate cylinders under the body.",
     "Include mounting holes, fillets (via offset/minkowski sparingly), and wall thickness when relevant.",
     "Ensure the model is a single watertight solid suitable for 3D printing.",
     ...fdmRulesForQuality(input.quality),
@@ -301,6 +302,82 @@ export function validateScadSource(source: string): { ok: boolean; reason?: stri
   return { ok: true };
 }
 
+/** True when the request is a toy / sports car (use deterministic SCAD template). */
+export function isToyVehiclePrompt(prompt: string): boolean {
+  return /(mașin[aăi]|masina|masini|toy\s*car|diecast|vehicle|camion|truck|tractor|buldozer|buggy|kart|automobil|ferrari|porsche|lamborghini|sports?\s*car|coupe|sedan|hot\s*wheels|mașinu[tț][aă]|masinuta)/iu.test(
+    prompt
+  );
+}
+
+/**
+ * Deterministic solid toy / sports-car OpenSCAD.
+ * Avoids LLM hollow-box (bathtub-with-wheels) failure mode.
+ */
+export function buildToyVehicleScad(prompt: string): string {
+  const sports =
+    /(ferrari|porsche|lamborghini|sports?\s*car|coupe|hot\s*wheels)/iu.test(prompt);
+  const label = prompt.slice(0, 80).replace(/"/g, "'");
+  return `// Deterministic toy car — solid body (NOT a hollow bathtub)
+// Request: ${label}
+$fn = 64;
+
+body_len = ${sports ? 150 : 140};
+body_w  = ${sports ? 58 : 62};
+body_h  = ${sports ? 22 : 26};
+cabin_len = ${sports ? 48 : 55};
+cabin_w   = ${sports ? 42 : 48};
+cabin_h   = ${sports ? 20 : 24};
+wheel_d = 28;
+wheel_w = 12;
+axle_z  = 14;
+track   = body_w / 2 + 4;
+wb_front = body_len * 0.28;
+wb_rear  = body_len * 0.30;
+
+module solid_body() {
+  // Lower chassis — CLOSED solid (no difference / no open tub)
+  hull() {
+    translate([0, 0, 10])
+      cube([body_len, body_w, 18], center = true);
+    translate([${sports ? 8 : 0}, 0, 16])
+      cube([body_len * 0.72, body_w * 0.88, 10], center = true);
+  }
+  // Cabin / windshield block — solid, sits ON the body
+  translate([${sports ? -6 : -4}, 0, body_h + cabin_h / 2 - 2])
+    hull() {
+      cube([cabin_len, cabin_w, cabin_h], center = true);
+      translate([cabin_len * 0.18, 0, -cabin_h * 0.15])
+        cube([cabin_len * 0.7, cabin_w * 0.92, cabin_h * 0.7], center = true);
+    }
+${
+  sports
+    ? `  // Rear spoiler
+  translate([-body_len / 2 + 14, 0, body_h + 10])
+    cube([6, body_w * 0.92, 3], center = true);
+  // Hood bulge
+  translate([body_len * 0.22, 0, body_h + 2])
+    cube([body_len * 0.28, body_w * 0.7, 6], center = true);
+`
+    : ""
+}}
+
+module car_wheel() {
+  rotate([90, 0, 0])
+    cylinder(h = wheel_w, d = wheel_d, center = true);
+}
+
+module toy_car() {
+  solid_body();
+  for (x = [wb_front, -wb_rear])
+    for (y = [-track, track])
+      translate([x, y, axle_z])
+        car_wheel();
+}
+
+toy_car();
+`;
+}
+
 /** Reject oversimplified solids when the user clearly asked for a complex vehicle/heli. */
 export function validateScadMatchesIntent(
   prompt: string,
@@ -311,6 +388,7 @@ export function validateScadMatchesIntent(
   const cylCount = (scad.match(/\bcylinder\s*\(/gi) ?? []).length;
   const hullCount = (scad.match(/\bhull\s*\(/gi) ?? []).length;
   const moduleCount = (scad.match(/\bmodule\s+\w+/gi) ?? []).length;
+  const diffCount = (scad.match(/\bdifference\s*\(/gi) ?? []).length;
   const tooSimple = cubeCount <= 2 && cylCount < 2 && hullCount < 1 && moduleCount < 2;
 
   if (/(elicopter|helicopter|\bheli\b)/iu.test(p)) {
@@ -325,12 +403,27 @@ export function validateScadMatchesIntent(
     }
   }
 
-  if (/(mașin[aăi]|masina|toy\s*car|vehicle|camion|truck|tractor)/iu.test(p)) {
-    if (tooSimple && cylCount < 4) {
+  if (isToyVehiclePrompt(p)) {
+    // Hollow open-top body (bathtub) = difference() scooping a large cube — reject.
+    const looksLikeTub =
+      diffCount >= 1 &&
+      cylCount >= 2 &&
+      !/(spoiler|cabin|hood|grille|fender|wheel_well|solid_body|toy_car)/i.test(scad) &&
+      hullCount < 1;
+    if (looksLikeTub) {
       return {
         ok: false,
         reason:
-          "Vehicle model too simple — need body + wheels (cylinders), not a single prism.",
+          "Vehicle looks like a hollow bathtub with wheels — need a SOLID closed car body + cabin, not difference()-scooped tub.",
+      };
+    }
+    const hasWheelModule = /(module\s+car_wheel|module\s+wheel|toy_car\s*\()/i.test(scad);
+    const enoughWheels = cylCount >= 4 || (hasWheelModule && /for\s*\(/.test(scad));
+    if (!enoughWheels || (tooSimple && !hasWheelModule)) {
+      return {
+        ok: false,
+        reason:
+          "Vehicle model too simple — need solid body + 4 wheel cylinders, not a single prism.",
       };
     }
   }

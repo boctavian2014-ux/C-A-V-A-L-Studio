@@ -19,7 +19,7 @@ import {
 } from "./services/job-registry";
 import { cadLog } from "./middleware/logger";
 import { setLocalStl } from "./storage/local-artifacts";
-import { sanitizeScadBuiltinShadows } from "./scad-prompt";
+import { isToyVehiclePrompt, sanitizeScadBuiltinShadows } from "./scad-prompt";
 
 const MAX_RENDER_REPAIRS = Number(process.env.CAD_MAX_RENDER_REPAIRS ?? 2);
 
@@ -53,6 +53,21 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
     appendJobLog(jobId, { level: "info", event: "job_updated", message: "generating" });
 
     let mode = generationMode;
+    // Toy cars: always prefer OpenSCAD solid template over Trellis (which hallucinates bathtubs).
+    const vehiclePrompt = isToyVehiclePrompt(job.prompt) || isToyVehiclePrompt(input.prompt ?? "");
+    if (vehiclePrompt && mode === "mesh") {
+      if (!(await isOpenScadInstalled())) {
+        await tryInstallOpenScad();
+      }
+      if (await isOpenScadInstalled()) {
+        appendJobLog(jobId, {
+          level: "info",
+          event: "pipeline_override",
+          message: "toy vehicle → openscad template (skip mesh)",
+        });
+        mode = "openscad";
+      }
+    }
     if (mode === "openscad" || mode === "library") {
       if (!(await isOpenScadInstalled())) {
         await tryInstallOpenScad();
