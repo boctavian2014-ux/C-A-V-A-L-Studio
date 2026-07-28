@@ -21,7 +21,9 @@ import { cadLog } from "./middleware/logger";
 import { setLocalStl } from "./storage/local-artifacts";
 import {
   buildToyVehicleScad,
+  buildToyHelicopterScad,
   isToyVehiclePrompt,
+  isToyHelicopterPrompt,
   sanitizeScadBuiltinShadows,
 } from "./scad-prompt";
 
@@ -57,9 +59,12 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
     appendJobLog(jobId, { level: "info", event: "job_updated", message: "generating" });
 
     let mode = generationMode;
-    // Toy cars: ALWAYS solid OpenSCAD template — never Trellis/Meshy (hallucinates tubs/blobs).
+    // Toy cars / helicopters: ALWAYS solid OpenSCAD library template — never Trellis/LLM junk.
     const vehiclePrompt = isToyVehiclePrompt(job.prompt) || isToyVehiclePrompt(input.prompt ?? "");
-    if (vehiclePrompt) {
+    const heliPrompt =
+      isToyHelicopterPrompt(job.prompt) || isToyHelicopterPrompt(input.prompt ?? "");
+    const libraryToy = vehiclePrompt || heliPrompt;
+    if (libraryToy) {
       if (!(await isOpenScadInstalled())) {
         await tryInstallOpenScad();
       }
@@ -71,7 +76,9 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
         appendJobLog(jobId, {
           level: "error",
           event: "job_failed",
-          message: "toy vehicle requires OpenSCAD (mesh blocked)",
+          message: heliPrompt
+            ? "toy helicopter requires OpenSCAD (mesh blocked)"
+            : "toy vehicle requires OpenSCAD (mesh blocked)",
         });
         return;
       }
@@ -79,15 +86,20 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
         appendJobLog(jobId, {
           level: "info",
           event: "pipeline_override",
-          message: "toy vehicle → library template (skip mesh/LLM)",
+          message: heliPrompt
+            ? "toy helicopter → library template (skip mesh/LLM)"
+            : "toy vehicle → library template (skip mesh/LLM)",
         });
       }
       mode = "library";
+      const promptText = job.prompt || input.prompt || (heliPrompt ? "toy helicopter" : "toy car");
       if (!input.previousScad?.trim()) {
         input = {
           ...input,
           generationMode: "library",
-          previousScad: buildToyVehicleScad(job.prompt || input.prompt || "toy car"),
+          previousScad: heliPrompt
+            ? buildToyHelicopterScad(promptText)
+            : buildToyVehicleScad(promptText),
         };
       } else {
         input = { ...input, generationMode: "library" };
@@ -98,7 +110,7 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
         await tryInstallOpenScad();
       }
       if (!(await isOpenScadInstalled())) {
-        if (mode === "library" || vehiclePrompt) {
+        if (mode === "library" || libraryToy) {
           await updateCadJob(jobId, {
             status: "failed",
             errorMessage: OPENSCAD_INSTALL_HINT_RO,

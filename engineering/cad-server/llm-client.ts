@@ -2,7 +2,9 @@ import {
   buildCadLlmPrompt,
   buildScadRepairPrompt,
   buildToyVehicleScad,
+  buildToyHelicopterScad,
   isToyVehiclePrompt,
+  isToyHelicopterPrompt,
   sanitizeScadBuiltinShadows,
   stripScadFences,
   validateScadMatchesIntent,
@@ -156,8 +158,19 @@ export async function generateOpenScad(input: {
   conversationHistory?: CadChatMessage[];
   previousScad?: string;
 }): Promise<GenerateOpenScadResult> {
-  // Toy / sports cars: always skip LLM (hollow bathtub / organic blobs).
-  // Use client template if present, else build the solid coupe.
+  // Toy cars / helicopters: always skip LLM (wedges / hollow junk).
+  if (isToyHelicopterPrompt(input.prompt)) {
+    const scad = sanitizeScadBuiltinShadows(
+      input.previousScad?.trim() || buildToyHelicopterScad(input.prompt)
+    );
+    return {
+      ok: true,
+      scad,
+      usedFallback: true,
+      model: "template:toy-helicopter",
+      attempts: 0,
+    };
+  }
   if (isToyVehiclePrompt(input.prompt)) {
     const scad = sanitizeScadBuiltinShadows(
       input.previousScad?.trim() || buildToyVehicleScad(input.prompt)
@@ -176,9 +189,11 @@ export async function generateOpenScad(input: {
 
   if (!apiKey) {
     if (allowFallback()) {
-      const scad = isToyVehiclePrompt(input.prompt)
-        ? buildToyVehicleScad(input.prompt)
-        : fallbackScadForPrompt(input.prompt);
+      const scad = isToyHelicopterPrompt(input.prompt)
+        ? buildToyHelicopterScad(input.prompt)
+        : isToyVehiclePrompt(input.prompt)
+          ? buildToyVehicleScad(input.prompt)
+          : fallbackScadForPrompt(input.prompt);
       return {
         ok: true,
         scad,

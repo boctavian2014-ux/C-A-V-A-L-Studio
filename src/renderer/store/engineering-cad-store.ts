@@ -9,6 +9,10 @@ import {
   buildToyVehicleScad,
   isToyVehiclePrompt,
 } from '../../../ai/engineering/toy-vehicle-scad';
+import {
+  buildToyHelicopterScad,
+  isToyHelicopterPrompt,
+} from '../../../ai/engineering/toy-helicopter-scad';
 import type { EngProject } from '../../../ai/engineering/engineering-generator';
 import { useAIStore } from '../../../ai/composer/ai-store';
 import { useEditorStore } from './editor-store';
@@ -635,10 +639,12 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     const pipeline = planResult.plan.pipeline;
     const planWarnings = planResult.plan.warnings?.filter(Boolean) ?? [];
     const toyVehicle = isToyVehiclePrompt(geometryPrompt);
+    const toyHeli = isToyHelicopterPrompt(geometryPrompt);
+    const toyLibrary = toyVehicle || toyHeli;
     const forceOpenScadFallback =
-      toyVehicle || (pipeline === 'mesh' && !credentials.meshConfigured);
-    // Toy cars: never Trellis/mesh — always OpenSCAD library template (solid coupe).
-    const generationMode = toyVehicle
+      toyLibrary || (pipeline === 'mesh' && !credentials.meshConfigured);
+    // Toy cars / helicopters: never Trellis/mesh — always OpenSCAD library template.
+    const generationMode = toyLibrary
       ? 'library'
       : forceOpenScadFallback
         ? 'openscad'
@@ -656,7 +662,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         plannerTech
       );
     const plannerMatchesUser =
-      !toyVehicle &&
+      !toyLibrary &&
       plannerTech.length > 20 &&
       userTokens.some((t) => plannerTech.toLowerCase().includes(t)) &&
       !plannerPolluted;
@@ -667,9 +673,15 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       'Match ONLY this subject — do not invent furniture, drawers, cabinets, bathtubs, tubs, basins, or unrelated objects.',
     ].join('\n');
 
-    const toyScad = toyVehicle ? buildToyVehicleScad(geometryPrompt) : undefined;
-    const jobPrompt = toyVehicle
-      ? `TOY VEHICLE (library template): ${geometryPrompt}`
+    const toyScad = toyHeli
+      ? buildToyHelicopterScad(geometryPrompt)
+      : toyVehicle
+        ? buildToyVehicleScad(geometryPrompt)
+        : undefined;
+    const jobPrompt = toyHeli
+      ? `TOY HELICOPTER (library template): ${geometryPrompt}`
+      : toyVehicle
+        ? `TOY VEHICLE (library template): ${geometryPrompt}`
       : forceOpenScadFallback && pipeline === 'mesh'
       ? [
           `USER OBJECT (exact): ${geometryPrompt}`,
@@ -693,13 +705,16 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       user: geometryPrompt.slice(0, 120),
       mode: generationMode,
       toyVehicle,
+      toyHeli,
       meshConfigured: credentials.meshConfigured,
     });
 
     const userIdResult = await caval.billingUserId?.();
-    const projectType = toyVehicle
-      ? 'vehicle'
-      : inferCadProjectType(geometryPrompt, project.spec);
+    const projectType = toyHeli
+      ? 'helicopter'
+      : toyVehicle
+        ? 'vehicle'
+        : inferCadProjectType(geometryPrompt, project.spec);
 
     let created;
     let createAttempt = 0;
@@ -712,7 +727,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           cavalId: userIdResult?.userId,
           conversationHistory: planMessages,
           previousScad: toyScad,
-          previousMeshTaskId: toyVehicle || forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
+          previousMeshTaskId: toyLibrary || forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
           generationMode,
           meshPrompt: generationMode === 'mesh' ? meshPrompt.slice(0, 12_000) : undefined,
           quality: 'standard',
@@ -744,9 +759,11 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     const jobId = created.jobId;
     const status = (created.status as CadJobStatus) ?? 'queued';
     const meshTaskId = (created as { meshTaskId?: string | null }).meshTaskId ?? null;
-    const statusMessage = toyVehicle
-      ? 'Template mașină solidă (OpenSCAD) — fără Trellis…'
-      : forceOpenScadFallback
+    const statusMessage = toyHeli
+      ? 'Template elicopter jucărie (OpenSCAD) — fără Trellis…'
+      : toyVehicle
+        ? 'Template mașină solidă (OpenSCAD) — fără Trellis…'
+        : forceOpenScadFallback
         ? 'TRELLIS/Meshy indisponibil — generez previzualizare 3D cu OpenSCAD…'
         : planWarnings.length > 0
           ? planWarnings.join(' · ')

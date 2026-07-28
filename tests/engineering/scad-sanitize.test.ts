@@ -83,3 +83,24 @@ translate([-40,-45,0]) rotate([90,0,0]) cylinder(h=12,d=28,center=true);
     expect(check.reason).toMatch(/bathtub|SOLID/i);
   });
 });
+
+import {
+  buildToyHelicopterScad,
+  isToyHelicopterPrompt,
+} from "../../ai/engineering/toy-helicopter-scad";
+
+describe("toy helicopter template", () => {
+  it("detects elicopter prompts", () => {
+    expect(isToyHelicopterPrompt("elicopter de jucarie")).toBe(true);
+    expect(isToyHelicopterPrompt("toy helicopter")).toBe(true);
+    expect(isToyHelicopterPrompt("masina ferrari")).toBe(false);
+  });
+
+  it("builds heli with fuselage, rotor, boom, skids", () => {
+    const scad = buildToyHelicopterScad("elicopter de jucarie");
+    expect(scad).toMatch(/toy_helicopter|fuselage|main_rotor|landing_skids|tail_boom/);
+    expect(scad.toLowerCase()).toContain("not a single wedge");
+    expect(validateScadSource(scad).ok).toBe(true);
+    expect(validateScadMatchesIntent("elicopter de jucarie", scad).ok).toBe(true);
+  });
+});

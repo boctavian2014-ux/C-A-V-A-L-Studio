@@ -3,8 +3,17 @@ import {
   buildToyVehicleScad,
   isToyVehiclePrompt,
 } from "../../ai/engineering/toy-vehicle-scad";
+import {
+  buildToyHelicopterScad,
+  isToyHelicopterPrompt,
+} from "../../ai/engineering/toy-helicopter-scad";
 
-export { buildToyVehicleScad, isToyVehiclePrompt };
+export {
+  buildToyVehicleScad,
+  isToyVehiclePrompt,
+  buildToyHelicopterScad,
+  isToyHelicopterPrompt,
+};
 
 const PROJECT_CAD_GUIDANCE: Record<string, string> = {
   drone:
