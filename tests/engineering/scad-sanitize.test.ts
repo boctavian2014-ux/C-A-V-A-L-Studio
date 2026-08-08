@@ -96,10 +96,12 @@ describe("toy helicopter template", () => {
     expect(isToyHelicopterPrompt("masina ferrari")).toBe(false);
   });
 
-  it("builds heli with fuselage, rotor, boom, skids", () => {
+  it("builds heli with fuselage, cabin, long rotor, boom, skids", () => {
     const scad = buildToyHelicopterScad("elicopter de jucarie");
-    expect(scad).toMatch(/toy_helicopter|fuselage|main_rotor|landing_skids|tail_boom/);
+    expect(scad).toMatch(/toy_helicopter|fuselage|cabin|main_rotor|landing_skids|tail_boom/);
+    expect(scad).toMatch(/blade_len\s*=\s*78/);
     expect(scad.toLowerCase()).toContain("not a single wedge");
+    expect(scad.toLowerCase()).toContain("library template");
     expect(validateScadSource(scad).ok).toBe(true);
     expect(validateScadMatchesIntent("elicopter de jucarie", scad).ok).toBe(true);
   });
