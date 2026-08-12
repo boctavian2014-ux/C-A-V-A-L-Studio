@@ -1,6 +1,6 @@
 # Release security status — post-remediere (2026-08-12)
 
-**HEAD documentat:** `cc124d8` plus acest fișier pe `main`  
+**HEAD documentat:** `cc124d8` plus acest fișier pe `main`
 **Baseline pre-remediere (nu descrie starea actuală):** `AUDIT-CAVALLO-COMPLET.md` (2026-07-19, commit `defb984`, **fără remedieri**). Nu intra în release; păstrează-l local ca referință istorică.
 
 Acest document înlocuiește auditul vechi ca **sursă de adevăr pentru starea de securitate după loturile A–C5, P1–P3, Q1 și SEC-IPC-WS-BINDING-001**.

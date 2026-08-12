@@ -1,6 +1,6 @@
 # IPC Trust Audit S1 (Pasul 3) — read-only
 
-**Date:** Aug 2026  
+**Date:** Aug 2026
 **Scope:** read-only inventory of IPC handlers — no remediations applied.
 
 ## Scale Critic / Mare / Medie / Scăzut
@@ -187,8 +187,8 @@ Grouping only — no code solutions.
 **Lot A residual risk (symlink/junction):** `resolveSandboxedWorkspacePath` uses realpath to block escapes through links that point outside the workspace. Live link coverage in `tests/security/lot-a-filesystem-ipc.test.ts` follows two policies only:
 
 - **Policy A:** Platform supports symlink/junction; creation fails for a reason *other than* insufficient privileges → test **fails** (never skip).
-- **Policy B:** Insufficient privileges (typical Windows without admin/Developer Mode) → test **may skip** the live-link assertion, but **must** emit  
-  `[COVERAGE-GAP] symlink/junction test skipped: insufficient privileges`  
+- **Policy B:** Insufficient privileges (typical Windows without admin/Developer Mode) → test **may skip** the live-link assertion, but **must** emit
+  `[COVERAGE-GAP] symlink/junction test skipped: insufficient privileges`
   via `console.error` (never silent `catch { return }`). Simulated `..` escape is still asserted.
 
 **CI treatment:** Prefer runners that can create junctions/symlinks so Policy B does not fire. If Policy B appears in logs, treat it as a **visible coverage-gap warning** (search logs for `[COVERAGE-GAP]`), not as full symlink-escape proof. Policy A failures must fail the job. Silent skip is rejected.

@@ -71,7 +71,7 @@ Aceste patru puncte sunt **input obligatoriu** din auditurile P2 / limitările d
 
 ## Faza 1 — REZULTAT AUDIT (2026-08-12, read-only)
 
-**Status ticket:** Deschis — audit Faza 1 **completat**; **așteaptă confirmare plan Faza 2**.  
+**Status ticket:** Deschis — audit Faza 1 **completat**; **așteaptă confirmare plan Faza 2**.
 **P2:** rămâne închis. `operation-registry` **nu** previne create duplicate (doar owner + cancel-once după ce există `jobId`).
 
 ### Verdict scurt
@@ -131,47 +131,47 @@ Double Stop Preview: `cancelCadJob` → main `shouldIssueCadCancelOnce` → al 2
 
 ### Contract propus — Faza 2 (așteaptă confirmare)
 
-**A. Lock atomic (main, obligatoriu)**  
-- Acquire **în main** înainte de orice `cad:createJob` / retry path.  
-- Cheie: `workspaceRoot + senderId` (dacă workspace gol: `senderId` + bound workspace din session).  
-- Duplicate → `{ ok:true, status:'cad_job_in_progress', jobId, operationId }` **fără** job nou.  
+**A. Lock atomic (main, obligatoriu)**
+- Acquire **în main** înainte de orice `cad:createJob` / retry path.
+- Cheie: `workspaceRoot + senderId` (dacă workspace gol: `senderId` + bound workspace din session).
+- Duplicate → `{ ok:true, status:'cad_job_in_progress', jobId, operationId }` **fără** job nou.
 - Retry folosește același lock (replace doar după cancel terminal sau policy supersede explicită).
 
-**B. Lifecycle lock**  
-- Release **exact o dată** la: success / fail / cancel ACK / timeout / cleanup.  
-- Stale completion **nu** eliberează lock-ul unui job/operation nou (epoch / operationId).  
+**B. Lifecycle lock**
+- Release **exact o dată** la: success / fail / cancel ACK / timeout / cleanup.
+- Stale completion **nu** eliberează lock-ul unui job/operation nou (epoch / operationId).
 - Lease/watchdog pentru job blocat (eliberare + status failed).
 
-**C. OpenSCAD (M1)**  
-- Kill real child/process tree pe cancel (nu doar status).  
-- Cleanup tmp controlat; mutex release.  
+**C. OpenSCAD (M1)**
+- Kill real child/process tree pe cancel (nu doar status).
+- Cleanup tmp controlat; mutex release.
 - `isJobAborted` persistent; no-op DELETE pe terminal; nu scrie `done` după abort.
 
-**D. UI**  
-- Disable imediat create/retry la click (optimistic) + reconciliere pe `cad_job_in_progress`.  
-- **Stop vizibil** în CadActions (și panel) pentru toate stările busy (`cadBusy\|batchBusy`), nu doar Preview+stlUrl / AI loading.  
-- clear preview: după ACK terminal **sau** stare explicită `stale`/`cancelling`/`cancel_failed`.  
+**D. UI**
+- Disable imediat create/retry la click (optimistic) + reconciliere pe `cad_job_in_progress`.
+- **Stop vizibil** în CadActions (și panel) pentru toate stările busy (`cadBusy\|batchBusy`), nu doar Preview+stlUrl / AI loading.
+- clear preview: după ACK terminal **sau** stare explicită `stale`/`cancelling`/`cancel_failed`.
 - Mesaje ACK ok/failed/skipped pe path CAD Stop.
 
-**E. Batch DELETE (M3)**  
-- Policy: **blochează** delete/clear total cât job part activ, **sau** cancel part + coadă; **sau** confirm dialog.  
-- La abort batch: `cancelJob(activePart.jobId)` once.  
+**E. Batch DELETE (M3)**
+- Policy: **blochează** delete/clear total cât job part activ, **sau** cancel part + coadă; **sau** confirm dialog.
+- La abort batch: `cancelJob(activePart.jobId)` once.
 - Fără stare parțială tăcută (raport failed/skipped pe piese).
 
-**F. Teste (mock, fără cloud/OpenSCAD real unde e posibil)**  
-1. Două create simultane → un singur job.  
-2. create + retry simultan → un singur job.  
-3. Policy workspace/sender.  
-4. Lock release pe success/fail/timeout/cancel.  
-5. Stale completion nu eliberează job nou.  
-6. Stop cu cadBusy; cancel trimis o dată.  
-7. Mid-kill OpenSCAD: tmp curat + lock free (unit cu mock spawn).  
-8. Batch delete/cancel cu job activ respectă policy.  
+**F. Teste (mock, fără cloud/OpenSCAD real unde e posibil)**
+1. Două create simultane → un singur job.
+2. create + retry simultan → un singur job.
+3. Policy workspace/sender.
+4. Lock release pe success/fail/timeout/cancel.
+5. Stale completion nu eliberează job nou.
+6. Stop cu cadBusy; cancel trimis o dată.
+7. Mid-kill OpenSCAD: tmp curat + lock free (unit cu mock spawn).
+8. Batch delete/cancel cu job activ respectă policy.
 9. Preview nu dispare prematur înainte de ACK (sau e `stale`).
 
 ### Explicit non-goals Faza 2 (dacă confirmi)
 
-- Redeschiderea P2 / schimbarea contractului `cancelOperation` dincolo de hook-ul pe lock CAD.  
+- Redeschiderea P2 / schimbarea contractului `cancelOperation` dincolo de hook-ul pe lock CAD.
 - Auto-start CAD după AI.
 
 ### Consolidare audituri paralele (fără a redeschide Faza 1)
