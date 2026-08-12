@@ -176,7 +176,7 @@ function fixFashionWebRootImports(workspaceRoot: string): string[] {
     if (!ent.isFile() || !/\.(ts|tsx)$/.test(ent.name)) continue;
     const rel = `web/src/${ent.name}`;
     const abs = joinRoot(workspaceRoot, rel);
-    let content = fs.readFileSync(abs, 'utf8');
+    const content = fs.readFileSync(abs, 'utf8');
     const next = content.replace(/from\s+(['"])\.\.\/types\1/g, 'from $1./types$1');
     if (next !== content) {
       fs.writeFileSync(abs, next, 'utf8');

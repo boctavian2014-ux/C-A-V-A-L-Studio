@@ -617,7 +617,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     attachedFiles, addAttachments, removeAttachment,
     prepareState, prepareInFlight, chatPrepareDraft, clearPrepareState,
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
-    agentMode, modelLabels, apiKeys,
+    agentMode, apiKeys,
     modeSwitchNotice, clearModeSwitchNotice,
     verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
     includeMode, setIncludeMode,

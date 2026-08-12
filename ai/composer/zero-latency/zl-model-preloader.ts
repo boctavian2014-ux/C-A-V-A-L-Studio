@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { preloadManager } from '../../preload/preload-manager';
 import { resolveModelSelection } from '../../models/auto-router';
 import type { ModelSelectionId } from '../../models/model-catalog';

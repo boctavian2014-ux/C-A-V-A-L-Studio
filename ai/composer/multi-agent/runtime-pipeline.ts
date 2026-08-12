@@ -47,7 +47,7 @@ import { partitionTasksByUiPhase, hasUiSpecInPrompt } from '../ui-spec-detector'
 import { applyPipelineScaffold } from '../scaffold-apply-node';
 import { ensureMcpServersReady } from '../../tools/tool-runtime';
 
-import { rememberCheckpoint, getCheckpoint, loadCheckpointFromDisk, clearCheckpoint } from './pipeline-checkpoint';
+import { getCheckpoint, loadCheckpointFromDisk, clearCheckpoint } from './pipeline-checkpoint';
 
 import { PipelineMemoryEngine } from './pipeline-memory';
 
@@ -565,8 +565,6 @@ export async function runCavalloMultiAgentPipeline(
     markStage(stages, 'modelOrch', 'done', arenaModels.summary.slice(0, 80));
     state.roleModelMap = arenaModels.roleModelMap;
 
-    const mergeModel = stageModelForRole('merge', arenaModels, model);
-    const supervisorModel = stageModelForRole('supervisor', arenaModels, model);
     const composeModelId = stageModelForRole('compose', arenaModels, model);
 
     markStage(stages, 'orchestrator', 'active');

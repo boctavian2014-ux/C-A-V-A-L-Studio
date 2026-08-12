@@ -8,7 +8,6 @@ const supabaseClientOptions = (): SupabaseClientOptions<"public"> => {
   };
   try {
     // Node < 22 needs ws for @supabase/realtime-js (Railway CAD server)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const ws = require("ws") as NonNullable<SupabaseClientOptions<"public">["realtime"]>["transport"];
     options.realtime = { transport: ws };
   } catch {

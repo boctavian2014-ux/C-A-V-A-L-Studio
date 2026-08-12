@@ -3,7 +3,7 @@ import type {
   CadConstraints,
   CadPlanContext,
 } from '../../engineering/cad-server/types';
-import type { BuildFile, EngProject, SpecData } from './engineering-generator';
+import type { EngProject, SpecData } from './engineering-generator';
 
 /** Engineering plan passed from generator / AI panel into CAD pipeline. */
 export type EngineeringPlan = EngProject;

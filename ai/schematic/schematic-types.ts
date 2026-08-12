@@ -212,9 +212,7 @@ export function computeGraphDelta(
   const beforeEdgeIds = new Set(before.edges.map((e) => e.id));
   const afterEdgeIds = new Set(after.edges.map((e) => e.id));
 
-  const afterNodeMap = new Map(after.nodes.map((n) => [n.id, n]));
   const beforeNodeMap = new Map(before.nodes.map((n) => [n.id, n]));
-  const afterEdgeMap = new Map(after.edges.map((e) => [e.id, e]));
   const beforeEdgeMap = new Map(before.edges.map((e) => [e.id, e]));
 
   return {

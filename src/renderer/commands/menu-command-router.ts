@@ -9,7 +9,6 @@ import {
   dispatchTerminalNew,
   dispatchTerminalPanelTab,
   dispatchTerminalSplit,
-  dispatchTerminalToggle,
   dispatchRunInTerminal,
 } from '../terminal/terminal-events';
 import { revealProblem, useProblemsStore } from '../store/problems-store';
@@ -37,7 +36,7 @@ const handlers: Record<MenuCommandId, Handler> = {
     useEditorStore.getState().createUntitledTab();
   },
   save: (ctx) => ctx.saveActiveTab(),
-  'save-as': async (ctx) => {
+  'save-as': async () => {
     const { activeTabId, tabs } = useEditorStore.getState();
     const tab = tabs.find((t) => t.id === activeTabId);
     const caval = window.caval;

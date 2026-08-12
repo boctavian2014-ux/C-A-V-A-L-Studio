@@ -1,5 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { pipelineEventBus } from "../ai/pipeline/pipeline-event-bus";
+import { oneShotShellInvocation } from "../src/main/powershell-shell";
+import { sanitizeEnvForTerminal } from "../src/main/subprocess-env";
+import { redactSensitiveCommandOutput } from "../src/shared/command-output-redaction";
 import { MobileBuildAgent } from "./mobile-build-agent";
 import { MobileBuildService } from "./mobile-build-service";
 import { mobileBuildStore } from "./mobile-build-store";
@@ -11,6 +14,9 @@ export interface MobileBuildRunnerCallbacks {
   onStep: (stepId: string, status: "running" | "done" | "error") => void;
   onComplete: (ok: boolean) => void;
 }
+
+const STEP_TIMEOUT_MS = 600_000;
+const MAX_OUTPUT_CHARS = 12_000;
 
 export class MobileBuildRunner {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -36,6 +42,7 @@ export class MobileBuildRunner {
 
   async run(platform: MobilePlatform, workspaceRoot: string, callbacks: MobileBuildRunnerCallbacks): Promise<{ ok: boolean }> {
     this.cancelled = false;
+    // Commands built exclusively in main service — not from renderer
     const commands = this.service.getCommands(platform, workspaceRoot);
     const logs: string[] = [];
 
@@ -63,19 +70,20 @@ export class MobileBuildRunner {
       });
 
       const result = await this.runCommand(entry.command, workspaceRoot, (line) => {
-        logs.push(line);
-        mobileBuildStore.pushLog(line);
-        callbacks.onData(line);
+        const redacted = redactSensitiveCommandOutput(line);
+        logs.push(redacted);
+        mobileBuildStore.pushLog(redacted);
+        callbacks.onData(redacted);
 
-        const url = this.service.extractBuildUrl(line);
+        const url = this.service.extractBuildUrl(redacted);
         if (url) {
           mobileBuildStore.setBuildUrl(url);
         }
 
-        const detected = this.agent.detectError(line);
+        const detected = this.agent.detectError(redacted);
         if (detected?.matched) {
-          void this.agent.analyzeWithAI(logs, line).then((analysis) => {
-            mobileBuildStore.setError(line, analysis);
+          void this.agent.analyzeWithAI(logs, redacted).then((analysis) => {
+            mobileBuildStore.setError(redacted, analysis);
             callbacks.onError(analysis);
           });
         }
@@ -88,7 +96,7 @@ export class MobileBuildRunner {
           type: "tool.result",
           id: toolCallId,
           success: false,
-          output: { stepId: entry.stepId },
+          output: { stepId: entry.stepId, timedOut: result.timedOut },
           timestamp: Date.now()
         });
         pipelineEventBus.emit({
@@ -122,36 +130,49 @@ export class MobileBuildRunner {
   async runFix(command: string, workspaceRoot: string, callbacks: Pick<MobileBuildRunnerCallbacks, "onData" | "onComplete">): Promise<{ ok: boolean }> {
     callbacks.onData(`> ${command}`);
     const result = await this.runCommand(command, workspaceRoot, (line) => {
-      mobileBuildStore.pushLog(line);
-      callbacks.onData(line);
+      const redacted = redactSensitiveCommandOutput(line);
+      mobileBuildStore.pushLog(redacted);
+      callbacks.onData(redacted);
     });
     callbacks.onComplete(!result.failed);
-    return { ok: !result.failed };
+    return { ok: !result.failed, timedOut: result.timedOut } as { ok: boolean };
   }
 
   private runCommand(
     command: string,
     workspaceRoot: string,
     onLine: (line: string) => void
-  ): Promise<{ failed: boolean; code: number | null }> {
+  ): Promise<{ failed: boolean; code: number | null; timedOut?: boolean }> {
     return new Promise((resolve) => {
-      const shell = process.platform === "win32" ? "powershell.exe" : "bash";
-      const shellArgs = process.platform === "win32"
-        ? ["-NoProfile", "-Command", command]
-        : ["-lc", command];
+      const { file: shell, args: shellArgs } = oneShotShellInvocation(command);
 
       this.process = spawn(shell, shellArgs, {
         cwd: workspaceRoot,
-        env: process.env,
-        shell: false
+        env: sanitizeEnvForTerminal(),
+        shell: false,
+        windowsHide: true,
       });
 
       let failed = false;
+      let timedOut = false;
+      let outputChars = 0;
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        failed = true;
+        if (this.process && !this.process.killed) this.process.kill();
+      }, STEP_TIMEOUT_MS);
 
       const handleChunk = (chunk: Buffer | string) => {
         const text = chunk.toString();
         for (const line of text.split(/\r?\n/)) {
-          if (line.trim()) onLine(line);
+          if (!line.trim()) continue;
+          outputChars += line.length;
+          if (outputChars > MAX_OUTPUT_CHARS) {
+            onLine("… (output truncated)");
+            return;
+          }
+          onLine(line);
         }
       };
 
@@ -162,16 +183,18 @@ export class MobileBuildRunner {
       });
 
       this.process.on("error", (error) => {
+        clearTimeout(timer);
         failed = true;
-        onLine(`Process error: ${error.message}`);
+        onLine(`Process error: ${redactSensitiveCommandOutput(error.message)}`);
         this.process = null;
-        resolve({ failed: true, code: null });
+        resolve({ failed: true, code: null, timedOut });
       });
 
       this.process.on("close", (code) => {
+        clearTimeout(timer);
         this.process = null;
         if (code !== 0) failed = true;
-        resolve({ failed, code });
+        resolve({ failed, code, timedOut });
       });
     });
   }

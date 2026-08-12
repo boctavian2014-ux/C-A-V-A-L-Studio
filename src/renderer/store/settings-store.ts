@@ -16,6 +16,7 @@ export type SettingsSection =
   | 'ai'
   | 'arena'
   | 'cad-cloud'
+  | 'health'
   | 'shortcuts'
   | 'about';
 

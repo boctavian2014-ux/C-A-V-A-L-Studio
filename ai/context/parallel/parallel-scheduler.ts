@@ -1,7 +1,7 @@
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 
+import { resolveBundledWorkerPath } from "../../../src/main/resolve-worker-path";
 import { compareTasks } from "./parallel-priority";
 import type {
   ParallelSchedulerStats,
@@ -33,10 +33,18 @@ export class ParallelScheduler {
 
   constructor(
     workerCount = Math.min(8, Math.max(4, Math.ceil((globalThis.navigator?.hardwareConcurrency ?? 4) / 2))),
-    private readonly workerPath = path.join(__dirname, "parallel-worker.js")
+    private readonly workerPath = resolveBundledWorkerPath("parallel-worker.js")
   ) {
-    for (let index = 0; index < workerCount; index += 1) {
-      this.workers.push(this.createWorker(index));
+    try {
+      for (let index = 0; index < workerCount; index += 1) {
+        this.workers.push(this.createWorker(index));
+      }
+    } catch (error) {
+      // Never block Electron window boot on a bad worker path (e.g. relative __dirname from webpack).
+      console.error(
+        `${PARALLEL_LOG_PREFIX} worker pool init failed (${this.workerPath}):`,
+        error instanceof Error ? error.message : error
+      );
     }
   }
 

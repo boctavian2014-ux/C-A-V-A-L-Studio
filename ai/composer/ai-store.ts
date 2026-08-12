@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { AIMessage, ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
-import { apiKeysToSecrets, BYOK_TO_SECRET, isPersistableSecret } from '../models/api-secrets';
+import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
@@ -20,7 +20,6 @@ import {
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
-import { buildScaffoldContinueMessage } from '../prompts/build-continue';
 import { isArenaContinueRequest } from '../prompts/arena-continue';
 import { isAgenticRepairRequest, buildAgenticRepairMessage } from '../prompts/agentic-repair';
 import {
@@ -78,10 +77,9 @@ import {
   isFashionMatchingEngineRequest,
   seedFashionForRequest,
 } from './fashion-matching-seed';
-import { getFashionFullStackScaffoldFiles } from '../scaffolds/fashion-matching/fullstack-manifest';
 import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/manifest';
 import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
-import { stripArenaChatNoise, formatArenaReasoning, summarizeForChatPanel, formatChatPanelSummary } from './chat-display';
+import { stripArenaChatNoise, formatArenaReasoning } from './chat-display';
 import {
   buildEarlyArenaMessage,
   buildFinalRecap,
@@ -327,7 +325,12 @@ interface CavalWindow {
     }>;
     secretsGet?: () => Promise<{
       ok: boolean;
-      secrets?: Record<string, string>;
+      providers?: Array<{
+        provider: string;
+        configured: boolean;
+        source: 'environment' | 'secure-storage' | 'none';
+        lastValidatedAt: string | null;
+      }>;
       configured?: Record<string, boolean>;
     }>;
     secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
@@ -572,6 +575,7 @@ async function applyDiffToWorkspace(diff: DetectedDiff): Promise<{ ok: boolean; 
 
   const writeResult = await window.caval?.fs?.writeFile?.(tab.path, newContent);
   if (writeResult && !writeResult.ok) {
+    updateTabContent(tab.id, previousContent);
     console.error('[ai-store] applyDiffToWorkspace write failed:', writeResult.error);
     return { ok: false };
   }
@@ -790,12 +794,16 @@ export const useAIStore = create<AIStore>()(
           if (BYOK_TO_SECRET[byokKey]) {
             if (trimmed && isPersistableSecret(trimmed)) {
               void persistSingleByokKey(byokKey, trimmed);
-              // UI keeps marker after save so plaintext is not held in store long-term
-              apiKeys[provider] = trimmed;
+              // Never keep plaintext in the renderer store — only presence marker.
+              apiKeys[provider] = CONFIGURED_MARKER;
             }
             // Empty key: do not wipe disk — user must clear explicitly elsewhere
           } else {
             void persistApiKeys(apiKeys);
+            // Non-BYOK provider keys are persisted via secretsSet; store markers only.
+            if (trimmed && isPersistableSecret(trimmed)) {
+              apiKeys[provider] = CONFIGURED_MARKER;
+            }
           }
           return { apiKeys };
         });
@@ -1021,7 +1029,6 @@ export const useAIStore = create<AIStore>()(
 
         let {
           selectedModel,
-          apiKeys,
           messages,
           includeMode,
           agentMode,
@@ -1039,7 +1046,6 @@ export const useAIStore = create<AIStore>()(
           get().newThread();
           ({
             selectedModel,
-            apiKeys,
             messages,
             includeMode,
             agentMode,
@@ -1060,7 +1066,6 @@ export const useAIStore = create<AIStore>()(
             get().setAgentMode(resolved.mode);
             ({
               selectedModel,
-              apiKeys,
               messages,
               includeMode,
               agentMode,
@@ -1075,7 +1080,6 @@ export const useAIStore = create<AIStore>()(
           }
         }
 
-        const modeDef = getAgentMode(agentMode);
         const attachmentsSnapshot = [...attachedFiles];
         let apiPrompt = userText;
         let fashionSeeded = false;
@@ -1488,7 +1492,7 @@ export const useAIStore = create<AIStore>()(
               }
             }
 
-            let verifyFailed = devToolsForRecap?.verify?.commands?.find((c) => !c.ok);
+            const verifyFailed = devToolsForRecap?.verify?.commands?.find((c) => !c.ok);
             const recapPatch: Partial<ChatMessage> = { writtenFiles };
             if (capturedRecapMeta) {
               recapPatch.pipelineRecapMeta = capturedRecapMeta;
@@ -2267,9 +2271,9 @@ export const useAIStore = create<AIStore>()(
         }
         if (state.selectedModel === 'caval-auto/free') {
           void getCaval()?.secretsGet?.().then((res) => {
-            const secrets = { ...(res?.secrets ?? {}) };
+            const secrets: Record<string, string> = {};
             for (const [key, isSet] of Object.entries(res?.configured ?? {})) {
-              if (isSet && !secrets[key]?.trim()) secrets[key] = '__configured__';
+              if (isSet) secrets[key] = '__configured__';
             }
             if (hasOpenRouterKey(undefined, secrets)) {
               useAIStore.setState({ selectedModel: 'caval-auto/balanced' });

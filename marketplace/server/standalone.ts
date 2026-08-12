@@ -1,4 +1,4 @@
-import { createServer, marketplaceRegistry, seedMarketplace } from "./index";
+import { createServer, seedMarketplace } from "./index";
 
 const port = Number(process.env.CAVAL_MARKETPLACE_PORT ?? 8787);
 

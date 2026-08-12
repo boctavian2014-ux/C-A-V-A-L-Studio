@@ -477,6 +477,11 @@ export function GitPanel() {
             </svg>
             <span style={{ flex: 1, textAlign: 'left', fontFamily: "'JetBrains Mono', monospace" }}>
               {branch || '—'}
+              {upstream ? (
+                <span style={{ color: 'var(--caval-text-muted)', fontWeight: 400 }}>
+                  {' '}→ {upstream}
+                </span>
+              ) : null}
             </span>
             {/* Ahead/behind */}
             {(ahead > 0 || behind > 0) && (

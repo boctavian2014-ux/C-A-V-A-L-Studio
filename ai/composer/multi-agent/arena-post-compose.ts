@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 
 import { runCavaloConsistencyScan, type ConsistencyScanResult } from '../consistency-engine';
 import { applyPipelineScaffold } from '../scaffold-apply-node';

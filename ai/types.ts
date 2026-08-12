@@ -56,6 +56,8 @@ export interface ModelRequest {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** User/UI abort — merged with provider timeout in ModelRouter. */
+  signal?: AbortSignal;
   metadata?: {
     workspaceRoot?: string;
     requestId?: string;

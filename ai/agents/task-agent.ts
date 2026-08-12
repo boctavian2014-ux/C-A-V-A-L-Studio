@@ -1,5 +1,5 @@
 import { AIClient } from "../ai-client";
-import type { ModelRequest, ModelResponse } from "../types";
+import type { ModelResponse } from "../types";
 
 export interface TaskAgentInput {
   objective: string;

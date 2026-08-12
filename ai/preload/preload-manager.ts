@@ -1,7 +1,7 @@
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 
+import { resolveBundledWorkerPath } from "../../src/main/resolve-worker-path";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { pipelineEventBus } from "../../components/ui/logicflow/logicflow-pipeline-emitter";
 import { ModelRouter } from "../model-router";
@@ -37,7 +37,7 @@ const OLLAMA_BASE =
 const DEFAULT_OPTIONS: Required<PreloadManagerOptions> = {
   maxConcurrentForeground: 2,
   maxConcurrentBackground: 2,
-  workerPath: path.join(__dirname, "preload-worker.js"),
+  workerPath: resolveBundledWorkerPath("preload-worker.js"),
   enableWorker: true,
 };
 
@@ -591,5 +591,5 @@ export class PreloadManager {
 }
 
 export const preloadManager = new PreloadManager({
-  workerPath: path.join(__dirname, "preload-worker.js"),
+  workerPath: resolveBundledWorkerPath("preload-worker.js"),
 });

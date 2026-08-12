@@ -1,4 +1,4 @@
-import type { ComposerPatchFile, ComposerPatchSet } from "../composer/types";
+import type { ComposerPatchSet } from "../composer/types";
 
 export type ReviewDecision = "pending" | "accepted" | "rejected";
 

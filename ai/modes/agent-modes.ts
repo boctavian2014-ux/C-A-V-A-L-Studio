@@ -121,21 +121,21 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
         name: "Filesystem",
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
-        enabled: true,
+        enabled: false,
       },
       {
         id: "git",
         name: "Git",
         command: "uvx",
         args: ["mcp-server-git", "--repository", "."],
-        enabled: true,
+        enabled: false,
       },
       {
         id: "fetch",
         name: "Fetch",
         command: "uvx",
         args: ["mcp-server-fetch"],
-        enabled: true,
+        enabled: false,
       },
       {
         id: "memory",
@@ -174,7 +174,7 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
           GITHUB_READ_ONLY: "1",
           GITHUB_TOOLSETS: "context,repos,issues,pull_requests,code_security",
         },
-        enabled: true,
+        enabled: false,
       },
       {
         id: "semgrep",

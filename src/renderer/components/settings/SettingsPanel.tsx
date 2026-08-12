@@ -16,6 +16,7 @@ import {
   PUBLISHER_UIC,
 } from '../../../shared/publisher-legal';
 import { formatCadDualHealth } from '../../../../ai/engineering/cad-dual-health';
+import { ProjectHealthPanel } from '../health/ProjectHealthPanel';
 
 const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
   {
@@ -64,6 +65,15 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinejoin="round" />
         <path d="M2 17l10 5 10-5M2 12l10 5 10-5" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    id: 'health',
+    label: 'Project Health',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
   },
@@ -397,11 +407,19 @@ function SectionCadCloud() {
   const saveSettings = async () => {
     const res = await window.caval.settingsLoad?.();
     const prev = res?.settings ?? {};
+    // URL only via settings-save — API keys go through secrets-set exclusively.
     await window.caval.settingsSave?.({
-      ...prev,
+      ...Object.fromEntries(
+        Object.entries(prev).filter(
+          ([k]) => !/\.apiKey$/i.test(k) && !/api[_-]?key|token|secret/i.test(k)
+        )
+      ),
       'cad.apiUrl': apiUrl.trim(),
-      'cad.apiKey': apiKey.trim(),
     });
+    if (apiKey.trim()) {
+      await window.caval.secretsSet?.({ CAD_API_KEY: apiKey.trim() });
+      setApiKey(''); // wipe plaintext from React state immediately after save
+    }
   };
 
   const testConnection = async () => {
@@ -556,6 +574,10 @@ function SectionShortcuts() {
   );
 }
 
+function SectionHealth() {
+  return <ProjectHealthPanel />;
+}
+
 function SectionAbout() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -640,6 +662,7 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
       case 'ai': return <SectionAi />;
       case 'arena': return <SectionArena />;
       case 'cad-cloud': return <SectionCadCloud />;
+      case 'health': return <SectionHealth />;
       case 'shortcuts': return <SectionShortcuts />;
       case 'about': return <SectionAbout />;
       default: return <SectionGeneral />;

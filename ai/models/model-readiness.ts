@@ -79,16 +79,15 @@ export async function resolveSecretsFromClient(): Promise<Record<string, string>
   const w = window as {
     caval?: {
       secretsGet?: () => Promise<{
-        secrets?: Record<string, string>;
         configured?: Record<string, boolean>;
       }>;
     };
   };
   const secretsRes = await w.caval?.secretsGet?.().catch(() => undefined);
-  const secrets = { ...(secretsRes?.secrets ?? {}) };
-  // Map configured flags to presence markers for readiness checks (never real key material).
+  const secrets: Record<string, string> = {};
+  // Map configured flags to presence markers only — never real key material.
   for (const [key, isSet] of Object.entries(secretsRes?.configured ?? {})) {
-    if (isSet && !secrets[key]?.trim()) {
+    if (isSet) {
       secrets[key] = '__configured__';
     }
   }

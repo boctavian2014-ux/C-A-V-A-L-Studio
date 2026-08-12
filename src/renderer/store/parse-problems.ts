@@ -32,7 +32,7 @@ export function parseProblemsFromOutput(output: string, source = 'verify'): Prob
     const line = rawLine.trimEnd();
     if (!line.trim()) continue;
 
-    let match = TSC_LINE.exec(line) ?? ESLINT_LINE.exec(line);
+    const match = TSC_LINE.exec(line) ?? ESLINT_LINE.exec(line);
     if (match) {
       const [, file, lineStr, colStr, sev, message] = match;
       const key = `${file}:${lineStr}:${colStr}:${message}`;

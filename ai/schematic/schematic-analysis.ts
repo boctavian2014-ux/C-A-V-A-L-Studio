@@ -1,7 +1,6 @@
 import type {
   SchematicAnalysisIssue,
   SchematicGraph,
-  SchematicNode,
 } from "./schematic-types";
 
 const STRUCTURAL_EDGE_TYPES = new Set(["call", "dependency"]);

@@ -15,19 +15,20 @@ interface McpServerStatus {
   tools: string[];
   toolDetails?: McpToolInfo[];
   error?: string;
+  trustStatus?: 'local_safe' | 'allowed' | 'denied' | 'pending';
+  capabilities?: string[];
+  safety?: 'LOCAL_SAFE' | 'NETWORK_OR_WRITE';
 }
 
 export function MCPPanel() {
   const projectPath = useEditorStore((s) => s.projectPath);
   const [servers, setServers] = useState<McpServerStatus[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
-  const [autoChecked, setAutoChecked] = useState(false);
 
   const refresh = useCallback(async () => {
     const caval = (window as unknown as {
       caval?: {
         mcpList?: () => Promise<{ servers?: McpServerStatus[] }>;
-        mcpEnsureReady?: () => Promise<{ ok?: boolean; servers?: McpServerStatus[] }>;
       };
     }).caval;
     const res = await caval?.mcpList?.();
@@ -39,7 +40,6 @@ export function MCPPanel() {
       caval?: {
         mcpStop?: (id: string) => Promise<unknown>;
         mcpStart?: (id: string) => Promise<{ ok?: boolean; status?: McpServerStatus }>;
-        mcpEnsureReady?: () => Promise<unknown>;
       };
     }).caval;
     setLoading(id);
@@ -49,13 +49,15 @@ export function MCPPanel() {
     void refresh();
   };
 
-  const ensureAll = async () => {
+  /** Explicit health for already-trusted / LOCAL_SAFE servers only — no silent first-run trust. */
+  const ensureTrusted = async () => {
     const caval = (window as unknown as {
       caval?: { mcpEnsureReady?: () => Promise<{ servers?: McpServerStatus[] }> };
     }).caval;
     setLoading('all');
     const res = await caval?.mcpEnsureReady?.();
     if (res?.servers) setServers(res.servers);
+    else await refresh();
     setLoading(null);
   };
 
@@ -63,16 +65,10 @@ export function MCPPanel() {
     void refresh();
   }, [refresh, projectPath]);
 
-  useEffect(() => {
-    if (!projectPath?.trim() || autoChecked) return;
-    setAutoChecked(true);
-    void ensureAll();
-  }, [projectPath, autoChecked]);
-
   const toggle = async (id: string, running: boolean) => {
     const caval = (window as unknown as {
       caval?: {
-        mcpStart?: (id: string) => Promise<{ ok?: boolean; status?: McpServerStatus }>;
+        mcpStart?: (id: string) => Promise<{ ok?: boolean; status?: McpServerStatus; error?: string }>;
         mcpStop?: (id: string) => Promise<unknown>;
       };
     }).caval;
@@ -83,7 +79,34 @@ export function MCPPanel() {
     void refresh();
   };
 
+  const revokeTrust = async (serverId: string) => {
+    const caval = (window as unknown as {
+      caval?: {
+        mcpTrustRevoke?: (input?: { serverId?: string }) => Promise<unknown>;
+        mcpStop?: (id: string) => Promise<unknown>;
+      };
+    }).caval;
+    setLoading(serverId);
+    await caval?.mcpStop?.(serverId);
+    await caval?.mcpTrustRevoke?.({ serverId });
+    setLoading(null);
+    void refresh();
+  };
+
   const needsFolder = !projectPath?.trim();
+
+  const trustLabel = (s: McpServerStatus): string => {
+    switch (s.trustStatus) {
+      case 'local_safe':
+        return 'local-safe';
+      case 'allowed':
+        return 'trusted';
+      case 'denied':
+        return 'denied';
+      default:
+        return 'pending trust';
+    }
+  };
 
   return (
     <div style={{ padding: 12 }}>
@@ -91,11 +114,12 @@ export function MCPPanel() {
         <div style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>MCP Servers</div>
         <button
           type="button"
-          onClick={() => void ensureAll()}
+          onClick={() => void ensureTrusted()}
           disabled={loading === 'all' || needsFolder}
+          title="Start LOCAL_SAFE and already-trusted servers only"
           style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--caval-border)', background: 'none', cursor: needsFolder ? 'not-allowed' : 'pointer', color: 'var(--caval-text-muted)' }}
         >
-          {loading === 'all' ? '…' : 'Health'}
+          {loading === 'all' ? '…' : 'Start trusted'}
         </button>
         <button
           type="button"
@@ -117,13 +141,12 @@ export function MCPPanel() {
           lineHeight: 1.45,
           color: 'var(--caval-text-muted)',
         }}>
-          Deschide un folder de proiect pentru a porni serverele MCP (filesystem, git).
-          Lista de mai jos vine din <code style={{ fontSize: 10 }}>caval.jsonc</code>.
+          Deschide un folder de proiect pentru MCP. Serverele cu network/write necesită trust explicit (ca Workspace Trust).
         </div>
       )}
 
       <p style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginBottom: 10, lineHeight: 1.45 }}>
-        Configurează în <code style={{ fontSize: 10 }}>caval.jsonc</code>. Chat pornește automat serverele enabled.
+        Configurează în <code style={{ fontSize: 10 }}>caval.jsonc</code>. Network/write servers start only after you Allow once per workspace.
       </p>
 
       {servers.length === 0 && (
@@ -142,6 +165,9 @@ export function MCPPanel() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ flex: 1, fontWeight: 600 }}>{s.name}</span>
+              <span style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
+                {trustLabel(s)}
+              </span>
               <span style={{
                 fontSize: 10,
                 color: s.running ? 'var(--caval-success)' : s.error ? '#EF4444' : 'var(--caval-text-muted)',
@@ -156,6 +182,16 @@ export function MCPPanel() {
                   style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--caval-border)', background: 'none', cursor: 'pointer', color: 'var(--caval-text-muted)' }}
                 >
                   ↻
+                </button>
+              )}
+              {(s.trustStatus === 'allowed' || s.trustStatus === 'denied') && (
+                <button
+                  type="button"
+                  disabled={loading === s.id || needsFolder}
+                  onClick={() => void revokeTrust(s.id)}
+                  style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--caval-border)', background: 'none', cursor: needsFolder ? 'not-allowed' : 'pointer', color: 'var(--caval-text-muted)' }}
+                >
+                  Revoke
                 </button>
               )}
               <button

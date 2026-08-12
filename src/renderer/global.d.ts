@@ -123,7 +123,10 @@ interface CavalEngineeringApi {
   saveFile: (projectPath: string, file: EngFileInput) => Promise<EngSaveResult>;
   saveAll: (projectPath: string, files: EngFileInput[]) => Promise<EngSaveResult>;
   exportCart: (parts: EngPartInput[], projectPath: string | null) => Promise<EngSaveResult>;
-  openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  openExternal: (
+    url: string,
+    origin?: "EXTERNAL_CONTENT"
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 type ChatActivityPhase =
   | "prepare"
@@ -201,6 +204,9 @@ interface McpServerStatus {
   tools: string[];
   toolDetails?: Array<{ serverId: string; name: string; description: string }>;
   error?: string;
+  trustStatus?: "local_safe" | "allowed" | "denied" | "pending";
+  capabilities?: string[];
+  safety?: "LOCAL_SAFE" | "NETWORK_OR_WRITE";
 }
 
 interface CavalPreloadApi {
@@ -242,8 +248,6 @@ interface CavalCadApi {
   plan: (input: {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     latestUserText: string;
-    openRouterApiKey?: string;
-    meshApiKey?: string;
     previousMeshTaskId?: string;
   }) => Promise<{
     ok: boolean;
@@ -266,21 +270,29 @@ interface CavalCadApi {
     projectType?: string;
     constraints?: Record<string, string | undefined>;
     cavalId?: string;
+    workspaceRoot?: string;
     planContext?: {
       requirements?: string;
       assembly?: string;
       components?: string;
       performance?: string;
     };
-    openRouterApiKey?: string;
-    meshApiKey?: string;
     quality?: 'standard' | 'high';
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     previousScad?: string;
     generationMode?: 'openscad' | 'mesh' | 'library';
     meshPrompt?: string;
     previousMeshTaskId?: string;
-  }) => Promise<{ ok: boolean; jobId?: string; status?: string; error?: string }>;
+  }) => Promise<{
+    ok: boolean;
+    jobId?: string;
+    status?: string;
+    code?: string;
+    operationId?: string;
+    phase?: string;
+    ownerIsCaller?: boolean;
+    error?: string;
+  }>;
   getJob: (input: { jobId: string; cavalId?: string }) => Promise<{
     ok: boolean;
     jobId?: string;
@@ -291,12 +303,25 @@ interface CavalCadApi {
     dimensions?: { x: number; y: number; z: number } | null;
     meshTaskId?: string | null;
   }>;
-  cancelJob: (input: { jobId: string; cavalId?: string }) => Promise<{
+  cancelJob: (input: { jobId: string; cavalId?: string; workspaceRoot?: string }) => Promise<{
     ok: boolean;
     jobId?: string;
     status?: string;
+    remoteCancel?: "ok" | "failed" | "skipped";
     error?: string;
   }>;
+  cancelJobs: (input: { jobIds: string[]; cavalId?: string; workspaceRoot?: string }) => Promise<{
+    ok: boolean;
+    partiallyCancelled?: boolean;
+    results?: Array<{
+      jobId: string;
+      ok: boolean;
+      remoteCancel?: string;
+      error?: string;
+    }>;
+    error?: string;
+  }>;
+  heartbeat: (input: { jobId?: string; operationId?: string; workspaceRoot?: string }) => Promise<{ ok: boolean }>;
   getJobLogs: (input: { jobId: string; cavalId?: string }) => Promise<{
     ok: boolean;
     jobId?: string;
@@ -441,6 +466,22 @@ interface CavalBridge {
     onChunk: (chunk: CavalStreamChunk) => void
   ) => () => void;
   abortChatStream?: (streamId: string) => Promise<{ ok: boolean }>;
+  cancelOperation?: (input: {
+    operationId?: string;
+    streamId?: string;
+    cadJobId?: string;
+    workspaceRoot?: string;
+    cavalId?: string;
+  }) => Promise<{
+    ok: boolean;
+    status?: string;
+    operationId?: string;
+    streamId?: string;
+    cadJobId?: string;
+    signalAborted?: boolean;
+    remoteCancel?: "ok" | "failed" | "skipped";
+    error?: string;
+  }>;
   onPipelineVerifyStatus?: (
     callback: (payload: {
       runId: string;
@@ -489,7 +530,6 @@ interface CavalBridge {
     messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
     workspaceRoot?: string;
     requestId?: string;
-    apiKeys?: Record<string, string>;
     jsonMode?: boolean;
     maxTokens?: number;
     temperature?: number;
@@ -510,12 +550,27 @@ interface CavalBridge {
   billingCheckout?: (input: { email: string }) => Promise<{ ok: boolean; url?: string; error?: string }>;
   secretsGet?: () => Promise<{
     ok: boolean;
-    secrets?: Record<string, string>;
+    providers?: Array<{
+      provider: string;
+      configured: boolean;
+      source: "environment" | "secure-storage" | "none";
+      lastValidatedAt: string | null;
+    }>;
     configured?: Record<string, boolean>;
+    error?: string;
   }>;
   secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
+  /** Lot C5.5 — user-initiated key test; no bodies/keys in the response. */
+  testProviderKey?: (input: {
+    providerId: string;
+    secretKey: string;
+  }) => Promise<{
+    ok: boolean;
+    result: "valid" | "invalid" | "unreachable";
+    error?: string;
+  }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
-  settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean }>;
+  settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
   modelsHealth?: () => Promise<{
     ok: boolean;
     summary?: string;
@@ -569,6 +624,31 @@ interface CavalBridge {
     };
     error?: string;
   }>;
+  projectHealthCheck?: (action: "scan" | "execute") => Promise<{
+    ok: boolean;
+    snapshot?: {
+      packageFound: boolean;
+      packageName?: string;
+      checks: Array<{
+        id: "typecheck" | "lint" | "test" | "build";
+        label: string;
+        scriptKey: string;
+        npmCommand: string;
+        status:
+          | "missing"
+          | "available"
+          | "running"
+          | "passed"
+          | "failed"
+          | "skipped"
+          | "timed_out";
+        script?: string;
+        exitCode?: number | null;
+        output?: string;
+      }>;
+    };
+    error?: string;
+  }>;
   zlPrepare?: (signals: {
     workspaceRoot: string;
     objectiveDraft?: string;
@@ -610,10 +690,16 @@ interface CavalBridge {
     activeFile?: string;
     openFiles?: string[];
   }) => Promise<CavalChatPrepareResult>;
-  mcpList?: () => Promise<{ ok: boolean; servers?: McpServerStatus[] }>;
-  mcpEnsureReady?: () => Promise<{ ok: boolean; servers?: McpServerStatus[] }>;
-  mcpStart?: (serverId: string) => Promise<{ ok: boolean; status?: McpServerStatus }>;
+  mcpList?: () => Promise<{ ok: boolean; servers?: McpServerStatus[]; remoteEnabled?: boolean }>;
+  mcpEnsureReady?: () => Promise<{ ok: boolean; servers?: McpServerStatus[]; remoteEnabled?: boolean }>;
+  mcpStart?: (serverId: string) => Promise<{ ok: boolean; status?: McpServerStatus; error?: string }>;
   mcpStop?: (serverId: string) => Promise<{ ok: boolean }>;
+  mcpTrustList?: () => Promise<{ ok: boolean; records?: unknown[] }>;
+  mcpTrustRevoke?: (input?: { serverId?: string }) => Promise<{
+    ok: boolean;
+    records?: unknown[];
+    error?: string;
+  }>;
   toolExecute?: (input: { name: string; arguments: Record<string, unknown> }) => Promise<{ ok: boolean; output?: unknown; error?: string }>;
   search?: {
     text?: (input: { query: string; caseSensitive?: boolean; maxResults?: number }) => Promise<{
@@ -643,7 +729,11 @@ interface CavalBridge {
   extensions?: {
     list: () => Promise<{ ok: boolean; extensions?: unknown[] }>;
     register: (manifest: { id: string; name: string; version: string }) => Promise<{ ok: boolean; error?: string }>;
-    install: (input: { extensionId: string; baseUrl: string }) => Promise<{ ok: boolean; error?: string }>;
+    install: (input: { extensionId: string }) => Promise<{
+      ok: boolean;
+      error?: string;
+      extension?: unknown;
+    }>;
   };
   openvsx?: {
     search: (query: string) => Promise<{ ok: boolean; extensions?: unknown[]; error?: string }>;

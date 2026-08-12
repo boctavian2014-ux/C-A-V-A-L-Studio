@@ -467,7 +467,7 @@ export function WorkbenchRoot() {
   const prevWindowWidthRef = useRef(window.innerWidth);
   const navStackRef = useRef<string[]>([]);
   const navIndexRef = useRef(-1);
-  const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, tabs, projectPath, activeSymbol } = useEditorStore();
+  const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, projectPath, activeSymbol } = useEditorStore();
   const { runWorkspaceVerifyAndReport, runBuildAndReport, queueChatFromPanel } = useAIStore();
   const gitChangesCount = useGitStore((s) => s.files.length);
 
