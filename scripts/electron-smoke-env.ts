@@ -7,10 +7,6 @@ export const ELECTRON_SMOKE_WARNING_ALLOWLIST: ReadonlyArray<{ pattern: RegExp; 
     reason: "Optional React DevTools prompt in development renderer; not a boot failure.",
   },
   {
-    pattern: /Invalid accelerator token/i,
-    reason: "Chromium keyboard_util warning for a menu accelerator; non-fatal.",
-  },
-  {
     pattern: /console-message' arguments are deprecated/i,
     reason: "Electron deprecation of console-message callback arity; non-fatal.",
   },
@@ -59,7 +55,8 @@ export function isFatalSmokeLine(line: string): boolean {
     /Renderer process gone/i.test(line) ||
     /Renderer failed to load/i.test(line) ||
     /Uncaught Exception/i.test(line) ||
-    /\bFATAL\b/i.test(line)
+    /\bFATAL\b/i.test(line) ||
+    /Invalid accelerator token/i.test(line)
   );
 }
 

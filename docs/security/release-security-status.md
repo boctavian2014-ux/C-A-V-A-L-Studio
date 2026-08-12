@@ -27,6 +27,7 @@ Quality gates (typecheck, lint `--max-warnings 0`, 1000 teste, build, `verify-ru
 | P3 CAD anti-dup / OpenSCAD kill | — | Remediat cu Δ6 ticketed |
 | Q1 quality gates + Electron smoke | Medie (merge) | **FINALIZAT** |
 | SEC-IPC-WS-BINDING-001 | Critic | **FINALIZAT** |
+| SEC-UI-ACCELERATOR-001 | Scăzut | **FINALIZAT** |
 | SEC-IPC-WS-VERIFY-001 | Mare | Remediat (Lot B — bound root only) |
 
 ## Backlog urmărit (nu limitări informale)
@@ -38,7 +39,6 @@ Quality gates (typecheck, lint `--max-warnings 0`, 1000 teste, build, `verify-ru
 | [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | Mută BYOK CAD către vault/profile server-side; elimină cheia din body main → CAD cloud |
 | [SEC-MCP-STDERR-REDACTION-001](./SEC-MCP-STDERR-REDACTION-001.md) | Medie | Redactare stderr MCP end-to-end înainte de UI/log |
 | [SEC-P3-BLOB-REVOKE-001](./SEC-P3-BLOB-REVOKE-001.md) | Scăzut | `URL.revokeObjectURL` exact-once pentru preview STL |
-| [SEC-UI-ACCELERATOR-001](./SEC-UI-ACCELERATOR-001.md) | Scăzut | Repară acceleratorul invalid; scoate warning-ul din allowlist-ul de smoke |
 
 ## Gate-uri de release
 

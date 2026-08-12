@@ -4,29 +4,25 @@
 |------|---------|
 | ID | SEC-UI-ACCELERATOR-001 |
 | Severitate | **Scăzut** |
-| Status | **Deschis** |
+| Status | **FINALIZAT** (2026-08-12) |
 | Owner | Desktop / menu |
-| Sprint | Post-Q1 (nu blochează quality gates) |
+| Sprint | Post-Q1 |
 | Depinde de | SEC-Q1-QUALITY-GATES-001 (**FINALIZAT**) |
 
 ## Problemă
 
-Smoke Electron emite:
+Smoke Electron emitea `Invalid accelerator token: M CmdOrCtrl` din chord-ul invalid
 
-`Invalid accelerator token: M CmdOrCtrl`
+`accelerator: "CmdOrCtrl+M CmdOrCtrl+Q"` (`Last Edit Location`).
 
-Sursa probabilă: chord-ul din meniul Go,
-
-`accelerator: "CmdOrCtrl+M CmdOrCtrl+Q"` (`Last Edit Location` în `src/main/electron-main.ts`).
-
-Electron/Chromium nu acceptă două acceleratoare separate prin spațiu; token-ul `M` este parsat greșit. Warning-ul este în allowlist-ul temporar de smoke (`scripts/electron-smoke-env.ts`) ca să nu eșueze boot-ul, dar **nu trebuie să rămână permanent** — poluează logurile și poate masca warning-uri reale.
+Electron nu acceptă două acceleratoare separate prin spațiu.
 
 ## Remediere
 
-- Înlocuiește chord-ul cu un accelerator valid (ex. `CmdOrCtrl+Alt+Q`) sau elimină shortcut-ul dacă nu e folosit.
-- Scoate `/Invalid accelerator token/i` din `ELECTRON_SMOKE_WARNING_ALLOWLIST`.
-- Confirmă `npm run smoke:electron` fără acel warning.
+- Shortcut: `CmdOrCtrl+Alt+Q`
+- `/Invalid accelerator token/i` scos din allowlist; linia este **fatală** în smoke (regresie)
+- Test: `tests/main/menu-accelerators.test.ts`
 
 ## Criteriu de acceptare
 
-Smoke nu mai listează `Invalid accelerator token`. Allowlist-ul rămâne doar pentru React DevTools (opțional) și deprecarea `console-message` până la migrarea API-ului Electron.
+Smoke nu mai listează `Invalid accelerator token`. Allowlist: React DevTools + deprecarea `console-message`.

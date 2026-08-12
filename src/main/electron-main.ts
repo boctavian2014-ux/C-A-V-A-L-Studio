@@ -543,7 +543,7 @@ const installApplicationMenu = (): void => {
       submenu: [
         { label: "Back", accelerator: "Alt+Left", click: () => sendMenuCommand("go-back") },
         { label: "Forward", accelerator: "Alt+Right", click: () => sendMenuCommand("go-forward") },
-        { label: "Last Edit Location", accelerator: "CmdOrCtrl+M CmdOrCtrl+Q", click: () => sendMenuCommand("last-edit-location") },
+        { label: "Last Edit Location", accelerator: "CmdOrCtrl+Alt+Q", click: () => sendMenuCommand("last-edit-location") },
         { type: "separator" },
         { label: "Switch Editor", click: () => sendMenuCommand("switch-editor") },
         { label: "Switch Group", click: () => sendMenuCommand("switch-group") },
