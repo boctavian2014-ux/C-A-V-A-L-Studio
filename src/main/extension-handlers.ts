@@ -1,12 +1,41 @@
 import { ipcMain } from "electron";
 import path from "node:path";
 import fs from "node:fs";
-import AdmZip from "adm-zip";
 
 import { ExtensionCompatibility } from "../../marketplace/extensions/compatibility";
-import type { ExtensionManifest as MarketplaceExtensionManifest } from "../../marketplace/extensions/manifest-validator";
-import { CavalExtensionHost, type ExtensionManifest } from "../extensions/extension-host";
-import { downloadOpenVsxVsix, listPopularOpenVsx, searchOpenVsx } from "./open-vsx-client";
+import {
+  CavalExtensionHost,
+  type ExtensionManifest,
+} from "../extensions/extension-host";
+import {
+  atomicInstallValidatedExtension,
+  ExtensionInstallError,
+  readInstallSidecar,
+} from "./extension-install-secure";
+import {
+  EXTENSION_INSTALL_LIMITS,
+  INTEGRITY_METADATA_MISSING_ERROR,
+  getMarketplaceAllowedHosts,
+  isValidSha256Hex,
+  normalizeSha256Hex,
+  parseMarketplaceInstallInput,
+  parseOpenVsxInstallInput,
+  sanitizeExtensionFolderId,
+} from "./extension-registry";
+import { assertTrustedSender } from "./ipc-trust";
+import {
+  downloadOpenVsxVsix,
+  formatOpenVsxNetworkError,
+  listPopularOpenVsx,
+  searchOpenVsx,
+} from "./open-vsx-client";
+import {
+  NetworkGuardError,
+  NETWORK_GUARD_DEFAULTS,
+  safeFetch,
+  sanitizeNetworkError,
+} from "./network-guard";
+import { getMarketplaceBaseUrl, startMarketplaceServer } from "./marketplace-server";
 
 const extensionHost = new CavalExtensionHost();
 const compatibility = new ExtensionCompatibility();
@@ -26,11 +55,16 @@ function loadExtensionsFromDisk(workspaceRoot: string): void {
         version?: string;
         engines?: { vscode?: string; caval?: string };
       };
+      const sidecar = readInstallSidecar(path.join(extDir, entry.name));
       const manifest: ExtensionManifest = {
         id: entry.name,
         name: pkg.name ?? entry.name,
         version: pkg.version ?? "0.0.0",
         engines: pkg.engines ?? {},
+        enabled: false,
+        status: "installed",
+        source: "disk",
+        sha256: sidecar?.sha256,
       };
       extensionHost.register(manifest);
     } catch {
@@ -39,169 +73,281 @@ function loadExtensionsFromDisk(workspaceRoot: string): void {
   }
 }
 
-function extractVsixToDirectory(vsixBuffer: Buffer, targetDir: string): void {
-  if (fs.existsSync(targetDir)) {
-    fs.rmSync(targetDir, { recursive: true, force: true });
+function resolveMarketplaceArtifactUrl(
+  marketplaceBase: string,
+  downloadUrl: string,
+  metadataUrl: string
+): string {
+  const base = marketplaceBase.replace(/\/+$/, "");
+  let absolute: URL;
+  try {
+    absolute = new URL(downloadUrl, `${base}/`);
+  } catch {
+    throw new ExtensionInstallError("url", "downloadUrl din metadata este invalid.");
   }
-  fs.mkdirSync(targetDir, { recursive: true });
 
-  const zip = new AdmZip(vsixBuffer);
-  const entries = zip.getEntries();
-  const packageEntry = entries.find((e) => e.entryName === "extension/package.json" || e.entryName.endsWith("/package.json"));
-  if (!packageEntry) {
-    throw new Error("VSIX invalid — package.json lipsește.");
+  // Must not treat the metadata JSON endpoint as the package bytes.
+  if (absolute.href.replace(/\/+$/, "") === metadataUrl.replace(/\/+$/, "")) {
+    throw new ExtensionInstallError(
+      "artifact",
+      "Marketplace nu oferă un artefact VSIX distinct de metadata."
+    );
   }
 
-  const prefix = packageEntry.entryName.replace(/package\.json$/, "");
-  for (const entry of entries) {
-    if (!entry.entryName.startsWith(prefix) || entry.isDirectory) continue;
-    const relative = entry.entryName.slice(prefix.length);
-    if (!relative) continue;
-    const outPath = path.join(targetDir, relative);
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, entry.getData());
-  }
+  return absolute.href;
 }
 
-export function registerExtensionHandlers(getWorkspaceRoot: (senderId: number) => string): void {
+/**
+ * Lot C2: trust + allowlisted registry + SHA-256 + secure extract.
+ * No renderer URLs. Extensions install disabled (no code execution).
+ */
+export function registerExtensionHandlers(
+  getBoundWorkspaceRoot: (senderId: number) => string | undefined
+): void {
   ipcMain.handle("extensions:list", async (event) => {
-    const root = getWorkspaceRoot(event.sender.id);
+    assertTrustedSender(event);
+    const root = getBoundWorkspaceRoot(event.sender.id);
     if (root?.trim()) loadExtensionsFromDisk(root);
     return { ok: true, extensions: extensionHost.list() };
   });
 
-  ipcMain.handle("extensions:register", async (_event, manifest: ExtensionManifest) => {
+  ipcMain.handle("extensions:register", async (event, manifest: ExtensionManifest) => {
+    assertTrustedSender(event);
     if (!manifest?.id) return { ok: false, error: "Invalid manifest" };
-    extensionHost.register(manifest);
-    return { ok: true };
+    // Memory-only registration — still disabled; does not load/execute code.
+    const entry = extensionHost.register({
+      ...manifest,
+      enabled: false,
+      status: "installed",
+      source: manifest.source ?? "disk",
+    });
+    return { ok: true, extension: entry };
   });
 
-  ipcMain.handle(
-    "extensions:install",
-    async (event, input: { extensionId: string; baseUrl: string }) => {
-      const root = getWorkspaceRoot(event.sender.id);
-      if (!root?.trim()) return { ok: false, error: "Deschide un folder de proiect." };
-      if (!input?.extensionId || !input?.baseUrl) {
-        return { ok: false, error: "extensionId și baseUrl sunt obligatorii." };
+  ipcMain.handle("extensions:install", async (event, input: unknown) => {
+    assertTrustedSender(event);
+    const root = getBoundWorkspaceRoot(event.sender.id)?.trim();
+    if (!root) return { ok: false, error: "Deschide un folder de proiect." };
+
+    const parsed = parseMarketplaceInstallInput(input);
+    if (!parsed) {
+      return {
+        ok: false,
+        error:
+          "Payload invalid: doar extensionId (publisher.extension) este acceptat — fără baseUrl/downloadUrl/URL.",
+      };
+    }
+
+    try {
+      await startMarketplaceServer();
+      const marketplaceBase = getMarketplaceBaseUrl().replace(/\/+$/, "");
+      const metadataUrl = `${marketplaceBase}/api/extensions/${encodeURIComponent(parsed.extensionId)}/download`;
+
+      const metaRes = await safeFetch(metadataUrl, {
+        mode: "marketplace",
+        allowedHosts: getMarketplaceAllowedHosts(),
+        marketplaceBaseUrl: marketplaceBase,
+        maxBytes: EXTENSION_INSTALL_LIMITS.METADATA_MAX_BYTES,
+        timeoutMs: NETWORK_GUARD_DEFAULTS.TIMEOUT_MS,
+      });
+
+      if (!metaRes.ok) {
+        return {
+          ok: false,
+          error: `Marketplace indisponibil (${metaRes.status}). Rulează npm run marketplace:serve.`,
+        };
       }
 
-      const base = input.baseUrl.replace(/\/$/, "");
-      const downloadUrl = `${base}/api/extensions/${encodeURIComponent(input.extensionId)}/download`;
       let version: {
         version?: string;
+        sha256?: string;
+        downloadUrl?: string;
+        sizeBytes?: number;
         manifest?: Record<string, unknown>;
+        engine?: { vscode?: string; caval?: string };
       };
       try {
-        const res = await fetch(downloadUrl);
-        if (!res.ok) {
-          return {
-            ok: false,
-            error: `Marketplace indisponibil (${res.status}). Rulează npm run marketplace:serve.`,
-          };
-        }
-        version = (await res.json()) as typeof version;
-      } catch (cause: unknown) {
-        const msg = cause instanceof Error ? cause.message : String(cause);
-        return { ok: false, error: `Nu mă pot conecta la marketplace: ${msg}` };
+        version = JSON.parse(metaRes.buffer.toString("utf8")) as typeof version;
+      } catch {
+        return { ok: false, error: "Metadata marketplace invalidă (JSON)." };
       }
 
-      const manifestRaw = version.manifest ?? {};
-      const extId = input.extensionId;
-      const extDir = path.join(root, ".cavalo", "extensions", extId);
-      fs.mkdirSync(extDir, { recursive: true });
+      const shaRaw = typeof version.sha256 === "string" ? version.sha256.trim() : "";
+      if (!isValidSha256Hex(shaRaw)) {
+        return { ok: false, error: INTEGRITY_METADATA_MISSING_ERROR };
+      }
+      const expectedSha = normalizeSha256Hex(shaRaw);
 
-      const pkg = {
-        ...manifestRaw,
-        name: manifestRaw.name ?? extId.split(".").pop() ?? extId,
-        publisher: manifestRaw.publisher ?? extId.split(".")[0] ?? "unknown",
-        version: String(manifestRaw.version ?? version.version ?? "0.0.0"),
-        engines: (manifestRaw.engines as ExtensionManifest["engines"]) ?? { caval: "^0.1.0" },
-      };
+      if (typeof version.sizeBytes === "number" && version.sizeBytes > EXTENSION_INSTALL_LIMITS.VSIX_MAX_BYTES) {
+        return {
+          ok: false,
+          error: `Pachetul depășește limita (${version.sizeBytes} > ${EXTENSION_INSTALL_LIMITS.VSIX_MAX_BYTES}).`,
+        };
+      }
 
-      fs.writeFileSync(path.join(extDir, "package.json"), JSON.stringify(pkg, null, 2), "utf8");
+      const downloadUrl = typeof version.downloadUrl === "string" ? version.downloadUrl.trim() : "";
+      if (!downloadUrl) {
+        return { ok: false, error: INTEGRITY_METADATA_MISSING_ERROR };
+      }
 
-      const manifest: ExtensionManifest = {
-        id: extId,
-        name: String(pkg.name),
-        version: String(pkg.version),
-        engines: pkg.engines ?? {},
-      };
-      extensionHost.register(manifest);
-      return { ok: true, extension: manifest };
+      const artifactUrl = resolveMarketplaceArtifactUrl(marketplaceBase, downloadUrl, metadataUrl);
+
+      const artifactRes = await safeFetch(artifactUrl, {
+        mode: "marketplace",
+        allowedHosts: getMarketplaceAllowedHosts(),
+        marketplaceBaseUrl: marketplaceBase,
+        maxBytes: EXTENSION_INSTALL_LIMITS.VSIX_MAX_BYTES,
+        timeoutMs: NETWORK_GUARD_DEFAULTS.TIMEOUT_MS,
+      });
+      if (!artifactRes.ok) {
+        return { ok: false, error: `Descărcare pachet eșuată (${artifactRes.status}).` };
+      }
+
+      const folderId = sanitizeExtensionFolderId(parsed.extensionId);
+      const result = atomicInstallValidatedExtension({
+        workspaceRoot: root,
+        folderId,
+        vsixBuffer: artifactRes.buffer,
+        expectedSha256: expectedSha,
+        source: "marketplace",
+        publisherHint: parsed.extensionId.split(".")[0],
+        nameHint: parsed.extensionId.split(".").slice(1).join("."),
+      });
+
+      const entry = extensionHost.register({
+        id: result.extension.id,
+        name: result.extension.name,
+        version: result.extension.version,
+        engines: result.extension.engines,
+        enabled: false,
+        status: "installed",
+        source: "marketplace",
+        sha256: result.extension.sha256,
+      });
+
+      return { ok: true, extension: entry };
+    } catch (cause: unknown) {
+      if (cause instanceof ExtensionInstallError) {
+        return { ok: false, error: cause.message };
+      }
+      if (cause instanceof NetworkGuardError) {
+        return { ok: false, error: sanitizeNetworkError(cause) };
+      }
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      return { ok: false, error: msg };
     }
-  );
+  });
 
-  ipcMain.handle("openvsx:search", async (_event, query: string) => {
+  ipcMain.handle("openvsx:search", async (event, query: string) => {
+    assertTrustedSender(event);
     try {
       const results = await searchOpenVsx(String(query ?? ""), 30);
       return { ok: true, extensions: results };
     } catch (cause: unknown) {
-      const msg = cause instanceof Error ? cause.message : String(cause);
-      return { ok: false, error: msg, extensions: [] };
+      return { ok: false, error: formatOpenVsxNetworkError(cause), extensions: [] };
     }
   });
 
-  ipcMain.handle("openvsx:popular", async () => {
+  ipcMain.handle("openvsx:popular", async (event) => {
+    assertTrustedSender(event);
     try {
       const results = await listPopularOpenVsx(30);
       return { ok: true, extensions: results };
     } catch (cause: unknown) {
-      const msg = cause instanceof Error ? cause.message : String(cause);
-      return { ok: false, error: msg, extensions: [] };
+      return { ok: false, error: formatOpenVsxNetworkError(cause), extensions: [] };
     }
   });
 
-  ipcMain.handle(
-    "openvsx:install",
-    async (event, input: { namespace: string; name: string }) => {
-      const root = getWorkspaceRoot(event.sender.id);
-      if (!root?.trim()) return { ok: false, error: "Deschide un folder de proiect." };
-      if (!input?.namespace?.trim() || !input?.name?.trim()) {
-        return { ok: false, error: "namespace și name sunt obligatorii." };
-      }
+  ipcMain.handle("openvsx:install", async (event, input: unknown) => {
+    assertTrustedSender(event);
+    const root = getBoundWorkspaceRoot(event.sender.id)?.trim();
+    if (!root) return { ok: false, error: "Deschide un folder de proiect." };
 
-      try {
-        const { buffer, version } = await downloadOpenVsxVsix(input.namespace.trim(), input.name.trim());
-        const publisher = input.namespace.trim();
-        const extName = input.name.trim();
-        const folderId = `${publisher}.${extName}-${version.version}`;
-        const extDir = path.join(root, ".cavalo", "extensions", folderId);
-
-        extractVsixToDirectory(buffer, extDir);
-
-        const manifestPath = path.join(extDir, "package.json");
-        if (!fs.existsSync(manifestPath)) {
-          return { ok: false, error: "VSIX extras fără package.json." };
-        }
-
-        const pkg = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as MarketplaceExtensionManifest;
-        const report = compatibility.analyze({
-          ...pkg,
-          publisher: pkg.publisher ?? publisher,
-          name: pkg.name ?? extName,
-          version: pkg.version ?? version.version,
-          engines: pkg.engines ?? version.engines ?? {},
-        });
-
-        if (!report.compatible) {
-          fs.rmSync(extDir, { recursive: true, force: true });
-          return { ok: false, error: "Extensie incompatibilă cu CAVALLO." };
-        }
-
-        const manifest: ExtensionManifest = {
-          id: folderId,
-          name: pkg.name ?? extName,
-          version: pkg.version ?? version.version,
-          engines: report.convertedManifest.engines,
-        };
-        extensionHost.register(manifest);
-        return { ok: true, extension: manifest };
-      } catch (cause: unknown) {
-        const msg = cause instanceof Error ? cause.message : String(cause);
-        return { ok: false, error: msg };
-      }
+    const parsed = parseOpenVsxInstallInput(input);
+    if (!parsed) {
+      return {
+        ok: false,
+        error: "Payload invalid: doar namespace + name sunt acceptate — fără URL din renderer.",
+      };
     }
-  );
+
+    try {
+      const { buffer, version, sha256 } = await downloadOpenVsxVsix(parsed.namespace, parsed.name);
+      const publisher = parsed.namespace;
+      const extName = parsed.name;
+      const folderId = sanitizeExtensionFolderId(`${publisher}.${extName}-${version.version}`);
+
+      const pkgProbe = (() => {
+        // Compatibility check uses package.json after extract — atomic install validates first.
+        return {
+          publisher,
+          name: extName,
+          version: version.version,
+          engines: version.engines ?? {},
+        };
+      })();
+
+      const report = compatibility.analyze({
+        ...pkgProbe,
+        engines: pkgProbe.engines ?? {},
+      });
+      if (!report.compatible) {
+        return { ok: false, error: "Extensie incompatibilă cu CAVALLO." };
+      }
+
+      const result = atomicInstallValidatedExtension({
+        workspaceRoot: root,
+        folderId,
+        vsixBuffer: buffer,
+        expectedSha256: sha256,
+        source: "openvsx",
+        publisherHint: publisher,
+        nameHint: extName,
+      });
+
+      // Re-check engines from installed package (already validated in extract).
+      const installedPkgPath = path.join(result.installDir, "package.json");
+      const installedPkg = JSON.parse(fs.readFileSync(installedPkgPath, "utf8")) as {
+        name?: string;
+        version?: string;
+        engines?: { vscode?: string; caval?: string };
+        publisher?: string;
+      };
+      const finalReport = compatibility.analyze({
+        name: installedPkg.name ?? extName,
+        publisher: installedPkg.publisher ?? publisher,
+        version: installedPkg.version ?? version.version,
+        engines: installedPkg.engines ?? version.engines ?? {},
+      });
+      if (!finalReport.compatible) {
+        fs.rmSync(result.installDir, { recursive: true, force: true });
+        return { ok: false, error: "Extensie incompatibilă cu CAVALLO." };
+      }
+
+      const entry = extensionHost.register({
+        id: result.extension.id,
+        name: result.extension.name,
+        version: result.extension.version,
+        engines: finalReport.convertedManifest.engines,
+        enabled: false,
+        status: "installed",
+        source: "openvsx",
+        sha256: result.extension.sha256,
+      });
+
+      return { ok: true, extension: entry };
+    } catch (cause: unknown) {
+      if (cause instanceof ExtensionInstallError) {
+        return { ok: false, error: cause.message };
+      }
+      return { ok: false, error: formatOpenVsxNetworkError(cause) };
+    }
+  });
 }
 
 export { extensionHost };
+
+/** Test-only: reset in-memory host between cases. */
+export function __resetExtensionHostForTests(): void {
+  extensionHost.clear();
+}

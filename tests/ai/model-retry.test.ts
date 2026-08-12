@@ -13,6 +13,20 @@ describe("ModelRetryPolicy", () => {
   it("retries same model on 429 at attempt 0", () => {
     const decision = policy.decide(new Error("HTTP 429 rate limited"), 0);
     expect(decision.retrySameModel).toBe(true);
+    expect(decision.switchModel).toBe(false);
+    expect(decision.switchProvider).toBe(false);
+  });
+
+  it("counts 429 retries and stops at max attempts", () => {
+    const first = policy.decide(new Error("HTTP 429 rate limited"), 0);
+    const second = policy.decide(new Error("HTTP 429 rate limited"), 1);
+    const last = policy.decide(new Error("HTTP 429 rate limited"), 2);
+    expect(first.retrySameModel).toBe(true);
+    expect(second.retrySameModel).toBe(false);
+    expect(second.switchModel).toBe(true);
+    expect(last.retrySameModel).toBe(false);
+    expect(last.switchProvider).toBe(true);
+    expect(last.reason).toMatch(/max retry attempts/i);
   });
 
   it("switches model on second attempt", () => {
@@ -27,8 +41,13 @@ describe("ModelRetryPolicy", () => {
     expect(decision.switchModel).toBe(true);
   });
 
-  it("does not retry non-retryable errors", () => {
-    const decision = policy.decide(new Error("invalid API key"), 0);
-    expect(decision.reason).toMatch(/not retryable/i);
+  it("never retries 401/403 or invalid API key (C5.1)", () => {
+    for (const message of ["HTTP 401 unauthorized", "HTTP 403 forbidden", "invalid API key"]) {
+      const decision = policy.decide(new Error(message), 0);
+      expect(decision.retrySameModel).toBe(false);
+      expect(decision.switchModel).toBe(false);
+      expect(decision.switchProvider).toBe(false);
+      expect(decision.reason).toMatch(/never retry/i);
+    }
   });
 });

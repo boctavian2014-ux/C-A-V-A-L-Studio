@@ -5,6 +5,8 @@ import type { ToolDefinition } from "../tools/tool-registry";
 import { mergeMcpServerEnv } from "./mcp-env";
 import { resolveMcpServerArgs, isGitRepository } from "./mcp-workspace-args";
 import { mcpToolId } from "./mcp-tool-names";
+import { MCP_REMOTE_ENABLED } from "./mcp-capabilities";
+import { isMcpServerStartAllowed } from "./mcp-trust";
 
 export interface McpServerConfig {
   id: string;
@@ -81,9 +83,14 @@ const resolveWindowsExecutable = (command: string, env: NodeJS.ProcessEnv): stri
 export const resolveMcpSpawn = (
   command: string,
   args: string[],
-  options: { env?: Record<string, string>; cwd?: string; secrets?: Record<string, string> }
+  options: {
+    env?: Record<string, string>;
+    cwd?: string;
+    secrets?: Record<string, string>;
+    serverId?: string;
+  }
 ): { command: string; args: string[]; env: NodeJS.ProcessEnv; cwd?: string } => {
-  let env = mergeMcpServerEnv(options.env, options.secrets);
+  let env = mergeMcpServerEnv(options.env, options.secrets, process.env, options.serverId);
   if (process.platform !== "win32") {
     return { command, args, env, cwd: options.cwd };
   }
@@ -245,13 +252,43 @@ export class McpClientManager {
       };
     }
 
+    if (workdir && !isMcpServerStartAllowed(workdir, serverId, entry.config.command, entry.config.args)) {
+      entry.error =
+        "MCP server requires workspace trust before start. Use MCP panel or Settings to allow this server.";
+      return {
+        id: serverId,
+        name: entry.config.name,
+        running: false,
+        tools: [],
+        toolDetails: [],
+        error: entry.error,
+      };
+    }
+
     try {
       const resolvedArgs = resolveMcpServerArgs(entry.config.args, workdir);
       const spawn = resolveMcpSpawn(entry.config.command, resolvedArgs, {
         env: entry.config.env,
         cwd: workdir,
         secrets: this.secretsProvider(),
+        serverId,
       });
+
+      // Lot C3: remote transports are not implemented — stdio only.
+      const transportKind = (entry.config as { transport?: string }).transport;
+      if (transportKind && transportKind !== "stdio") {
+        entry.error = MCP_REMOTE_ENABLED
+          ? "Unsupported MCP transport"
+          : "MCP remote transports are disabled (mcp.remote.enabled=false)";
+        return {
+          id: serverId,
+          name: entry.config.name,
+          running: false,
+          tools: [],
+          toolDetails: [],
+          error: entry.error,
+        };
+      }
 
       const [{ Client }, { StdioClientTransport }] = await Promise.all([
         import("@modelcontextprotocol/sdk/client"),

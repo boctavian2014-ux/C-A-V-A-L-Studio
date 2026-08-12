@@ -1,5 +1,7 @@
 import { resolveProviderModelId } from "../models/provider-model-id";
 import { extractReasoningFromDelta } from "./stream-reasoning";
+import { SafeProviderError, safeErrorFromHttpStatus, toSafeProviderError } from "./provider-errors";
+import { assertProviderRequestUrl } from "../../src/main/cloud-provider-registry";
 import type {
   ChatMessage,
   ModelDescriptor,
@@ -22,17 +24,32 @@ export abstract class HttpChatProvider implements ModelProvider {
 
   abstract models(): ModelDescriptor[];
 
+  private assertEndpointAllowed(endpoint: string): void {
+    const check = assertProviderRequestUrl(this.name, endpoint);
+    if (!check.ok) {
+      throw new SafeProviderError("host_blocked", check.error, { retryable: false });
+    }
+  }
+
   async complete(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): Promise<ModelResponse> {
     const startedAt = Date.now();
-    const response = await fetch(model.endpoint, {
-      method: "POST",
-      headers: this.headers(),
-      signal: options.signal,
-      body: JSON.stringify(this.payload(request, model, false))
-    });
+    this.assertEndpointAllowed(model.endpoint);
+    let response: Response;
+    try {
+      response = await fetch(model.endpoint, {
+        method: "POST",
+        headers: this.headers(),
+        signal: options.signal,
+        body: JSON.stringify(this.payload(request, model, false))
+      });
+    } catch (err) {
+      throw toSafeProviderError(err, this.name);
+    }
 
     if (!response.ok) {
-      throw new Error(`${this.name} failed with ${response.status}: ${await response.text()}`);
+      // Lot C5.1: never attach response.text() to Error (may echo secrets).
+      await response.text().catch(() => "");
+      throw safeErrorFromHttpStatus(this.name, response.status);
     }
 
     const json = await response.json() as {
@@ -75,15 +92,22 @@ export abstract class HttpChatProvider implements ModelProvider {
   }
 
   async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamChunk> {
-    const response = await fetch(model.endpoint, {
-      method: "POST",
-      headers: this.headers(),
-      signal: options.signal,
-      body: JSON.stringify(this.payload(request, model, true))
-    });
+    this.assertEndpointAllowed(model.endpoint);
+    let response: Response;
+    try {
+      response = await fetch(model.endpoint, {
+        method: "POST",
+        headers: this.headers(),
+        signal: options.signal,
+        body: JSON.stringify(this.payload(request, model, true))
+      });
+    } catch (err) {
+      throw toSafeProviderError(err, this.name);
+    }
 
     if (!response.ok || !response.body) {
-      throw new Error(`${this.name} streaming failed with ${response.status}: ${await response.text()}`);
+      await response.text().catch(() => "");
+      throw safeErrorFromHttpStatus(this.name, response.status || 502);
     }
 
     const reader = response.body.getReader();

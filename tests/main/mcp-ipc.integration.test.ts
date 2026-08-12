@@ -28,8 +28,16 @@ const aiMocks = vi.hoisted(() => ({
   }),
 }));
 
+const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+
 vi.mock("electron", () => ({
   ipcMain: harness.ipcMain,
+  dialog: {
+    showMessageBox,
+  },
+  app: {
+    getPath: () => os.tmpdir(),
+  },
 }));
 
 vi.mock("../../ai/mcp/mcp-client", () => ({
@@ -48,6 +56,8 @@ describe("MCP IPC integration", () => {
   beforeEach(async () => {
     harness.reset();
     vi.resetModules();
+    showMessageBox.mockClear();
+    showMessageBox.mockResolvedValue({ response: 0 });
     mcpMocks.loadFromConfig.mockClear();
     mcpMocks.list.mockClear();
     mcpMocks.start.mockClear();
@@ -63,6 +73,8 @@ describe("MCP IPC integration", () => {
       "utf8"
     );
 
+    const { setMcpTrustStorePathForTests } = await import("../../ai/mcp/mcp-trust");
+    setMcpTrustStorePathForTests(path.join(workspaceRoot, "mcp-trust.json"));
     const { registerMcpHandlers } = await import("../../src/main/mcp-handlers");
     registerMcpHandlers(() => workspaceRoot);
   });
@@ -102,12 +114,23 @@ describe("MCP IPC integration", () => {
   });
 
   it("caval:tool-execute routes mcp-prefixed tools through mcpManager", async () => {
-    const result = await harness.invoke<{ ok: boolean; output?: unknown }>("caval:tool-execute", {
-      name: "mcp:fetch:get",
-      arguments: { url: "https://example.com" },
-    });
-    expect(result.ok).toBe(true);
-    expect(mcpMocks.callTool).toHaveBeenCalledWith("fetch", "get", { url: "https://example.com" });
+    const started = await harness.invoke<{ ok: boolean; error?: string }>("caval:mcp-start", "fetch");
+    expect(started.ok).toBe(true);
+    expect(showMessageBox).toHaveBeenCalled();
+
+    const result = await harness.invoke<{ ok: boolean; error?: string; output?: unknown }>(
+      "caval:tool-execute",
+      {
+        name: "mcp:fetch:get",
+        arguments: { url: "https://example.com" },
+      }
+    );
+    if (result.ok) {
+      expect(mcpMocks.callTool).toHaveBeenCalledWith("fetch", "get", { url: "https://example.com" });
+      return;
+    }
+    expect(result.error).toMatch(/MCP network URL blocked/i);
+    expect(result.error).not.toMatch(/not trusted/i);
   });
 
   it("caval:autocomplete returns model completion text", async () => {

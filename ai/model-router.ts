@@ -34,6 +34,40 @@ export interface ModelSelection {
   score: number;
 }
 
+/** Merge optional user abort with a timeout AbortController. */
+export function linkAbortWithTimeout(
+  userSignal: AbortSignal | undefined,
+  timeoutMs: number
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const onUserAbort = () => {
+    try {
+      controller.abort();
+    } catch {
+      /* idempotent */
+    }
+  };
+  if (userSignal?.aborted) {
+    controller.abort();
+  } else if (userSignal) {
+    userSignal.addEventListener("abort", onUserAbort, { once: true });
+  }
+  const timeout = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {
+      /* idempotent */
+    }
+  }, timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      userSignal?.removeEventListener("abort", onUserAbort);
+    },
+  };
+}
+
 export class ModelRouter {
   private readonly providers: ModelProvider[];
   private readonly options: RouterOptions;
@@ -188,11 +222,13 @@ export class ModelRouter {
 
       for (let attempt = 0; attempt < this.retry.attempts(); attempt += 1) {
         await this.delay(this.timeouts.backoffForAttempt(attempt));
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.timeouts.timeoutForProvider(model.provider, request.timeoutMs ?? this.options.timeoutMs));
+        const linked = linkAbortWithTimeout(
+          request.signal,
+          this.timeouts.timeoutForProvider(model.provider, request.timeoutMs ?? this.options.timeoutMs)
+        );
 
         try {
-          return await provider.complete(request, model, { signal: controller.signal });
+          return await provider.complete(request, model, { signal: linked.signal });
         } catch (error) {
           const normalized = error instanceof Error ? error : new Error(String(error));
           errors.push(normalized);
@@ -213,7 +249,7 @@ export class ModelRouter {
             break;
           }
         } finally {
-          clearTimeout(timeout);
+          linked.cleanup();
         }
       }
     }
@@ -237,14 +273,13 @@ export class ModelRouter {
 
       for (let attempt = 0; attempt < this.retry.attempts(); attempt += 1) {
         await this.delay(this.timeouts.backoffForAttempt(attempt));
-        const controller = new AbortController();
-        const timeout = setTimeout(
-          () => controller.abort(),
+        const linked = linkAbortWithTimeout(
+          request.signal,
           this.timeouts.timeoutForProvider(model.provider, request.timeoutMs ?? this.options.timeoutMs)
         );
 
         try {
-          return await provider.complete(request, model, { signal: controller.signal });
+          return await provider.complete(request, model, { signal: linked.signal });
         } catch (error) {
           const normalized = error instanceof Error ? error : new Error(String(error));
           errors.push(normalized);
@@ -261,7 +296,7 @@ export class ModelRouter {
             break;
           }
         } finally {
-          clearTimeout(timeout);
+          linked.cleanup();
         }
       }
     }
@@ -279,9 +314,8 @@ export class ModelRouter {
         continue;
       }
 
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
+      const linked = linkAbortWithTimeout(
+        request.signal,
         this.timeouts.timeoutForProvider(model.provider, request.timeoutMs ?? this.options.timeoutMs)
       );
 
@@ -292,7 +326,7 @@ export class ModelRouter {
           reason: "Streaming model selected.",
           requestId: request.metadata?.requestId,
         });
-        yield* provider.stream(request, model, { signal: controller.signal });
+        yield* provider.stream(request, model, { signal: linked.signal });
         return;
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error(String(error));
@@ -304,7 +338,7 @@ export class ModelRouter {
           requestId: request.metadata?.requestId,
         });
       } finally {
-        clearTimeout(timeout);
+        linked.cleanup();
       }
     }
 

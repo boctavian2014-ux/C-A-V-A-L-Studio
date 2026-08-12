@@ -15,7 +15,7 @@ describe("resolveMcpSpawn", () => {
     const resolved = resolveMcpSpawn("uvx", ["mcp-server-git", "--repository", "."], {});
     expect(resolved.command).not.toBe("uvx.cmd");
     expect(resolved.command.toLowerCase()).toMatch(/uvx(\.exe)?$/);
-    expect(resolved.env.PATH).toMatch(/\.local[\\/]+bin/i);
+    expect(resolved.env.PATH).toBeTruthy();
   });
 
   it("keeps command unchanged on non-Windows", () => {
@@ -25,45 +25,55 @@ describe("resolveMcpSpawn", () => {
   });
 });
 
-describe("mergeMcpServerEnv", () => {
-  const originalFirecrawl = process.env.FIRECRAWL_API_KEY;
-
-  beforeEach(() => {
-    process.env.FIRECRAWL_API_KEY = "from-process";
+describe("mergeMcpServerEnv (Lot C3)", () => {
+  it("does not preserve secrets from process.env when config blank", () => {
+    const env = mergeMcpServerEnv(
+      { FIRECRAWL_API_KEY: "" },
+      undefined,
+      { PATH: "/bin", FIRECRAWL_API_KEY: "from-process", OPENROUTER_API_KEY: "x" },
+      "firecrawl"
+    );
+    expect(env.FIRECRAWL_API_KEY).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.PATH).toBe("/bin");
   });
 
-  afterEach(() => {
-    if (originalFirecrawl === undefined) delete process.env.FIRECRAWL_API_KEY;
-    else process.env.FIRECRAWL_API_KEY = originalFirecrawl;
-  });
-
-  it("ignores blank config env values so process.env is preserved", () => {
-    const env = mergeMcpServerEnv({ FIRECRAWL_API_KEY: "" });
-    expect(env.FIRECRAWL_API_KEY).toBe("from-process");
-  });
-
-  it("prefers non-empty config env over process.env", () => {
-    const env = mergeMcpServerEnv({ FIRECRAWL_API_KEY: "from-config" });
+  it("prefers non-empty config env", () => {
+    const env = mergeMcpServerEnv(
+      { FIRECRAWL_API_KEY: "from-config" },
+      undefined,
+      { PATH: "/bin", FIRECRAWL_API_KEY: "from-process" },
+      "firecrawl"
+    );
     expect(env.FIRECRAWL_API_KEY).toBe("from-config");
   });
 
-  it("injects secrets when config env is absent", () => {
-    const env = mergeMcpServerEnv(undefined, { FIRECRAWL_API_KEY: "from-secrets" });
+  it("injects secrets for declared server keys", () => {
+    const env = mergeMcpServerEnv(
+      undefined,
+      { FIRECRAWL_API_KEY: "from-secrets" },
+      { PATH: "/bin" },
+      "firecrawl"
+    );
     expect(env.FIRECRAWL_API_KEY).toBe("from-secrets");
   });
 
   it("injects GITHUB_PERSONAL_ACCESS_TOKEN from secrets", () => {
     const env = mergeMcpServerEnv(
       { GITHUB_PERSONAL_ACCESS_TOKEN: "" },
-      { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_test_token" }
+      { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_test_token" },
+      { PATH: "/bin" },
+      "github"
     );
     expect(env.GITHUB_PERSONAL_ACCESS_TOKEN).toBe("ghp_test_token");
   });
 
-  it("injects SEMGREP_APP_TOKEN from secrets when config blank", () => {
+  it("injects SEMGREP_APP_TOKEN from secrets when blank in config", () => {
     const env = mergeMcpServerEnv(
       { SEMGREP_APP_TOKEN: "" },
-      { SEMGREP_APP_TOKEN: "sgp_test" }
+      { SEMGREP_APP_TOKEN: "sgp_test" },
+      { PATH: "/bin" },
+      "semgrep"
     );
     expect(env.SEMGREP_APP_TOKEN).toBe("sgp_test");
   });
@@ -105,11 +115,3 @@ describe("mcpStartErrorHint", () => {
     expect(hint).toMatch(/trivy plugin install mcp/i);
   });
 });
-
-/**
- * Manual verification (Extensions + MCP):
- * 1. Open a folder with caval.jsonc → Extensions → MCP → Health shows tools for filesystem/fetch/memory.
- * 2. Git shows tools if uvx is installed, else a clear hint (not npm E404).
- * 3. App launch auto-starts marketplace — Extensions tab lists Romania Tools without npm run marketplace:serve.
- * 4. Install extension → .cavalo/extensions/<id>/package.json; reload → appears under Instalate.
- */

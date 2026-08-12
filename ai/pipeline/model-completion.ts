@@ -9,7 +9,7 @@ import {
 } from '../models/auto-router';
 import { isAutoTier, type ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey } from '../models/model-readiness';
-import { resolveByokApiKeys, isPersistableSecret } from '../models/api-secrets';
+import { resolveByokApiKeysFromEnv, isPersistableSecret } from '../models/api-secrets';
 import { getModelProfile } from '../model-profiles';
 import { MODELS, createProvider, type ApiKeys, type AIMessage, type ModelId } from '../multi-model/provider';
 import type { RoutingIntent, ModelRequest } from '../types';
@@ -50,6 +50,8 @@ export interface CompleteModelTextInput {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  /** P2: abort in-flight provider fetch / stream. */
+  signal?: AbortSignal;
 }
 
 export type CompleteModelTextResult =
@@ -87,6 +89,7 @@ function buildModelRequest(
     temperature: input.temperature,
     maxTokens: input.maxTokens,
     timeoutMs: input.timeoutMs ?? (input.jsonMode ? 120_000 : undefined),
+    signal: input.signal,
     metadata: {
       requestId,
       preferredModel: modelId,
@@ -104,8 +107,12 @@ async function streamByokModel(
   apiKeys: ApiKeys,
   messages: CompletionMessage[],
   callbacks: CompletionStreamCallbacks,
-  isChat = false
+  isChat = false,
+  signal?: AbortSignal
 ): Promise<CompleteModelTextResult> {
+  if (signal?.aborted) {
+    return { ok: false, error: 'Generare anulată.' };
+  }
   const provider = createProvider(modelId, apiKeys);
   let full = '';
   let streamError: string | undefined;
@@ -116,19 +123,31 @@ async function streamByokModel(
     callbacks.onStatus?.('think', 'active');
   }
 
-  await provider.streamChat(messages as AIMessage[], ({ delta, error }) => {
-    if (error) {
-      streamError = error;
-      return;
-    }
-    if (isChat && !gotFirstDelta && delta) {
-      gotFirstDelta = true;
-      callbacks.onStatus?.('think', 'done');
-      callbacks.onStatus?.('write', 'active');
-    }
-    full += delta;
-    callbacks.onDelta?.(delta);
-  });
+  await provider.streamChat(
+    messages as AIMessage[],
+    ({ delta, error }) => {
+      if (signal?.aborted) {
+        streamError = 'Generare anulată.';
+        return;
+      }
+      if (error) {
+        streamError = error;
+        return;
+      }
+      if (isChat && !gotFirstDelta && delta) {
+        gotFirstDelta = true;
+        callbacks.onStatus?.('think', 'done');
+        callbacks.onStatus?.('write', 'active');
+      }
+      full += delta;
+      callbacks.onDelta?.(delta);
+    },
+    signal
+  );
+
+  if (signal?.aborted) {
+    return { ok: false, error: 'Generare anulată.' };
+  }
 
   if (streamError) {
     return { ok: false, error: streamError };
@@ -246,9 +265,15 @@ export async function executeModelCompletion(
   const requestId = input.requestId ?? `complete-${Date.now()}`;
   const intent = input.intent ?? 'kilocode';
   const isChat = (input.capability ?? 'chat') === 'chat' || input.capability === 'code';
+  const signal = input.signal;
+
+  if (signal?.aborted) {
+    return { ok: false, error: 'Generare anulată.' };
+  }
 
   if (isByokModel(input.model)) {
-    const apiKeys = resolveByokApiKeys(input.apiKeys);
+    // BYOK keys only from main process env (applyStoredSecretsToEnv) — ignore renderer.
+    const apiKeys = resolveByokApiKeysFromEnv();
     const meta = MODELS.find((m) => m.id === input.model);
     const needed =
       meta?.provider === 'anthropic'
@@ -273,7 +298,14 @@ export async function executeModelCompletion(
       callbacks.onStatus?.('route', 'done', input.model);
       callbacks.onStatus?.('connect', 'active');
     }
-    return streamByokModel(input.model as ModelId, apiKeys, input.messages, callbacks, isChat);
+    return streamByokModel(
+      input.model as ModelId,
+      apiKeys,
+      input.messages,
+      callbacks,
+      isChat,
+      signal
+    );
   }
 
   if (isChat) {
@@ -342,6 +374,9 @@ export async function executeModelCompletion(
   const errors: string[] = [];
 
   for (const modelId of modelIdsToTry) {
+    if (signal?.aborted) {
+      return { ok: false, error: 'Generare anulată.' };
+    }
     if (isChat) {
       callbacks.onMeta?.(modelId, resolved.reason);
     } else {
@@ -395,7 +430,7 @@ export async function executeModelCompletion(
                 : m
             );
 
-      const streamRequest = { ...modelRequest, messages: streamMessages };
+      const streamRequest = { ...modelRequest, messages: streamMessages, signal };
 
       let full = '';
       let reasoningFull = '';
@@ -408,6 +443,9 @@ export async function executeModelCompletion(
       }
 
       for await (const chunk of aiClient.stream(streamRequest)) {
+        if (signal?.aborted) {
+          return { ok: false, error: 'Generare anulată.' };
+        }
         if (chunk.kind === 'reasoning') {
           reasoningFull += chunk.text;
           if (!gotReasoning && isChat) {
@@ -425,6 +463,10 @@ export async function executeModelCompletion(
         }
         full += chunk.text;
         callbacks.onDelta?.(chunk.text);
+      }
+
+      if (signal?.aborted) {
+        return { ok: false, error: 'Generare anulată.' };
       }
 
       if (isChat) {
@@ -445,6 +487,9 @@ export async function executeModelCompletion(
         provider: profile?.provider ?? 'open_source',
       };
     } catch (error) {
+      if (signal?.aborted) {
+        return { ok: false, error: 'Generare anulată.' };
+      }
       errors.push(`${modelId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

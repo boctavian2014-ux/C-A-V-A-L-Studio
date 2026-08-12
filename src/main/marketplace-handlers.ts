@@ -2,6 +2,7 @@ import { ipcMain } from "electron";
 
 import type { ExtensionQuery, MarketplaceExtension } from "../../marketplace/api";
 import { getMarketplaceBaseUrl, startMarketplaceServer } from "./marketplace-server";
+import { assertTrustedSender } from "./ipc-trust";
 
 async function marketplaceFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const started = await startMarketplaceServer();
@@ -17,7 +18,8 @@ async function marketplaceFetch<T>(path: string, init?: RequestInit): Promise<T>
 }
 
 export function registerMarketplaceHandlers(): void {
-  ipcMain.handle("marketplace:health", async () => {
+  ipcMain.handle("marketplace:health", async (event) => {
+    assertTrustedSender(event);
     const url = getMarketplaceBaseUrl();
     const started = await startMarketplaceServer();
     if (!started) {
@@ -33,7 +35,8 @@ export function registerMarketplaceHandlers(): void {
     }
   });
 
-  ipcMain.handle("marketplace:search", async (_event, query: ExtensionQuery) => {
+  ipcMain.handle("marketplace:search", async (event, query: ExtensionQuery) => {
+    assertTrustedSender(event);
     const params = new URLSearchParams();
     if (query?.text) params.set("q", query.text);
     if (query?.category) params.set("category", query.category);
@@ -45,7 +48,8 @@ export function registerMarketplaceHandlers(): void {
 
   ipcMain.handle(
     "marketplace:autocomplete",
-    async (_event, input: { q: string; mode?: string }) => {
+    async (event, input: { q: string; mode?: string }) => {
+      assertTrustedSender(event);
       const params = new URLSearchParams();
       params.set("q", input?.q ?? "");
       if (input?.mode) params.set("mode", input.mode);
@@ -53,7 +57,8 @@ export function registerMarketplaceHandlers(): void {
     }
   );
 
-  ipcMain.handle("marketplace:categories", async () => {
+  ipcMain.handle("marketplace:categories", async (event) => {
+    assertTrustedSender(event);
     return marketplaceFetch<string[]>("/api/extensions/categories");
   });
 }
