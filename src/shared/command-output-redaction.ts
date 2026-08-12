@@ -2,6 +2,7 @@
 export function redactSensitiveCommandOutput(text: string): string {
   if (!text) return text;
   return text
+    .replace(/ghp_[A-Za-z0-9_]{20,}/g, "ghp_[REDACTED]")
     .replace(/sk-or-v1-[a-zA-Z0-9_-]{8,}/g, "sk-or-v1-[REDACTED]")
     .replace(/sk-ant-[a-zA-Z0-9_-]{10,}/g, "sk-ant-[REDACTED]")
     .replace(/sk-[a-zA-Z0-9_-]{10,}/g, "sk-[REDACTED]")

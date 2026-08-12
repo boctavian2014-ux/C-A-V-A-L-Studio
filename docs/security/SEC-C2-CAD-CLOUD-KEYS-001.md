@@ -4,38 +4,41 @@
 |-------|--------|
 | **ID** | SEC-C2-CAD-CLOUD-KEYS-001 |
 | **Severitate** | **Medie** |
-| **Status** | **Mitigat / Deschis** — client redacts logs/errors; **keys still sent in HTTPS body** to CAD cloud when required by current server contract |
+| **Status** | **PR1 backend implementat / Deschis** — identity JWT + provider profiles criptate + flag legacy. Desktop încă trimite chei (`attachMainCadSecrets`). Ticketul nu e Remediat. |
 | **Owner** | CAD / platform |
-| **Sprint** | Next server-side CAD auth sprint |
+| **Sprint** | PR1 backend (acest lot); PR2 desktop după merge + deploy |
 | **Related** | Lot C2 renderer isolation (done); Lot C5.6 analysis |
 
 ## Context
 
 After C2, the renderer no longer receives/sends API keys. `cad-handlers.ts` still attaches `OPENROUTER_API_KEY` / `MESHY_API_KEY` / `PIAPI` into the outbound JSON body toward the CAD cloud (`attachMainCadSecrets`) because the **current CAD cloud contract expects those fields**.
 
+## PR1 (backend) — făcut
+
+- JWT Bearer (`sub`) is the only accountId for provider profiles.
+- `x-caval-user-id` never beats JWT and cannot access profiles.
+- `provider_profiles` stores AES-256-GCM ciphertext only.
+- `POST /cad/jobs` and `POST /cad/plan` accept `providerProfileId`.
+- `CAD_LEGACY_CLIENT_SECRET_PAYLOAD` defaults on; legacy body keys still work.
+- `CAD_ALLOW_ANONYMOUS=1` fails boot in production (except `CAD_USE_LOCAL=1`).
+
+See [SEC-C2-CAD-CLOUD-KEYS-PR1.md](./SEC-C2-CAD-CLOUD-KEYS-PR1.md).
+
 ## Lot C5.6 decision
 
-**Do not remove BYOK/API keys from the body yet** — that would break CAD cloud jobs without a server-side vault/profile.
+**Do not remove BYOK/API keys from the desktop body yet** — PR2 after this backend is deployed.
 
-### Contract for true remediation (server-side)
+### Contract for true remediation (PR2 + E2E)
 
-1. CAD cloud loads provider keys from its own env/vault/profile keyed by `cavalId` / tenant.
-2. Main sends job payload **without** `openRouterApiKey` / `meshApiKey` / `piapiApiKey`.
-3. Automated test asserts outbound CAD JSON has no secret fields.
+1. Desktop sends JWT + `providerProfileId` only.
+2. Main payload has no `openRouterApiKey` / `meshApiKey` / `piapiApiKey`.
+3. E2E asserts outbound CAD JSON has no secret fields.
 4. Then mark this ticket **Remediat**.
-
-Until then: status stays **Mitigat/Deschis** — not “Remediat”.
-
-## Client mitigations already in place
-
-- Renderer cannot supply keys (C2).
-- CAD outbound uses `safeFetch` + origin-gated auth headers (C1).
-- Errors/logs use `redactSensitiveText` (no body-with-keys logging found).
 
 ## Closing criteria
 
 | Criteriu | Stare |
 |----------|--------|
-| CAD cloud reads keys server-side | Pending |
-| Main body contains no BYOK/API key fields | Pending |
-| Test proves payload without keys + CAD still works | Pending |
+| CAD cloud reads keys from per-account vault | **PR1** (profile path) |
+| Main body contains no BYOK/API key fields | Pending PR2 |
+| Test proves payload without keys + CAD still works | Pending E2E after PR2 |

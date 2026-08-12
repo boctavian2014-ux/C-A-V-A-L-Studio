@@ -15,9 +15,19 @@ const maxRequests = (): number =>
   Number(process.env.CAD_RATE_LIMIT_MAX ?? 30);
 
 const bucketKey = (request: Request): string => {
+  const accountId = request.cadAuth?.accountId;
+  const profileId =
+    typeof request.body?.providerProfileId === "string"
+      ? request.body.providerProfileId
+      : typeof request.params?.id === "string" && request.path.includes("/profiles/")
+        ? request.params.id
+        : "";
+  if (accountId) {
+    return profileId ? `account:${accountId}:profile:${profileId}` : `account:${accountId}`;
+  }
   const cavalId = request.cadAuth?.cavalId ?? "anonymous";
   const ip = request.ip ?? request.socket.remoteAddress ?? "unknown";
-  return `${cavalId}:${ip}`;
+  return `legacy:${cavalId}:${ip}`;
 };
 
 export const cadRateLimitMiddleware = (
@@ -42,7 +52,8 @@ export const cadRateLimitMiddleware = (
       level: "warn",
       event: "rate_limit_exceeded",
       cavalId: request.cadAuth?.cavalId,
-      meta: { key, count: bucket.count, max },
+      accountId: request.cadAuth?.accountId ?? undefined,
+      meta: { count: bucket.count, max },
     });
     response.status(429).json({
       ok: false,

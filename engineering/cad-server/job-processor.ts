@@ -12,6 +12,7 @@ import { tryInstallOpenScad } from "./openscad-install";
 import { computeStlBoundingBox } from "./stl-bbox";
 import type { CreateCadJobInput } from "./types";
 import { appendJobLog } from "./services/job-logger";
+import { redactSensitiveText } from "../../src/shared/command-output-redaction";
 import {
   clearJobAbort,
   isJobAborted,
@@ -155,7 +156,7 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
       await markJobCancelled(jobId);
       return;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = redactSensitiveText(error instanceof Error ? error.message : String(error));
     await updateCadJob(jobId, { status: "failed", errorMessage: message });
     appendJobLog(jobId, { level: "error", event: "job_failed", message });
     cadLog({ level: "error", event: "job_failed", jobId, message });
@@ -220,7 +221,7 @@ const processMeshJob = async (
 
     await updateCadJob(jobId, {
       status: "failed",
-      errorMessage: mesh.error ?? "Mesh generation failed",
+      errorMessage: redactSensitiveText(mesh.error ?? "Mesh generation failed"),
     });
     appendJobLog(jobId, { level: "error", event: "job_failed", message: mesh.error });
     return;
@@ -296,7 +297,7 @@ const processOpenScadJob = async (
     if (!llm.ok || !llm.scad) {
       await updateCadJob(jobId, {
         status: "failed",
-        errorMessage: llm.error ?? "LLM failed to generate OpenSCAD",
+        errorMessage: redactSensitiveText(llm.error ?? "LLM failed to generate OpenSCAD"),
       });
       appendJobLog(jobId, { level: "error", event: "job_failed", message: llm.error });
       return;
@@ -361,7 +362,7 @@ const processOpenScadJob = async (
 
     await updateCadJob(jobId, {
       status: "failed",
-      errorMessage: renderErr,
+      errorMessage: redactSensitiveText(renderErr),
       generatedScad: scad,
     });
     appendJobLog(jobId, { level: "error", event: "job_failed", message: renderErr });

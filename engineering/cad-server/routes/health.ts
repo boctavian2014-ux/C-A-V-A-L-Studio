@@ -7,6 +7,9 @@ import {
 } from "../mesh-client";
 import { isOpenScadInstalled } from "../scad-runner";
 import { isCadPersistenceConfigured } from "../storage/index";
+import { isCadAnonymousAllowed } from "../boot-guard";
+import { isLegacyClientSecretPayloadEnabled } from "../legacy-contract";
+import { isProfileEncryptionConfigured } from "../crypto/profile-secret";
 
 export const cadHealthCheck = async () => ({
   ok: true,
@@ -20,7 +23,10 @@ export const cadHealthCheck = async () => ({
   openscadInstalled: await isOpenScadInstalled(),
   llmModel: process.env.CAD_LLM_MODEL ?? "openai/gpt-4o-mini",
   allowFallback: process.env.CAD_ALLOW_FALLBACK === "1",
-  authRequired: Boolean(process.env.CAD_API_KEY) || process.env.CAD_ALLOW_ANONYMOUS !== "1",
+  authRequired: Boolean(process.env.CAD_API_KEY) || !isCadAnonymousAllowed(),
+  anonymousAllowed: isCadAnonymousAllowed(),
+  legacyClientSecretPayload: isLegacyClientSecretPayloadEnabled(),
+  profileVaultConfigured: isProfileEncryptionConfigured(),
   checkedAt: new Date().toISOString(),
 });
 

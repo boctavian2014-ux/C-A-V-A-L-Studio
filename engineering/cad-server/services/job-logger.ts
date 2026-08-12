@@ -1,4 +1,5 @@
 import type { CadJobLogEntry } from "../types";
+import { redactSensitiveText } from "../../../src/shared/command-output-redaction";
 
 const logs = new Map<string, CadJobLogEntry[]>();
 const MAX_LOGS_PER_JOB = 200;
@@ -11,7 +12,7 @@ export const appendJobLog = (
     at: entry.at ?? new Date().toISOString(),
     level: entry.level,
     event: entry.event,
-    message: entry.message,
+    message: entry.message ? redactSensitiveText(entry.message) : undefined,
     meta: entry.meta,
   };
   const list = logs.get(jobId) ?? [];
