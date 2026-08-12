@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createIpcHarness } from "./ipc-harness";
 
 const harness = createIpcHarness();
+const boundRoots = new Map<number, string>();
 
 const terminalMocks = vi.hoisted(() => {
   const sessions = new Map<
@@ -70,15 +74,26 @@ vi.mock("../../src/main/powershell-shell", async () => {
   };
 });
 
-describe("Terminal IPC integration", () => {
+describe("Terminal IPC integration (Lot B Zone A)", () => {
+  let workspace: string;
+
   beforeEach(async () => {
     harness.reset();
     vi.resetModules();
     terminalMocks.spawn.mockClear();
     terminalMocks.sessions.clear();
     mockWindow.webContents.send.mockClear();
+    boundRoots.clear();
 
-    await import("../../src/main/terminal-handlers");
+    workspace = fs.mkdtempSync(path.join(os.tmpdir(), "caval-term-ws-"));
+    boundRoots.set(harness.sender.id, workspace);
+
+    const { registerTerminalHandlers } = await import("../../src/main/terminal-handlers");
+    registerTerminalHandlers((id) => boundRoots.get(id));
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
   });
 
   it("terminal:create spawns a PTY and wires output to renderer", async () => {
@@ -145,26 +160,39 @@ describe("Terminal IPC integration", () => {
     expect(created.error).toMatch(/window/i);
   });
 
-  it("terminal:create uses workspace cwd when provided", async () => {
-    const workspaceCwd = process.cwd();
-    const created = await harness.invoke<{ ok: boolean }>("terminal:create", "term-cwd", {
-      cwd: workspaceCwd,
+  it("terminal:create uses bound workspace cwd and ignores renderer cwd", async () => {
+    const created = await harness.invoke<{ ok: boolean; cwd?: string }>("terminal:create", "term-cwd", {
+      cwd: "C:\\Windows\\System32",
     });
     expect(created.ok).toBe(true);
+    expect(created.cwd).toBe(path.resolve(workspace));
     expect(terminalMocks.spawn).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(Array),
-      expect.objectContaining({ cwd: workspaceCwd })
+      expect.objectContaining({ cwd: path.resolve(workspace) })
     );
   });
 
-  it("terminal:create falls back to homedir for invalid cwd", async () => {
-    const os = await import("os");
-    await harness.invoke("terminal:create", "term-bad-cwd", { cwd: "Z:\\nonexistent\\path" });
-    expect(terminalMocks.spawn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(Array),
-      expect.objectContaining({ cwd: os.homedir() })
-    );
+  it("terminal:create rejects when workspace is unbound (no homedir fallback)", async () => {
+    boundRoots.clear();
+    const created = await harness.invoke<{ ok: boolean; error?: string }>("terminal:create", "term-unbound", {
+      cwd: os.homedir(),
+    });
+    expect(created.ok).toBe(false);
+    expect(created.error).toMatch(/folder|workspace/i);
+    expect(terminalMocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it("terminal:create sanitizes API keys from env", async () => {
+    const prev = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = "sk-or-secret-test";
+    try {
+      await harness.invoke("terminal:create", "term-env");
+      const opts = terminalMocks.spawn.mock.calls[0]?.[2] as { env: Record<string, string> };
+      expect(opts.env.OPENROUTER_API_KEY).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = prev;
+    }
   });
 });

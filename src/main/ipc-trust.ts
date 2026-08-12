@@ -1,12 +1,6 @@
-import { shell, type IpcMainInvokeEvent, type WebContents, type WebFrameMain } from "electron";
+import type { IpcMainInvokeEvent, WebContents, WebFrameMain } from "electron";
 
 const TRUSTED_PROTOCOLS = new Set(["file:", "app:", "caval:"]);
-
-export const STRIPE_CHECKOUT_HOSTS = [
-  "checkout.stripe.com",
-  "billing.stripe.com",
-  "pay.stripe.com",
-];
 
 /** Accept only top-level local renderer frames (not remote http/https iframes). */
 export function validateTrustedSender(
@@ -45,38 +39,17 @@ export function assertTrustedSender(event: IpcMainInvokeEvent): void {
   }
 }
 
-export function isSafeExternalUrl(url: string, allowedHosts?: string[]): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return false;
-  }
-
-  if (allowedHosts && allowedHosts.length > 0) {
-    return allowedHosts.some(
-      (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
-    );
-  }
-
-  return true;
-}
-
-export async function openSafeExternalUrl(
-  url: string,
-  allowedHosts?: string[]
-): Promise<{ ok: boolean; error?: string }> {
-  if (!isSafeExternalUrl(url, allowedHosts)) {
-    return { ok: false, error: "URL blocked by security policy." };
-  }
-  try {
-    await shell.openExternal(url);
-    return { ok: true };
-  } catch (err: unknown) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
+/** Re-exports — Lot C4: single policy lives in external-url-policy.ts */
+export {
+  STRIPE_CHECKOUT_HOSTS,
+  CAVALLO_TRUSTED_HOSTS,
+  isSafeExternalUrl,
+  openSafeExternalUrl,
+  openExternalUrl,
+  evaluateExternalUrl,
+  parseExternalUrl,
+  redactUrlForDisplay,
+  isRenderableExternalHref,
+  isAllowedWorkbenchNavigation,
+  type ExternalUrlOrigin,
+} from "./external-url-policy";

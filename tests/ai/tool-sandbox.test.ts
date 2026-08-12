@@ -30,6 +30,6 @@ describe("ToolSandbox", () => {
       confirm: true
     }, process.cwd());
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/Blocked shell metacharacters/);
+    expect(result.error).toMatch(/Invalid npm script name/);
   });
 });

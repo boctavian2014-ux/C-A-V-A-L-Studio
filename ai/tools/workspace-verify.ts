@@ -5,6 +5,7 @@ import {
   runAllowedWorkspaceCommand,
   type CommandRunResult,
 } from './workspace-command-runner';
+import { workspaceCommandMutex } from './workspace-execute-lock';
 import { maybeAutoFixBeforeVerify } from './verify-auto-fix';
 
 export interface WorkspaceVerifyOptions {
@@ -66,8 +67,7 @@ export function formatVerifySummary(result: WorkspaceVerifyResult): string {
   return parts.join('; ');
 }
 
-/** Run build/test/typecheck locally — no MCP required. */
-export async function runWorkspaceVerify(
+async function runWorkspaceVerifyUnlocked(
   workspaceRoot: string,
   options: WorkspaceVerifyOptions = {}
 ): Promise<WorkspaceVerifyResult> {
@@ -126,12 +126,22 @@ export async function runWorkspaceVerify(
   };
 }
 
+/** Run build/test/typecheck locally — no MCP required. Uses Zone B per-workspace mutex. */
+export async function runWorkspaceVerify(
+  workspaceRoot: string,
+  options: WorkspaceVerifyOptions = {}
+): Promise<WorkspaceVerifyResult> {
+  return workspaceCommandMutex.runExclusive(workspaceRoot, () =>
+    runWorkspaceVerifyUnlocked(workspaceRoot, options)
+  );
+}
+
 /** Run verify with optional pre-install and one retry after installing missing modules from output. */
 export async function runWorkspaceVerifyWithAutoFix(
   workspaceRoot: string,
   options: WorkspaceVerifyOptions = {}
 ): Promise<WorkspaceVerifyResult> {
-  let result = await runWorkspaceVerify(workspaceRoot, options);
+  const result = await runWorkspaceVerify(workspaceRoot, options);
   if (!options.autoInstall) return result;
 
   const failed = result.commands.find((c) => !c.ok && !/^npm install/i.test(c.command));

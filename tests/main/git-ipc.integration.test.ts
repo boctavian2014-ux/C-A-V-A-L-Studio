@@ -8,10 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIpcHarness } from "./ipc-harness";
 
 const harness = createIpcHarness();
+const boundRoots = new Map<number, string>();
+const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
 
 vi.mock("electron", () => ({
   ipcMain: harness.ipcMain,
-  BrowserWindow: { fromWebContents: vi.fn() },
+  BrowserWindow: { fromWebContents: vi.fn(() => null) },
+  dialog: {
+    showMessageBox,
+    showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
+  },
 }));
 
 const hasGit = (() => {
@@ -29,12 +35,15 @@ function initGitRepo(dir: string) {
   execSync('git config user.name "Caval Test"', { cwd: dir, stdio: "pipe" });
 }
 
-describe.skipIf(!hasGit)("Git IPC integration", () => {
+describe.skipIf(!hasGit)("Git IPC integration (Lot B Zone C)", () => {
   let repoPath: string;
 
   beforeEach(async () => {
     harness.reset();
     vi.resetModules();
+    showMessageBox.mockClear();
+    showMessageBox.mockResolvedValue({ response: 0 });
+    boundRoots.clear();
 
     repoPath = await fs.mkdtemp(path.join(os.tmpdir(), "caval-git-ipc-"));
     initGitRepo(repoPath);
@@ -42,23 +51,25 @@ describe.skipIf(!hasGit)("Git IPC integration", () => {
     execSync("git add app.ts", { cwd: repoPath, stdio: "pipe" });
     execSync('git commit -m "initial"', { cwd: repoPath, stdio: "pipe" });
 
+    boundRoots.set(harness.sender.id, repoPath);
+
     const { registerGitHandlers } = await import("../../src/main/git-handlers");
-    registerGitHandlers();
+    registerGitHandlers((id) => boundRoots.get(id));
   });
 
   afterEach(async () => {
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 
-  it("git:status reports branch and tracked files", async () => {
+  it("git:status reports branch and tracked files (ignores renderer projectPath)", async () => {
     await fs.writeFile(path.join(repoPath, "app.ts"), "export const v = 2;\n", "utf8");
     await fs.writeFile(path.join(repoPath, "new.txt"), "hello\n", "utf8");
 
     const status = await harness.invoke<{
       isRepo: boolean;
       branch: string;
-      files: Array<{ path: string; staged: boolean }>;
-    }>("git:status", repoPath);
+      files: Array<{ path: string; staged: boolean; status?: string }>;
+    }>("git:status", "C:\\Windows\\System32");
 
     expect(status.isRepo).toBe(true);
     expect(status.branch).toBeTruthy();
@@ -66,10 +77,14 @@ describe.skipIf(!hasGit)("Git IPC integration", () => {
     expect(status.files.some((f) => f.path === "new.txt" && f.status === "?")).toBe(true);
   });
 
-  it("git:status returns isRepo false outside a repository", async () => {
+  it("git:status returns isRepo false when bound root is not a repository", async () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), "caval-not-git-"));
     try {
-      const status = await harness.invoke<{ isRepo: boolean; files: unknown[] }>("git:status", outside);
+      boundRoots.set(harness.sender.id, outside);
+      const status = await harness.invoke<{ isRepo: boolean; files: unknown[] }>(
+        "git:status",
+        repoPath
+      );
       expect(status.isRepo).toBe(false);
       expect(status.files).toEqual([]);
     } finally {
@@ -118,7 +133,7 @@ describe.skipIf(!hasGit)("Git IPC integration", () => {
     expect(log[0]?.subject).toBe("Bump version constant");
   });
 
-  it("git:revertHunk reverses a working-tree patch", async () => {
+  it("git:revertHunk requires confirmation and reverses a working-tree patch", async () => {
     const filePath = path.join(repoPath, "app.ts");
     const original = "line1\nline2\nline3\n";
     await fs.writeFile(filePath, original, "utf8");
@@ -127,8 +142,17 @@ describe.skipIf(!hasGit)("Git IPC integration", () => {
     const hunk = ["@@ -1,3 +1,3 @@", " line1", "-line2", "+changed", " line3"].join("\n");
     const reverted = await harness.invoke<{ ok: boolean }>("git:revertHunk", repoPath, "app.ts", hunk);
 
+    expect(showMessageBox).toHaveBeenCalled();
     expect(reverted.ok).toBe(true);
     expect(await fs.readFile(filePath, "utf8")).toBe(original);
+  });
+
+  it("git:push does not execute when user cancels confirmation", async () => {
+    showMessageBox.mockResolvedValueOnce({ response: 1 });
+    const result = await harness.invoke<{ ok: boolean; error?: string }>("git:push", repoPath);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/anulat/i);
+    expect(showMessageBox).toHaveBeenCalled();
   });
 
   it("git:branches lists local branches", async () => {

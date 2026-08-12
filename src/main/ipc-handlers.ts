@@ -2,17 +2,25 @@ import { ipcMain, dialog, shell, BrowserWindow, type IpcMainInvokeEvent } from "
 import * as fs from "fs";
 
 import { readDirTree } from "./fs-tree";
-import { requireWorkspacePath } from "./path-security";
+import {
+  assertTextContentSize,
+  requireSandboxedWorkspacePath,
+} from "./path-security";
 import { parseIpcInput, fsPathSchema, fsReadFileSchema, fsRenameSchema, fsWriteFileSchema } from "./ipc-schemas";
 import { recordAudit, persistAuditLog } from "./audit-log";
 import { assertTrustedSender } from "./ipc-trust";
 
+/**
+ * Bound workspace roots per sender — synced via setIpcWorkspaceRoot from bindWorkspace.
+ * Lot A: NEVER fall back to process.cwd(); missing entry means unbound.
+ */
 const workspaceForSender = new Map<number, string>();
 
 export function setIpcWorkspaceRoot(senderId: number, root: string): void {
   workspaceForSender.set(senderId, root);
 }
 
+/** Bound root only — no cwd / app.getPath fallback. */
 export function getIpcWorkspaceRoot(senderId: number): string | undefined {
   return workspaceForSender.get(senderId);
 }
@@ -27,9 +35,8 @@ function auditFs(channel: string, senderId: number, targetPath: string, ok: bool
   });
 }
 
-function trustedWorkspacePath(event: IpcMainInvokeEvent, relativeOrAbsolute: string): string {
-  assertTrustedSender(event);
-  return requireWorkspacePath(workspaceForSender.get(event.sender.id), relativeOrAbsolute);
+function sandboxedPath(event: IpcMainInvokeEvent, relativeOrAbsolute: string): string {
+  return requireSandboxedWorkspacePath(workspaceForSender.get(event.sender.id), relativeOrAbsolute);
 }
 
 /** Selectează unul sau mai multe fișiere (atașamente chat, import, etc.) */
@@ -78,16 +85,19 @@ ipcMain.handle("fs:openFolder", async (event) => {
 
 /** Citește recursiv structura unui director și returnează un arbore JSON */
 ipcMain.handle("fs:readTree", async (event, dirPath: string) => {
-  const target = trustedWorkspacePath(event, dirPath);
+  assertTrustedSender(event);
+  const target = sandboxedPath(event, dirPath);
   return readDirTree(target, target);
 });
 
 /** Citește conținutul unui fișier text */
 ipcMain.handle("fs:readFile", async (event, filePath: string) => {
+  assertTrustedSender(event);
   try {
     const { filePath: validated } = parseIpcInput(fsReadFileSchema, { filePath });
-    const target = trustedWorkspacePath(event, validated);
+    const target = sandboxedPath(event, validated);
     const content = fs.readFileSync(target, "utf-8");
+    assertTextContentSize(content, "file content");
     auditFs("fs:readFile", event.sender.id, target, true);
     return { ok: true, content };
   } catch (err: unknown) {
@@ -99,9 +109,11 @@ ipcMain.handle("fs:readFile", async (event, filePath: string) => {
 
 /** Salvează conținut într-un fișier */
 ipcMain.handle("fs:writeFile", async (event, filePath: string, content: string) => {
+  assertTrustedSender(event);
   try {
     const parsed = parseIpcInput(fsWriteFileSchema, { filePath, content });
-    const target = trustedWorkspacePath(event, parsed.filePath);
+    assertTextContentSize(parsed.content, "write content");
+    const target = sandboxedPath(event, parsed.filePath);
     fs.writeFileSync(target, parsed.content, "utf-8");
     auditFs("fs:writeFile", event.sender.id, target, true);
     const ws = workspaceForSender.get(event.sender.id);
@@ -116,9 +128,10 @@ ipcMain.handle("fs:writeFile", async (event, filePath: string, content: string) 
 
 /** Creează un fișier nou gol */
 ipcMain.handle("fs:createFile", async (event, filePath: string) => {
+  assertTrustedSender(event);
   try {
     const { targetPath } = parseIpcInput(fsPathSchema, { targetPath: filePath });
-    const target = trustedWorkspacePath(event, targetPath);
+    const target = sandboxedPath(event, targetPath);
     fs.writeFileSync(target, "", "utf-8");
     auditFs("fs:createFile", event.sender.id, target, true);
     return { ok: true };
@@ -129,9 +142,10 @@ ipcMain.handle("fs:createFile", async (event, filePath: string) => {
 
 /** Creează un director nou */
 ipcMain.handle("fs:createDir", async (event, dirPath: string) => {
+  assertTrustedSender(event);
   try {
     const { targetPath } = parseIpcInput(fsPathSchema, { targetPath: dirPath });
-    const target = trustedWorkspacePath(event, targetPath);
+    const target = sandboxedPath(event, targetPath);
     fs.mkdirSync(target, { recursive: true });
     auditFs("fs:createDir", event.sender.id, target, true);
     return { ok: true };
@@ -142,10 +156,11 @@ ipcMain.handle("fs:createDir", async (event, dirPath: string) => {
 
 /** Redenumește / mută un fișier sau director */
 ipcMain.handle("fs:rename", async (event, oldPath: string, newPath: string) => {
+  assertTrustedSender(event);
   try {
     const parsed = parseIpcInput(fsRenameSchema, { oldPath, newPath });
-    const from = trustedWorkspacePath(event, parsed.oldPath);
-    const to = trustedWorkspacePath(event, parsed.newPath);
+    const from = sandboxedPath(event, parsed.oldPath);
+    const to = sandboxedPath(event, parsed.newPath);
     fs.renameSync(from, to);
     auditFs("fs:rename", event.sender.id, `${from} -> ${to}`, true);
     return { ok: true };
@@ -156,9 +171,10 @@ ipcMain.handle("fs:rename", async (event, oldPath: string, newPath: string) => {
 
 /** Șterge un fișier sau director */
 ipcMain.handle("fs:delete", async (event, targetPath: string) => {
+  assertTrustedSender(event);
   try {
     const { targetPath: validated } = parseIpcInput(fsPathSchema, { targetPath });
-    const target = trustedWorkspacePath(event, validated);
+    const target = sandboxedPath(event, validated);
     fs.rmSync(target, { recursive: true, force: true });
     auditFs("fs:delete", event.sender.id, target, true);
     return { ok: true };
@@ -169,8 +185,9 @@ ipcMain.handle("fs:delete", async (event, targetPath: string) => {
 
 /** Deschide fișier în file explorer nativ */
 ipcMain.handle("fs:reveal", async (event, filePath: string) => {
+  assertTrustedSender(event);
   try {
-    const target = trustedWorkspacePath(event, filePath);
+    const target = sandboxedPath(event, filePath);
     shell.showItemInFolder(target);
     return { ok: true };
   } catch (err: unknown) {

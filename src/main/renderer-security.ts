@@ -1,6 +1,6 @@
-import { app, session, shell, type Session } from "electron";
+import { app, session, type Session } from "electron";
 
-import { isSafeExternalUrl } from "./ipc-trust";
+import { isAllowedWorkbenchNavigation } from "./external-url-policy";
 
 export const CAVALLO_RENDERER_WEB_PREFERENCES_BASE = {
   contextIsolation: true,
@@ -40,24 +40,21 @@ export function installRendererSessionPolicy(sess: Session = session.defaultSess
   });
 }
 
+/**
+ * Lot C4: never auto-open external URLs from window.open.
+ * External links must go through engineering:openExternal (EXTERNAL_CONTENT) or other policy paths.
+ */
 export function installWebContentsSecurity(): void {
   app.on("web-contents-created", (_event, contents) => {
     contents.on("will-navigate", (event, navigationUrl) => {
-      try {
-        const parsed = new URL(navigationUrl);
-        if (parsed.protocol === "file:" || parsed.protocol === "app:" || parsed.protocol === "caval:") {
-          return;
-        }
-      } catch {
-        /* block */
+      if (isAllowedWorkbenchNavigation(navigationUrl)) {
+        return;
       }
       event.preventDefault();
     });
 
-    contents.setWindowOpenHandler(({ url }) => {
-      if (isSafeExternalUrl(url)) {
-        void shell.openExternal(url);
-      }
+    contents.setWindowOpenHandler(() => {
+      // Always deny — no shell.openExternal here (phishing vector from AI/content).
       return { action: "deny" };
     });
 

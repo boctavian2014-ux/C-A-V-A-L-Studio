@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import os from "node:os";
 
 import { assertShellCommandAllowed } from "./shell-security";
 import { assertPathInWorkspace } from "./path-security";

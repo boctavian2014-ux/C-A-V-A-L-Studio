@@ -2,12 +2,15 @@ import { spawn } from 'node:child_process';
 
 import { assertShellCommandAllowed } from '../../src/main/shell-security';
 import { oneShotShellInvocation } from '../../src/main/powershell-shell';
+import { sanitizeEnvForTerminal } from '../../src/main/subprocess-env';
+import { redactSensitiveCommandOutput } from '../../src/shared/command-output-redaction';
 
 export interface CommandRunResult {
   command: string;
   ok: boolean;
   exitCode: number | null;
   output: string;
+  timedOut?: boolean;
 }
 
 const MAX_OUTPUT_CHARS = 12_000;
@@ -18,6 +21,10 @@ function trimOutput(text: string): string {
   return `${text.slice(0, MAX_OUTPUT_CHARS)}\n… (output truncated)`;
 }
 
+/**
+ * Allowlisted one-shot command in a workspace.
+ * Callers that need exclusivity wrap with `workspaceCommandMutex` (Project Health pattern).
+ */
 export async function runAllowedWorkspaceCommand(
   command: string,
   workspaceRoot: string,
@@ -31,12 +38,14 @@ export async function runAllowedWorkspaceCommand(
 
     const child = spawn(shell, shellArgs, {
       cwd: workspaceRoot,
-      env: process.env,
+      env: sanitizeEnvForTerminal(),
       shell: false,
+      windowsHide: true,
     });
 
     let output = '';
     let settled = false;
+    let timedOut = false;
 
     const finish = (ok: boolean, exitCode: number | null) => {
       if (settled) return;
@@ -46,7 +55,10 @@ export async function runAllowedWorkspaceCommand(
         command: trimmed,
         ok,
         exitCode,
-        output: trimOutput(output.trim() || (ok ? '(no output)' : '(command failed)')),
+        timedOut,
+        output: redactSensitiveCommandOutput(
+          trimOutput(output.trim() || (ok ? '(no output)' : '(command failed)'))
+        ),
       });
     };
 
@@ -67,6 +79,7 @@ export async function runAllowedWorkspaceCommand(
     });
 
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill();
       append(`\n(timed out after ${timeoutMs}ms)`);
       finish(false, null);

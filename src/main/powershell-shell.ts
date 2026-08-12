@@ -135,6 +135,7 @@ export function resolvePreferredShell(): ResolvedShell {
 
 function runWingetPowerShell(action: "install" | "upgrade"): Promise<number | null> {
   return new Promise((resolve) => {
+    // Fixed argv + shell:false — do not launch the shell itself via shell:true
     const child = spawn(
       "winget",
       [
@@ -148,7 +149,7 @@ function runWingetPowerShell(action: "install" | "upgrade"): Promise<number | nu
         "--accept-package-agreements",
         "--accept-source-agreements",
       ],
-      { shell: true, windowsHide: false }
+      { shell: false, windowsHide: false }
     );
     child.on("error", () => resolve(null));
     child.on("close", (code) => resolve(code));
