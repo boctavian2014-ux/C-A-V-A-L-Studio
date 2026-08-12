@@ -1,7 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ipcMain, dialog } from 'electron';
-import { assertTrustedSender, isSafeExternalUrl, openSafeExternalUrl } from './ipc-trust';
+import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { assertTrustedSender } from './ipc-trust';
+import {
+  isExternalUrlOrigin,
+  isRenderableExternalHref,
+  openExternalUrl,
+  type ExternalUrlOrigin,
+} from './external-url-policy';
+import {
+  assertBatchFileCount,
+  assertTextContentSize,
+  resolveInsideDir,
+  resolveSandboxedWorkspacePath,
+} from './path-security';
 
 // ──────────────────────────────────────────────
 //  Robotics AI — IPC Handlers (CAVALLO Studio)
@@ -26,6 +38,13 @@ export interface EngSaveResult {
   ok: boolean;
   savedPath?: string;
   savedPaths?: string[];
+  /** Present when validation rejected the batch before any write. */
+  validationErrors?: string[];
+  /**
+   * After validation passed: if a mid-write I/O error occurs we stop immediately
+   * (no silent continue) and report which paths wrote vs which failed.
+   */
+  failed?: Array<{ name: string; error: string }>;
   error?: string;
 }
 
@@ -36,10 +55,10 @@ function mdCell(value: string): string {
   return (value || '—').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|');
 }
 
-/** Markdown-safe shop cell: link only when shopUrl is a valid http(s) URL. */
+/** Markdown-safe shop cell: link only when shopUrl is a valid external href (display only). */
 function shopCell(shop: string, shopUrl: string): string {
   const url = typeof shopUrl === 'string' ? shopUrl.trim() : '';
-  if (!isSafeExternalUrl(url)) return mdCell(shop);
+  if (!isRenderableExternalHref(url)) return mdCell(shop);
   const encoded = url.replace(/[()\s]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
   return `[${mdCell(shop)}](${encoded})`;
 }
@@ -76,17 +95,10 @@ export function sanitizeFileName(name: string): string {
   return cleaned;
 }
 
-/** Defense-in-depth: confirm the resolved destination stays inside `dir`. */
-function resolveInsideDir(dir: string, fileName: string): string | null {
-  const dest = path.join(dir, sanitizeFileName(fileName));
-  if (!isPathInsideWorkspace(dir, dest)) return null;
-  return dest;
-}
-
-function ensureOutputDir(projectPath: string): string {
-  const dir = path.join(projectPath, OUTPUT_DIR);
+function ensureOutputDir(workspaceRoot: string): string {
+  const dir = path.join(workspaceRoot, OUTPUT_DIR);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return fs.realpathSync(dir);
 }
 
 export function isPathInsideWorkspace(workspaceRoot: string, targetPath: string): boolean {
@@ -95,29 +107,55 @@ export function isPathInsideWorkspace(workspaceRoot: string, targetPath: string)
   return resolved === root || resolved.startsWith(root + path.sep);
 }
 
-export function registerEngineeringHandlers(getWorkspaceRoot: (senderId: number) => string): void {
-  const assertProjectPath = (senderId: number, projectPath: string): EngSaveResult | null => {
-    if (!projectPath) {
+/**
+ * Lot A: workspace root exclusively from getBoundWorkspaceRoot — never cwd fallback.
+ * Renderer-supplied projectPath is validated as under the bound root (or ignored when equal).
+ */
+export function registerEngineeringHandlers(
+  getBoundWorkspaceRoot: (senderId: number) => string | undefined
+): void {
+  const boundRootOrError = (
+    senderId: number
+  ): { root: string } | EngSaveResult => {
+    const root = getBoundWorkspaceRoot(senderId)?.trim();
+    if (!root) {
       return { ok: false, error: 'Niciun proiect deschis. Deschide un folder mai întâi.' };
     }
-    const root = getWorkspaceRoot(senderId);
-    if (!isPathInsideWorkspace(root, projectPath)) {
-      return { ok: false, error: 'Calea proiectului nu aparține workspace-ului deschis.' };
+    return { root };
+  };
+
+  const resolveProjectUnderBound = (
+    boundRoot: string,
+    projectPath: string | null | undefined
+  ): string | EngSaveResult => {
+    if (!projectPath?.trim()) {
+      return { ok: false, error: 'Niciun proiect deschis. Deschide un folder mai întâi.' };
     }
-    return null;
+    try {
+      return resolveSandboxedWorkspacePath(boundRoot, projectPath);
+    } catch (err: unknown) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Calea proiectului nu aparține workspace-ului deschis.',
+      };
+    }
   };
 
   ipcMain.handle(
     'engineering:saveFile',
     async (event, projectPath: string, file: EngFileInput): Promise<EngSaveResult> => {
-      const denied = assertProjectPath(event.sender.id, projectPath);
-      if (denied) return denied;
+      assertTrustedSender(event);
+      const bound = boundRootOrError(event.sender.id);
+      if (!('root' in bound)) return bound;
+      const project = resolveProjectUnderBound(bound.root, projectPath);
+      if (typeof project !== 'string') return project;
       if (!file?.name) {
         return { ok: false, error: 'Fișier invalid.' };
       }
       try {
-        const dir = ensureOutputDir(projectPath);
-        const dest = resolveInsideDir(dir, file.name);
+        assertTextContentSize(file.content ?? '', 'engineering file');
+        const dir = ensureOutputDir(project);
+        const dest = resolveInsideDir(dir, sanitizeFileName(file.name));
         if (!dest) {
           return { ok: false, error: 'Nume de fișier invalid.' };
         }
@@ -129,28 +167,98 @@ export function registerEngineeringHandlers(getWorkspaceRoot: (senderId: number)
     }
   );
 
+  /**
+   * saveAll contract (Lot A):
+   * 1) Validate ENTIRE file list before any write (names, sandbox paths, sizes, batch count).
+   * 2) If any input invalid → write nothing; return validationErrors.
+   * 3) Then write sequentially. On mid-write I/O failure: stop immediately, return
+   *    savedPaths (succeeded) + failed (which failed) — never continue silently.
+   */
   ipcMain.handle(
     'engineering:saveAll',
     async (event, projectPath: string, files: EngFileInput[]): Promise<EngSaveResult> => {
-      const denied = assertProjectPath(event.sender.id, projectPath);
-      if (denied) return denied;
+      assertTrustedSender(event);
+      const bound = boundRootOrError(event.sender.id);
+      if (!('root' in bound)) return bound;
+      const project = resolveProjectUnderBound(bound.root, projectPath);
+      if (typeof project !== 'string') return project;
       if (!Array.isArray(files) || files.length === 0) {
         return { ok: false, error: 'Nu există fișiere de salvat.' };
       }
+
+      const validationErrors: string[] = [];
       try {
-        const dir = ensureOutputDir(projectPath);
-        const savedPaths: string[] = [];
-        for (const f of files) {
-          if (!f?.name) continue;
-          const dest = resolveInsideDir(dir, f.name);
-          if (!dest) continue;
-          fs.writeFileSync(dest, f.content ?? '', 'utf-8');
-          savedPaths.push(dest);
-        }
-        return { ok: true, savedPaths };
+        assertBatchFileCount(files.length);
       } catch (err: unknown) {
-        return { ok: false, error: err instanceof Error ? err.message : 'Eroare la salvarea fișierelor.' };
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Batch too large',
+          validationErrors: [err instanceof Error ? err.message : 'Batch too large'],
+        };
       }
+
+      let dir: string;
+      try {
+        dir = ensureOutputDir(project);
+      } catch (err: unknown) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Cannot create output dir' };
+      }
+
+      const planned: Array<{ name: string; dest: string; content: string }> = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        if (!f?.name) {
+          validationErrors.push(`files[${i}]: missing name`);
+          continue;
+        }
+        try {
+          assertTextContentSize(f.content ?? '', `files[${i}]`);
+        } catch (err: unknown) {
+          validationErrors.push(
+            `files[${i}] (${f.name}): ${err instanceof Error ? err.message : String(err)}`
+          );
+          continue;
+        }
+        const dest = resolveInsideDir(dir, sanitizeFileName(f.name));
+        if (!dest) {
+          validationErrors.push(`files[${i}] (${f.name}): invalid file name / path escape`);
+          continue;
+        }
+        planned.push({ name: f.name, dest, content: f.content ?? '' });
+      }
+
+      if (validationErrors.length > 0) {
+        return {
+          ok: false,
+          error: 'Validation failed — no files written',
+          validationErrors,
+        };
+      }
+      if (planned.length === 0) {
+        return { ok: false, error: 'Nu există fișiere de salvat.' };
+      }
+
+      const savedPaths: string[] = [];
+      const failed: Array<{ name: string; error: string }> = [];
+      for (const item of planned) {
+        try {
+          fs.writeFileSync(item.dest, item.content, 'utf-8');
+          savedPaths.push(item.dest);
+        } catch (err: unknown) {
+          failed.push({
+            name: item.name,
+            error: err instanceof Error ? err.message : 'I/O write failed',
+          });
+          // Fail-closed mid-write: stop; do not continue silently.
+          return {
+            ok: false,
+            error: 'I/O failure after validation — partial write',
+            savedPaths,
+            failed,
+          };
+        }
+      }
+      return { ok: true, savedPaths };
     }
   );
 
@@ -167,22 +275,36 @@ export function registerEngineeringHandlers(getWorkspaceRoot: (senderId: number)
       }
 
       const content = buildCartMarkdown(parts);
+      try {
+        assertTextContentSize(content, 'cart markdown');
+      } catch (err: unknown) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Content too large' };
+      }
 
       try {
+        // In-workspace save only when projectPath is under bound root.
+        // Outside workspace: ONLY via native Save dialog — renderer never supplies free external path.
         if (projectPath) {
-          const denied = assertProjectPath(event.sender.id, projectPath);
-          if (denied) return denied;
-          const dir = ensureOutputDir(projectPath);
-          const dest = path.join(dir, 'componente.md');
+          const bound = boundRootOrError(event.sender.id);
+          if (!('root' in bound)) return bound;
+          const project = resolveProjectUnderBound(bound.root, projectPath);
+          if (typeof project !== 'string') return project;
+          const dir = ensureOutputDir(project);
+          const dest = resolveInsideDir(dir, 'componente.md');
+          if (!dest) return { ok: false, error: 'Nume de fișier invalid.' };
           fs.writeFileSync(dest, content, 'utf-8');
           return { ok: true, savedPath: dest };
         }
 
-        const result = await dialog.showSaveDialog({
+        const window = BrowserWindow.fromWebContents(event.sender);
+        const saveOptions = {
           title: 'Exportă lista de componente',
           defaultPath: 'componente.md',
           filters: [{ name: 'Markdown', extensions: ['md'] }],
-        });
+        };
+        const result = window
+          ? await dialog.showSaveDialog(window, saveOptions)
+          : await dialog.showSaveDialog(saveOptions);
         if (result.canceled || !result.filePath) {
           return { ok: false, error: 'Anulat.' };
         }
@@ -196,28 +318,24 @@ export function registerEngineeringHandlers(getWorkspaceRoot: (senderId: number)
 
   ipcMain.handle(
     'engineering:openExternal',
-    async (event, url: string): Promise<{ ok: boolean; error?: string }> => {
+    async (
+      event,
+      payload: string | { url: string; origin?: ExternalUrlOrigin }
+    ): Promise<{ ok: boolean; error?: string }> => {
       assertTrustedSender(event);
-      // shopUrl vine din output LLM — fără allowlist, orice http(s) trecea
-      // direct în browser. Validam protocolul și cerem confirmarea explicită
-      // a utilizatorului înainte de a deschide un host arbitrar.
-      if (!isSafeExternalUrl(url)) {
-        return { ok: false, error: 'URL blocat de politica de securitate.' };
+      // Lot C4: renderer/LLM content may only claim EXTERNAL_CONTENT — never bypass via origin spoof.
+      const url = typeof payload === 'string' ? payload : payload?.url;
+      const claimedOrigin =
+        typeof payload === 'object' && payload && isExternalUrlOrigin(payload.origin)
+          ? payload.origin
+          : 'EXTERNAL_CONTENT';
+      if (claimedOrigin !== 'EXTERNAL_CONTENT') {
+        return { ok: false, error: 'Origin IPC invalid pentru openExternal.' };
       }
-      const host = new URL(url).hostname;
-      const choice = await dialog.showMessageBox({
-        type: 'warning',
-        buttons: ['Deschide', 'Anulează'],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
-        message: `Deschizi linkul extern ${host}?`,
-        detail: url.length > 300 ? `${url.slice(0, 300)}…` : url,
-      });
-      if (choice.response !== 0) {
-        return { ok: false, error: 'Anulat de utilizator.' };
+      if (typeof url !== 'string' || !url.trim()) {
+        return { ok: false, error: 'URL lipsă.' };
       }
-      return openSafeExternalUrl(url);
+      return openExternalUrl(url, { origin: 'EXTERNAL_CONTENT' });
     }
   );
 }

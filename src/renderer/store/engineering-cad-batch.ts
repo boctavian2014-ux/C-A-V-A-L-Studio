@@ -39,6 +39,17 @@ function blobUrlFromBase64(base64: string, mime = 'model/stl'): string {
 
 async function fetchStlAsBase64(url: string): Promise<string | null> {
   try {
+    // Prefer hardened main IPC (SSRF allowlist + no free-URL auth) over renderer fetch.
+    if (window.caval?.cad?.fetchStl && /^https?:\/\//i.test(url)) {
+      const userIdResult = await window.caval.billingUserId?.();
+      const fetched = await window.caval.cad.fetchStl({
+        url,
+        cavalId: userIdResult?.userId,
+      });
+      if (fetched.ok && fetched.base64) return fetched.base64;
+      return null;
+    }
+    // blob: / data: stay in renderer
     const res = await fetch(url);
     if (!res.ok) return null;
     const buf = await res.arrayBuffer();
@@ -104,6 +115,7 @@ async function createJobWithLibraryFallback(input: {
   userPrompt: string;
   project: EngProject;
   cavalId?: string;
+  workspaceRoot?: string | null;
 }): Promise<{ ok: boolean; jobId?: string; error?: string }> {
   const cad = window.caval?.cad;
   if (!cad?.createJob) return { ok: false, error: 'CAD API indisponibil' };
@@ -120,6 +132,7 @@ async function createJobWithLibraryFallback(input: {
 
   const libraryAttempt = await cad.createJob({
     ...base,
+    workspaceRoot: input.workspaceRoot ?? undefined,
     generationMode: 'library',
   });
   if (libraryAttempt.ok && libraryAttempt.jobId) {
@@ -130,6 +143,7 @@ async function createJobWithLibraryFallback(input: {
   if (isLibraryModeUnsupportedError(err) || /Invalid option|bad_request/i.test(err)) {
     const openscadAttempt = await cad.createJob({
       ...base,
+      workspaceRoot: input.workspaceRoot ?? undefined,
       generationMode: 'openscad',
     });
     if (openscadAttempt.ok && openscadAttempt.jobId) {
@@ -169,6 +183,16 @@ export async function runRoboticsCadBatch(params: {
   const lib = window.caval?.roboticsLibrary;
   const userIdResult = await window.caval.billingUserId?.();
   const cavalId = userIdResult?.userId;
+  const workspaceRoot = params.projectPath ?? undefined;
+
+  const cancelCreatedJobIfAborted = async (jobId?: string): Promise<void> => {
+    if (!jobId || !params.signal?.aborted || !cad?.cancelJob) return;
+    await cad.cancelJob({
+      jobId,
+      cavalId,
+      workspaceRoot,
+    }).catch(() => undefined);
+  };
 
   for (let i = 0; i < parts.length; i++) {
     if (params.signal?.aborted) {
@@ -217,11 +241,30 @@ export async function runRoboticsCadBatch(params: {
             userPrompt: params.userPrompt,
             project: params.project,
             cavalId,
+            workspaceRoot,
           });
           if (!created.ok || !created.jobId) {
             throw new Error(created.error ?? 'createJob failed for library scad');
           }
+          parts[i] = {
+            ...parts[i],
+            status: 'running',
+            jobId: created.jobId,
+          };
+          params.onPartUpdate([...parts]);
+          await cancelCreatedJobIfAborted(created.jobId);
+          if (params.signal?.aborted) {
+            parts[i] = { ...parts[i], status: 'skipped', error: 'Anulat' };
+            params.onPartUpdate([...parts]);
+            continue;
+          }
           const done = await pollJobUntilDone(created.jobId, params.signal);
+          if (params.signal?.aborted) {
+            await cancelCreatedJobIfAborted(created.jobId);
+            parts[i] = { ...parts[i], status: 'skipped', error: 'Anulat' };
+            params.onPartUpdate([...parts]);
+            continue;
+          }
           if (!done.ok || !done.stlUrl) {
             throw new Error(normalizeCadErrorMessage(done.error) ?? done.error ?? 'Library render failed');
           }
@@ -262,13 +305,32 @@ export async function runRoboticsCadBatch(params: {
           components: `${comp.name} ×${comp.qty}`,
         },
         cavalId,
+        workspaceRoot,
         generationMode: 'openscad',
         quality: 'standard',
       });
       if (!created.ok || !created.jobId) {
         throw new Error(created.error ?? 'createJob failed');
       }
+      parts[i] = {
+        ...parts[i],
+        status: 'running',
+        jobId: created.jobId,
+      };
+      params.onPartUpdate([...parts]);
+      await cancelCreatedJobIfAborted(created.jobId);
+      if (params.signal?.aborted) {
+        parts[i] = { ...parts[i], status: 'skipped', error: 'Anulat' };
+        params.onPartUpdate([...parts]);
+        continue;
+      }
       const done = await pollJobUntilDone(created.jobId, params.signal);
+      if (params.signal?.aborted) {
+        await cancelCreatedJobIfAborted(created.jobId);
+        parts[i] = { ...parts[i], status: 'skipped', error: 'Anulat' };
+        params.onPartUpdate([...parts]);
+        continue;
+      }
       if (!done.ok || !done.stlUrl) {
         throw new Error(done.error ?? 'Custom CAD failed');
       }

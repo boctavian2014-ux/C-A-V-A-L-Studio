@@ -35,9 +35,11 @@ export type CadStorePhase =
   | 'idle'
   | 'submitting'
   | 'processing'
+  | 'cancelling'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'stale';
 
 export interface CadJobPlan {
   project: EngProject;
@@ -113,7 +115,7 @@ async function loadCadCredentials(): Promise<{
   const caval = window.caval;
   const [settingsResult, secretsResult, health] = await Promise.all([
     caval.settingsLoad?.() ?? Promise.resolve({ ok: true, settings: {} }),
-    caval.secretsGet?.() ?? Promise.resolve({ ok: true, secrets: {}, configured: {} }),
+    caval.secretsGet?.() ?? Promise.resolve({ ok: true, configured: {} }),
     caval.cad?.health?.() ?? Promise.resolve(null),
   ]);
   const settings = (settingsResult?.settings ?? {}) as Record<string, string>;
@@ -206,6 +208,7 @@ interface EngineeringCadState {
   activePartId: string | null;
   batchSummary: string | null;
   batchBusy: boolean;
+  activeBatchJobIds: string[];
 
   /** @deprecated use phase !== 'idle' */
   cadBusy: boolean;
@@ -226,7 +229,7 @@ interface EngineeringCadState {
   setActivePartId: (id: string | null) => void;
   exportBatchZip: () => Promise<{ ok: boolean; savedPath?: string; error?: string; canceled?: boolean }>;
   pollCadJob: (jobId: string) => Promise<void>;
-  cancelCadJob: () => void;
+  cancelCadJob: (opts?: { skipRemote?: boolean }) => Promise<void>;
   retryCadJob: () => Promise<void>;
   clearCadJob: () => void;
   downloadStl: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
@@ -243,7 +246,10 @@ interface EngineeringCadState {
 
 function syncLegacyFields(
   patch: Partial<EngineeringCadState>,
-  current?: Pick<EngineeringCadState, 'phase' | 'serverStatus' | 'error' | 'statusMessage'>
+  current?: Pick<
+    EngineeringCadState,
+    'phase' | 'serverStatus' | 'error' | 'statusMessage' | 'batchBusy'
+  >
 ): Partial<EngineeringCadState> {
   const phase = patch.phase ?? current?.phase ?? 'idle';
   const serverStatus = patch.serverStatus ?? current?.serverStatus ?? null;
@@ -252,11 +258,48 @@ function syncLegacyFields(
     patch.statusMessage !== undefined ? patch.statusMessage : (current?.statusMessage ?? null);
   return {
     ...patch,
-    cadBusy: phase === 'submitting' || phase === 'processing' || Boolean(patch.batchBusy),
+    cadBusy:
+      phase === 'submitting' ||
+      phase === 'processing' ||
+      phase === 'cancelling' ||
+      Boolean(patch.batchBusy ?? current?.batchBusy),
     cadStatus: serverStatus,
     cadError: error,
     generateMessage: statusMessage,
   };
+}
+
+function normalizeJobIds(jobIds: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(jobIds.map((id) => String(id ?? '').trim()).filter(Boolean)));
+}
+
+function getActiveCadJobIds(state: Pick<
+  EngineeringCadState,
+  'jobId' | 'batchParts' | 'activeBatchJobIds'
+>): string[] {
+  return normalizeJobIds([
+    state.jobId,
+    ...state.activeBatchJobIds,
+    ...state.batchParts.map((part) => part.jobId ?? null),
+  ]);
+}
+
+function hasActiveCadWork(state: Pick<
+  EngineeringCadState,
+  'phase' | 'jobId' | 'batchBusy' | 'batchParts' | 'activeBatchJobIds'
+>): boolean {
+  if (state.batchBusy) return true;
+  if (state.phase === 'submitting' || state.phase === 'processing' || state.phase === 'cancelling') {
+    return true;
+  }
+  if (state.phase === 'stale' && Boolean(state.jobId)) {
+    return true;
+  }
+  return false;
+}
+
+function setBatchJobIdsFromParts(parts: CadBatchPart[]): string[] {
+  return normalizeJobIds(parts.map((part) => part.jobId ?? null));
 }
 
 function resetJobFields(): Partial<EngineeringCadState> {
@@ -278,6 +321,7 @@ function resetJobFields(): Partial<EngineeringCadState> {
     activePartId: null,
     batchSummary: null,
     batchBusy: false,
+    activeBatchJobIds: [],
   });
 }
 
@@ -306,6 +350,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   activePartId: null,
   batchSummary: null,
   batchBusy: false,
+  activeBatchJobIds: [],
 
   cadBusy: false,
   cadStatus: null,
@@ -313,6 +358,11 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   generateMessage: null,
 
   clearCadJob: () => {
+    const current = get();
+    if (hasActiveCadWork(current)) {
+      void current.cancelCadJob();
+      return;
+    }
     stopPolling();
     abortSubmit();
     patch(resetJobFields());
@@ -320,31 +370,96 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   },
 
   clearCadPreview: () => {
-    get().clearCadJob();
+    void get().clearCadJob();
   },
 
-  cancelCadJob: async () => {
-    const { jobId } = get();
+  cancelCadJob: async (opts) => {
+    const current = get();
+    const jobIds = getActiveCadJobIds(current);
+    const targetJobIds = jobIds.length > 0 ? jobIds : current.jobId ? [current.jobId] : [];
+    const hasActiveWork = hasActiveCadWork(current);
     stopPolling();
     abortSubmit();
-    if (jobId && window.caval?.cad?.cancelJob) {
-      const userIdResult = await window.caval.billingUserId?.();
-      void window.caval.cad.cancelJob({
-        jobId,
-        cavalId: userIdResult?.userId,
-      });
+    if (!hasActiveWork) {
+      return;
     }
+
+    patch({
+      phase: 'cancelling',
+      error: null,
+      statusMessage: 'Se anulează jobul CAD…',
+    });
+
+    let remoteFailed = false;
+    let partialCancel = false;
+    let remoteSkipped = false;
+    if (!opts?.skipRemote && targetJobIds.length) {
+      try {
+        const userIdResult = await window.caval.billingUserId?.();
+        const workspaceRoot = get().lastPlan?.projectPath ?? useEditorStore.getState().projectPath ?? undefined;
+        if (window.caval?.cad?.cancelJobs && targetJobIds.length > 1) {
+          const res = await window.caval.cad.cancelJobs({
+            jobIds: targetJobIds,
+            cavalId: userIdResult?.userId,
+            workspaceRoot,
+          });
+          remoteSkipped = res?.results?.every((item) => item.remoteCancel === 'skipped') ?? false;
+          partialCancel = Boolean(res?.partiallyCancelled);
+          remoteFailed = !res?.ok || Boolean(res?.results?.some((item) => item.ok === false));
+        } else if (window.caval?.cad?.cancelJob) {
+          const results = await Promise.all(
+            targetJobIds.map((jobId) =>
+              window.caval.cad.cancelJob({
+                jobId,
+                cavalId: userIdResult?.userId,
+                workspaceRoot,
+              })
+            )
+          );
+          remoteSkipped = results.length > 0 && results.every((res) => res.remoteCancel === 'skipped');
+          remoteFailed = results.some((res) => res && res.ok === false);
+          partialCancel = results.some((res) => res.ok) && remoteFailed;
+        } else {
+          remoteSkipped = true;
+        }
+      } catch {
+        remoteFailed = true;
+      }
+    } else {
+      remoteSkipped = true;
+    }
+
+    if (remoteFailed) {
+      patch({
+        phase: 'stale',
+        error: 'Cancel neconfirmat / job posibil activ',
+        statusMessage: partialCancel
+          ? 'Anulare parțială — Cancel neconfirmat / job posibil activ'
+          : 'Cancel neconfirmat / job posibil activ',
+      });
+      log('cancel stale', {
+        jobIds: targetJobIds,
+        remote: remoteSkipped ? 'skipped' : 'failed',
+      });
+      return;
+    }
+
     patch({
       phase: 'cancelled',
       serverStatus: 'cancelled',
       error: null,
-      statusMessage: 'Generare CAD anulată.',
+      statusMessage: remoteSkipped
+        ? 'Generare CAD oprită local.'
+        : 'Generare CAD anulată.',
     });
-    log('cancelled', jobId);
+    log('cancelled', {
+      jobIds: targetJobIds,
+      remote: remoteSkipped ? 'skipped' : 'ok',
+    });
   },
 
   stopPoll: () => {
-    get().cancelCadJob();
+    void get().cancelCadJob();
   },
 
   downloadStl: async () => {
@@ -524,7 +639,8 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   },
 
   createCadJob: async (plan: CadJobPlan) => {
-    if (get().cadBusy) {
+    const current = get();
+    if (current.cadBusy || current.batchBusy) {
       return;
     }
     const caval = window.caval;
@@ -543,7 +659,14 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       return;
     }
 
-    get().clearCadJob();
+    if (hasActiveCadWork(current)) {
+      patch({
+        phase: 'failed',
+        error: 'Oprește jobul CAD curent înainte de o generare nouă',
+      });
+      return;
+    }
+
     submitAbort = new AbortController();
 
     const { project, userPrompt } = plan;
@@ -596,6 +719,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       cadTitle: primaryStl?.name ?? project.spec.title,
       lastPlan: plan,
       retryCount: 0,
+      activeBatchJobIds: [],
     });
 
     await warmCadPipeline(resolvedModel, workspaceRoot);
@@ -720,6 +844,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       : toyVehicle
         ? 'vehicle'
         : inferCadProjectType(geometryPrompt, project.spec);
+    const workspaceRootArg = workspaceRoot ?? undefined;
 
     let created;
     let createAttempt = 0;
@@ -730,6 +855,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           prompt: jobPrompt.slice(0, 12_000),
           projectType,
           cavalId: userIdResult?.userId,
+          workspaceRoot: workspaceRootArg,
           conversationHistory: planMessages,
           previousScad: toyScad,
           previousMeshTaskId: toyLibrary || forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
@@ -737,7 +863,16 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           meshPrompt: generationMode === 'mesh' ? meshPrompt.slice(0, 12_000) : undefined,
           quality: 'standard',
         });
-        if (created.ok && created.jobId) break;
+        if (created?.code === 'cad_job_in_progress') {
+          patch({
+            phase: 'failed',
+            error: created.ownerIsCaller === false
+              ? created.error ?? 'Un job CAD este deja în curs în acest workspace'
+              : created.error ?? 'Un job CAD este deja în curs în acest workspace',
+          });
+          return;
+        }
+        if (created?.ok) break;
       } catch (err) {
         created = {
           ok: false,
@@ -750,7 +885,17 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       }
     }
 
-    if (submitAbort.signal.aborted) return;
+    if (submitAbort.signal.aborted) {
+      const abortedJobId = created?.jobId;
+      if (abortedJobId) {
+        await cad.cancelJob({
+          jobId: abortedJobId,
+          cavalId: userIdResult?.userId,
+          workspaceRoot: workspaceRootArg,
+        }).catch(() => undefined);
+      }
+      return;
+    }
 
     if (!created?.ok || !created.jobId) {
       patch({
@@ -873,6 +1018,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       batchParts: [],
       batchSummary: null,
       activePartId: null,
+      activeBatchJobIds: [],
       error: null,
       statusMessage: 'Batch STL: standard librărie + custom OpenSCAD…',
       stlUrl: null,
@@ -887,10 +1033,17 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         signal: submitAbort.signal,
         onPartUpdate: (next) => {
           const firstDone = next.find((p) => p.status === 'done' && p.stlUrl);
+          const activeBatchJobIds = setBatchJobIdsFromParts(next);
+          const interrupted = get().phase === 'cancelling' || get().phase === 'stale';
           patch({
             batchParts: next,
-            statusMessage: `Batch: ${next.filter((p) => p.status === 'done').length}/${next.length}`,
-            ...(firstDone && !get().stlUrl
+            activeBatchJobIds,
+            ...(interrupted
+              ? {}
+              : {
+                  statusMessage: `Batch: ${next.filter((p) => p.status === 'done').length}/${next.length}`,
+                }),
+            ...(firstDone && !get().stlUrl && !interrupted
               ? {
                   stlUrl: firstDone.stlUrl,
                   stlFileName: `${firstDone.id}.stl`,
@@ -903,23 +1056,27 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         },
       });
 
+      const current = get();
       const first = parts.find((p) => p.status === 'done' && p.stlUrl);
       const anyFail = parts.some((p) => p.status === 'failed');
+      const interrupted = submitAbort?.signal.aborted || current.phase === 'cancelled' || current.phase === 'stale';
       patch({
         batchParts: parts,
         batchSummary: summary,
         batchBusy: false,
-        phase: first ? 'completed' : 'failed',
-        stlUrl: first?.stlUrl ?? null,
-        stlFileName: first ? `${first.id}.stl` : null,
-        cadTitle: first?.name ?? null,
-        activePartId: first?.id ?? null,
-        statusMessage: summary,
-        error: first ? null : anyFail ? 'Niciun STL generat.' : 'Batch anulat.',
+        activeBatchJobIds: [],
+        phase: interrupted ? current.phase : first ? 'completed' : 'failed',
+        stlUrl: interrupted ? current.stlUrl : first?.stlUrl ?? null,
+        stlFileName: interrupted ? current.stlFileName : first ? `${first.id}.stl` : null,
+        cadTitle: interrupted ? current.cadTitle : first?.name ?? null,
+        activePartId: interrupted ? current.activePartId : first?.id ?? null,
+        statusMessage: interrupted ? current.statusMessage ?? summary : summary,
+        error: interrupted ? current.error : first ? null : anyFail ? 'Niciun STL generat.' : 'Batch anulat.',
       });
     } catch (err) {
       patch({
         batchBusy: false,
+        activeBatchJobIds: [],
         phase: 'failed',
         error: err instanceof Error ? err.message : String(err),
       });

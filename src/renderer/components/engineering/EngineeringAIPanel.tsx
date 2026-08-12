@@ -9,10 +9,13 @@ import {
   parseRoboticsPlan,
   roboticsPlanToEngProject,
 } from '../../../../ai/engineering/robotics-format';
-import { createSectionCollector } from '../../../../ai/engineering/streaming-sections';
+import {
+  createSectionCollector,
+  shouldFlushStreamImmediately,
+} from '../../../../ai/engineering/streaming-sections';
 import { checkModelReadiness, type ModelReadiness } from '../../../../ai/models/model-readiness';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
-import { useRoboticsSessionStore } from '../../store/robotics-session-store';
+import { useRoboticsSessionStore, issueAbortChatStreamOnce } from '../../store/robotics-session-store';
 import { CavaloAiMark } from '../brand/CavaloHorseMark';
 import { bootstrapRoboticsDesktopProject } from './bootstrap-robotics-project';
 
@@ -38,6 +41,13 @@ export function EngineeringAIPanel() {
   const plan = useRoboticsSessionStore((s) => s.plan);
   const project = useRoboticsSessionStore((s) => s.project);
   const bom = useRoboticsSessionStore((s) => s.bom);
+  const streamingMode = useRoboticsSessionStore((s) => s.streamingMode);
+  const cancelStatus = useRoboticsSessionStore((s) => s.cancelStatus);
+  const cancelMessage = useRoboticsSessionStore((s) => s.cancelMessage);
+  const cadPhase = useEngineeringCadStore((s) => s.phase);
+  const cadBusy = useEngineeringCadStore((s) => s.cadBusy);
+  const batchBusy = useEngineeringCadStore((s) => s.batchBusy);
+  const cancelCadJob = useEngineeringCadStore((s) => s.cancelCadJob);
 
   const [localReadinessHint, setLocalReadinessHint] = useState<string | null>(null);
   const [, setReadiness] = useState<ModelReadiness | null>(null);
@@ -47,6 +57,55 @@ export function EngineeringAIPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const collectorRef = useRef(createSectionCollector());
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeStreamIdRef = useRef<string | null>(null);
+  const hadSectionsRef = useRef(false);
+  const accumulatedRef = useRef('');
+
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      const controller = abortRef.current;
+      const streamId = activeStreamIdRef.current;
+      const cadJobId = useEngineeringCadStore.getState().jobId;
+      abortRef.current = null;
+      activeStreamIdRef.current = null;
+      try {
+        controller?.abort();
+      } catch {
+        /* idempotent */
+      }
+      useRoboticsSessionStore.getState().finalizeStream({
+        callAbortChat: false,
+        forStreamId: streamId,
+        settle: true,
+        incomplete: true,
+        clearProgress: false,
+      });
+      // Best-effort unified cancel (P2) — fire-and-forget on unmount.
+      const projectPath = useEditorStore.getState().projectPath;
+      void (async () => {
+        try {
+          if (window.caval?.cancelOperation) {
+            await window.caval.cancelOperation({
+              streamId: streamId ?? undefined,
+              cadJobId: cadJobId ?? undefined,
+              workspaceRoot: projectPath ?? undefined,
+            });
+            await useEngineeringCadStore.getState().cancelCadJob({ skipRemote: true });
+          } else {
+            issueAbortChatStreamOnce(streamId);
+            await useEngineeringCadStore.getState().cancelCadJob();
+          }
+        } catch {
+          issueAbortChatStreamOnce(streamId);
+          await useEngineeringCadStore.getState().cancelCadJob();
+        }
+      })();
+    };
+  }, []);
 
   useEffect(() => {
     void loadModelLabels();
@@ -83,40 +142,70 @@ export function EngineeringAIPanel() {
     bom?: import('../../../../ai/engineering/robotics-components-schema').RoboticsComponentBom | null;
     warning?: string;
     error?: string;
-  }) => {
+  }, streamId: string | null) => {
     const s = useRoboticsSessionStore.getState();
+    if (!streamId || s.streamId !== streamId || s.streamSettled) return;
+
     if (flushTimerRef.current) {
       clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
     }
     collectorRef.current.finish();
-    // End loading as soon as plan is ready (before BOM decompose).
-    // Do not abortChat here — stream already finished; aborting mid-decompose is wrong.
-    s.finalizeStream({ callAbortChat: false, abortSignal: false });
+    // End loading for THIS stream only; keep streamProgress until final settle.
+    s.finalizeStream({
+      callAbortChat: false,
+      abortSignal: false,
+      clearProgress: false,
+      forStreamId: streamId,
+    });
 
     if (partial.ok && partial.project) {
-      s.setProject(partial.project);
-      s.setPlan(partial.plan ?? null);
-      if (partial.bom !== undefined) s.setBom(partial.bom ?? null);
-      s.setWarning(partial.warning ?? null);
+      s.applyForStream(streamId, {
+        project: partial.project,
+        plan: partial.plan ?? null,
+        ...(partial.bom !== undefined ? { bom: partial.bom ?? null } : {}),
+        warning: partial.warning ?? null,
+        incomplete: false,
+      });
       s.setError(null);
       s.clearPromptAfterResponse();
-      if (!s.userTabLocked) {
-        s.setActiveTab(partial.bom?.components?.length ? 'cad' : 'overview');
-      }
       void bootstrapRoboticsDesktopProject({
         project: partial.project,
         plan: partial.plan ?? s.plan,
         userPrompt: s.lastPrompt || s.prompt,
       });
     } else if (!partial.ok) {
-      s.setWarning(null);
-      s.setError(partial.error ?? 'Generare eșuată.');
+      // Keep any valid progress already captured; report safe error.
+      s.applyForStream(streamId, {
+        warning: null,
+        error: partial.error ?? 'Generare eșuată.',
+        incomplete: true,
+      });
+    }
+  }, []);
+
+  const flushPartial = useCallback((streamId: string, accumulated: string) => {
+    const s = useRoboticsSessionStore.getState();
+    if (s.streamId !== streamId || s.streamSettled) return;
+    // Collector list first — do not wait for parseRoboticsPlan to paint progress UI.
+    const snap = collectorRef.current.snapshot();
+    s.applyForStream(streamId, { streamProgress: snap });
+    if (!accumulated.trim()) return;
+    if (s.streamingMode === 'fallback') return;
+    const partialPlan = parseRoboticsPlan(accumulated);
+    try {
+      const partialProject = roboticsPlanToEngProject(partialPlan);
+      s.applyForStream(streamId, { plan: partialPlan, project: partialProject });
+    } catch {
+      s.applyForStream(streamId, { plan: partialPlan });
     }
   }, []);
 
   const handleGenerate = useCallback(async () => {
     const session = useRoboticsSessionStore.getState();
+    // Concurrency: never start a second stream while loading or cancelling.
+    if (session.loading || session.cancelStatus === "aborting") return;
+
     if (!prompt.trim()) {
       session.setError('Descrie ce vrei să construiești.');
       return;
@@ -132,37 +221,49 @@ export function EngineeringAIPanel() {
       return;
     }
 
-    useEngineeringCadStore.getState().clearCadPreview();
+    if (cadBusy || batchBusy || cadPhase === 'cancelling' || cadPhase === 'stale') {
+      await cancelCadJob();
+      const cadState = useEngineeringCadStore.getState();
+      if (cadState.cadBusy || cadState.batchBusy || cadState.phase === 'cancelling') {
+        session.setError('Oprește generarea CAD înainte de un plan nou');
+        return;
+      }
+      if (cadState.phase === 'stale') {
+        session.setError(cadState.error ?? 'Oprește generarea CAD înainte de un plan nou');
+        return;
+      }
+    }
+
     const submittedPrompt = prompt.trim();
     session.setLastPrompt(submittedPrompt);
     session.beginGenerate();
     setLocalReadinessHint(null);
     collectorRef.current.reset();
+    hadSectionsRef.current = false;
+    accumulatedRef.current = '';
 
     const controller = new AbortController();
     abortRef.current = controller;
+    activeStreamIdRef.current = null;
     let planReadyFired = false;
     let generationSucceeded = false;
+    let streamIdLocal: string | null = null;
 
-    const flushPartial = (accumulated: string) => {
+    const scheduleFlush = (streamId: string) => {
       const snap = collectorRef.current.snapshot();
-      useRoboticsSessionStore.getState().setStreamProgress(snap);
-      if (!accumulated.trim()) return;
-      const partialPlan = parseRoboticsPlan(accumulated);
-      useRoboticsSessionStore.getState().setPlan(partialPlan);
-      try {
-        useRoboticsSessionStore.getState().setProject(roboticsPlanToEngProject(partialPlan));
-      } catch {
-        /* partial */
+      if (shouldFlushStreamImmediately(hadSectionsRef.current, snap)) {
+        hadSectionsRef.current = true;
+        if (flushTimerRef.current) {
+          clearTimeout(flushTimerRef.current);
+          flushTimerRef.current = null;
+        }
+        flushPartial(streamId, accumulatedRef.current);
+        return;
       }
-    };
-
-    let accumulated = '';
-    const scheduleFlush = () => {
       if (flushTimerRef.current) return;
       flushTimerRef.current = setTimeout(() => {
         flushTimerRef.current = null;
-        flushPartial(accumulated);
+        flushPartial(streamId, accumulatedRef.current);
       }, 150);
     };
 
@@ -174,17 +275,49 @@ export function EngineeringAIPanel() {
         workspaceRoot: projectPath,
         signal: controller.signal,
         onStreamStart: (id) => {
+          // New stream (including retry) — reset collector so deltas do not double.
+          if (streamIdLocal && streamIdLocal !== id) {
+            collectorRef.current.reset();
+            hadSectionsRef.current = false;
+            accumulatedRef.current = '';
+          }
+          streamIdLocal = id;
+          activeStreamIdRef.current = id;
           useRoboticsSessionStore.getState().setStreamId(id);
         },
+        onReasoningActivity: () => {
+          if (!streamIdLocal) return;
+          useRoboticsSessionStore.getState().applyForStream(streamIdLocal, {
+            reasoningActive: true,
+          });
+        },
+        onStreamingMode: (mode) => {
+          if (!streamIdLocal && mode === 'fallback') {
+            useRoboticsSessionStore.getState().setStreamingMode('fallback');
+            return;
+          }
+          if (streamIdLocal) {
+            useRoboticsSessionStore.getState().applyForStream(streamIdLocal, {
+              streamingMode: mode,
+            });
+          } else {
+            useRoboticsSessionStore.getState().setStreamingMode(mode);
+          }
+        },
         onDelta: (chunk) => {
-          accumulated += chunk;
+          if (!streamIdLocal) return;
+          const s = useRoboticsSessionStore.getState();
+          if (s.streamId !== streamIdLocal || s.streamSettled) return;
+          // Fallback must not fake live section streaming.
+          if (s.streamingMode === 'fallback') return;
+          accumulatedRef.current += chunk;
           collectorRef.current.push(chunk);
-          scheduleFlush();
+          scheduleFlush(streamIdLocal);
         },
         onPlanReady: (partial) => {
           planReadyFired = true;
           if (partial.ok) generationSucceeded = true;
-          applyPlanReady(partial);
+          applyPlanReady(partial, streamIdLocal);
         },
       });
 
@@ -192,81 +325,227 @@ export function EngineeringAIPanel() {
         clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
       }
-      collectorRef.current.finish();
+      const finishedSnap = collectorRef.current.finish();
+      if (streamIdLocal) {
+        useRoboticsSessionStore.getState().applyForStream(streamIdLocal, {
+          streamProgress: finishedSnap,
+        });
+      }
 
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        useRoboticsSessionStore.getState().finalizeStream({
+          callAbortChat: false,
+          settle: true,
+          incomplete: true,
+          clearProgress: false,
+          forStreamId: streamIdLocal,
+        });
+        return;
+      }
 
-      // BOM / final warning after decompose (loading already off via onPlanReady).
       if (result.ok && result.project) {
         generationSucceeded = true;
         const s = useRoboticsSessionStore.getState();
-        s.setProject(result.project);
-        s.setPlan(result.plan ?? null);
-        s.setBom(result.bom ?? null);
-        s.setWarning(result.warning ?? null);
-        s.setError(null);
-        s.clearPromptAfterResponse();
-        if (!s.userTabLocked && result.bom?.components.length) {
-          s.setActiveTab('cad');
+        if (streamIdLocal && (s.streamId !== streamIdLocal || s.streamSettled)) {
+          return;
         }
+        if (streamIdLocal) {
+          s.applyForStream(streamIdLocal, {
+            project: result.project,
+            plan: result.plan ?? null,
+            bom: result.bom ?? null,
+            warning: result.warning ?? null,
+            incomplete: false,
+          });
+          s.setError(null);
+        } else {
+          s.setProject(result.project);
+          s.setPlan(result.plan ?? null);
+          s.setBom(result.bom ?? null);
+          s.setWarning(result.warning ?? null);
+          s.setError(null);
+        }
+        s.clearPromptAfterResponse();
         void bootstrapRoboticsDesktopProject({
           project: result.project,
           plan: result.plan ?? null,
           userPrompt: submittedPrompt,
         });
+        // Controlled settle after final plan commit — keep final progress snapshot.
+        s.finalizeStream({
+          callAbortChat: false,
+          settle: true,
+          clearProgress: false,
+          forStreamId: streamIdLocal,
+        });
       } else if (!planReadyFired) {
-        applyPlanReady({
-          ok: false,
-          error: result.error ?? 'Generare eșuată.',
+        applyPlanReady(
+          {
+            ok: false,
+            error: result.error ?? 'Generare eșuată.',
+          },
+          streamIdLocal
+        );
+        useRoboticsSessionStore.getState().finalizeStream({
+          callAbortChat: false,
+          settle: true,
+          incomplete: true,
+          clearProgress: false,
+          forStreamId: streamIdLocal,
         });
       } else if (!result.ok) {
-        useRoboticsSessionStore.getState().setError(result.error ?? 'Generare eșuată.');
+        if (streamIdLocal) {
+          useRoboticsSessionStore.getState().applyForStream(streamIdLocal, {
+            error: result.error ?? 'Generare eșuată.',
+            incomplete: true,
+          });
+        } else {
+          useRoboticsSessionStore.getState().setError(result.error ?? 'Generare eșuată.');
+        }
+        useRoboticsSessionStore.getState().finalizeStream({
+          callAbortChat: false,
+          settle: true,
+          incomplete: true,
+          clearProgress: false,
+          forStreamId: streamIdLocal,
+        });
+      } else {
+        useRoboticsSessionStore.getState().finalizeStream({
+          callAbortChat: false,
+          settle: true,
+          clearProgress: false,
+          forStreamId: streamIdLocal,
+        });
       }
     } catch (err) {
       if (!controller.signal.aborted) {
-        useRoboticsSessionStore.getState().setError(
-          err instanceof Error ? err.message : String(err)
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        if (streamIdLocal) {
+          useRoboticsSessionStore.getState().applyForStream(streamIdLocal, {
+            error: msg,
+            incomplete: true,
+          });
+        } else {
+          useRoboticsSessionStore.getState().setError(msg);
+        }
       }
+      useRoboticsSessionStore.getState().finalizeStream({
+        callAbortChat: false,
+        settle: true,
+        incomplete: true,
+        clearProgress: false,
+        forStreamId: streamIdLocal,
+      });
     } finally {
       abortRef.current = null;
-      useRoboticsSessionStore.getState().finalizeStream({
-        callAbortChat: true,
-        abortSignal: false,
-      });
-      // Always clear composer after a successful run (even if onPlanReady was missed).
+      activeStreamIdRef.current = null;
       if (generationSucceeded || useRoboticsSessionStore.getState().project) {
         const s = useRoboticsSessionStore.getState();
         if (!s.lastPrompt.trim() && submittedPrompt) s.setLastPrompt(submittedPrompt);
         s.clearPromptAfterResponse();
       }
     }
-  }, [prompt, selectedModel, apiKeys, openRouterConfigured, projectPath, applyPlanReady]);
+  }, [
+    prompt,
+    selectedModel,
+    apiKeys,
+    openRouterConfigured,
+    projectPath,
+    applyPlanReady,
+    flushPartial,
+    cadBusy,
+    batchBusy,
+    cadPhase,
+    cancelCadJob,
+  ]);
 
   const handleStop = useCallback(() => {
-    useRoboticsSessionStore.getState().finalizeStream({
+    const streamId = activeStreamIdRef.current;
+    const cadJobId = useEngineeringCadStore.getState().jobId;
+    const s = useRoboticsSessionStore.getState();
+    s.setCancelStatus("aborting", "Cancelling…");
+
+    s.finalizeStream({
       abortController: abortRef.current,
-      callAbortChat: true,
+      callAbortChat: false,
       abortSignal: true,
+      settle: true,
+      incomplete: true,
+      clearProgress: false,
+      forStreamId: streamId,
     });
     abortRef.current = null;
-    void useEngineeringCadStore.getState().cancelCadJob();
+    activeStreamIdRef.current = null;
+
+    void (async () => {
+      const projectPath = useEditorStore.getState().projectPath;
+      const userIdResult = await window.caval?.billingUserId?.();
+      let remote: "ok" | "failed" | "skipped" = "skipped";
+      try {
+        if (window.caval?.cancelOperation) {
+          const res = await window.caval.cancelOperation({
+            streamId: streamId ?? undefined,
+            cadJobId: cadJobId ?? undefined,
+            workspaceRoot: projectPath ?? undefined,
+            cavalId: userIdResult?.userId,
+          });
+          remote = res.remoteCancel ?? "skipped";
+          if (!res.ok) {
+            useRoboticsSessionStore
+              .getState()
+              .setCancelStatus("failed_remote", res.error ?? "Could not cancel remotely");
+            await useEngineeringCadStore.getState().cancelCadJob({ skipRemote: true });
+            return;
+          }
+        } else {
+          issueAbortChatStreamOnce(streamId);
+        }
+        await useEngineeringCadStore.getState().cancelCadJob({
+          skipRemote: remote !== "skipped",
+        });
+        if (remote === "failed") {
+          useRoboticsSessionStore
+            .getState()
+            .setCancelStatus(
+              "failed_remote",
+              "Could not cancel remotely — local generation stopped"
+            );
+        } else {
+          useRoboticsSessionStore.getState().setCancelStatus("aborted", "Canceled");
+        }
+      } catch (err) {
+        useRoboticsSessionStore.getState().setCancelStatus(
+          "failed_remote",
+          err instanceof Error ? err.message : "Could not cancel remotely"
+        );
+        await useEngineeringCadStore.getState().cancelCadJob({ skipRemote: true });
+      }
+    })();
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
+      if (useRoboticsSessionStore.getState().loading) return;
       void handleGenerate();
     }
   };
 
   const summaryLine = (() => {
-    if (loading) return 'Generez… răspunsul apare în centru';
+    if (cancelStatus === "aborting") return cancelMessage ?? "Cancelling…";
+    if (cancelStatus === "failed_remote") {
+      return cancelMessage ?? "Could not cancel remotely";
+    }
+    if (cancelStatus === "aborted") return cancelMessage ?? "Canceled";
+    if (loading && streamingMode === "fallback") {
+      return "Generare fără progres live (mod non-streaming)";
+    }
+    if (loading) return "Generez… răspunsul apare în centru";
     if (project && plan) {
       const n = bom?.components.length ?? 0;
       return n > 0
         ? `Plan gata · ${n} piese CAD — vezi centrul`
-        : 'Plan gata — vezi răspunsul în centru';
+        : "Plan gata — vezi răspunsul în centru";
     }
     return null;
   })();
@@ -442,31 +721,42 @@ export function EngineeringAIPanel() {
           />
           <button
             type="button"
-            onClick={loading ? handleStop : () => void handleGenerate()}
-            disabled={!loading && !prompt.trim()}
-            className={!loading && prompt.trim() ? 'glow-accent' : undefined}
+            aria-label={
+              loading || cadBusy || batchBusy || cancelStatus === "aborting"
+                ? "Oprește generarea Robotics"
+                : "Generează plan Robotics"
+            }
+            disabled={
+              cancelStatus === "aborting" || ((!loading && !cadBusy && !batchBusy) && !prompt.trim())
+            }
+            onClick={
+              loading || cadBusy || batchBusy || cancelStatus === "aborting"
+                ? handleStop
+                : () => void handleGenerate()
+            }
+            className={!loading && !cadBusy && !batchBusy && prompt.trim() ? 'glow-accent' : undefined}
             style={{
               width: '100%', padding: '10px 0',
               borderRadius: 8, border: 'none',
-              background: loading
+              background: loading || cadBusy || batchBusy
                 ? 'rgba(239,68,68,0.12)'
                 : prompt.trim()
                   ? 'linear-gradient(135deg, rgba(0,224,255,0.95), rgba(0,180,220,0.9))'
                   : 'rgba(255,255,255,0.06)',
-              color: loading
+              color: loading || cadBusy || batchBusy
                 ? '#EF4444'
                 : prompt.trim() ? '#0E0E0F' : 'var(--caval-text-muted)',
               fontWeight: 700, fontSize: 13.5,
-              cursor: (!loading && !prompt.trim()) ? 'not-allowed' : 'pointer',
+              cursor: ((!loading && !cadBusy && !batchBusy) && !prompt.trim()) ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
             }}
           >
-            {loading ? (
+            {loading || cadBusy || batchBusy || cancelStatus === "aborting" ? (
               <>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                   <rect x="3" y="3" width="10" height="10" rx="1.5" />
                 </svg>
-                Oprește
+                {cancelStatus === "aborting" ? "Cancelling…" : "Oprește"}
               </>
             ) : (
               <>

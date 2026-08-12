@@ -44,6 +44,7 @@ export function applyCadCloudEnvDefaults(): void {
   if (!process.env.CAD_API_URL?.trim()) {
     const url = fromFile.apiUrl?.trim() || DEFAULT_CAD_CLOUD_URL;
     if (isCadCloudOnly() && url) {
+      // Defer full DNS SSRF to network-guard at first use; scheme/host checked in resolveCadBaseUrl.
       process.env.CAD_API_URL = url;
     }
   }

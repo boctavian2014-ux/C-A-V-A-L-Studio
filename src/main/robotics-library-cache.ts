@@ -6,13 +6,25 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
 import { ROBOTICS_STANDARD_CATALOG } from "../../ai/engineering/robotics-standard-catalog";
+import {
+  NETWORK_GUARD_DEFAULTS,
+  safeFetch,
+  validateRoboticsCdnBase,
+} from "./network-guard";
 
 const DEFAULT_CDN_BASE =
   "https://cdn.jsdelivr.net/gh/boctavian2014-ux/C-A-V-A-L-Studio@main/libraries/robotics-standard";
 
 export function getRoboticsLibraryCdnBase(): string {
   const env = process.env.ROBOTICS_LIBRARY_CDN_BASE?.trim();
-  if (env) return env.replace(/\/+$/, "");
+  if (env) {
+    const validated = validateRoboticsCdnBase(env);
+    if (validated.ok) return validated.normalized;
+    console.warn(
+      "[robotics-library] invalid ROBOTICS_LIBRARY_CDN_BASE; falling back to default:",
+      validated.error
+    );
+  }
   return DEFAULT_CDN_BASE;
 }
 
@@ -100,13 +112,18 @@ async function softRefresh(
     const url = `${getRoboticsLibraryCdnBase()}/${rel}`;
     const headers: Record<string, string> = {};
     if (etag) headers["If-None-Match"] = etag;
-    const res = await fetch(url, { headers });
-    if (res.status === 304) return;
-    if (!res.ok) return;
-    const buf = Buffer.from(await res.arrayBuffer());
+    const result = await safeFetch(url, {
+      mode: "cdn",
+      headers,
+      timeoutMs: NETWORK_GUARD_DEFAULTS.TIMEOUT_MS,
+      maxBytes: NETWORK_GUARD_DEFAULTS.CDN_MAX_BYTES,
+      allowedContentTypes: null,
+    });
+    if (result.status === 304) return;
+    if (!result.ok) return;
     await ensureDir(path.dirname(localPath));
-    await fs.writeFile(localPath, buf);
-    const newEtag = res.headers.get("etag");
+    await fs.writeFile(localPath, result.buffer);
+    const newEtag = result.headers.get("etag");
     await fs.writeFile(metaPath, JSON.stringify({ etag: newEtag, fetchedAt: Date.now() }));
   } catch {
     /* ignore background refresh errors */
@@ -126,8 +143,13 @@ async function downloadToCache(
 }> {
   const url = `${getRoboticsLibraryCdnBase()}/${rel}`;
   try {
-    const res = await fetch(url);
-    if (!res.ok) {
+    const result = await safeFetch(url, {
+      mode: "cdn",
+      timeoutMs: NETWORK_GUARD_DEFAULTS.TIMEOUT_MS,
+      maxBytes: NETWORK_GUARD_DEFAULTS.CDN_MAX_BYTES,
+      allowedContentTypes: null,
+    });
+    if (!result.ok) {
       // Dev fallback: read from repo checkout if present
       const repoLocal = path.join(process.cwd(), "libraries", "robotics-standard", rel);
       try {
@@ -136,13 +158,12 @@ async function downloadToCache(
         await fs.copyFile(repoLocal, localPath);
         return { ok: true, localPath, fromCache: false, etag: null };
       } catch {
-        return { ok: false, error: `CDN ${res.status} for ${rel}` };
+        return { ok: false, error: `CDN ${result.status} for ${rel}` };
       }
     }
-    const buf = Buffer.from(await res.arrayBuffer());
     await ensureDir(path.dirname(localPath));
-    await fs.writeFile(localPath, buf);
-    const etag = res.headers.get("etag");
+    await fs.writeFile(localPath, result.buffer);
+    const etag = result.headers.get("etag");
     await fs.writeFile(metaPath, JSON.stringify({ etag, fetchedAt: Date.now() }));
     return { ok: true, localPath, fromCache: false, etag };
   } catch (err) {

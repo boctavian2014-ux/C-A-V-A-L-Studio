@@ -18,7 +18,7 @@ import {
   registerJobAbort,
 } from "./services/job-registry";
 import { cadLog } from "./middleware/logger";
-import { setLocalStl } from "./storage/local-artifacts";
+import { clearLocalArtifacts, setLocalStl } from "./storage/local-artifacts";
 import {
   buildToyVehicleScad,
   buildToyHelicopterScad,
@@ -42,6 +42,13 @@ export const enqueueCadJob = async (
 
 const failIfAborted = (jobId: string): void => {
   if (isJobAborted(jobId)) throw new Error("Job cancelled");
+};
+
+const markJobCancelled = async (jobId: string): Promise<void> => {
+  await updateCadJob(jobId, { status: "cancelled", errorMessage: "Cancelled by user" });
+  appendJobLog(jobId, { level: "warn", event: "job_cancelled" });
+  cadLog({ level: "info", event: "job_cancelled", jobId });
+  clearLocalArtifacts(jobId);
 };
 
 const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<void> => {
@@ -145,9 +152,7 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
     await processOpenScadJob(jobId, job, input, signal, meshApiKey);
   } catch (error) {
     if (signal.aborted || isJobAborted(jobId)) {
-      await updateCadJob(jobId, { status: "cancelled", errorMessage: "Cancelled by user" });
-      appendJobLog(jobId, { level: "warn", event: "job_cancelled" });
-      cadLog({ level: "info", event: "job_cancelled", jobId });
+      await markJobCancelled(jobId);
       return;
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -237,6 +242,11 @@ const processMeshJob = async (
     buffer: mesh.stlBuffer,
   });
 
+  if (signal.aborted || isJobAborted(jobId)) {
+    await markJobCancelled(jobId);
+    return;
+  }
+
   const warnings = ["Check overhangs in your slicer before printing organic meshes."];
   await updateCadJob(jobId, {
     status: "done",
@@ -299,7 +309,7 @@ const processOpenScadJob = async (
   await updateCadJob(jobId, { status: "rendering", generatedScad: scad });
   appendJobLog(jobId, { level: "info", event: "job_updated", message: "rendering" });
 
-  let rendered = await renderScadToStl(scad, jobId);
+  let rendered = await renderScadToStl(scad, jobId, undefined, signal, jobId);
   let repairAttempts = 0;
 
   while (!rendered.ok && repairAttempts < MAX_RENDER_REPAIRS) {
@@ -312,7 +322,7 @@ const processOpenScadJob = async (
       if (sanitized !== scad) {
         scad = sanitized;
         await updateCadJob(jobId, { generatedScad: scad });
-        rendered = await renderScadToStl(scad, jobId);
+        rendered = await renderScadToStl(scad, jobId, undefined, signal, jobId);
         if (rendered.ok) break;
       }
     }
@@ -328,7 +338,7 @@ const processOpenScadJob = async (
     if (!fixed.ok || !fixed.scad) break;
     scad = sanitizeScadBuiltinShadows(fixed.scad);
     await updateCadJob(jobId, { generatedScad: scad });
-    rendered = await renderScadToStl(scad, jobId);
+    rendered = await renderScadToStl(scad, jobId, undefined, signal, jobId);
   }
 
   if (!rendered.ok || !rendered.stlBuffer) {
@@ -367,6 +377,11 @@ const processOpenScadJob = async (
     buffer: rendered.stlBuffer,
   });
 
+  if (signal.aborted || isJobAborted(jobId)) {
+    await markJobCancelled(jobId);
+    return;
+  }
+
   const warnings: string[] = [];
   if (usedFallback) warnings.push(llmError ?? "Used fallback mock geometry");
   if (repairAttempts > 0) warnings.push(`OpenSCAD repaired ${repairAttempts} time(s) before render`);
@@ -384,8 +399,10 @@ const processOpenScadJob = async (
 export const cancelCadJobProcessing = async (jobId: string): Promise<boolean> => {
   const { cancelJobProcessing } = await import("./services/job-registry");
   const aborted = cancelJobProcessing(jobId);
-  await updateCadJob(jobId, { status: "cancelled", errorMessage: "Cancelled by user" });
-  appendJobLog(jobId, { level: "warn", event: "job_cancelled" });
+  const job = await getCadJob(jobId);
+  if (job && !["done", "failed", "cancelled"].includes(job.status)) {
+    await markJobCancelled(jobId);
+  }
   return aborted;
 };
 

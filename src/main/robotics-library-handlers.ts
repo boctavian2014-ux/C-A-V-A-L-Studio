@@ -1,8 +1,16 @@
-import { ipcMain, type IpcMainInvokeEvent } from "electron";
+import { ipcMain, dialog, BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import { assertTrustedSender } from "./ipc-trust";
+import {
+  assertBatchFileCount,
+  assertStlBase64Size,
+  IPC_CONTENT_LIMITS,
+  resolveInsideDir,
+  resolveSandboxedWorkspacePath,
+} from "./path-security";
 import {
   getCatalogFromCacheOrCdn,
   getRoboticsLibraryCdnBase,
@@ -11,14 +19,9 @@ import {
 } from "./robotics-library-cache";
 import { sanitizeFileName } from "./engineering-handlers";
 
-function resolveInsideDir(dir: string, fileName: string): string | null {
-  const resolved = path.resolve(dir, fileName);
-  const rel = path.relative(dir, resolved);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
-  return resolved;
-}
-
-export function registerRoboticsLibraryHandlers(): void {
+export function registerRoboticsLibraryHandlers(
+  getBoundWorkspaceRoot: (senderId: number) => string | undefined
+): void {
   const handle = (channel: string, fn: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args) => {
       assertTrustedSender(event);
@@ -46,23 +49,46 @@ export function registerRoboticsLibraryHandlers(): void {
   handle(
     "roboticsLibrary:saveStlToProject",
     async (
-      _e,
+      event,
       input: unknown
     ): Promise<{ ok: boolean; savedPath?: string; error?: string }> => {
+      const bound = getBoundWorkspaceRoot(event.sender.id)?.trim();
+      if (!bound) return { ok: false, error: "No workspace open" };
+
       const body = input as {
         projectPath?: string;
         fileName?: string;
         base64?: string;
       };
-      if (!body?.projectPath || !body.fileName || !body.base64) {
-        return { ok: false, error: "projectPath, fileName, base64 required" };
+      if (!body?.fileName || !body.base64) {
+        return { ok: false, error: "fileName, base64 required" };
       }
-      const outDir = path.join(body.projectPath, "caval-engineering", "cad");
+
+      let projectRoot: string;
+      try {
+        projectRoot = body.projectPath?.trim()
+          ? resolveSandboxedWorkspacePath(bound, body.projectPath)
+          : resolveSandboxedWorkspacePath(bound, bound);
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : "Path outside workspace",
+        };
+      }
+
+      let buffer: Buffer;
+      try {
+        buffer = assertStlBase64Size(body.base64);
+      } catch (err: unknown) {
+        return { ok: false, error: err instanceof Error ? err.message : "STL too large" };
+      }
+
+      const outDir = path.join(projectRoot, "caval-engineering", "cad");
       await fs.mkdir(outDir, { recursive: true });
       const name = sanitizeFileName(body.fileName.endsWith(".stl") ? body.fileName : `${body.fileName}.stl`);
       const dest = resolveInsideDir(outDir, name);
       if (!dest) return { ok: false, error: "Invalid file name" };
-      await fs.writeFile(dest, Buffer.from(body.base64, "base64"));
+      await fs.writeFile(dest, buffer);
       return { ok: true, savedPath: dest };
     }
   );
@@ -70,7 +96,7 @@ export function registerRoboticsLibraryHandlers(): void {
   handle(
     "roboticsLibrary:exportZip",
     async (
-      _e,
+      event,
       input: unknown
     ): Promise<{ ok: boolean; savedPath?: string; canceled?: boolean; error?: string }> => {
       const body = input as {
@@ -79,25 +105,69 @@ export function registerRoboticsLibraryHandlers(): void {
       };
       if (!body?.files?.length) return { ok: false, error: "No STL files to zip" };
 
-      const zip = new AdmZip();
-      for (const f of body.files) {
-        const name = sanitizeFileName(f.name.endsWith(".stl") ? f.name : `${f.name}.stl`);
-        zip.addFile(name, Buffer.from(f.base64, "base64"));
+      try {
+        assertBatchFileCount(body.files.length);
+      } catch (err: unknown) {
+        return { ok: false, error: err instanceof Error ? err.message : "Too many files" };
       }
 
-      if (body.projectPath) {
-        const outDir = path.join(body.projectPath, "caval-engineering", "cad");
+      const zip = new AdmZip();
+      let totalBytes = 0;
+      for (const f of body.files) {
+        let buffer: Buffer;
+        try {
+          buffer = assertStlBase64Size(f.base64);
+        } catch (err: unknown) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : `STL too large: ${f.name}`,
+          };
+        }
+        totalBytes += buffer.length;
+        if (totalBytes > IPC_CONTENT_LIMITS.ZIP_TOTAL_BYTES) {
+          return {
+            ok: false,
+            error: `ZIP aggregate exceeds limit (${totalBytes} > ${IPC_CONTENT_LIMITS.ZIP_TOTAL_BYTES} bytes)`,
+          };
+        }
+        const name = sanitizeFileName(f.name.endsWith(".stl") ? f.name : `${f.name}.stl`);
+        zip.addFile(name, buffer);
+      }
+
+      // In-workspace: path must be under bound root. Outside: ONLY native Save dialog.
+      if (body.projectPath?.trim()) {
+        const bound = getBoundWorkspaceRoot(event.sender.id)?.trim();
+        if (!bound) return { ok: false, error: "No workspace open" };
+        let projectRoot: string;
+        try {
+          projectRoot = resolveSandboxedWorkspacePath(bound, body.projectPath);
+        } catch (err: unknown) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : "Path outside workspace",
+          };
+        }
+        const outDir = path.join(projectRoot, "caval-engineering", "cad");
         await fs.mkdir(outDir, { recursive: true });
-        const dest = path.join(outDir, "export-all.zip");
+        if (!fsSync.existsSync(outDir)) {
+          return { ok: false, error: "Cannot create output directory" };
+        }
+        const dest = resolveInsideDir(outDir, "export-all.zip");
+        if (!dest) return { ok: false, error: "Invalid output path" };
         zip.writeZip(dest);
         return { ok: true, savedPath: dest };
       }
 
-      const { dialog } = await import("electron");
-      const pick = await dialog.showSaveDialog({
-        defaultPath: "cavallo-robotics-stl.zip",
-        filters: [{ name: "ZIP", extensions: ["zip"] }],
-      });
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const pick = window
+        ? await dialog.showSaveDialog(window, {
+            defaultPath: "cavallo-robotics-stl.zip",
+            filters: [{ name: "ZIP", extensions: ["zip"] }],
+          })
+        : await dialog.showSaveDialog({
+            defaultPath: "cavallo-robotics-stl.zip",
+            filters: [{ name: "ZIP", extensions: ["zip"] }],
+          });
       if (pick.canceled || !pick.filePath) return { ok: false, canceled: true };
       zip.writeZip(pick.filePath);
       return { ok: true, savedPath: pick.filePath };

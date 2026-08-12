@@ -8,9 +8,11 @@ const PHASE_LABELS: Record<CadStorePhase, string> = {
   idle: '',
   submitting: 'Planificare…',
   processing: 'Generare…',
+  cancelling: 'Oprire…',
   completed: 'Gata',
   failed: 'Eșuat',
   cancelled: 'Anulat',
+  stale: 'Necert',
 };
 
 export function EngineeringCadPreview() {
@@ -31,6 +33,8 @@ export function EngineeringCadPreview() {
   const setActivePartId = useEngineeringCadStore((s) => s.setActivePartId);
   const exportBatchZip = useEngineeringCadStore((s) => s.exportBatchZip);
   const [editDirty, setEditDirty] = useState(false);
+  const busy = phase === 'submitting' || phase === 'processing' || phase === 'cancelling';
+  const showShell = Boolean(stlUrl) || busy || phase === 'stale';
 
   const handleClose = useCallback(() => {
     if (editDirty) {
@@ -39,8 +43,12 @@ export function EngineeringCadPreview() {
       );
       if (!ok) return;
     }
+    if (busy) {
+      void cancelCadJob();
+      return;
+    }
     clearCadJob();
-  }, [editDirty, clearCadJob]);
+  }, [busy, cancelCadJob, clearCadJob, editDirty]);
 
   const handleSaveEdited = useCallback(
     (base64: string) => {
@@ -50,7 +58,7 @@ export function EngineeringCadPreview() {
     [setEditedStl]
   );
 
-  if (!stlUrl) return null;
+  if (!showShell) return null;
 
   const doneParts = batchParts.filter((p) => p.status === 'done' && p.stlUrl);
   const viewerParts = doneParts
@@ -139,10 +147,11 @@ export function EngineeringCadPreview() {
           >
             {hasEdited ? 'STL (cu modificări)' : 'Salvează STL'}
           </button>
-          {(phase === 'submitting' || phase === 'processing') && (
+          {busy && (
             <button
               type="button"
               onClick={() => cancelCadJob()}
+              disabled={phase === 'cancelling'}
               style={{
                 padding: '6px 12px',
                 borderRadius: 6,
@@ -150,10 +159,10 @@ export function EngineeringCadPreview() {
                 background: 'transparent',
                 color: '#EF4444',
                 font: '600 12px Inter, sans-serif',
-                cursor: 'pointer',
+                cursor: phase === 'cancelling' ? 'not-allowed' : 'pointer',
               }}
             >
-              Stop
+              {phase === 'cancelling' ? 'Cancelling…' : 'Stop'}
             </button>
           )}
           <button
@@ -208,13 +217,32 @@ export function EngineeringCadPreview() {
       )}
 
       <div style={{ flex: 1, minHeight: 0 }}>
-        <CadViewer
-          stlUrl={stlUrl}
-          batchParts={viewerParts}
-          hasEditedStl={hasEdited}
-          onSaveEditedStl={handleSaveEdited}
-          onEditDirtyChange={setEditDirty}
-        />
+        {stlUrl ? (
+          <CadViewer
+            stlUrl={stlUrl}
+            batchParts={viewerParts}
+            hasEditedStl={hasEdited}
+            onSaveEditedStl={handleSaveEdited}
+            onEditDirtyChange={setEditDirty}
+          />
+        ) : (
+          <div
+            style={{
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 24,
+              color: 'var(--caval-text-muted)',
+              textAlign: 'center',
+              lineHeight: 1.5,
+            }}
+          >
+            {phase === 'stale'
+              ? 'Nu s-a putut confirma anularea. Jobul ar putea fi încă activ.'
+              : 'Aștept STL-ul generat.'}
+          </div>
+        )}
       </div>
     </div>
   );
