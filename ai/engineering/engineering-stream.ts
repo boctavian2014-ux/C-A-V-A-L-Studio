@@ -1,6 +1,6 @@
 import type { CavalStreamChunk } from '../../src/main/preload';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { pickBestRoboticsMarkdown } from './robotics-format';
+import { issueAbortChatStreamOnce } from './stream-abort-once';
 
 function generateStreamId(): string {
   return `eng-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -11,13 +11,18 @@ export async function completeViaChatStream(params: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
-  /** Incremental markdown deltas for progressive section UI. */
+  /** Incremental markdown deltas for progressive section UI (document content only). */
   onDelta?: (chunk: string) => void;
-  /** Fired once when the stream id is known (for abortChatStream). */
+  /** Fired once when the stream id is known (for abortChatStream + stale guards). */
   onStreamStart?: (streamId: string) => void;
+  /**
+   * Reasoning activity only — never document content.
+   * Callers must not append this into accumulated markdown / plan / sections.
+   */
+  onReasoningActivity?: () => void;
 }): Promise<
-  | { ok: true; text: string; resolvedModel?: string }
-  | { ok: false; error: string }
+  | { ok: true; text: string; resolvedModel?: string; deltaChars: number }
+  | { ok: false; error: string; aborted?: boolean }
 > {
   const caval = (window as unknown as {
     caval?: {
@@ -52,38 +57,50 @@ export async function completeViaChatStream(params: {
     return { ok: false, error: 'Mesaj utilizator lipsă.' };
   }
 
+  // Abort already produced before subscribe — never leave a pending promise.
   if (params.signal?.aborted) {
-    return { ok: false, error: 'Generare anulată.' };
+    return { ok: false, error: 'Generare anulată.', aborted: true };
   }
 
   return new Promise((resolve) => {
     const streamId = generateStreamId();
-    params.onStreamStart?.(streamId);
     let buffer = '';
-    let reasoningBuffer = '';
     let resolvedModel: string | undefined;
     let settled = false;
+    const cleanupHolder: { fn?: () => void } = {};
 
     const finish = (
       result:
-        | { ok: true; text: string; resolvedModel?: string }
-        | { ok: false; error: string }
+        | { ok: true; text: string; resolvedModel?: string; deltaChars: number }
+        | { ok: false; error: string; aborted?: boolean }
     ) => {
       if (settled) return;
       settled = true;
-      cleanup?.();
+      cleanupHolder.fn?.();
       params.signal?.removeEventListener('abort', onAbort);
       resolve(result);
     };
 
     const onAbort = () => {
-      void Promise.resolve(caval.abortChatStream?.(streamId)).catch(() => undefined);
-      finish({ ok: false, error: 'Generare anulată.' });
+      // Best-effort, once per streamId — main cancel is P2.
+      issueAbortChatStreamOnce(streamId);
+      finish({ ok: false, error: 'Generare anulată.', aborted: true });
     };
 
+    // Attach listener first, then check aborted (race with pre-aborted signal).
     params.signal?.addEventListener('abort', onAbort, { once: true });
+    if (params.signal?.aborted) {
+      onAbort();
+      return;
+    }
 
-    const cleanup = caval.chatStream!(
+    params.onStreamStart?.(streamId);
+    if (params.signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    cleanupHolder.fn = caval.chatStream!(
       {
         message: userMessage,
         model: params.model,
@@ -105,8 +122,9 @@ export async function completeViaChatStream(params: {
         if (chunk.type === 'meta' && chunk.resolvedModel) {
           resolvedModel = chunk.resolvedModel;
         }
+        // Reasoning never enters the Robotics document buffer.
         if (chunk.type === 'reasoning' && chunk.reasoningDelta) {
-          reasoningBuffer += chunk.reasoningDelta;
+          params.onReasoningActivity?.();
         }
         if (chunk.type === 'delta' && chunk.delta) {
           buffer += chunk.delta;
@@ -116,17 +134,18 @@ export async function completeViaChatStream(params: {
           finish({ ok: false, error: chunk.error ?? 'Eroare necunoscută' });
         }
         if (chunk.type === 'done') {
-          const text = pickBestRoboticsMarkdown(buffer, reasoningBuffer);
+          // Delta channel is the sole source for final markdown document.
           finish({
             ok: true,
-            text,
+            text: buffer,
             resolvedModel: chunk.model ?? resolvedModel,
+            deltaChars: buffer.length,
           });
         }
       }
     );
 
-    if (!cleanup) {
+    if (!cleanupHolder.fn) {
       params.signal?.removeEventListener('abort', onAbort);
       finish({ ok: false, error: 'IPC streaming indisponibil.' });
     }

@@ -52,7 +52,6 @@ type CavalAiComplete = (input: {
   capability?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   workspaceRoot?: string;
-  apiKeys?: ApiKeys;
   jsonMode?: boolean;
   maxTokens?: number;
   temperature?: number;
@@ -76,7 +75,8 @@ export async function decomposeRoboticsComponents(params: {
   prompt: string;
   planMarkdown?: string;
   modelId: ModelSelectionId;
-  apiKeys: ApiKeys;
+  /** @deprecated Ignored — keys live only in main process. */
+  apiKeys?: ApiKeys;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
   catalog?: Record<string, RoboticsCatalogEntry>;
@@ -121,7 +121,6 @@ export async function decomposeRoboticsComponents(params: {
     intent: 'planning',
     capability: 'planning',
     workspaceRoot: params.workspaceRoot ?? undefined,
-    apiKeys: params.apiKeys,
     jsonMode: true,
     maxTokens: 4096,
     temperature: 0.15,

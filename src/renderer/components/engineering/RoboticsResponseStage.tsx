@@ -34,6 +34,9 @@ export function RoboticsResponseStage() {
   const bom = useRoboticsSessionStore((s) => s.bom);
   const activeTab = useRoboticsSessionStore((s) => s.activeTab);
   const streamProgress = useRoboticsSessionStore((s) => s.streamProgress);
+  const streamingMode = useRoboticsSessionStore((s) => s.streamingMode);
+  const reasoningActive = useRoboticsSessionStore((s) => s.reasoningActive);
+  const incomplete = useRoboticsSessionStore((s) => s.incomplete);
   const warning = useRoboticsSessionStore((s) => s.warning);
   const error = useRoboticsSessionStore((s) => s.error);
   const setActiveTab = useRoboticsSessionStore((s) => s.setActiveTab);
@@ -58,7 +61,7 @@ export function RoboticsResponseStage() {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [project, plan]);
+  }, [project, plan, streamProgress, loading]);
 
   const handleSoftwareHandoff = () => {
     if (!project) return;
@@ -70,14 +73,22 @@ export function RoboticsResponseStage() {
     })();
   };
 
-  if (!project || !plan) {
+  const showProgressStage =
+    loading ||
+    Boolean(streamProgress && streamProgress.total > 0) ||
+    (incomplete && Boolean(streamProgress));
+
+  // Final tabs only when plan is committed and we are not mid-stream.
+  const showFinalStage = Boolean(project && plan && !loading);
+
+  if (!showFinalStage && !showProgressStage) {
     return (
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         gap: 12, padding: 32, textAlign: 'center', minHeight: 0,
       }}>
-        <div className={loading ? 'glow-accent' : undefined} style={{
+        <div style={{
           width: 64, height: 64, borderRadius: 16,
           background: 'linear-gradient(135deg, rgba(0,224,255,0.12), rgba(124,58,237,0.12))',
           border: '1px solid rgba(0,224,255,0.2)',
@@ -89,12 +100,160 @@ export function RoboticsResponseStage() {
           </svg>
         </div>
         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--caval-text)' }}>
-          {loading ? 'Generez planul Robotics…' : 'Răspunsul apare aici, în centru'}
-          {loading && <span className="glass-stream-cursor" aria-hidden />}
+          Răspunsul apare aici, în centru
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--caval-text-muted)', lineHeight: 1.55, maxWidth: 420 }}>
           Scrie cererea în panoul din dreapta și apasă Generează. Planul, BOM-ul și acțiunile CAD
           se afișează pe tot ecranul central.
+        </div>
+      </div>
+    );
+  }
+
+  if (!showFinalStage && showProgressStage) {
+    const activeSection = streamProgress?.sections.find((s) => s.status === 'generating')
+      ?? streamProgress?.sections[streamProgress.sections.length - 1];
+    return (
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0,
+        background: 'var(--caval-bg)',
+      }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 32px' }}>
+          <div style={{
+            width: '100%', maxWidth: 900, margin: '0 auto',
+            display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            {(warning || error) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {warning && (
+                  <div style={{
+                    padding: '8px 12px', borderRadius: 8,
+                    background: 'rgba(212,168,87,0.08)', border: '1px solid rgba(212,168,87,0.2)',
+                    color: '#D4A857', fontSize: 12.5, lineHeight: 1.45,
+                  }}>
+                    {warning}
+                  </div>
+                )}
+                {error && (
+                  <div style={{
+                    padding: '8px 12px', borderRadius: 8,
+                    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)',
+                    color: '#EF4444', fontSize: 12.5, lineHeight: 1.45,
+                  }}>
+                    {error}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div
+              role="status"
+              aria-live="polite"
+              style={{ fontSize: 15, fontWeight: 600, color: 'var(--caval-text)' }}
+            >
+              {incomplete && !loading
+                ? 'Generare întreruptă — rezultat parțial'
+                : streamingMode === 'fallback'
+                  ? 'Generare fără progres live'
+                  : reasoningActive && !(streamProgress && streamProgress.total > 0)
+                    ? 'Analizez / Generez…'
+                    : 'Rezultat în curs de generare'}
+              {loading && <span className="glass-stream-cursor" aria-hidden />}
+            </div>
+
+            {streamProgress && streamProgress.total > 0 && (
+              <div role="status" aria-live="polite" style={{ fontSize: 12.5, color: 'var(--caval-text-muted)' }}>
+                Generez secțiunea {Math.min(streamProgress.completed + 1, streamProgress.total)} din{' '}
+                {streamProgress.total}
+                {streamProgress.activeKey ? ` · ${streamProgress.activeKey}` : ''}
+                {incomplete ? ' · incomplet' : ''}
+              </div>
+            )}
+
+            {streamingMode === 'fallback' && loading && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{ fontSize: 11, color: 'var(--caval-text-muted)', opacity: 0.9 }}
+              >
+                Mod non-streaming — aștept răspunsul complet.
+              </div>
+            )}
+
+            <div
+              ref={tabsWrapRef}
+              role="tablist"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: tabCols === 1 ? '1fr' : '1fr 1fr',
+                gap: 8,
+              }}
+            >
+              {ROBOTICS_TAB_GROUPS.map(({ id, label }) => (
+                <ResultTab
+                  key={id}
+                  label={label}
+                  active={activeTab === id}
+                  onClick={() => {
+                    setUserTabLocked(true);
+                    setActiveTab(id as RoboticsTabId);
+                  }}
+                />
+              ))}
+            </div>
+
+            <div className="glass-panel" style={{ padding: '12px 14px', borderRadius: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--caval-text)' }}>
+                Secțiuni
+              </div>
+              {(!streamProgress || streamProgress.sections.length === 0) && (
+                <div style={{ fontSize: 12.5, color: 'var(--caval-text-muted)' }}>
+                  {reasoningActive ? 'AI lucrează (raționament)…' : 'Aștept primele secțiuni…'}
+                </div>
+              )}
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(streamProgress?.sections ?? []).map((sec, i) => (
+                  <li
+                    key={`${sec.key}-${i}`}
+                    style={{
+                      fontSize: 12.5,
+                      color: sec.status === 'complete' ? 'var(--caval-text)' : 'var(--caval-accent)',
+                      display: 'flex',
+                      gap: 8,
+                      alignItems: 'baseline',
+                    }}
+                  >
+                    <span style={{ opacity: 0.7, minWidth: 88 }}>
+                      {sec.status === 'complete' ? 'status: complete' : 'status: generating'}
+                    </span>
+                    <span>{sec.heading || sec.key}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="glass-panel glass-ai-bubble" style={{ padding: '16px 18px', borderRadius: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--caval-text-muted)' }}>
+                {activeSection?.heading || 'Conținut parțial'}
+                {incomplete ? ' (incomplet)' : ''}
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: 'var(--caval-text)',
+                }}
+              >
+                {activeSection?.content?.trim()
+                  || (reasoningActive ? 'Analizez…' : 'Se generează…')}
+              </pre>
+              {loading && <span className="glass-stream-cursor" aria-hidden />}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -157,13 +316,6 @@ export function RoboticsResponseStage() {
             ))}
           </div>
 
-          {streamProgress && streamProgress.total > 0 && (
-            <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>
-              Secțiuni: {streamProgress.completed}/{streamProgress.total}
-              {streamProgress.activeKey ? ` · generează ${streamProgress.activeKey}` : ''}
-            </div>
-          )}
-
           <button
             type="button"
             onClick={handleSoftwareHandoff}
@@ -186,17 +338,15 @@ export function RoboticsResponseStage() {
           <div className="glass-panel glass-ai-bubble" style={{
             padding: '16px 18px',
             borderRadius: 14,
-            marginBottom: streamProgress ? 8 : 0,
           }}>
             <RoboticsTabContent
               tabId={activeTab}
-              plan={plan}
-              project={project}
+              plan={plan!}
+              project={project!}
               bom={bom}
               projectPath={projectPath}
               userPrompt={userPrompt}
             />
-            {Boolean(streamProgress) && <span className="glass-stream-cursor" aria-hidden />}
           </div>
         </div>
       </div>
@@ -383,11 +533,13 @@ function CadActions({
   const cadStatus = useEngineeringCadStore((s) => s.serverStatus);
   const cadError = useEngineeringCadStore((s) => s.error);
   const statusMessage = useEngineeringCadStore((s) => s.statusMessage);
+  const cancelCadJob = useEngineeringCadStore((s) => s.cancelCadJob);
   const createCadJob = useEngineeringCadStore((s) => s.createCadJob);
   const createBatchFromBom = useEngineeringCadStore((s) => s.createBatchFromBom);
   const exportBatchZip = useEngineeringCadStore((s) => s.exportBatchZip);
   const retryCadJob = useEngineeringCadStore((s) => s.retryCadJob);
   const busy = cadBusy || batchBusy;
+  const stopping = phase === 'cancelling';
 
   return (
     <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -435,12 +587,14 @@ function CadActions({
           if (!userPrompt.trim()) return;
           void createCadJob({ project, userPrompt, projectPath });
         }}
-        disabled={busy || !userPrompt.trim()}
+        disabled={busy || stopping || !userPrompt.trim()}
         style={{
           padding: '9px 0', borderRadius: 6, border: 'none',
-          background: busy || !userPrompt.trim() ? 'rgba(0,224,255,0.25)' : 'rgba(124,58,237,0.85)',
+          background: busy || stopping || !userPrompt.trim()
+            ? 'rgba(0,224,255,0.25)'
+            : 'rgba(124,58,237,0.85)',
           color: '#fff', fontWeight: 700, fontSize: 12.5,
-          cursor: busy || !userPrompt.trim() ? 'not-allowed' : 'pointer',
+          cursor: busy || stopping || !userPrompt.trim() ? 'not-allowed' : 'pointer',
         }}
       >
         {cadBusy && !batchBusy
@@ -480,10 +634,25 @@ function CadActions({
         </button>
       )}
 
-      {(busy || batchSummary) && statusMessage && (
+      {(busy || batchSummary || phase === 'cancelling' || phase === 'stale') && statusMessage && (
         <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', lineHeight: 1.45 }}>
-          {batchSummary ?? statusMessage}
+          {phase === 'cancelling' || phase === 'stale' ? statusMessage : batchSummary ?? statusMessage}
         </div>
+      )}
+
+      {(busy || phase === 'cancelling') && (
+        <button
+          type="button"
+          onClick={() => void cancelCadJob()}
+          disabled={stopping}
+          style={{
+            padding: '7px 0', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)',
+            background: 'transparent', color: '#EF4444',
+            fontWeight: 600, fontSize: 12, cursor: stopping ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {stopping ? 'Cancelling…' : 'Stop'}
+        </button>
       )}
 
       {phase === 'failed' && cadError && (
@@ -497,10 +666,12 @@ function CadActions({
           <button
             type="button"
             onClick={() => void retryCadJob()}
+            disabled={busy}
             style={{
               display: 'block', marginTop: 7, padding: '6px 12px', borderRadius: 6,
               border: '1px solid rgba(239,68,68,0.35)', background: 'transparent',
-              color: '#EF4444', fontWeight: 600, fontSize: 11.5, cursor: 'pointer',
+              color: '#EF4444', fontWeight: 600, fontSize: 11.5,
+              cursor: busy ? 'not-allowed' : 'pointer',
             }}
           >
             Reîncearcă
@@ -554,7 +725,7 @@ function PartsView({ parts, projectPath }: { parts: PartItem[]; projectPath: str
 
   const openShop = async (e: React.MouseEvent, url: string) => {
     e.preventDefault();
-    if (url) await window.caval.engineering.openExternal(url);
+    if (url) await window.caval.engineering.openExternal(url, "EXTERNAL_CONTENT");
   };
 
   return (

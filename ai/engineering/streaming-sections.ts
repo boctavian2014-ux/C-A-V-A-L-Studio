@@ -191,6 +191,14 @@ export function createSectionCollector(): SectionCollector {
   };
 }
 
+/** First heading / section should flush immediately; later updates may throttle. */
+export function shouldFlushStreamImmediately(
+  hadDiscoverableSections: boolean,
+  snap: SectionStreamSnapshot
+): boolean {
+  return !hadDiscoverableSections && snap.total > 0;
+}
+
 /** Comoditate: colectează tot textul dintr-o dată (fallback non-stream). */
 export function collectSections(fullText: string): StreamingSection[] {
   const c = createSectionCollector();

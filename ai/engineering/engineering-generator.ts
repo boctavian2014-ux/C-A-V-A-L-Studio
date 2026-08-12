@@ -18,7 +18,6 @@ import {
   missingRoboticsSections,
   missingRecommendedRoboticsSections,
   parseRoboticsPlan,
-  pickBestRoboticsMarkdown,
   roboticsPlanToEngProject,
   extractScadBlock,
   type ParsedRoboticsPlan,
@@ -82,6 +81,8 @@ export interface GenerateResult {
   warning?: string;
   raw?: string;
   resolvedModel?: string;
+  /** How the completion was obtained — fallback must not fake live section progress. */
+  streamingMode?: 'streaming' | 'fallback';
 }
 
 const ROBOTICS_INTENT = 'deep_thinking' as const;
@@ -92,7 +93,6 @@ type CavalAiComplete = (input: {
   capability?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   workspaceRoot?: string;
-  apiKeys?: ApiKeys;
   jsonMode?: boolean;
   maxTokens?: number;
   temperature?: number;
@@ -105,21 +105,17 @@ type CavalAiComplete = (input: {
 async function runRoboticsCompletion(params: {
   prompt: string;
   modelId: ModelSelectionId;
-  apiKeys: ApiKeys;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
   retryIncomplete?: boolean;
   onDelta?: (chunk: string) => void;
   onStreamStart?: (streamId: string) => void;
+  onReasoningActivity?: () => void;
+  onStreamingMode?: (mode: 'streaming' | 'fallback') => void;
 }): Promise<
-  | { ok: true; text: string; resolvedModel?: string }
+  | { ok: true; text: string; resolvedModel?: string; streamingMode: 'streaming' | 'fallback' }
   | { ok: false; error: string }
 > {
-  // Some models split their output between the main content and a separate
-  // `reasoning` channel. When the transport surfaces `reasoning`, keep the
-  // richest markdown fragment; otherwise fall back to plain `text`.
-  const bestText = (r: { text: string; reasoning?: string }): string =>
-    r.reasoning ? pickBestRoboticsMarkdown(r.text, r.reasoning) : r.text;
   const userContent = params.retryIncomplete
     ? `${params.prompt.trim()}${ROBOTICS_AI_ULTRA_RETRY_SUFFIX}`
     : params.prompt.trim();
@@ -131,6 +127,7 @@ async function runRoboticsCompletion(params: {
 
   const caval = (window as unknown as { caval?: { aiComplete?: CavalAiComplete } }).caval;
 
+  params.onStreamingMode?.('streaming');
   const streamResult = await completeViaChatStream({
     model: params.modelId,
     messages,
@@ -138,17 +135,27 @@ async function runRoboticsCompletion(params: {
     signal: params.signal,
     onDelta: params.onDelta,
     onStreamStart: params.onStreamStart,
+    onReasoningActivity: params.onReasoningActivity,
   });
 
-  if (streamResult.ok) return { ...streamResult, text: bestText(streamResult) };
+  // Stream path: document text is delta-only (never reasoning-merged).
+  if (streamResult.ok) {
+    return {
+      ok: true,
+      text: streamResult.text,
+      resolvedModel: streamResult.resolvedModel,
+      streamingMode: 'streaming',
+    };
+  }
 
+  // Non-stream fallback: explicit mode, no fake live section progress.
   if (caval?.aiComplete) {
+    params.onStreamingMode?.('fallback');
     const completeResult = await caval.aiComplete({
       model: params.modelId,
       intent: ROBOTICS_INTENT,
       capability: 'planning',
       workspaceRoot: params.workspaceRoot ?? undefined,
-      apiKeys: params.apiKeys,
       maxTokens: 16384,
       temperature: 0.2,
       timeoutMs: 180_000,
@@ -158,8 +165,9 @@ async function runRoboticsCompletion(params: {
     if (completeResult.ok) {
       return {
         ok: true,
-        text: bestText(completeResult),
+        text: completeResult.text,
         resolvedModel: completeResult.resolvedModel,
+        streamingMode: 'fallback',
       };
     }
   }
@@ -170,15 +178,28 @@ async function runRoboticsCompletion(params: {
 export async function generateEngineering(params: {
   prompt: string;
   modelId: ModelSelectionId;
-  apiKeys: ApiKeys;
+  /** @deprecated Ignored — keys live only in main process. */
+  apiKeys?: ApiKeys;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
   onDelta?: (chunk: string) => void;
   onStreamStart?: (streamId: string) => void;
+  onReasoningActivity?: () => void;
+  onStreamingMode?: (mode: 'streaming' | 'fallback') => void;
   /** Fired when markdown plan is ready, before BOM decompose (so UI can end loading). */
   onPlanReady?: (partial: GenerateResult) => void;
 }): Promise<GenerateResult> {
-  const { prompt, modelId, apiKeys, workspaceRoot, signal, onDelta, onStreamStart, onPlanReady } = params;
+  const {
+    prompt,
+    modelId,
+    workspaceRoot,
+    signal,
+    onDelta,
+    onStreamStart,
+    onReasoningActivity,
+    onStreamingMode,
+    onPlanReady,
+  } = params;
 
   if (signal?.aborted) {
     return { ok: false, error: 'Generare anulată.' };
@@ -214,11 +235,12 @@ export async function generateEngineering(params: {
   let result = await runRoboticsCompletion({
     prompt,
     modelId,
-    apiKeys,
     workspaceRoot,
     signal,
     onDelta,
     onStreamStart,
+    onReasoningActivity,
+    onStreamingMode,
   });
 
   if (signal?.aborted) {
@@ -226,22 +248,33 @@ export async function generateEngineering(params: {
   }
 
   if (!result.ok) {
-    return { ok: false, error: result.error };
+    return { ok: false, error: result.error, streamingMode: 'streaming' };
+  }
+
+  if (!result.text.trim()) {
+    return {
+      ok: false,
+      error:
+        'Modelul a răspuns fără document markdown (doar raționament sau gol). Încearcă din nou sau alt model.',
+      streamingMode: result.streamingMode,
+    };
   }
 
   let plan = parseRoboticsPlan(result.text);
   let missing = missingRoboticsSections(plan);
 
   if (missing.length > 0) {
+    // Retry is a new stream — panel resets collector on onStreamStart.
     const retry = await runRoboticsCompletion({
       prompt,
       modelId,
-      apiKeys,
       workspaceRoot,
       signal,
       retryIncomplete: true,
       onDelta,
       onStreamStart,
+      onReasoningActivity,
+      onStreamingMode,
     });
 
     if (signal?.aborted) {
@@ -260,6 +293,7 @@ export async function generateEngineering(params: {
       ok: false,
       error: 'Modelul nu a returnat un plan markdown valid.',
       raw: result.text,
+      streamingMode: result.streamingMode,
     };
   }
 
@@ -279,6 +313,7 @@ export async function generateEngineering(params: {
         raw: result.text,
         resolvedModel: result.resolvedModel,
         warning: partialWarning,
+        streamingMode: result.streamingMode,
       });
       let bom: RoboticsComponentBom | undefined;
       try {
@@ -286,7 +321,6 @@ export async function generateEngineering(params: {
           prompt,
           planMarkdown: plan.rawMarkdown,
           modelId,
-          apiKeys,
           workspaceRoot,
           signal,
           catalog: ROBOTICS_STANDARD_CATALOG,
@@ -303,6 +337,7 @@ export async function generateEngineering(params: {
         raw: result.text,
         resolvedModel: result.resolvedModel,
         warning: partialWarning,
+        streamingMode: result.streamingMode,
       };
     }
 
@@ -311,6 +346,7 @@ export async function generateEngineering(params: {
       error: `Plan incomplet — lipsesc secțiunile: ${missing.join(', ')}. Încearcă Auto Frontier sau un model mai capabil.`,
       raw: result.text,
       plan,
+      streamingMode: result.streamingMode,
     };
   }
 
@@ -332,6 +368,7 @@ export async function generateEngineering(params: {
     raw: result.text,
     resolvedModel: result.resolvedModel,
     warning: recommendedWarning,
+    streamingMode: result.streamingMode,
   });
 
   let bom: RoboticsComponentBom | undefined;
@@ -341,7 +378,6 @@ export async function generateEngineering(params: {
       prompt,
       planMarkdown: plan.rawMarkdown,
       modelId,
-      apiKeys,
       workspaceRoot,
       signal,
       catalog: ROBOTICS_STANDARD_CATALOG,
@@ -365,5 +401,6 @@ export async function generateEngineering(params: {
     raw: result.text,
     resolvedModel: result.resolvedModel,
     warning: warnings.length > 0 ? warnings.join(' ') : undefined,
+    streamingMode: result.streamingMode,
   };
 }
