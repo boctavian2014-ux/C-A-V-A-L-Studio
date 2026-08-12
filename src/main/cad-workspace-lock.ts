@@ -353,4 +353,3 @@ export function resetCadWorkspaceLocksForTests(): void {
   lockKeyByOperationId.clear();
   lockKeyByJobId.clear();
 }
-

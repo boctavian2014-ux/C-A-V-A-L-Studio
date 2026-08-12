@@ -256,11 +256,9 @@ describe('arena-wait contextual messages', () => {
     expect(withProject.length).toBeGreaterThan(0);
 
     const picker = createWaitMessagePicker('compose', ctx);
-    // Contextual templates are prepended before generics — first bag entries include project.
-    const firstBatch = Array.from({ length: Math.max(withProject.length, 8) }, () =>
-      picker.next()
-    );
-    expect(firstBatch.some((m) => m.includes('caval-shop'))).toBe(true);
+    // Shuffle-bag can put contextual lines anywhere in the first cycle — exhaust the pool.
+    const firstCycle = Array.from({ length: pool.length }, () => picker.next());
+    expect(firstCycle.some((m) => m.includes('caval-shop'))).toBe(true);
   });
 
   it('buildWaitSceneContext maps steps and modules', () => {
