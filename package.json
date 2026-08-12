@@ -87,6 +87,7 @@
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
     "eslint": "^10.5.0",
+    "expo": "^55.0.28",
     "monaco-editor-webpack-plugin": "^7.1.1",
     "png-to-ico": "^2.1.8",
     "png2icons": "^2.0.1",
