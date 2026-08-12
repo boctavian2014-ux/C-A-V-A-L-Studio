@@ -1,8 +1,13 @@
 import { ipcMain } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import path from "node:path";
 
 import { assertPathInWorkspace } from "./path-security";
+import { assertTrustedSender } from "./ipc-trust";
+import {
+  requireBoundWorkspaceRoot,
+  type BoundWorkspaceRootGetter,
+} from "./bound-workspace";
+import { sanitizeEnvForTerminal } from "./subprocess-env";
 
 interface LspSession {
   id: string;
@@ -35,10 +40,15 @@ function languageServerCommand(languageId: string): { command: string; args: str
   }
 }
 
-export function registerLspHandlers(getWorkspaceRoot: (senderId: number) => string): void {
+export function registerLspHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGetter): void {
   ipcMain.handle("lsp:start", async (event, languageId: string) => {
-    const root = getWorkspaceRoot(event.sender.id);
-    if (!root?.trim()) return { ok: false, error: "No workspace open" };
+    assertTrustedSender(event);
+    let root: string;
+    try {
+      root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
 
     const spec = languageServerCommand(languageId);
     if (!spec) return { ok: false, error: `No LSP for language: ${languageId}` };
@@ -54,7 +64,9 @@ export function registerLspHandlers(getWorkspaceRoot: (senderId: number) => stri
       const child = spawn(spec.command, spec.args, {
         cwd: root,
         stdio: "pipe",
-        env: process.env,
+        env: sanitizeEnvForTerminal(),
+        shell: false,
+        windowsHide: true,
       }) as ChildProcessWithoutNullStreams;
 
       const session: LspSession = {
@@ -82,7 +94,8 @@ export function registerLspHandlers(getWorkspaceRoot: (senderId: number) => stri
     }
   });
 
-  ipcMain.handle("lsp:stop", async (_event, sessionId: string) => {
+  ipcMain.handle("lsp:stop", async (event, sessionId: string) => {
+    assertTrustedSender(event);
     const session = sessions.get(sessionId);
     if (!session?.process) return { ok: false, error: "Session not found" };
     session.process.kill();
@@ -91,7 +104,8 @@ export function registerLspHandlers(getWorkspaceRoot: (senderId: number) => stri
     return { ok: true };
   });
 
-  ipcMain.handle("lsp:status", async () => {
+  ipcMain.handle("lsp:status", async (event) => {
+    assertTrustedSender(event);
     return {
       ok: true,
       servers: [...sessions.values()].map((s) => ({
@@ -111,8 +125,12 @@ export function registerLspHandlers(getWorkspaceRoot: (senderId: number) => stri
     column: number;
     symbol?: string;
   }) => {
-    const root = getWorkspaceRoot(event.sender.id);
-    if (!root?.trim()) return { ok: false, error: "No workspace" };
+    assertTrustedSender(event);
+    try {
+      requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
 
     const sessionId = `lsp-${input.languageId}`;
     const session = sessions.get(sessionId);

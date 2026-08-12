@@ -23,7 +23,6 @@ import {
 
 import type { RoutingIntent } from "../../ai/types";
 
-import type { ApiKeys } from "../../ai/multi-model/provider";
 import { ensureMcpServersReady, getOrCreateToolRegistry } from "./mcp-handlers";
 import { formatToolCallNotice } from "../../ai/pipeline/tool-agent-loop";
 import { enrichChatWithZeroLatency } from "./zl-handlers";
@@ -39,6 +38,15 @@ import {
   shouldUseMultiAgentPipeline,
   abortMultiAgentPipeline,
 } from "../../ai/composer/multi-agent";
+import {
+  assertCadJobOwnedBySender,
+  beginCancelOperation,
+  getStreamAbortSignal,
+  markOperationTerminal,
+  registerStreamOperation,
+} from "./operation-registry";
+import { cancelCadJobRemote } from "./cad-handlers";
+import { releaseCadWorkspaceLock } from "./cad-workspace-lock";
 import { loadReasoningConfig } from "../../ai/composer/multi-agent/config";
 import {
   buildWorkspaceBootstrap,
@@ -46,6 +54,11 @@ import {
 } from "../../ai/context/workspace-bootstrap";
 import { WORKSPACE_BOOTSTRAP_MARKER } from "../../ai/context/workspace-bootstrap-shared";
 import { runWorkspaceVerify, runWorkspaceVerifyWithAutoFix } from "../../ai/tools/workspace-verify";
+import { runProjectHealthSnapshot } from "../../ai/tools/project-health-runner";
+import { parseProjectHealthAction } from "../../src/shared/project-health-check";
+import { assertTrustedSender } from "./ipc-trust";
+import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
+import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
 
 
 
@@ -125,7 +138,7 @@ export interface CavalAiCompleteRequest {
 
   requestId?: string;
 
-  apiKeys?: ApiKeys;
+  apiKeys?: never;
 
   jsonMode?: boolean;
 
@@ -611,18 +624,47 @@ function enrichRequestWithWorkspaceBootstrap(
 }
 
 const activeStreamsBySender = new Map<number, Set<string>>();
+/** streamId → { senderId, workspaceRoot } for abort/resume scoping (Lot C5.2). */
+const streamOwners = new Map<string, { senderId: number; workspaceRoot: string }>();
 
-function trackActiveStream(senderId: number, streamId: string): void {
+function trackActiveStream(senderId: number, streamId: string, workspaceRoot = ""): void {
   let streams = activeStreamsBySender.get(senderId);
   if (!streams) {
     streams = new Set();
     activeStreamsBySender.set(senderId, streams);
   }
   streams.add(streamId);
+  streamOwners.set(streamId, { senderId, workspaceRoot: workspaceRoot.trim() });
 }
 
 function untrackActiveStream(senderId: number, streamId: string): void {
   activeStreamsBySender.get(senderId)?.delete(streamId);
+  streamOwners.delete(streamId);
+}
+
+function assertStreamOwnedBySender(
+  senderId: number,
+  streamId: string,
+  workspaceRoot?: string
+): { ok: true } | { ok: false; error: string } {
+  const owner = streamOwners.get(streamId);
+  if (!owner) {
+    // Allow abort of unknown/expired ids only from same sender tracking set.
+    const tracked = activeStreamsBySender.get(senderId)?.has(streamId);
+    if (tracked) return { ok: true };
+    return { ok: false, error: "Stream not found for this sender" };
+  }
+  if (owner.senderId !== senderId) {
+    return { ok: false, error: "Cross-sender stream control denied" };
+  }
+  if (
+    workspaceRoot?.trim() &&
+    owner.workspaceRoot &&
+    owner.workspaceRoot !== workspaceRoot.trim()
+  ) {
+    return { ok: false, error: "Cross-workspace stream control denied" };
+  }
+  return { ok: true };
 }
 
 export function abortAllStreamsForSender(senderId: number): void {
@@ -649,6 +691,12 @@ async function streamToRenderer(
   const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim();
   const userBoundWorkspace = Boolean(explicitRoot || boundRoot);
   const workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
+  streamOwners.set(streamId, { senderId, workspaceRoot: workspaceRoot?.trim() ?? "" });
+  registerStreamOperation({
+    streamId,
+    senderId,
+    workspaceRoot: workspaceRoot?.trim() ?? "",
+  });
   request = { ...request, workspaceRoot };
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 
@@ -738,7 +786,7 @@ async function streamToRenderer(
 
     stream.send({
       type: "error",
-      error: result.error ?? "Multi-agent pipeline failed",
+      error: safeErrorMessageForUi(result.error ?? "Multi-agent pipeline failed"),
     });
     return;
   }
@@ -765,6 +813,7 @@ async function streamToRenderer(
     toolRegistry,
     useTools,
     workspaceRoot,
+    signal: getStreamAbortSignal(streamId),
   };
 
   sendStatusChunk(stream, "prepare", "done");
@@ -772,23 +821,23 @@ async function streamToRenderer(
 
   const result = await executeModelCompletion(completionInput, {
     onMeta: (resolvedModel, reason) => {
-      if (!stream.isAlive()) return;
+      if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
       stream.send({ type: "meta", resolvedModel, reason });
     },
     onDelta: (delta) => {
-      if (!stream.isAlive()) return;
+      if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
       stream.send({ type: "delta", delta });
     },
     onReasoning: (reasoningDelta) => {
-      if (!stream.isAlive()) return;
+      if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
       stream.send({ type: "reasoning", reasoningDelta });
     },
     onStatus: (phase, status, detail) => {
-      if (!stream.isAlive()) return;
+      if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
       sendStatusChunk(stream, phase, status, detail);
     },
     onToolCall: (toolName, status, detail, writtenPath) => {
-      if (!stream.isAlive()) return;
+      if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
       const isDirectCodingMode = fusedRequest.mode === "code" || fusedRequest.mode === "debug";
       if (!isDirectCodingMode) {
         const notice = formatToolCallNotice(toolName, status, detail);
@@ -815,7 +864,17 @@ async function streamToRenderer(
 
   if (!stream.isAlive()) return;
 
+  if (getStreamAbortSignal(streamId)?.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({
+      type: "error",
+      error: "Generare anulată.",
+    });
+    return;
+  }
+
   if (result.ok) {
+    markOperationTerminal(streamId, "completed");
     stream.send({
       type: "done",
       model: result.resolvedModel,
@@ -824,9 +883,10 @@ async function streamToRenderer(
     return;
   }
 
+  markOperationTerminal(streamId, result.error?.includes("anulat") ? "aborted" : "failed");
   stream.send({
     type: "error",
-    error: result.error,
+    error: safeErrorMessageForUi(result.error ?? "Stream failed"),
   });
 
   } finally {
@@ -907,7 +967,7 @@ async function streamResumeToRenderer(
 
     stream.send({
       type: "error",
-      error: result.error ?? "Pipeline resume failed",
+      error: safeErrorMessageForUi(result.error ?? "Pipeline resume failed"),
     });
   } finally {
     untrackActiveStream(senderId, streamId);
@@ -933,23 +993,66 @@ export function registerModelHandlers(
   ipcMain.handle(
     "caval:workspace-verify",
     async (
-      _event,
-      workspaceRoot: string,
+      event,
+      _workspaceRootFromRenderer: unknown,
       options?: { autoInstall?: boolean; writtenFiles?: string[] }
     ) => {
     try {
-      const verify = options?.autoInstall
-        ? await runWorkspaceVerifyWithAutoFix(workspaceRoot, options)
-        : await runWorkspaceVerify(workspaceRoot, options);
+      assertTrustedSender(event);
+      // Lot B: ignore renderer workspaceRoot — bound root only
+      const workspaceRoot = getBoundWorkspaceRoot?.(event.sender.id)?.trim();
+      if (!workspaceRoot) {
+        return {
+          ok: false,
+          error: "Deschide un folder în workspace înainte de Workspace Verify.",
+        };
+      }
+      const safeOptions = {
+        autoInstall: options?.autoInstall === true,
+        writtenFiles: Array.isArray(options?.writtenFiles)
+          ? options.writtenFiles.filter((f): f is string => typeof f === "string")
+          : undefined,
+      };
+      const verify = safeOptions.autoInstall
+        ? await runWorkspaceVerifyWithAutoFix(workspaceRoot, safeOptions)
+        : await runWorkspaceVerify(workspaceRoot, safeOptions);
       return { ok: true, verify };
     } catch (error) {
       return {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: safeErrorMessageForUi(error),
       };
     }
   }
   );
+
+  ipcMain.handle("caval:project-health-check", async (event, actionInput: unknown) => {
+    try {
+      assertTrustedSender(event);
+      const action = parseProjectHealthAction(actionInput);
+      if (!action) {
+        return { ok: false, error: "Invalid project health action" };
+      }
+
+      const workspaceRoot = getBoundWorkspaceRoot?.(event.sender.id)?.trim();
+      if (!workspaceRoot) {
+        return {
+          ok: false,
+          error: "Deschide un folder în workspace înainte de Project Health Check.",
+        };
+      }
+
+      const snapshot = await runProjectHealthSnapshot(workspaceRoot, {
+        execute: action === "execute",
+      });
+      return { ok: true, snapshot };
+    } catch (error) {
+      return {
+        ok: false,
+        error: safeErrorMessageForUi(error),
+      };
+    }
+  });
 
   ipcMain.handle("caval:models-list", async () => {
 
@@ -980,7 +1083,7 @@ export function registerModelHandlers(
     } catch (error) {
       return {
         ok: false,
-        summary: error instanceof Error ? error.message : String(error),
+        summary: safeErrorMessageForUi(error),
         providers: {},
         models: {},
       };
@@ -995,17 +1098,141 @@ export function registerModelHandlers(
   });
 
   ipcMain.handle("caval:ai-chat-stream", async (event, request: CavalChatStreamRequest) => {
+    assertTrustedSender(event);
+    const boundRoot =
+      getBoundWorkspaceRoot?.(event.sender.id)?.trim() ||
+      request.workspaceRoot?.trim() ||
+      getWorkspaceRoot(event.sender.id);
+    const limit = consumeAiRateLimit("stream_start", event.sender.id, boundRoot);
+    if (!limit.ok) {
+      return {
+        ok: false,
+        error: "rate_limited",
+        code: "rate_limited_local",
+        retryAfterMs: limit.retryAfterMs,
+      };
+    }
     warmOpenRouterConnection();
     void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getWorkspaceRoot, getBoundWorkspaceRoot);
     return { ok: true, started: true };
   });
 
-  ipcMain.handle("caval:ai-stream-abort", async (_event, streamId: string) => {
-    abortMultiAgentPipeline(streamId);
-    return { ok: true };
+  ipcMain.handle("caval:ai-stream-abort", async (event, streamId: string) => {
+    assertTrustedSender(event);
+    allowAiAbort();
+    const sid = String(streamId ?? "");
+    const owned = assertStreamOwnedBySender(event.sender.id, sid);
+    if (!owned.ok) {
+      return { ok: false, error: owned.error };
+    }
+    const cancel = beginCancelOperation({
+      streamId: sid,
+      senderId: event.sender.id,
+    });
+    abortMultiAgentPipeline(sid);
+    untrackActiveStream(event.sender.id, sid);
+    return {
+      ok: cancel.ok,
+      status: cancel.status,
+      signalAborted: cancel.signalAborted,
+      error: cancel.error,
+    };
   });
 
+  ipcMain.handle(
+    "caval:cancel-operation",
+    async (
+      event,
+      input: {
+        operationId?: string;
+        streamId?: string;
+        cadJobId?: string;
+        workspaceRoot?: string;
+        cavalId?: string;
+      }
+    ) => {
+      assertTrustedSender(event);
+      allowAiAbort();
+      const streamId = input?.streamId ? String(input.streamId) : undefined;
+      const cadJobId = input?.cadJobId ? String(input.cadJobId) : undefined;
+
+      if (streamId) {
+        const owned = assertStreamOwnedBySender(
+          event.sender.id,
+          streamId,
+          input?.workspaceRoot
+        );
+        if (!owned.ok && !cadJobId) {
+          return { ok: false, error: owned.error, status: "unknown" as const };
+        }
+      }
+      if (cadJobId) {
+        const ownedCad = assertCadJobOwnedBySender(
+          event.sender.id,
+          cadJobId,
+          input?.workspaceRoot
+        );
+        if (!ownedCad.ok) {
+          return { ok: false, error: ownedCad.error, status: "unknown" as const };
+        }
+      }
+
+      const cancel = beginCancelOperation({
+        operationId: input?.operationId,
+        streamId,
+        cadJobId,
+        senderId: event.sender.id,
+        workspaceRoot: input?.workspaceRoot,
+      });
+      if (!cancel.ok) {
+        return cancel;
+      }
+
+      if (streamId) {
+        abortMultiAgentPipeline(streamId);
+        untrackActiveStream(event.sender.id, streamId);
+      }
+
+      let remoteCancel = cancel.remoteCancel ?? ("skipped" as const);
+      const jobToCancel = cancel.cadJobId ?? cadJobId;
+      if (jobToCancel) {
+        const remote = await cancelCadJobRemote(jobToCancel, input?.cavalId);
+        remoteCancel = remote.remoteCancel;
+        if (!remote.ok && remote.remoteCancel === "failed") {
+          return {
+            ok: true,
+            status: "aborted" as const,
+            operationId: cancel.operationId,
+            streamId: cancel.streamId,
+            cadJobId: jobToCancel,
+            signalAborted: cancel.signalAborted,
+            remoteCancel: "failed" as const,
+            error: remote.error,
+          };
+        }
+        if (remote.remoteCancel === "ok" || remote.remoteCancel === "skipped") {
+          releaseCadWorkspaceLock({
+            jobId: jobToCancel,
+            workspaceRoot: input?.workspaceRoot,
+            reason: "aborted",
+          });
+        }
+      }
+
+      return {
+        ok: true,
+        status: cancel.status,
+        operationId: cancel.operationId,
+        streamId: cancel.streamId,
+        cadJobId: jobToCancel,
+        signalAborted: cancel.signalAborted,
+        remoteCancel,
+      };
+    }
+  );
+
   ipcMain.handle("caval:workspace-session-reset", async (event) => {
+    assertTrustedSender(event);
     abortAllStreamsForSender(event.sender.id);
     return { ok: true };
   });
@@ -1023,6 +1250,24 @@ export function registerModelHandlers(
         strictReview?: boolean;
       }
     ) => {
+      assertTrustedSender(event);
+      const boundRoot =
+        getBoundWorkspaceRoot?.(event.sender.id)?.trim() || input.workspaceRoot?.trim() || "";
+      const limit = consumeAiRateLimit("resume", event.sender.id, boundRoot);
+      if (!limit.ok) {
+        return {
+          ok: false,
+          error: "rate_limited",
+          code: "rate_limited_local",
+          retryAfterMs: limit.retryAfterMs,
+        };
+      }
+      const owned = assertStreamOwnedBySender(event.sender.id, input.streamId, boundRoot);
+      // Resume may create a new stream id after prior completion — allow if not claimed by another sender.
+      if (!owned.ok && owned.error.includes("Cross-sender")) {
+        return { ok: false, error: owned.error };
+      }
+      trackActiveStream(event.sender.id, input.streamId, boundRoot);
       warmOpenRouterConnection();
       void streamResumeToRenderer(event.sender, event.sender.id, input);
       return { ok: true, started: true };
@@ -1033,28 +1278,29 @@ export function registerModelHandlers(
 
   ipcMain.handle("caval:ai-complete", async (event, input: CavalAiCompleteRequest) => {
     try {
-      const workspaceRoot = input.workspaceRoot ?? getWorkspaceRoot(event.sender.id);
-      const useTools = input.jsonMode ? false : agentCompleteUsesTools(input.model);
+      assertTrustedSender(event);
+      const { apiKeys: _ignoredApiKeys, ...safeInput } = input as CavalAiCompleteRequest & {
+        apiKeys?: unknown;
+      };
+      void _ignoredApiKeys;
+      const workspaceRoot = safeInput.workspaceRoot ?? getWorkspaceRoot(event.sender.id);
+      const useTools = safeInput.jsonMode ? false : agentCompleteUsesTools(safeInput.model);
       if (useTools) {
         await ensureMcpServersReady(workspaceRoot).catch(() => undefined);
       }
       const toolRegistry = getOrCreateToolRegistry(event.sender.id, workspaceRoot);
       return await completeModelText({
-        ...input,
+        ...safeInput,
         workspaceRoot,
         toolRegistry,
         useTools,
+        // Keys only from main env / secure storage — never from renderer.
+        apiKeys: undefined,
       });
     } catch (error) {
-
-      const message = error instanceof Error ? error.message : String(error);
-
-      return { ok: false as const, error: message };
-
+      return { ok: false as const, error: safeErrorMessageForUi(error) };
     }
-
   });
-
 
 
   ipcMain.handle("caval:resolve-model", async (_event, input: { model: string; intent?: RoutingIntent }) => {

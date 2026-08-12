@@ -284,8 +284,11 @@ contextBridge.exposeInMainWorld("caval", {
       }[],
       projectPath: string | null
     ) => ipcRenderer.invoke("engineering:exportCart", parts, projectPath),
-    openExternal: (url: string) =>
-      ipcRenderer.invoke("engineering:openExternal", url),
+    openExternal: (url: string, origin?: "EXTERNAL_CONTENT") =>
+      ipcRenderer.invoke("engineering:openExternal", {
+        url,
+        origin: origin ?? "EXTERNAL_CONTENT",
+      }),
   },
   chat: (request: CavalChatRequest) => ipcRenderer.invoke("caval:ai-chat", request),
   modelsList: () =>
@@ -314,6 +317,23 @@ contextBridge.exposeInMainWorld("caval", {
   },
   abortChatStream: (streamId: string) =>
     ipcRenderer.invoke("caval:ai-stream-abort", streamId) as Promise<{ ok: boolean }>,
+  cancelOperation: (input: {
+    operationId?: string;
+    streamId?: string;
+    cadJobId?: string;
+    workspaceRoot?: string;
+    cavalId?: string;
+  }) =>
+    ipcRenderer.invoke("caval:cancel-operation", input) as Promise<{
+      ok: boolean;
+      status?: string;
+      operationId?: string;
+      streamId?: string;
+      cadJobId?: string;
+      signalAborted?: boolean;
+      remoteCancel?: "ok" | "failed" | "skipped";
+      error?: string;
+    }>,
   onPipelineVerifyStatus: (
       callback: (payload: {
         runId: string;
@@ -410,7 +430,6 @@ contextBridge.exposeInMainWorld("caval", {
     messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
     workspaceRoot?: string;
     requestId?: string;
-    apiKeys?: Record<string, string>;
     jsonMode?: boolean;
     maxTokens?: number;
     temperature?: number;
@@ -557,6 +576,32 @@ contextBridge.exposeInMainWorld("caval", {
       };
       error?: string;
     }>,
+  projectHealthCheck: (action: "scan" | "execute") =>
+    ipcRenderer.invoke("caval:project-health-check", action) as Promise<{
+      ok: boolean;
+      snapshot?: {
+        packageFound: boolean;
+        packageName?: string;
+        checks: Array<{
+          id: string;
+          label: string;
+          scriptKey: string;
+          npmCommand: string;
+          status:
+            | "missing"
+            | "available"
+            | "running"
+            | "passed"
+            | "failed"
+            | "skipped"
+            | "timed_out";
+          script?: string;
+          exitCode?: number | null;
+          output?: string;
+        }>;
+      };
+      error?: string;
+    }>,
   zlPrepare: (signals: {
     workspaceRoot: string;
     objectiveDraft?: string;
@@ -613,16 +658,46 @@ contextBridge.exposeInMainWorld("caval", {
   secretsGet: () =>
     ipcRenderer.invoke("caval:secrets-get") as Promise<{
       ok: boolean;
-      secrets?: Record<string, string>;
+      providers?: Array<{
+        provider: string;
+        configured: boolean;
+        source: "environment" | "secure-storage" | "none";
+        lastValidatedAt: string | null;
+      }>;
       configured?: Record<string, boolean>;
+      error?: string;
     }>,
   secretsSet: (secrets: Record<string, string>) =>
     ipcRenderer.invoke("caval:secrets-set", secrets) as Promise<{ ok: boolean }>,
-  mcpList: () => ipcRenderer.invoke("caval:mcp-list") as Promise<{ ok: boolean; servers?: unknown[] }>,
+  /** Lot C5.5 — user-initiated key test; returns only valid|invalid|unreachable (no bodies/keys). */
+  testProviderKey: (input: { providerId: string; secretKey: string }) =>
+    ipcRenderer.invoke("caval:test-provider-key", input) as Promise<{
+      ok: boolean;
+      result: "valid" | "invalid" | "unreachable";
+      error?: string;
+    }>,
+  mcpList: () =>
+    ipcRenderer.invoke("caval:mcp-list") as Promise<{
+      ok: boolean;
+      servers?: unknown[];
+      remoteEnabled?: boolean;
+    }>,
   mcpEnsureReady: () =>
-    ipcRenderer.invoke("caval:mcp-ensure") as Promise<{ ok: boolean; servers?: unknown[] }>,
+    ipcRenderer.invoke("caval:mcp-ensure") as Promise<{
+      ok: boolean;
+      servers?: unknown[];
+      remoteEnabled?: boolean;
+    }>,
   mcpStart: (serverId: string) => ipcRenderer.invoke("caval:mcp-start", serverId),
   mcpStop: (serverId: string) => ipcRenderer.invoke("caval:mcp-stop", serverId),
+  mcpTrustList: () =>
+    ipcRenderer.invoke("caval:mcp-trust-list") as Promise<{ ok: boolean; records?: unknown[] }>,
+  mcpTrustRevoke: (input?: { serverId?: string }) =>
+    ipcRenderer.invoke("caval:mcp-trust-revoke", input) as Promise<{
+      ok: boolean;
+      records?: unknown[];
+      error?: string;
+    }>,
   toolExecute: (input: { name: string; arguments: Record<string, unknown> }) =>
     ipcRenderer.invoke("caval:tool-execute", input),
   autocomplete: (input: { prefix: string; filePath: string; language: string }) =>
@@ -766,8 +841,6 @@ contextBridge.exposeInMainWorld("caval", {
     plan: (input: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       latestUserText: string;
-      openRouterApiKey?: string;
-      meshApiKey?: string;
       previousMeshTaskId?: string;
     }) =>
       ipcRenderer.invoke("cad:plan", input) as Promise<{
@@ -791,14 +864,13 @@ contextBridge.exposeInMainWorld("caval", {
       projectType?: string;
       constraints?: Record<string, string | undefined>;
       cavalId?: string;
+      workspaceRoot?: string;
       planContext?: {
         requirements?: string;
         assembly?: string;
         components?: string;
         performance?: string;
       };
-      openRouterApiKey?: string;
-      meshApiKey?: string;
       quality?: 'standard' | 'high';
       conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
       previousScad?: string;
@@ -810,6 +882,10 @@ contextBridge.exposeInMainWorld("caval", {
         ok: boolean;
         jobId?: string;
         status?: string;
+        code?: string;
+        operationId?: string;
+        phase?: string;
+        ownerIsCaller?: boolean;
         error?: string;
       }>,
     getJob: (input: { jobId: string; cavalId?: string }) =>
@@ -823,13 +899,28 @@ contextBridge.exposeInMainWorld("caval", {
         dimensions?: { x: number; y: number; z: number } | null;
         meshTaskId?: string | null;
       }>,
-    cancelJob: (input: { jobId: string; cavalId?: string }) =>
+    cancelJob: (input: { jobId: string; cavalId?: string; workspaceRoot?: string }) =>
       ipcRenderer.invoke("cad:cancelJob", input) as Promise<{
         ok: boolean;
         jobId?: string;
         status?: string;
+        remoteCancel?: "ok" | "failed" | "skipped";
         error?: string;
       }>,
+    cancelJobs: (input: { jobIds: string[]; cavalId?: string; workspaceRoot?: string }) =>
+      ipcRenderer.invoke("cad:cancelJobs", input) as Promise<{
+        ok: boolean;
+        partiallyCancelled?: boolean;
+        results?: Array<{
+          jobId: string;
+          ok: boolean;
+          remoteCancel?: string;
+          error?: string;
+        }>;
+        error?: string;
+      }>,
+    heartbeat: (input: { jobId?: string; operationId?: string; workspaceRoot?: string }) =>
+      ipcRenderer.invoke("cad:heartbeat", input) as Promise<{ ok: boolean }>,
     getJobLogs: (input: { jobId: string; cavalId?: string }) =>
       ipcRenderer.invoke("cad:getJobLogs", input) as Promise<{
         ok: boolean;
@@ -960,8 +1051,12 @@ contextBridge.exposeInMainWorld("caval", {
     list: () => ipcRenderer.invoke("extensions:list") as Promise<{ ok: boolean; extensions?: unknown[] }>,
     register: (manifest: { id: string; name: string; version: string }) =>
       ipcRenderer.invoke("extensions:register", manifest) as Promise<{ ok: boolean; error?: string }>,
-    install: (input: { extensionId: string; baseUrl: string }) =>
-      ipcRenderer.invoke("extensions:install", input) as Promise<{ ok: boolean; error?: string }>,
+    install: (input: { extensionId: string }) =>
+      ipcRenderer.invoke("extensions:install", input) as Promise<{
+        ok: boolean;
+        error?: string;
+        extension?: unknown;
+      }>,
   },
 
   openvsx: {

@@ -6,6 +6,12 @@ import path from "node:path";
 import { parseIpcInput, debugLaunchSchema } from "./ipc-schemas";
 import { assertPathInWorkspace } from "./path-security";
 import { recordAudit } from "./audit-log";
+import { assertTrustedSender } from "./ipc-trust";
+import {
+  requireBoundWorkspaceRoot,
+  type BoundWorkspaceRootGetter,
+} from "./bound-workspace";
+import { sanitizeEnvForTerminal } from "./subprocess-env";
 
 export interface DebugSession {
   id: string;
@@ -15,6 +21,7 @@ export interface DebugSession {
 }
 
 const sessions = new Map<string, { child: ChildProcessWithoutNullStreams; session: DebugSession }>();
+const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 
 async function loadLaunchConfig(workspaceRoot: string): Promise<{
   program: string;
@@ -39,10 +46,15 @@ async function loadLaunchConfig(workspaceRoot: string): Promise<{
   }
 }
 
-export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => string): void {
+export function registerDebugHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGetter): void {
   ipcMain.handle("debug:launch", async (event, input?: unknown) => {
-    const root = getWorkspaceRoot(event.sender.id);
-    if (!root?.trim()) return { ok: false, error: "No workspace open" };
+    assertTrustedSender(event);
+    let root: string;
+    try {
+      root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
 
     let program: string;
     let args: string[] = [];
@@ -52,6 +64,7 @@ export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => st
       const parsed = parseIpcInput(debugLaunchSchema, { workspaceRoot: root, ...(input as object) });
       program = parsed.program;
       args = parsed.args ?? [];
+      // Ignore renderer cwd outside workspace — force under bound root
       cwd = parsed.cwd ?? root;
     } else {
       const launch = await loadLaunchConfig(root);
@@ -72,8 +85,9 @@ export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => st
 
       const child = spawn(process.execPath, [resolvedProgram, ...args], {
         cwd,
-        env: { ...process.env, NODE_OPTIONS: "--inspect-brk=9229" },
+        env: { ...sanitizeEnvForTerminal(), NODE_OPTIONS: "--inspect-brk=9229" },
         stdio: "pipe",
+        windowsHide: true,
       }) as ChildProcessWithoutNullStreams;
 
       const sessionId = `dbg-${Date.now()}`;
@@ -85,7 +99,14 @@ export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => st
       };
       sessions.set(sessionId, { child, session });
 
-      child.on("exit", () => sessions.delete(sessionId));
+      const timer = setTimeout(() => {
+        if (!child.killed) child.kill();
+      }, DEFAULT_TIMEOUT_MS);
+
+      child.on("exit", () => {
+        clearTimeout(timer);
+        sessions.delete(sessionId);
+      });
 
       recordAudit({
         channel: "debug:launch",
@@ -109,7 +130,8 @@ export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => st
     }
   });
 
-  ipcMain.handle("debug:stop", async (_event, sessionId: string) => {
+  ipcMain.handle("debug:stop", async (event, sessionId: string) => {
+    assertTrustedSender(event);
     const entry = sessions.get(sessionId);
     if (!entry) return { ok: false, error: "Session not found" };
     entry.child.kill();
@@ -117,7 +139,8 @@ export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => st
     return { ok: true };
   });
 
-  ipcMain.handle("debug:list", async () => {
+  ipcMain.handle("debug:list", async (event) => {
+    assertTrustedSender(event);
     return {
       ok: true,
       sessions: [...sessions.values()].map((e) => e.session),
@@ -125,9 +148,13 @@ export function registerDebugHandlers(getWorkspaceRoot: (senderId: number) => st
   });
 
   ipcMain.handle("debug:launch-config", async (event) => {
-    const root = getWorkspaceRoot(event.sender.id);
-    if (!root?.trim()) return { ok: false, error: "No workspace" };
-    const config = await loadLaunchConfig(root);
-    return { ok: true, config };
+    assertTrustedSender(event);
+    try {
+      const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+      const config = await loadLaunchConfig(root);
+      return { ok: true, config };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 }

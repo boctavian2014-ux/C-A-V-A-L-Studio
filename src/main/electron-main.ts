@@ -27,6 +27,7 @@ import {
   resolvePreferredShell,
 } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
+import { registerTerminalHandlers } from "./terminal-handlers";
 import {
   addRecentWorkspace,
   listRecentWorkspaces,
@@ -39,7 +40,7 @@ import { registerModelHandlers, abortAllStreamsForSender } from "./model-handler
 import { registerMcpHandlers } from "./mcp-handlers";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
-import { registerCadHandlers } from "./cad-handlers";
+import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
 import { registerRoboticsLibraryHandlers } from "./robotics-library-handlers";
 import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
 import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
@@ -49,9 +50,14 @@ import { registerSchematicHandlers } from "./schematic-handlers";
 import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
 import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { mergeSecrets, normalizeSecretsMap, filterNonEmptySecretsPatch } from "../../ai/models/api-secrets";
+import {
+  buildSecretProviderMetadata,
+  configuredMapFromProviders,
+  SETTINGS_FORBIDDEN_SECRET_KEYS,
+} from "../shared/secrets-metadata";
 import { inferPreloadContext } from "../../ai/models/infer-context";
+import { validateCadApiUrl, validateCadApiUrlSync } from "./network-guard";
 import "./ipc-handlers";
-import "./terminal-handlers";
 import { registerSearchHandlers } from "./search-handlers";
 import { registerDebugHandlers } from "./debug-handlers";
 import { registerLspHandlers } from "./lsp-handlers";
@@ -59,10 +65,25 @@ import { registerExtensionHandlers } from "./extension-handlers";
 import { registerMarketplaceHandlers } from "./marketplace-handlers";
 import { setCavalConfigExtraPaths } from "../../ai/config/caval-config";
 import { setIpcWorkspaceRoot } from "./ipc-handlers";
-import { assertTrustedSender, openSafeExternalUrl, STRIPE_CHECKOUT_HOSTS } from "./ipc-trust";
-import { assertPathInWorkspace } from "./path-security";
+import { assertTrustedSender } from "./ipc-trust";
+import {
+  CAVALLO_TRUSTED_HOSTS,
+  openExternalUrl,
+  redactUrlForDisplay,
+  STRIPE_CHECKOUT_HOSTS,
+} from "./external-url-policy";
+import { validateSecretsPatchFormats, validateSecretFormat } from "./byok-key-format";
+import { assertOllamaBaseUrl, assertProviderRequestUrl } from "./cloud-provider-registry";
+import { consumeAiRateLimit } from "./ai-rate-limit";
+import {
+  assertTextContentSize,
+  normalizeWorkspaceRoot,
+  resolveSandboxedWorkspacePath,
+} from "./path-security";
 import { sanitizeEnvForTerminal } from "./subprocess-env";
-import { normalizeWorkspaceRoot } from "./path-security";
+import { requireBoundWorkspaceRoot } from "./bound-workspace";
+import { workspaceCommandMutex } from "../../ai/tools/workspace-execute-lock";
+import { runAllowedWorkspaceCommand } from "../../ai/tools/workspace-command-runner";
 import {
   getRendererWebPreferences,
   installRendererSessionPolicy,
@@ -72,7 +93,13 @@ import {
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
 
+/** Q1-F: headless boot check — no .env keys, no CAD cloud, no live providers. */
+function isElectronSmokeMode(): boolean {
+  return process.env.CAVAL_SMOKE === "1";
+}
+
 const loadLocalEnvFile = (): void => {
+  if (isElectronSmokeMode()) return;
   const envPath = path.join(process.cwd(), ".env");
   try {
     if (!fsSync.existsSync(envPath)) return;
@@ -118,22 +145,23 @@ export function getBoundWorkspaceRoot(senderId: number): string | undefined {
   return workspaceRoots.get(senderId);
 }
 
-registerGitHandlers();
-registerEngineeringHandlers(workspaceFor);
+registerGitHandlers(getBoundWorkspaceRoot);
+registerTerminalHandlers(getBoundWorkspaceRoot);
+registerEngineeringHandlers(getBoundWorkspaceRoot);
 registerModelHandlers(
   (id) => workspaceRoots.get(id) ?? process.cwd(),
   getBoundWorkspaceRoot
 );
-registerMcpHandlers(workspaceFor);
+registerMcpHandlers(getBoundWorkspaceRoot);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);
-registerCadHandlers();
-registerRoboticsLibraryHandlers();
+registerCadHandlers(getBoundWorkspaceRoot);
+registerRoboticsLibraryHandlers(getBoundWorkspaceRoot);
 registerSchematicHandlers(workspaceFor);
 registerSearchHandlers(workspaceFor);
-registerDebugHandlers(workspaceFor);
-registerLspHandlers(workspaceFor);
-registerExtensionHandlers(workspaceFor);
+registerDebugHandlers(getBoundWorkspaceRoot);
+registerLspHandlers(getBoundWorkspaceRoot);
+registerExtensionHandlers(getBoundWorkspaceRoot);
 registerMarketplaceHandlers();
 
 const subscribePipelineIpc = (sender: Electron.WebContents): (() => void) => {
@@ -199,16 +227,14 @@ const createWindow = (): BrowserWindow => {
     webPreferences: getRendererWebPreferences(path.join(__dirname, "preload.js")),
   });
 
-  window.maximize();
+  if (!isElectronSmokeMode()) {
+    window.maximize();
+  }
 
   window.webContents.on("console-message", (_event, level, message, _line, sourceId) => {
     const tag = level >= 3 ? "error" : level === 2 ? "warn" : "log";
     console[tag === "log" ? "log" : tag](`[renderer${sourceId ? ` ${sourceId}` : ""}] ${message}`);
   });
-
-  if (!app.isPackaged) {
-    window.webContents.openDevTools({ mode: "detach" });
-  }
 
   const loadRenderer = () => {
     window.loadFile(path.join(__dirname, "../renderer/index.html"));
@@ -240,14 +266,21 @@ const createWindow = (): BrowserWindow => {
     console.info("[caval] Renderer responsive again");
   });
 
-  if (!app.isPackaged) {
-    void window.webContents.session.clearCache().then(loadRenderer);
-  } else {
-    loadRenderer();
-  }
-
   window.webContents.on("did-finish-load", () => {
     console.info("[caval] Renderer loaded");
+    if (isElectronSmokeMode()) {
+      console.info("[caval-smoke] renderer-ready");
+      const smokeWorkspace = process.env.CAVAL_SMOKE_WORKSPACE?.trim();
+      if (smokeWorkspace && fsSync.existsSync(smokeWorkspace)) {
+        bindWorkspace(window.webContents.id, smokeWorkspace);
+        console.info("[caval-smoke] workspace-bound");
+      }
+      console.info("[caval-smoke] complete");
+      setTimeout(() => {
+        if (!window.isDestroyed()) window.close();
+        app.quit();
+      }, 250);
+    }
     if (rendererRecoveryPending && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       rendererRecoveryPending = false;
       window.webContents.send("caval:renderer-recovered", {
@@ -258,15 +291,25 @@ const createWindow = (): BrowserWindow => {
     }
   });
 
-  if (!app.isPackaged) {
+  if (!app.isPackaged && !isElectronSmokeMode()) {
     window.webContents.openDevTools({ mode: "detach" });
   }
 
   window.webContents.on("did-fail-load", (_event, code, description, url) => {
     console.error("[caval] Renderer failed to load:", code, description, url);
+    if (isElectronSmokeMode()) {
+      console.error("[caval-smoke] fatal: renderer failed to load");
+      app.exit(1);
+    }
   });
 
   installRendererContextMenu(window);
+
+  if (!app.isPackaged && !isElectronSmokeMode()) {
+    void window.webContents.session.clearCache().then(loadRenderer);
+  } else {
+    loadRenderer();
+  }
 
   return window;
 };
@@ -568,7 +611,14 @@ const installApplicationMenu = (): void => {
         { label: "Open Process Explorer", click: () => sendMenuCommand("process-explorer") },
         { type: "separator" },
         { label: "Check for Updates...", click: () => sendMenuCommand("check-updates") },
-        { label: "CAVALLO Studio Docs", click: () => void shell.openExternal("https://caval.studio") },
+        {
+          label: "CAVALLO Studio Docs",
+          click: () =>
+            void openExternalUrl("https://caval.studio", {
+              origin: "INTERNAL_CONSTANT",
+              allowedHosts: CAVALLO_TRUSTED_HOSTS,
+            }),
+        },
         { label: "About", click: () => sendMenuCommand("about") }
       ]
     }
@@ -580,14 +630,24 @@ ipcMain.handle("caval:save-file", async (event, request: { path?: string; conten
   assertTrustedSender(event);
   const window = BrowserWindow.fromWebContents(event.sender);
   let targetPath = request.path;
-  const workspaceRoot = workspaceRoots.get(event.sender.id);
+  // Lot A: bound workspace only — never process.cwd() / renderer-supplied root fallback.
+  const workspaceRoot = getBoundWorkspaceRoot(event.sender.id);
+
+  try {
+    assertTextContentSize(request.content ?? "", "save-file content");
+  } catch (error) {
+    return {
+      canceled: true,
+      error: error instanceof Error ? error.message : "Content too large",
+    };
+  }
 
   if (targetPath && !request.saveAs) {
     if (!workspaceRoot?.trim()) {
       return { canceled: true, error: "No workspace open" };
     }
     try {
-      targetPath = assertPathInWorkspace(workspaceRoot, targetPath);
+      targetPath = resolveSandboxedWorkspacePath(workspaceRoot, targetPath);
     } catch (error) {
       return {
         canceled: true,
@@ -596,6 +656,7 @@ ipcMain.handle("caval:save-file", async (event, request: { path?: string; conten
     }
   }
 
+  // Save As / untitled: ONLY via native dialog — renderer never sends free external path.
   if (!targetPath || request.saveAs) {
     const saveOptions = {
       title: "Save File",
@@ -642,6 +703,10 @@ const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatRespo
   if (!endpoint) {
     throw new Error("CAVAL_CLOUD_AI_URL is not configured.");
   }
+  const urlCheck = assertProviderRequestUrl("caval_cloud", endpoint);
+  if (!urlCheck.ok) {
+    throw new Error(urlCheck.error);
+  }
 
   return withTimeout(async (signal) => {
     const response = await fetch(endpoint, {
@@ -670,7 +735,8 @@ const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatRespo
     });
 
     if (!response.ok) {
-      throw new Error(`Caval Cloud failed with ${response.status}: ${await response.text()}`);
+      await response.text().catch(() => "");
+      throw new Error(`Caval Cloud failed with ${response.status}`);
     }
 
     const json = await response.json() as { content?: string; message?: { content?: string }; choices?: Array<{ message?: { content?: string } }> };
@@ -683,7 +749,13 @@ const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatRespo
 };
 
 const callOllama = async (request: CavalChatRequest): Promise<CavalChatResponse> => {
-  const endpoint = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/api/chat";
+  const raw = process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434/api/chat";
+  const withPath = raw.includes("/api/") ? raw : `${raw.replace(/\/+$/, "")}/api/chat`;
+  const validated = assertOllamaBaseUrl(withPath);
+  if (!validated.ok) {
+    throw new Error(validated.error);
+  }
+  const endpoint = validated.normalized;
 
   return withTimeout(async (signal) => {
     const response = await fetch(endpoint, {
@@ -712,7 +784,8 @@ const callOllama = async (request: CavalChatRequest): Promise<CavalChatResponse>
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama failed with ${response.status}: ${await response.text()}`);
+      await response.text().catch(() => "");
+      throw new Error(`Ollama failed with ${response.status}`);
     }
 
     const json = await response.json() as { message?: { content?: string } };
@@ -809,20 +882,34 @@ const shellCommand = (): { command: string; args: string[] } => {
 
 ipcMain.handle("caval:terminal-start", async (event) => {
   assertTrustedSender(event);
+  let cwd: string;
+  try {
+    cwd = requireBoundWorkspaceRoot(
+      getBoundWorkspaceRoot,
+      event.sender.id,
+      "Deschide un folder în workspace înainte de a deschide terminalul."
+    );
+  } catch (error) {
+    return {
+      started: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
   if (process.platform === "win32") {
     await ensureLatestPowerShellInstalled();
   }
   const id = event.sender.id;
   const existing = terminals.get(id);
   if (existing && !existing.killed) {
-    return { started: true, reused: true };
+    return { started: true, reused: true, cwd };
   }
 
+  // Zone A: explicit shell executable, shell:false — isolated from AI automated runners
   const { command, args } = shellCommand();
   const terminal = spawn(command, args, {
-    cwd: workspaceRoots.get(id) ?? process.cwd(),
+    cwd,
     env: sanitizeEnvForTerminal(),
-    shell: false
+    shell: false,
   });
 
   terminals.set(id, terminal);
@@ -833,8 +920,8 @@ ipcMain.handle("caval:terminal-start", async (event) => {
     event.sender.send("caval:terminal-data", `\r\n[process exited with code ${code ?? "unknown"}]\r\n`);
     terminals.delete(id);
   });
-  event.sender.send("caval:terminal-data", `Caval terminal started in ${workspaceRoots.get(id) ?? process.cwd()}\r\n`);
-  return { started: true, reused: false };
+  event.sender.send("caval:terminal-data", `Caval terminal started in ${cwd}\r\n`);
+  return { started: true, reused: false, cwd };
 });
 
 ipcMain.handle("caval:terminal-write", (event, data: string) => {
@@ -868,7 +955,8 @@ ipcMain.handle("caval:composer-run", async (event, request: {
   runBuild?: boolean;
   runTests?: boolean;
 }): Promise<ComposerResult> => {
-  const workspaceRoot = workspaceFor(event.sender.id);
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   zeroLatencyFusion.prepare({
     workspaceRoot,
     objectiveDraft: request.objective,
@@ -911,6 +999,8 @@ ipcMain.handle("caval:suggestions-proceed", async (event, input: {
   objective: string;
   alternativeId?: string;
 }) => {
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   const sender = event.sender;
   const unsubscribeStep = logicFlowPipelineEmitter.subscribe((step) => {
     sender.send("caval:logicflow-pipeline-step", step);
@@ -919,7 +1009,7 @@ ipcMain.handle("caval:suggestions-proceed", async (event, input: {
   try {
     return await composer.proceedAfterSuggestions(input.sessionId, {
       objective: input.objective,
-      workspaceRoot: workspaceFor(event.sender.id),
+      workspaceRoot,
       approvedAlternativeId: input.alternativeId
     }, input.alternativeId);
   } finally {
@@ -932,6 +1022,7 @@ ipcMain.handle("caval:review-action", async (event, input: {
   action: "acceptAll" | "rejectAll" | "acceptFile" | "rejectFile" | "acceptHunk" | "rejectHunk" | "acceptLine" | "rejectLine" | "askAIToRevise";
   targetId?: string;
 }) => {
+  assertTrustedSender(event);
   switch (input.action) {
     case "acceptAll": return codeReviewActions.acceptAll();
     case "rejectAll": return codeReviewActions.rejectAll();
@@ -942,11 +1033,12 @@ ipcMain.handle("caval:review-action", async (event, input: {
     case "acceptLine": if (input.targetId) codeReviewActions.acceptLine(input.targetId); break;
     case "rejectLine": if (input.targetId) codeReviewActions.rejectLine(input.targetId); break;
     case "askAIToRevise": {
+      const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
       const session = await codeReviewActions.askAIToRevise();
       if (session) {
         await composer.run({
           objective: `Revise the proposed patches based on code review session ${session.id}`,
-          workspaceRoot: workspaceFor(event.sender.id),
+          workspaceRoot,
           skipSuggestions: true,
           reviewSessionId: session.id,
           runBuild: false,
@@ -960,6 +1052,8 @@ ipcMain.handle("caval:review-action", async (event, input: {
 });
 
 ipcMain.handle("caval:review-apply", async (event, input: { sessionId: string; objective: string }) => {
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   const sender = event.sender;
   const unsubscribeStep = logicFlowPipelineEmitter.subscribe((step) => {
     sender.send("caval:logicflow-pipeline-step", step);
@@ -968,7 +1062,7 @@ ipcMain.handle("caval:review-apply", async (event, input: { sessionId: string; o
   try {
     return await composer.applyAfterReview(input.sessionId, {
       objective: input.objective,
-      workspaceRoot: workspaceFor(event.sender.id)
+      workspaceRoot
     });
   } finally {
     unsubscribeStep();
@@ -1013,12 +1107,14 @@ ipcMain.handle("caval:tool-replay", async (event, input: {
   input?: unknown;
   confirm?: boolean;
 }) => {
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   return toolSandbox.run({
     toolCallId: input.toolCallId,
     tool: input.tool,
     input: input.input,
     confirm: input.confirm ?? false
-  }, workspaceFor(event.sender.id));
+  }, workspaceRoot);
 });
 
 ipcMain.handle("caval:agent-create-plan", async (event, goal: Goal) => {
@@ -1032,10 +1128,12 @@ ipcMain.handle("caval:agent-create-plan", async (event, goal: Goal) => {
 });
 
 ipcMain.handle("caval:agent-execute-step", async (event, request: AgentExecuteStepRequest) => {
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   const sender = event.sender;
   const unsubscribeEvents = subscribePipelineIpc(sender);
   try {
-    return await agentOrchestrator.executeStep(request, workspaceFor(event.sender.id));
+    return await agentOrchestrator.executeStep(request, workspaceRoot);
   } finally {
     unsubscribeEvents();
   }
@@ -1047,12 +1145,20 @@ ipcMain.handle("caval:agent-abort", async () => {
 });
 
 ipcMain.handle("caval:agent-save-audit", async (event, audit: AgentAuditReport) => {
+  assertTrustedSender(event);
   try {
-    const workspaceRoot = workspaceFor(event.sender.id);
-    const dir = path.join(workspaceRoot, ".caval", "agent-audits");
+    // Lot A: bound root only — never process.cwd() fallback via workspaceFor.
+    const workspaceRoot = getBoundWorkspaceRoot(event.sender.id);
+    if (!workspaceRoot?.trim()) {
+      return { ok: false, error: "No workspace open" };
+    }
+    const dir = resolveSandboxedWorkspacePath(workspaceRoot, path.join(workspaceRoot, ".caval", "agent-audits"));
     await fs.mkdir(dir, { recursive: true });
-    const filePath = path.join(dir, `${audit.replayToken}.json`);
-    await fs.writeFile(filePath, JSON.stringify(audit, null, 2), "utf8");
+    const token = String(audit?.replayToken ?? "audit").replace(/[^a-zA-Z0-9._\-]/g, "_").slice(0, 80);
+    const filePath = resolveSandboxedWorkspacePath(dir, `${token}.json`);
+    const payload = JSON.stringify(audit, null, 2);
+    assertTextContentSize(payload, "agent audit");
+    await fs.writeFile(filePath, payload, "utf8");
     return { ok: true, path: filePath };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1066,6 +1172,8 @@ ipcMain.handle("caval:sandbox-run", async (event, input: {
   input?: unknown;
   confirm?: boolean;
 }) => {
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   const unsubscribeEvents = subscribePipelineIpc(event.sender);
   try {
     const toolId = input.toolCallId || `sandbox-${Date.now()}`;
@@ -1082,7 +1190,7 @@ ipcMain.handle("caval:sandbox-run", async (event, input: {
       tool: input.tool,
       input: input.input,
       confirm: input.confirm ?? true
-    }, workspaceFor(event.sender.id));
+    }, workspaceRoot);
     return result;
   } finally {
     unsubscribeEvents();
@@ -1090,11 +1198,13 @@ ipcMain.handle("caval:sandbox-run", async (event, input: {
 });
 
 ipcMain.handle("caval:apply-fix-rerun", async (event, input: { message: string; commands: string[] }) => {
-  const workspaceRoot = workspaceFor(event.sender.id);
-  const command = input.commands[0];
-  if (!command) {
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+  const command = input.commands?.[0];
+  if (!command || typeof command !== "string") {
     return { ok: false, error: "No fix command provided." };
   }
+  // Zone B: allowlist only — no free command string from renderer/LLM
   try {
     assertShellCommandAllowed(command);
   } catch (error) {
@@ -1108,26 +1218,30 @@ ipcMain.handle("caval:apply-fix-rerun", async (event, input: { message: string; 
     input: { command },
     timestamp: Date.now()
   });
-  const result = await mobileBuildRunner.runFix(command, workspaceRoot, {
-    onData: () => undefined,
-    onComplete: () => undefined
-  });
-  pipelineEventBus.emit({
-    type: "tool.result",
-    id: fixId,
-    success: result.ok,
-    output: result,
-    timestamp: Date.now()
-  });
-  return { ok: result.ok };
+  try {
+    const result = await workspaceCommandMutex.runExclusive(workspaceRoot, () =>
+      runAllowedWorkspaceCommand(command, workspaceRoot)
+    );
+    pipelineEventBus.emit({
+      type: "tool.result",
+      id: fixId,
+      success: result.ok,
+      output: result,
+      timestamp: Date.now()
+    });
+    return { ok: result.ok, timedOut: result.timedOut, error: result.ok ? undefined : result.output };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 });
 
 ipcMain.handle("caval:mobile-build-start", async (event, input: { platform: MobilePlatform }) => {
+  assertTrustedSender(event);
   if (mobileBuildRunner.isRunning()) {
     return { ok: false, error: "A mobile build is already running." };
   }
 
-  const workspaceRoot = workspaceFor(event.sender.id);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   const sender = event.sender;
 
   void mobileBuildRunner.run(input.platform, workspaceRoot, {
@@ -1140,27 +1254,39 @@ ipcMain.handle("caval:mobile-build-start", async (event, input: { platform: Mobi
   return { ok: true, started: true };
 });
 
-ipcMain.handle("caval:mobile-build-cancel", () => {
+ipcMain.handle("caval:mobile-build-cancel", (event) => {
+  assertTrustedSender(event);
   mobileBuildRunner.cancel();
   return { ok: true };
 });
 
 ipcMain.handle("caval:mobile-build-fix", async (event, input: { command: string }) => {
-  const workspaceRoot = workspaceFor(event.sender.id);
+  assertTrustedSender(event);
+  const workspaceRoot = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
   const sender = event.sender;
 
+  if (!input?.command || typeof input.command !== "string") {
+    return { ok: false, error: "No fix command provided." };
+  }
+  // Zone B: allowlist only — reject free command strings outside policy
   try {
     assertShellCommandAllowed(input.command);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 
-  const result = await mobileBuildRunner.runFix(input.command, workspaceRoot, {
-    onData: (line) => sender.send("caval:mobile-build-data", line),
-    onComplete: (ok) => sender.send("caval:mobile-build-complete", { ok })
-  });
-
-  return result;
+  try {
+    const result = await workspaceCommandMutex.runExclusive(workspaceRoot, async () => {
+      const run = await runAllowedWorkspaceCommand(input.command, workspaceRoot);
+      sender.send("caval:mobile-build-data", `> ${input.command}`);
+      if (run.output) sender.send("caval:mobile-build-data", run.output);
+      sender.send("caval:mobile-build-complete", { ok: run.ok });
+      return run;
+    });
+    return { ok: result.ok, timedOut: result.timedOut };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 });
 
 ipcMain.handle("caval:context-index", async (event) => {
@@ -1257,33 +1383,13 @@ const RENDERER_REDACTED_SECRET_KEYS = new Set<string>([
   "SUPABASE_SERVICE_ROLE_KEY",
   "BILLING_API_KEY",
 ]);
+void RENDERER_REDACTED_SECRET_KEYS;
 
 const buildSecretsConfiguredMap = (
   stored: Record<string, string>
 ): Record<string, boolean> => {
-  const configured: Record<string, boolean> = {};
-  for (const key of SECRET_ENV_KEYS) {
-    configured[key] = Boolean(
-      stored[key]?.trim() || process.env[key]?.trim()
-    );
-  }
-  return configured;
-};
-
-/** Strip all secret material — renderer gets only `configured` flags. */
-const redactSecretsForRenderer = (
-  stored: Record<string, string>
-): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(stored)) {
-    if (RENDERER_REDACTED_SECRET_KEYS.has(key)) continue;
-    // Also block any *API_KEY / *_TOKEN / SERVICE_ROLE patterns.
-    if (/(_API_KEY|_TOKEN|_SECRET|SERVICE_ROLE|CONNECTION_STRING)$/i.test(key)) {
-      continue;
-    }
-    if (value?.trim()) out[key] = value;
-  }
-  return out;
+  const providers = buildSecretProviderMetadata({ stored });
+  return configuredMapFromProviders(providers);
 };
 
 const readApiSecrets = (): Record<string, string> => {
@@ -1367,7 +1473,13 @@ const applySettingsToEnv = (settings: Record<string, string>): void => {
     process.env.OLLAMA_BASE_URL = settings["ollama.url"].trim();
   }
   if (settings["cad.apiUrl"]?.trim()) {
-    process.env.CAD_API_URL = settings["cad.apiUrl"].trim();
+    const validated = validateCadApiUrlSync(settings["cad.apiUrl"].trim());
+    if (validated.ok) {
+      process.env.CAD_API_URL = validated.normalized;
+      resetCadBaseUrlCache();
+    } else {
+      console.warn("[settings] rejecting cad.apiUrl:", validated.error);
+    }
   }
   // Meshy / OpenRouter / CAD keys live only in secrets → applyStoredSecretsToEnv.
   if (settings["caval.cloud.apiKey"]?.trim()) {
@@ -1380,23 +1492,40 @@ const loadPersistedAppSettings = (): void => {
   applySettingsToEnv(persistedAppSettings);
 };
 
-ipcMain.handle("caval:settings-save", (event, settings: Record<string, string>) => {
-  const merged = { ...persistedAppSettings, ...settings };
-  const secretsPatch: Record<string, string> = {};
-  // Only write non-empty values — empty write-only fields must not wipe stored secrets.
-  const maybeSecret = (settingsKey: string, envKey: string) => {
-    if (settings[settingsKey] === undefined) return;
-    const trimmed = settings[settingsKey]?.trim() ?? "";
-    if (trimmed) secretsPatch[envKey] = trimmed;
-  };
-  maybeSecret("openrouter.apiKey", "OPENROUTER_API_KEY");
-  maybeSecret("mesh.apiKey", "MESHY_API_KEY");
-  maybeSecret("cad.apiKey", "CAD_API_KEY");
-  if (Object.keys(secretsPatch).length > 0) {
-    const mergedSecrets = mergeApiSecrets(secretsPatch);
-    writeApiSecrets(mergedSecrets);
-    applyStoredSecretsToEnv();
+ipcMain.handle("caval:settings-save", async (event, settings: Record<string, string>) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
+  const incoming = { ...(settings ?? {}) };
+  for (const key of Object.keys(incoming)) {
+    if (
+      (SETTINGS_FORBIDDEN_SECRET_KEYS as readonly string[]).includes(key) ||
+      /\.apiKey$/i.test(key) ||
+      /api[_-]?key|token|secret|password/i.test(key)
+    ) {
+      return {
+        ok: false,
+        error:
+          "API keys cannot be saved via settings-save. Use secrets-set (Settings → Chei API).",
+      };
+    }
+  }
+  if (incoming["cad.apiUrl"]?.trim()) {
+    const validated = await validateCadApiUrl(incoming["cad.apiUrl"].trim());
+    if (!validated.ok) {
+      return {
+        ok: false,
+        error: `Invalid cad.apiUrl: ${validated.error}`,
+      };
+    }
+    incoming["cad.apiUrl"] = validated.normalized;
+  }
+  const merged = { ...persistedAppSettings, ...incoming };
   writePersistedAppSettings(merged);
   const forRenderer = { ...merged };
   for (const key of SETTINGS_SENSITIVE_KEYS) {
@@ -1454,11 +1583,13 @@ const getRendererSettings = (
 };
 
 ipcMain.handle("caval:billing-user-id", (event) => {
+  assertTrustedSender(event);
   const settings = getRendererSettings(event.sender.id);
   return { ok: true, userId: settings["caval.userId"] };
 });
 
 ipcMain.handle("caval:billing-entitlements", async (event) => {
+  assertTrustedSender(event);
   const settings = getRendererSettings(event.sender.id);
   const userId = settings["caval.userId"];
   const apiKey = process.env.BILLING_API_KEY ?? process.env.BILLING_ADMIN_KEY;
@@ -1483,6 +1614,7 @@ ipcMain.handle("caval:billing-entitlements", async (event) => {
 });
 
 ipcMain.handle("caval:billing-checkout", async (event, input: { email: string }) => {
+  assertTrustedSender(event);
   const settings = getRendererSettings(event.sender.id);
   const userId = settings["caval.userId"];
   const apiKey = process.env.BILLING_API_KEY ?? process.env.BILLING_ADMIN_KEY;
@@ -1507,33 +1639,35 @@ ipcMain.handle("caval:billing-checkout", async (event, input: { email: string })
     if (!res.ok || !json.url) {
       return { ok: false, error: json.error ?? `Checkout failed (${res.status})` };
     }
-    const opened = await openSafeExternalUrl(json.url, STRIPE_CHECKOUT_HOSTS);
+    // USER_INITIATED_TRUSTED: user clicked Pay — Stripe allowlist only; redact URL in response.
+    const opened = await openExternalUrl(json.url, {
+      origin: "USER_INITIATED_TRUSTED",
+      allowedHosts: STRIPE_CHECKOUT_HOSTS,
+    });
     if (!opened.ok) {
       return { ok: false, error: opened.error ?? "Checkout URL blocked by security policy." };
     }
-    return { ok: true, url: json.url };
+    return { ok: true, url: redactUrlForDisplay(json.url) };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 
 ipcMain.handle("caval:secrets-get", (event) => {
-  assertTrustedSender(event);
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
   const stored = normalizeSecretsMap(readApiSecrets());
-  const merged: Record<string, string> = { ...stored };
-  if (process.env.OPENROUTER_API_KEY && !merged.OPENROUTER_API_KEY) {
-    merged.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-  }
-  if (process.env.MESHY_API_KEY && !merged.MESHY_API_KEY) {
-    merged.MESHY_API_KEY = process.env.MESHY_API_KEY;
-  }
-  if (process.env.CAD_API_KEY && !merged.CAD_API_KEY) {
-    merged.CAD_API_KEY = process.env.CAD_API_KEY;
-  }
+  const providers = buildSecretProviderMetadata({ stored });
   return {
     ok: true,
-    secrets: redactSecretsForRenderer(merged),
-    configured: buildSecretsConfiguredMap(merged),
+    providers,
+    configured: configuredMapFromProviders(providers),
   };
 });
 
@@ -1544,38 +1678,82 @@ ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => 
   if (Object.keys(filtered).length === 0) {
     return { ok: true };
   }
+  // Lot C5.5: format validation only — no automatic network dry-run.
+  const format = validateSecretsPatchFormats(filtered);
+  if (!format.ok) {
+    return { ok: false, error: format.error, key: format.key };
+  }
   const merged = mergeApiSecrets(filtered);
   writeApiSecrets(merged);
   applyStoredSecretsToEnv();
   return { ok: true };
 });
 
+/**
+ * Lot C5.5 — Explicit user-initiated key test (never runs on save).
+ * Returns only valid | invalid | unreachable — no bodies/keys.
+ */
+ipcMain.handle(
+  "caval:test-provider-key",
+  async (event, input: { providerId: string; secretKey: string }) => {
+    assertTrustedSender(event);
+    const limit = consumeAiRateLimit("complete", event.sender.id, "secrets-test");
+    if (!limit.ok) {
+      return { ok: false, result: "unreachable" as const, error: "rate_limited" };
+    }
+    const secrets = normalizeSecretsMap(readApiSecrets());
+    const keyName = String(input?.secretKey ?? "").trim();
+    const value = secrets[keyName]?.trim();
+    if (!value) {
+      return { ok: false, result: "invalid" as const };
+    }
+    const format = validateSecretFormat(keyName, value);
+    if (!format.ok) {
+      return { ok: false, result: "invalid" as const };
+    }
+    return { ok: true, result: "valid" as const };
+  }
+);
+
 app.whenReady().then(() => {
   app.setName("CAVALLO");
   installRendererSessionPolicy();
   installWebContentsSecurity();
   installApplicationMenu();
-  loadPersistedAppSettings();
-  applyStoredSecretsToEnv();
-  setCavalConfigExtraPaths([app.getAppPath()]);
-  setMcpSecretsProvider(readApiSecrets);
-  applyCadCloudEnvDefaults();
-  warmOpenRouterConnection(true);
-  preloadCoreModels();
-  void ensureLatestPowerShellInstalled().catch((err) => {
-    console.warn("[shell] PowerShell 7 ensure skipped:", err instanceof Error ? err.message : err);
-  });
-  void startMarketplaceServer().catch((err) => {
-    console.warn("[marketplace] auto-start skipped:", err instanceof Error ? err.message : err);
-  });
-  if (!isCadCloudOnly()) {
-    void ensureCadLocalServer().catch((err) => {
-      console.warn("[cad] auto-start skipped:", err instanceof Error ? err.message : err);
+  if (!isElectronSmokeMode()) {
+    loadPersistedAppSettings();
+    applyStoredSecretsToEnv();
+    setCavalConfigExtraPaths([app.getAppPath()]);
+    setMcpSecretsProvider(readApiSecrets);
+    applyCadCloudEnvDefaults();
+    warmOpenRouterConnection(true);
+    preloadCoreModels();
+    void ensureLatestPowerShellInstalled().catch((err) => {
+      console.warn("[shell] PowerShell 7 ensure skipped:", err instanceof Error ? err.message : err);
     });
+    void startMarketplaceServer().catch((err) => {
+      console.warn("[marketplace] auto-start skipped:", err instanceof Error ? err.message : err);
+    });
+    if (!isCadCloudOnly()) {
+      void ensureCadLocalServer().catch((err) => {
+        console.warn("[cad] auto-start skipped:", err instanceof Error ? err.message : err);
+      });
+    } else {
+      console.info("[cad] cloud-only mode — CAD API:", process.env.CAD_API_URL);
+    }
   } else {
-    console.info("[cad] cloud-only mode — CAD API:", process.env.CAD_API_URL);
+    console.info("[caval-smoke] main-ready");
+    const preloadPath = path.join(__dirname, "preload.js");
+    if (fsSync.existsSync(preloadPath)) {
+      console.info("[caval-smoke] preload-present");
+    } else {
+      console.error("[caval-smoke] fatal: missing preload.js");
+    }
   }
   createWindow();
+  if (isElectronSmokeMode()) {
+    console.info("[caval-smoke] window-created");
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
