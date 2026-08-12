@@ -21,9 +21,16 @@ import { cadRateLimitMiddleware } from "../middleware/rate-limit";
 import { cadForbidden, cadNotFound } from "../middleware/errors";
 import { cadLog } from "../middleware/logger";
 import type { CreateCadJobInput } from "../types";
+import { attachResolvedCadSecrets, asCreateCadJobInput } from "../services/cad-secret-resolve";
 
 const sanitizePrompt = (prompt: string): string =>
   prompt.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
+
+const ownerIdFromAuth = (request: Request): string => {
+  const auth = request.cadAuth;
+  if (!auth) throw cadForbidden();
+  return auth.accountId ?? auth.cavalId;
+};
 
 export const createJobHandlers = [
   cadRateLimitMiddleware,
@@ -34,14 +41,19 @@ export const createJobHandlers = [
       const auth = request.cadAuth;
       if (!auth) throw cadForbidden();
 
-      const body = request.body as CreateCadJobInput;
+      const raw = request.body as CreateCadJobInput;
+      const secured = (await attachResolvedCadSecrets(
+        request,
+        raw as unknown as Record<string, unknown> & { providerProfileId?: string }
+      )) as unknown as CreateCadJobInput;
+
+      const ownerId = ownerIdFromAuth(request);
       const input: CreateCadJobInput = {
-        ...body,
-        prompt: sanitizePrompt(body.prompt),
-        cavalId: body.cavalId ?? auth.cavalId,
+        ...asCreateCadJobInput(secured as unknown as Record<string, unknown>, ownerId),
+        prompt: sanitizePrompt(secured.prompt ?? raw.prompt),
       };
 
-      const jobId = await enqueueCadJob(input, auth.cavalId);
+      const jobId = await enqueueCadJob(input, ownerId);
       response.status(202).json({ ok: true, jobId, status: "queued" });
     } catch (error) {
       next(error);
@@ -60,7 +72,7 @@ export const getJobHandlers = [
       const job = await getCadJob(id);
       if (!job) throw cadNotFound("Job not found");
 
-      assertJobOwnership(job, auth.cavalId);
+      assertJobOwnership(job, ownerIdFromAuth(request));
 
       const result = await buildCadJobResult(job);
       response.json(toCadJobPublicView(result));
@@ -81,10 +93,16 @@ export const deleteJobHandlers = [
       const job = await getCadJob(id);
       if (!job) throw cadNotFound("Job not found");
 
-      assertJobOwnership(job, auth.cavalId);
+      assertJobOwnership(job, ownerIdFromAuth(request));
 
       await cancelCadJobProcessing(id);
-      cadLog({ level: "info", event: "job_cancelled", jobId: id, cavalId: auth.cavalId });
+      cadLog({
+        level: "info",
+        event: "job_cancelled",
+        jobId: id,
+        cavalId: auth.cavalId,
+        accountId: auth.accountId ?? undefined,
+      });
       response.json({ ok: true, jobId: id, status: "cancelled" });
     } catch (error) {
       next(error);
@@ -103,13 +121,11 @@ export const getJobResultHandlers = [
       const job = await getCadJob(id);
       if (!job) throw cadNotFound("Job not found");
 
-      assertJobOwnership(job, auth.cavalId);
+      assertJobOwnership(job, ownerIdFromAuth(request));
 
       const result = await buildCadJobResult(job);
       const localBuffer = getLocalStlBuffer(id);
 
-      // Three.js STLLoader and browsers send Accept: */* — always serve binary when
-      // we have a local artifact (JSON metadata is on GET /cad/jobs/:id).
       const wantsJson =
         request.query.format === "json" ||
         (request.header("accept") ?? "").includes("application/json");
@@ -147,7 +163,7 @@ export const getJobLogsHandlers = [
       const job = await getCadJob(id);
       if (!job) throw cadNotFound("Job not found");
 
-      assertJobOwnership(job, auth.cavalId);
+      assertJobOwnership(job, ownerIdFromAuth(request));
 
       response.json({ ok: true, jobId: id, logs: getJobLogs(id) });
     } catch (error) {

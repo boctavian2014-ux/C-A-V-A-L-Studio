@@ -29,6 +29,10 @@ describe("cad server", () => {
   beforeEach(() => {
     process.env.CAD_ALLOW_ANONYMOUS = "1";
     delete process.env.CAD_API_KEY;
+    delete process.env.CAD_JWT_SECRET;
+    delete process.env.SUPABASE_JWT_SECRET;
+    delete process.env.CAD_PROFILE_ENCRYPTION_KEY;
+    delete process.env.CAD_LEGACY_CLIENT_SECRET_PAYLOAD;
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     resetCadJobsForTests();

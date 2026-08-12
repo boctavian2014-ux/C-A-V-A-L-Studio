@@ -35,7 +35,7 @@ Quality gates (typecheck, lint `--max-warnings 0`, 1000 teste, build, `verify-ru
 |--------|------------|-------------|
 | [SEC-EXT-RUNTIME-PERMISSIONS-001](./SEC-EXT-RUNTIME-PERMISSIONS-001.md) | Mare | Nu activa rularea extensiilor până există sandbox și permission grants |
 | [SEC-MCP-REMOTE-001](./SEC-MCP-REMOTE-001.md) | Mare | MCP remote rămâne OFF până la transport, trust și egress controlate |
-| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | Mută BYOK CAD către vault/profile server-side; elimină cheia din body main → CAD cloud |
+| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | PR1 backend: JWT + vault per account. Desktop încă trimite chei până la PR2 |
 | [SEC-MCP-STDERR-REDACTION-001](./SEC-MCP-STDERR-REDACTION-001.md) | Medie | Redactare stderr MCP end-to-end înainte de UI/log |
 | [SEC-P3-BLOB-REVOKE-001](./SEC-P3-BLOB-REVOKE-001.md) | Scăzut | `URL.revokeObjectURL` exact-once pentru preview STL |
 | [SEC-UI-ACCELERATOR-001](./SEC-UI-ACCELERATOR-001.md) | Scăzut | Repară acceleratorul invalid; scoate warning-ul din allowlist-ul de smoke |

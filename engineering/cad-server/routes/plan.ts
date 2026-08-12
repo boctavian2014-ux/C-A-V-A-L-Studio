@@ -2,9 +2,12 @@ import type { Request, Response, NextFunction } from "express";
 import { planPrint3DRequest } from "../print3d-planner";
 import { validateBody, planPrint3DSchema } from "../middleware/validate";
 import { cadSafetyMiddleware } from "../middleware/safety";
+import { cadRateLimitMiddleware } from "../middleware/rate-limit";
 import { cadLog } from "../middleware/logger";
+import { attachResolvedCadSecrets } from "../services/cad-secret-resolve";
 
 export const planRouterHandlers = [
+  cadRateLimitMiddleware,
   validateBody(planPrint3DSchema),
   cadSafetyMiddleware,
   async (request: Request, response: Response, next: NextFunction): Promise<void> => {
@@ -15,16 +18,22 @@ export const planRouterHandlers = [
         openRouterApiKey?: string;
         meshApiKey?: string;
         piapiApiKey?: string;
+        providerProfileId?: string;
         previousMeshTaskId?: string;
       };
 
+      const secured = (await attachResolvedCadSecrets(
+        request,
+        body as unknown as Record<string, unknown> & { providerProfileId?: string }
+      )) as typeof body;
+
       const result = await planPrint3DRequest({
-        messages: body.messages ?? [],
-        latestUserText: body.latestUserText.trim(),
-        openRouterApiKey: body.openRouterApiKey,
-        meshApiKey: body.meshApiKey,
-        piapiApiKey: body.piapiApiKey,
-        previousMeshTaskId: body.previousMeshTaskId,
+        messages: secured.messages ?? [],
+        latestUserText: (secured.latestUserText ?? body.latestUserText).trim(),
+        openRouterApiKey: secured.openRouterApiKey,
+        meshApiKey: secured.meshApiKey,
+        piapiApiKey: secured.piapiApiKey,
+        previousMeshTaskId: secured.previousMeshTaskId,
       });
 
       if (!result.ok) {
@@ -36,6 +45,8 @@ export const planRouterHandlers = [
         level: "info",
         event: "plan_created",
         cavalId: request.cadAuth?.cavalId,
+        accountId: request.cadAuth?.accountId ?? undefined,
+        requestClass: body.providerProfileId ? "profile" : "legacy",
       });
       response.json({ ok: true, plan: result.plan });
     } catch (error) {

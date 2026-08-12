@@ -11,9 +11,17 @@ import {
   getJobLogsHandlers,
   getJobResultHandlers,
 } from "./routes/jobs";
+import {
+  createProfileHandlers,
+  listProfilesHandlers,
+  rotateProfileHandlers,
+  revokeProfileHandlers,
+} from "./routes/profiles";
 import { startCadJobCleanup } from "./services/job-cleanup";
+import { assertCadProductionSafety } from "./boot-guard";
 
 export { cadHealthCheck } from "./routes/health";
+export { assertCadProductionSafety } from "./boot-guard";
 
 export const createCadServer = (): express.Application => {
   const app = express();
@@ -26,6 +34,11 @@ export const createCadServer = (): express.Application => {
   });
 
   app.use(requireCadAuth);
+
+  app.get("/cad/profiles", ...listProfilesHandlers);
+  app.post("/cad/profiles", ...createProfileHandlers);
+  app.post("/cad/profiles/:id/rotate", ...rotateProfileHandlers);
+  app.post("/cad/profiles/:id/revoke", ...revokeProfileHandlers);
 
   app.post("/cad/plan", ...planRouterHandlers);
   app.post("/cad/jobs", ...createJobHandlers);
@@ -51,6 +64,7 @@ export const resolveCadPublicUrl = (): string | undefined => {
 };
 
 export const startCadServer = (port = resolveCadPort()): void => {
+  assertCadProductionSafety();
   const app = createCadServer();
   const host = "0.0.0.0";
   app.listen(port, host, () => {

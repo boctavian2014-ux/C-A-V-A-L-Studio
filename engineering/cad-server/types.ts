@@ -50,6 +50,9 @@ export interface PlanPrint3DRequest {
   messages: CadChatMessage[];
   latestUserText: string;
   openRouterApiKey?: string;
+  meshApiKey?: string;
+  piapiApiKey?: string;
+  providerProfileId?: string;
   previousMeshTaskId?: string;
 }
 
@@ -65,6 +68,8 @@ export interface CreateCadJobInput {
   meshApiKey?: string;
   /** Per-request PiAPI Trellis key from Electron (never stored). */
   piapiApiKey?: string;
+  /** Opaque provider profile id (PR1). Secret is resolved server-side. */
+  providerProfileId?: string;
   quality?: CadQuality;
   conversationHistory?: CadChatMessage[];
   previousScad?: string;
@@ -132,10 +137,19 @@ export interface CadJobPublicView {
   updatedAt?: string;
 }
 
+export type CadAuthClass = "jwt" | "legacy" | "anonymous";
+
+export type CadRequestClass = "profile" | "legacy";
+
 export interface CadAuthContext {
+  /** JWT.sub when Authorization Bearer was verified. Null on legacy/anonymous. */
+  accountId: string | null;
+  /** Legacy/telemetry identity. Never used for provider-profile authz. */
   cavalId: string;
   userId: string | null;
   isService: boolean;
+  authClass: CadAuthClass;
+  headerCavalId: string | null;
 }
 
 declare global {
