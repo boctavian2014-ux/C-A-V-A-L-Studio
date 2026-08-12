@@ -1,6 +1,6 @@
 # SEC-C2 PR1 — CAD identity, provider profiles, legacy flag
 
-**Status:** backend implemented, **not** ticket-complete. Desktop `attachMainCadSecrets` is unchanged.
+**Status:** **BACKEND FINALIZAT** (PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3) merged). Ticket [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) remains **Deschis / Mitigat** until PR2 desktop, E2E without keys in body, and legacy flag off without regression. Desktop `attachMainCadSecrets` is unchanged.
 
 ## API contract
 
@@ -37,6 +37,8 @@ Public profile fields: `id`, `provider`, `capabilities`, `status`, `createdAt`, 
 ## Telemetry
 
 `cadLog` writes to the CAD process stdout/stderr only (Railway logs). There is no Datadog/Sentry/PostHog hook on this path. `accountId` in those lines is internal operations identity, not an external analytics event. Payload bodies and secrets are not logged.
+
+Watch `requestClass` / `request_class` = `profile` vs `legacy` **after** a client can emit profile traffic. Until PR2, desktop still uses `attachMainCadSecrets`, so logs will normally show **only legacy**. Do not treat missing profile traffic as a backend defect.
 
 ## Encryption key rotation
 
