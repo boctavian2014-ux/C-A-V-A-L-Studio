@@ -21,7 +21,7 @@ flowchart TD
 ## Workflows
 
 - `build.yml`: build multi-platforma, Electron deps, installer artifacts.
-- `test.yml`: unit/integration/UI smoke/AI/Context/Marketplace checks, coverage placeholder si cache.
+- `test.yml`: typecheck → lint → test → build → verify-runtime-assets (aceleași gate-uri ca `cicd:test`). Smoke Electron pe job separat (xvfb; continue-on-error pe PR).
 - `code-signing.yml`: Windows EV, macOS Developer ID + notarizare, Linux optional signing.
 - `release.yml`: changelog, release notes, GitHub/S3/custom publish, feed JSON.
 - `nightly.yml`: build zilnic pe canalul Nightly cu tag `nightly-YYYY-MM-DD`.
@@ -31,6 +31,24 @@ flowchart TD
 
 ```bash
 npm run cicd:test
+```
+
+`cicd:test` rulează aceleași gate-uri PR ca GitHub Actions, în ordine:
+
+`typecheck` → `lint` → `test` → `build` → `verify-runtime-assets`
+
+Release:
+
+```bash
+npm run release:preflight
+```
+
+Preflight-ul de release reia gate-urile PR, apoi file checks și `smoke:electron`.
+Nu publică release și nu cere chei/API.
+
+Vezi `docs/ci/quality-gates.md` pentru PR vs release.
+
+```bash
 CAVAL_BUILD_PLATFORM=linux CAVAL_RELEASE_CHANNEL=beta npm run cicd:build-installer
 CAVAL_RELEASE_CHANNEL=stable npm run cicd:publish-release
 npm run cicd:publish-marketplace

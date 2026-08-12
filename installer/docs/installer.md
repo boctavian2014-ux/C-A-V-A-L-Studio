@@ -5,15 +5,15 @@
 From the Cavallo Studio repo root (`caval studio`):
 
 ```bash
-# Full pipeline: preflight → typecheck → test → build → dist:win → sign (optional) → report
+# Full pipeline: preflight files → quality gates → smoke → dist:win → sign (optional) → report
 CAVAL_RELEASE_CHANNEL=stable npm run release:win
 ```
 
-Preflight only:
+Preflight only (same PR gates + file checks + Electron smoke):
 
 ```bash
 npm run release:preflight
-npm run release:preflight -- --phase=post-build
+npm run release:preflight -- --files-only --phase=post-build
 ```
 
 ### Output

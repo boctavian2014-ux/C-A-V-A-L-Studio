@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildArenaModelPlan,
@@ -58,27 +61,36 @@ describe('arena parallel scans', () => {
   });
 
   it('emits parallelGroup on all three stages', async () => {
-    const events: Array<{ stage: string; status: string; group?: string }> = [];
-    const result = await runParallelArenaScans({
-      workspaceRoot: process.cwd(),
-      writtenFiles: [],
-      scanModelId: 'stepfun-step-3-7-flash',
-      callbacks: {
-        onMultiAgentStatus: (stage, status, _d, _m, _s, _a, parallelGroup) => {
-          events.push({ stage, status, group: parallelGroup });
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'caval-arena-scan-'));
+    try {
+      fs.writeFileSync(
+        path.join(workspaceRoot, 'package.json'),
+        JSON.stringify({ name: 'arena-scan-fixture' })
+      );
+      const events: Array<{ stage: string; status: string; group?: string }> = [];
+      const result = await runParallelArenaScans({
+        workspaceRoot,
+        writtenFiles: [],
+        scanModelId: 'stepfun-step-3-7-flash',
+        callbacks: {
+          onMultiAgentStatus: (stage, status, _d, _m, _s, _a, parallelGroup) => {
+            events.push({ stage, status, group: parallelGroup });
+          },
         },
-      },
-    });
+      });
 
-    const active = events.filter((e) => e.status === 'active');
-    expect(active.map((e) => e.stage).sort()).toEqual([
-      'performance',
-      'security',
-      'userSim',
-    ]);
-    expect(active.every((e) => e.group === ARENA_SCAN_PARALLEL_GROUP)).toBe(true);
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
-    expect(result.summaries.security).toBeTruthy();
+      const active = events.filter((e) => e.status === 'active');
+      expect(active.map((e) => e.stage).sort()).toEqual([
+        'performance',
+        'security',
+        'userSim',
+      ]);
+      expect(active.every((e) => e.group === ARENA_SCAN_PARALLEL_GROUP)).toBe(true);
+      expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(result.summaries.security).toBeTruthy();
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });
 

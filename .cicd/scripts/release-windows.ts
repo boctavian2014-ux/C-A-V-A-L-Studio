@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { channelFromEnv, run } from "./ci-utils";
+import { runQualityGates } from "./quality-gates";
 import { runReleasePreflight } from "./release-preflight";
 
 export interface ReleaseStepReport {
@@ -122,22 +123,17 @@ export async function runWindowsRelease(): Promise<ReleaseReport> {
     return writeReleaseReport({ channel, version, steps, artifacts: [], signingConfigured, ok: false });
   }
 
-  record(await runStep("typecheck", () => run("npm", ["run", "typecheck"])));
-  if (!steps.at(-1)?.ok) {
-    return writeReleaseReport({ channel, version, steps, artifacts: [], signingConfigured, ok: false });
-  }
-
-  record(await runStep("test", () => run("npm", ["test"])));
-  if (!steps.at(-1)?.ok) {
-    return writeReleaseReport({ channel, version, steps, artifacts: [], signingConfigured, ok: false });
-  }
-
-  record(await runStep("build", () => run("npm", ["run", "build"])));
+  record(await runStep("quality-gates", () => runQualityGates()));
   if (!steps.at(-1)?.ok) {
     return writeReleaseReport({ channel, version, steps, artifacts: [], signingConfigured, ok: false });
   }
 
   record(await runStep("preflight:post-build", () => runReleasePreflight({ phase: "post-build" }).then(() => undefined)));
+  if (!steps.at(-1)?.ok) {
+    return writeReleaseReport({ channel, version, steps, artifacts: [], signingConfigured, ok: false });
+  }
+
+  record(await runStep("smoke:electron", () => run("npm", ["run", "smoke:electron"])));
   if (!steps.at(-1)?.ok) {
     return writeReleaseReport({ channel, version, steps, artifacts: [], signingConfigured, ok: false });
   }

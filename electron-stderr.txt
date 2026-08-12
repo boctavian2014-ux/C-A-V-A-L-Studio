@@ -1,0 +1,15 @@
+HISTORIC FIXTURE — not a current Electron log.
+Captured 2026-07-27 before webpack emitted dist/main/parallel-worker.js.
+Do not treat this file as live stderr. Current production build emits
+dist/main/parallel-worker.js, dist/main/preload-worker.js, and
+dist/main/context-parallel-worker.js (see npm run verify-runtime-assets).
+
+--- original capture ---
+[CONTEXT:PARALLEL] worker error: Cannot find module 'C:\Users\octav\Desktop\caval studio\dist\main\parallel-worker.js'
+[CONTEXT:PARALLEL] worker error: Cannot find module 'C:\Users\octav\Desktop\caval studio\dist\main\parallel-worker.js'
+[CONTEXT:PARALLEL] worker error: Cannot find module 'C:\Users\octav\Desktop\caval studio\dist\main\parallel-worker.js'
+[CONTEXT:PARALLEL] worker error: Cannot find module 'C:\Users\octav\Desktop\caval studio\dist\main\parallel-worker.js'
+[26248:0727/180627.349:WARNING:electron\shell\common\keyboard_util.cc:281] Invalid accelerator token: M CmdOrCtrl
+(electron) 'console-message' arguments are deprecated and will be removed. Please use Event<WebContentsConsoleMessageEventParams> object instead.
+[26248:0727/180629.188:INFO:CONSOLE:28499] "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools
+You might need to use a local HTTP server (instead of file://): https://react.dev/link/react-devtools-faq font-weight:bold", source: file:///C:/Users/octav/Desktop/caval%20studio/dist/renderer/workbench-app.js?v=1785164632753 (28499)

@@ -1,19 +1,14 @@
 import { performance } from "node:perf_hooks";
 import { run, writeMetrics } from "./ci-utils";
+import { PR_QUALITY_GATES } from "./quality-gates";
 
 const main = async (): Promise<void> => {
   const startedAt = performance.now();
   const diagnostics: string[] = [];
 
-  const commands: Array<[string, string[]]> = [
-    ["npm", ["run", "typecheck"]],
-    ["npm", ["test"]],
-    ["npm", ["run", "build"]]
-  ];
-
-  for (const command of commands) {
+  for (const [command, args] of PR_QUALITY_GATES) {
     try {
-      await run(command[0], command[1]);
+      await run(command, [...args]);
     } catch (error) {
       diagnostics.push(error instanceof Error ? error.message : String(error));
     }
@@ -30,4 +25,7 @@ const main = async (): Promise<void> => {
   }
 };
 
-void main();
+void main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});

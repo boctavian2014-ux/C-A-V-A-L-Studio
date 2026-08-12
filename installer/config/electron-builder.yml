@@ -1,9 +1,9 @@
-appId: com.caval.studio
+appId: com.devaieood.cavallo
 productName: CAVALLO
 copyright: "Copyright (c) 2026 \"Dev AI\" EOOD. All rights reserved."
-artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+artifactName: CAVALLO-Setup-${version}.${ext}
 directories:
-  output: release/${channel}
+  output: release
   buildResources: installer/assets
 files:
   - dist/**
@@ -11,20 +11,17 @@ files:
   - build-icons/**
   - package.json
   - branding/**
-  - installer/assets/**
+  - "!**/*.map"
+  - "!**/*.md"
 asar: true
+asarUnpack:
+  # Worker threads cannot execute JS from inside app.asar
+  - dist/main/*worker*.js
+  # Native terminal module (prebuilds + any build output)
+  - node_modules/node-pty/**/*
+npmRebuild: false
+buildDependenciesFromSource: false
 compression: maximum
-license: installer/assets/license.rtf
-publish:
-  - provider: github
-    owner: caval-studio
-    repo: caval-studio
-    releaseType: release
-  - provider: s3
-    bucket: caval-studio-releases
-    region: eu-central-1
-  - provider: generic
-    url: https://updates.caval.studio/${channel}
 extraMetadata:
   main: dist/main/electron-main.js
 protocols:
@@ -37,12 +34,10 @@ win:
     - target: nsis
       arch:
         - x64
-        - arm64
-    - target: msi
-      arch:
-        - x64
-  publisherName: '"Dev AI" EOOD'
-  verifyUpdateCodeSignature: true
+  # Keep icon/metadata; skip code signing for local unsigned builds
+  signAndEditExecutable: true
+  signExecutable: false
+  verifyUpdateCodeSignature: false
 nsis:
   oneClick: false
   perMachine: false
@@ -66,43 +61,11 @@ mac:
       arch:
         - x64
         - arm64
-    - target: pkg
-      arch:
-        - x64
-        - arm64
-dmg:
-  sign: false
-  backgroundColor: "#0A1A2F"
-pkg:
-  scripts: installer/assets/pkg-scripts
 linux:
   icon: build-icons/icon.png
   category: Development
   target:
-    - target: deb
-      arch:
-        - x64
-        - arm64
-    - target: rpm
-      arch:
-        - x64
     - target: AppImage
       arch:
         - x64
-        - arm64
-deb:
-  depends:
-    - gconf2
-    - gconf-service
-    - libnotify4
-    - libnss3
-    - libxss1
-    - libxtst6
-    - xdg-utils
-rpm:
-  depends:
-    - libnotify
-    - nss
-    - xdg-utils
 electronUpdaterCompatibility: ">=6.0.0"
-generateUpdatesFilesForAllChannels: true

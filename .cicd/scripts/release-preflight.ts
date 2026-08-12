@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { PR_QUALITY_GATES, RELEASE_ONLY_GATES, runQualityGates } from "./quality-gates";
 
 export type PreflightPhase = "pre" | "post-build";
 
@@ -30,7 +31,11 @@ const REQUIRED_PRE_FILES = [
   "package.json"
 ] as const;
 
-const POST_BUILD_FILES = ["dist/main/electron-main.js"] as const;
+const POST_BUILD_FILES = [
+  "dist/main/electron-main.js",
+  "dist/main/parallel-worker.js",
+  "dist/main/preload.js",
+] as const;
 
 const fileExists = async (root: string, relativePath: string): Promise<boolean> => {
   try {
@@ -123,10 +128,25 @@ export async function runReleasePreflight(options: PreflightOptions = {}): Promi
 const isMain = process.argv[1]?.replace(/\\/g, "/").endsWith("release-preflight.ts");
 
 if (isMain) {
+  const filesOnly = process.argv.includes("--files-only");
   const phaseArg = process.argv.find((arg) => arg.startsWith("--phase="));
   const phase = phaseArg?.slice("--phase=".length) === "post-build" ? "post-build" : "pre";
+  const skipSmoke = process.env.CAVAL_PREFLIGHT_SKIP_SMOKE === "1" || process.argv.includes("--skip-smoke");
 
-  void runReleasePreflight({ phase }).catch((error: unknown) => {
+  void (async () => {
+    if (!filesOnly && !phaseArg) {
+      console.log("[preflight] PR quality gates (typecheck → lint → test → build → verify-runtime-assets)");
+      await runQualityGates(PR_QUALITY_GATES);
+      await runReleasePreflight({ phase: "pre" });
+      await runReleasePreflight({ phase: "post-build" });
+      if (!skipSmoke) {
+        console.log("[preflight] release-only gate: Electron smoke");
+        await runQualityGates(RELEASE_ONLY_GATES);
+      }
+      return;
+    }
+    await runReleasePreflight({ phase });
+  })().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   });
