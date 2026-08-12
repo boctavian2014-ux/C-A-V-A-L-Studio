@@ -4,7 +4,7 @@
 |------|---------|
 | ID | CI-EXPO-TSCONFIG-BASE-001 |
 | Severitate | Medie (gate CI cloud) |
-| Status | **Deschis** |
+| Status | **Deschis** — GitHub [#4](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/issues/4) |
 | Owner | Platform / CI |
 | Sprint | Separat de SEC-C2; blochează „cloud CI verde”, nu PR2 desktop |
 | Depinde de | Nimic din CAD/provider profiles |
