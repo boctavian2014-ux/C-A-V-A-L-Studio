@@ -1,0 +1,107 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { resolveBindableWorkspaceDirectory } from "../../src/main/bound-workspace";
+import { createIpcHarness } from "../main/ipc-harness";
+
+const harness = createIpcHarness();
+const bound = new Map<number, string>();
+const onOpen = vi.fn(async (senderId: number, _sender: unknown, root: string) => {
+  bound.set(senderId, root);
+});
+
+vi.mock("electron", () => ({
+  ipcMain: harness.ipcMain,
+}));
+
+describe("SEC-IPC-WS-BINDING-001 workspace bind", () => {
+  let workspace: string;
+  let filePath: string;
+
+  beforeEach(async () => {
+    harness.reset();
+    harness.sender.getURL = () => "file:///caval-renderer/index.html";
+    harness.sender.mainFrame.url = "file:///caval-renderer/index.html";
+    bound.clear();
+    onOpen.mockClear();
+    vi.resetModules();
+    workspace = fs.mkdtempSync(path.join(os.tmpdir(), "caval-ws-bind-"));
+    filePath = path.join(workspace, "not-a-dir.txt");
+    fs.writeFileSync(filePath, "x");
+
+    const { registerWorkspaceBindingHandlers } = await import(
+      "../../src/main/workspace-binding-handlers"
+    );
+    registerWorkspaceBindingHandlers({
+      bindWorkspace: (senderId, root) => {
+        bound.set(senderId, root);
+      },
+      getBoundRoot: (senderId) => bound.get(senderId),
+      addRecentWorkspace: vi.fn(),
+      onOpen,
+    });
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("resolveBindableWorkspaceDirectory accepts a real directory", () => {
+    expect(resolveBindableWorkspaceDirectory(workspace)).toBe(path.resolve(workspace));
+  });
+
+  it("resolveBindableWorkspaceDirectory rejects files, empty, and missing paths", () => {
+    expect(() => resolveBindableWorkspaceDirectory("")).toThrow(/Invalid folder path/);
+    expect(() => resolveBindableWorkspaceDirectory(filePath)).toThrow(/not an accessible directory/);
+    expect(() => resolveBindableWorkspaceDirectory(path.join(workspace, "missing"))).toThrow(
+      /not an accessible directory/
+    );
+  });
+
+  it("caval:workspace-open rejects untrusted sender without bind", async () => {
+    harness.sender.getURL = () => "https://evil.example/";
+    harness.sender.mainFrame.url = "https://evil.example/";
+    const result = await harness.invoke<{ ok: boolean; error?: string }>(
+      "caval:workspace-open",
+      workspace
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Untrusted IPC sender/i);
+    expect(bound.size).toBe(0);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("caval:workspace-sync rejects untrusted sender without bind", async () => {
+    harness.sender.getURL = () => "https://evil.example/";
+    harness.sender.mainFrame.url = "https://evil.example/";
+    const result = await harness.invoke<{ ok: boolean; error?: string }>(
+      "caval:workspace-sync",
+      workspace
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Untrusted IPC sender/i);
+    expect(bound.size).toBe(0);
+  });
+
+  it("caval:workspace-open binds a real directory for a trusted sender", async () => {
+    const result = await harness.invoke<{ ok: boolean; path?: string }>(
+      "caval:workspace-open",
+      workspace
+    );
+    expect(result.ok).toBe(true);
+    expect(result.path).toBe(path.resolve(workspace));
+    expect(bound.get(harness.sender.id)).toBe(path.resolve(workspace));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("caval:workspace-sync binds a real directory for a trusted sender", async () => {
+    const result = await harness.invoke<{ ok: boolean; path?: string }>(
+      "caval:workspace-sync",
+      workspace
+    );
+    expect(result.ok).toBe(true);
+    expect(bound.get(harness.sender.id)).toBe(path.resolve(workspace));
+  });
+});

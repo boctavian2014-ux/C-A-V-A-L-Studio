@@ -89,6 +89,7 @@ import {
   installRendererSessionPolicy,
   installWebContentsSecurity,
 } from "./renderer-security";
+import { registerWorkspaceBindingHandlers } from "./workspace-binding-handlers";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -1295,19 +1296,11 @@ ipcMain.handle("caval:context-index", async (event) => {
   return { ok: true, documentCount: documents.length };
 });
 
-ipcMain.handle("caval:workspace-open", async (event, folderPath: string, options?: { source?: RecentWorkspaceSource }) => {
-  if (!folderPath || typeof folderPath !== "string") {
-    return { ok: false, error: "Invalid folder path" };
-  }
-  const source = options?.source === "clone" ? "clone" : "folder";
-  const current = workspaceRoots.get(event.sender.id);
-  if (current === folderPath) {
-    bindWorkspace(event.sender.id, folderPath);
-    addRecentWorkspace(folderPath, source);
-    return { ok: true, path: folderPath, cached: true };
-  }
-  await sendWorkspaceToRenderer(event.sender.id, event.sender, folderPath, source);
-  return { ok: true, path: folderPath };
+registerWorkspaceBindingHandlers({
+  bindWorkspace,
+  getBoundRoot: (id) => workspaceRoots.get(id),
+  addRecentWorkspace,
+  onOpen: sendWorkspaceToRenderer,
 });
 
 ipcMain.handle("workspace:list-recent", (event) => {
@@ -1334,13 +1327,7 @@ ipcMain.handle("workspace:remove-recent", (event, folderPath: string) => {
   return { ok: true, entries: removeRecentWorkspace(folderPath) };
 });
 
-/** Lightweight root sync — no re-index, no warm cache storm (used on chat send). */
-ipcMain.handle("caval:workspace-sync", (event, folderPath: string) => {
-  if (folderPath && typeof folderPath === "string") {
-    bindWorkspace(event.sender.id, folderPath);
-  }
-  return { ok: true, path: folderPath };
-});
+/** Lightweight root sync is registered in registerWorkspaceBindingHandlers (SEC-IPC-WS-BINDING-001). */
 
 ipcMain.handle("caval:context-search", async (event, input: { query: string; limit?: number }) => {
   try {

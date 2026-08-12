@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { IpcMainInvokeEvent } from "electron";
 
 import { normalizeWorkspaceRoot } from "./path-security";
@@ -23,4 +24,25 @@ export function requireBoundWorkspaceRootFromEvent(
   message?: string
 ): string {
   return requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id, message);
+}
+
+/**
+ * SEC-IPC-WS-BINDING-001 — only an existing local directory may become the bound root.
+ * Call after assertTrustedSender; never bind a renderer-supplied file or missing path.
+ */
+export function resolveBindableWorkspaceDirectory(folderPath: unknown): string {
+  if (typeof folderPath !== "string" || !folderPath.trim()) {
+    throw new Error("Invalid folder path");
+  }
+  const root = normalizeWorkspaceRoot(folderPath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(root);
+  } catch {
+    throw new Error("Workspace path is not an accessible directory");
+  }
+  if (!stat.isDirectory()) {
+    throw new Error("Workspace path is not an accessible directory");
+  }
+  return root;
 }

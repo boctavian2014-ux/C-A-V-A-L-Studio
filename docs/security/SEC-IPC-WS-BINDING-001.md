@@ -1,12 +1,18 @@
 # Remediation backlog — Workspace binding IPC security
 
-## OPEN: `caval:workspace-open` / `caval:workspace-sync` bind without sender trust
+## Închidere (2026-08-12)
+
+- `assertTrustedSender` pe `caval:workspace-open` și `caval:workspace-sync` (`src/main/workspace-binding-handlers.ts`).
+- `resolveBindableWorkspaceDirectory`: string non-gol, `normalizeWorkspaceRoot`, există pe disc și e director.
+- Teste: `tests/security/lot-ipc-workspace-binding.test.ts` — sender untrusted nu leagă root-ul pe niciun canal.
+
+## OPEN (istoric): `caval:workspace-open` / `caval:workspace-sync` bind without sender trust
 
 | Field | Value |
 |-------|--------|
 | **ID** | SEC-IPC-WS-BINDING-001 |
 | **Severitate** | **Critic** |
-| **Status** | **Deschis** (nu blochează merge-ul Project Health) |
+| **Status** | **FINALIZAT** (2026-08-12) |
 | **Componente afectate** | `caval:workspace-open`, `caval:workspace-sync` (`src/main/electron-main.ts`) |
 | **Risc** | Aceste canale populează `getBoundWorkspaceRoot` prin `bindWorkspace(event.sender.id, folderPath)` **fără** `assertTrustedSender`. Un sender IPC netrusted poate lega un `folderPath` arbitrar pe `senderId`. Orice feature care tratează root-ul legat ca „de încredere” (inclusiv **Project Health**, verify, tool runners, indexare context) **moștenește** acest risc: controalele downstream pe bound root nu protejează dacă binding-ul însuși e compromis. |
 | **Remediere propusă** | 1) `assertTrustedSender(event)` pe **ambele** handlere. 2) Validează că `folderPath` e string non-gol, există pe disc și e accesibil (directory) **înainte** de `bindWorkspace`. 3) Opțional: `normalizeWorkspaceRoot` + respingere path-uri invalide / non-directory. |
