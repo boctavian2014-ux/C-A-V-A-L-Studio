@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { isPathInsideWorkspace, sanitizeFileName } from "../../src/main/engineering-handlers";
 
@@ -8,8 +9,8 @@ describe("engineering-handlers helpers", () => {
   });
 
   it("isPathInsideWorkspace accepts nested paths only", () => {
-    const root = "C:\\proj\\demo";
-    expect(isPathInsideWorkspace(root, "C:\\proj\\demo\\out\\file.md")).toBe(true);
-    expect(isPathInsideWorkspace(root, "C:\\proj\\other\\file.md")).toBe(false);
+    const root = path.resolve("proj-demo");
+    expect(isPathInsideWorkspace(root, path.join(root, "out", "file.md"))).toBe(true);
+    expect(isPathInsideWorkspace(root, path.resolve(root, "..", "other", "file.md"))).toBe(false);
   });
 });

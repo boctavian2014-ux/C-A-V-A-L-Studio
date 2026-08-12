@@ -22,7 +22,7 @@ Nu s-a adăugat un `tsconfig.base.json` local. Nu s-a scos proiectul din gate-ul
 
 ## Remediere
 
-Lockfile regenerated with **npm 10.8.2** (same as GitHub Actions `setup-node@20`). A first lockfile from local npm 11 made `npm ci` fail (`Missing: typescript@5.9.3`).
+După ce typecheck a trecut pe Actions, 3 teste din `tests/main` (nu security) eșuau pe Linux pentru că hardcodau `C:\...`. Ajustate cu `path.resolve` / `path.join`. Nu s-au atins C2, CAD, profiles sau quality gates.
 
 **De ce SDK 55:** același major ca install-ul accidental local care deja typecheck-uia; React 19.2.x (repo: `react@^19.2.7`); Node 20 pe GitHub Actions (SDK 57 cere Node 22). TypeScript 6 acceptă `module: "preserve"` din `expo/tsconfig.base`; `compilerOptions` locale (`module`/`moduleResolution` Node16, `jsx: react-jsx`) rămân peste preset.
 

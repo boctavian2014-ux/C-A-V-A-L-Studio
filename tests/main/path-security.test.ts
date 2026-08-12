@@ -1,11 +1,12 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { assertPathInWorkspace, pathsEqual, resolveWorkspacePath } from "../../src/main/path-security";
 
 describe("path-security", () => {
-  const root = "C:\\workspace\\proj";
+  const root = path.resolve("workspace-proj");
 
   it("assertPathInWorkspace allows paths under root", () => {
-    expect(assertPathInWorkspace(root, "C:\\workspace\\proj\\src\\a.ts")).toContain("src");
+    expect(assertPathInWorkspace(root, path.join(root, "src", "a.ts"))).toContain("src");
   });
 
   it("assertPathInWorkspace is case-insensitive on Windows", () => {
@@ -17,9 +18,9 @@ describe("path-security", () => {
   });
 
   it("assertPathInWorkspace rejects escape attempts", () => {
-    expect(() => assertPathInWorkspace(root, "C:\\workspace\\other\\secret.txt")).toThrow(
-      /outside workspace/i
-    );
+    expect(() =>
+      assertPathInWorkspace(root, path.resolve(root, "..", "other", "secret.txt"))
+    ).toThrow(/outside workspace/i);
   });
 
   it("resolveWorkspacePath joins relative paths safely", () => {

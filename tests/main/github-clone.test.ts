@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { normalizeGithubRepoUrl, repoTargetPath } from '../../src/main/github-clone';
@@ -25,6 +26,7 @@ describe('github-clone', () => {
   });
 
   it('builds target path under parent', () => {
-    expect(repoTargetPath('C:/dev', 'Hello-World')).toBe('C:\\dev\\Hello-World');
+    const parent = path.resolve('dev');
+    expect(repoTargetPath(parent, 'Hello-World')).toBe(path.join(parent, 'Hello-World'));
   });
 });
