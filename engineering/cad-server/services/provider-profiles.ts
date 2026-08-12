@@ -4,6 +4,7 @@ import { cadForbidden, cadNotFound, cadBadRequest, cadInternal } from "../middle
 import {
   decryptProfileSecret,
   encryptProfileSecret,
+  ProfileEncryptionError,
   type EncryptedProfileSecret,
 } from "../crypto/profile-secret";
 
@@ -332,12 +333,23 @@ export const resolveOwnedActiveProfileSecret = async (input: {
   if (!meta) throw cadNotFound("Provider profile not found");
   const profile = assertOwnedActive(meta, input.accountId);
 
+  const decryptOwned = (encrypted: EncryptedProfileSecret): string => {
+    try {
+      return decryptProfileSecret(encrypted);
+    } catch (error) {
+      if (error instanceof ProfileEncryptionError) {
+        throw cadInternal("Provider profile cannot be decrypted");
+      }
+      throw error;
+    }
+  };
+
   const memory = findMemory(input.profileId);
   if (memory) {
     return {
       profile,
       provider: memory.provider,
-      plaintext: decryptProfileSecret(memory.secret),
+      plaintext: decryptOwned(memory.secret),
     };
   }
 
@@ -356,7 +368,7 @@ export const resolveOwnedActiveProfileSecret = async (input: {
   if (!data) throw cadForbidden("Provider profile is revoked");
 
   const row = data as DbSecretRow;
-  const plaintext = decryptProfileSecret({
+  const plaintext = decryptOwned({
     ciphertext: row.secret_ciphertext,
     iv: row.secret_iv,
     authTag: row.secret_auth_tag,

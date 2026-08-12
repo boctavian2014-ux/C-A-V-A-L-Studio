@@ -4,8 +4,15 @@ import type { CadAuthContext } from "../types";
 import { cadUnauthorized } from "./errors";
 import { isCadAnonymousAllowed } from "../boot-guard";
 
-const jwtSecret = (): string | undefined =>
-  process.env.CAD_JWT_SECRET?.trim() || process.env.SUPABASE_JWT_SECRET?.trim() || undefined;
+/**
+ * Single verify secret. CAD_JWT_SECRET wins exclusively when set.
+ * Never tries both secrets (that would be a JWT confusion attack).
+ */
+export const resolveCadJwtVerifySecret = (): string | undefined => {
+  const cad = process.env.CAD_JWT_SECRET?.trim();
+  if (cad) return cad;
+  return process.env.SUPABASE_JWT_SECRET?.trim() || undefined;
+};
 
 interface VerifiedJwt {
   accountId: string;
@@ -18,11 +25,11 @@ const verifyBearerJwt = (request: Request): VerifiedJwt | "missing" | "invalid" 
   const token = header.slice("Bearer ".length).trim();
   if (!token) return "invalid";
 
-  const secret = jwtSecret();
+  const secret = resolveCadJwtVerifySecret();
   if (!secret) return "invalid";
 
   try {
-    const payload = jwt.verify(token, secret) as Record<string, unknown>;
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] }) as Record<string, unknown>;
     const accountId = typeof payload.sub === "string" ? payload.sub.trim() : "";
     if (!accountId) return "invalid";
     return { accountId };

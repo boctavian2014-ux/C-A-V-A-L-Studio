@@ -9,11 +9,14 @@ import { cadLog } from "../../engineering/cad-server/middleware/logger";
 import { assertCadProductionSafety } from "../../engineering/cad-server/boot-guard";
 
 const KEY = randomBytes(32).toString("hex");
+const KEY_V1 = randomBytes(32).toString("hex");
+const KEY_V2 = randomBytes(32).toString("hex");
 
 describe("provider profile AES-256-GCM", () => {
   afterEach(() => {
     delete process.env.CAD_PROFILE_ENCRYPTION_KEY;
     delete process.env.CAD_PROFILE_ENCRYPTION_KEY_VERSION;
+    delete process.env.CAD_PROFILE_ENCRYPTION_KEY_V1;
   });
 
   it("round-trips with a unique nonce per encryption", () => {
@@ -26,6 +29,32 @@ describe("provider profile AES-256-GCM", () => {
     expect(a.authTag).toBeTruthy();
     expect(decryptProfileSecret(a)).toBe("sk-or-v1-abcdefghijklmnopqrstuv");
     expect(decryptProfileSecret(b)).toBe("sk-or-v1-abcdefghijklmnopqrstuv");
+  });
+
+  it("decrypts a v1 profile after the server current version becomes v2 when V1 key is kept", () => {
+    process.env.CAD_PROFILE_ENCRYPTION_KEY = KEY_V1;
+    process.env.CAD_PROFILE_ENCRYPTION_KEY_VERSION = "1";
+    const stored = encryptProfileSecret("sk-or-v1-abcdefghijklmnopqrstuv");
+    expect(stored.keyVersion).toBe(1);
+
+    process.env.CAD_PROFILE_ENCRYPTION_KEY = KEY_V2;
+    process.env.CAD_PROFILE_ENCRYPTION_KEY_VERSION = "2";
+    process.env.CAD_PROFILE_ENCRYPTION_KEY_V1 = KEY_V1;
+
+    expect(decryptProfileSecret(stored)).toBe("sk-or-v1-abcdefghijklmnopqrstuv");
+    const next = encryptProfileSecret("sk-or-v1-abcdefghijklmnopqrstuv");
+    expect(next.keyVersion).toBe(2);
+    expect(decryptProfileSecret(next)).toBe("sk-or-v1-abcdefghijklmnopqrstuv");
+  });
+
+  it("fails closed if the previous version key is missing after a bump", () => {
+    process.env.CAD_PROFILE_ENCRYPTION_KEY = KEY_V1;
+    process.env.CAD_PROFILE_ENCRYPTION_KEY_VERSION = "1";
+    const stored = encryptProfileSecret("sk-or-v1-abcdefghijklmnopqrstuv");
+    process.env.CAD_PROFILE_ENCRYPTION_KEY = KEY_V2;
+    process.env.CAD_PROFILE_ENCRYPTION_KEY_VERSION = "2";
+    delete process.env.CAD_PROFILE_ENCRYPTION_KEY_V1;
+    expect(() => decryptProfileSecret(stored)).toThrow(/CAD_PROFILE_ENCRYPTION_KEY_V1/);
   });
 });
 

@@ -16,15 +16,34 @@ import {
 } from "../../engineering/cad-server/services/provider-profiles";
 
 const JWT_SECRET = "cad-pr1-test-jwt-secret";
+const SUPABASE_JWT_SECRET = "cad-pr1-supabase-jwt-secret";
 const ENC_KEY = randomBytes(32).toString("hex");
 const VAULT_SECRET = "sk-or-v1-vaultsecretvalueabcdefghijk";
 
-let lastLlmKey: string | undefined;
-let lastPlannerKey: string | undefined;
+const harness = vi.hoisted(() => {
+  const state = {
+    lastLlmKey: undefined as string | undefined,
+    lastPlannerKey: undefined as string | undefined,
+    hold: null as Promise<void> | null,
+    release: null as (() => void) | null,
+    armHold() {
+      state.hold = new Promise<void>((resolve) => {
+        state.release = resolve;
+      });
+    },
+    releaseHold() {
+      state.release?.();
+      state.hold = null;
+      state.release = null;
+    },
+  };
+  return state;
+});
 
 vi.mock("../../engineering/cad-server/llm-client", () => ({
   generateOpenScad: vi.fn(async (input: { openRouterApiKey?: string }) => {
-    lastLlmKey = input.openRouterApiKey;
+    harness.lastLlmKey = input.openRouterApiKey;
+    if (harness.hold) await harness.hold;
     return { ok: true, scad: "cube(10);" };
   }),
   repairOpenScad: vi.fn(async () => ({ ok: false })),
@@ -32,7 +51,7 @@ vi.mock("../../engineering/cad-server/llm-client", () => ({
 
 vi.mock("../../engineering/cad-server/print3d-planner", () => ({
   planPrint3DRequest: vi.fn(async (input: { openRouterApiKey?: string }) => {
-    lastPlannerKey = input.openRouterApiKey;
+    harness.lastPlannerKey = input.openRouterApiKey;
     return {
       ok: true,
       plan: {
@@ -81,8 +100,9 @@ describe("SEC-C2 PR1 provider profiles", () => {
   const accountB = randomUUID();
 
   beforeEach(() => {
-    lastLlmKey = undefined;
-    lastPlannerKey = undefined;
+    harness.lastLlmKey = undefined;
+    harness.lastPlannerKey = undefined;
+    harness.releaseHold();
     process.env.CAD_ALLOW_ANONYMOUS = "1";
     process.env.CAD_JWT_SECRET = JWT_SECRET;
     process.env.CAD_PROFILE_ENCRYPTION_KEY = ENC_KEY;
@@ -132,7 +152,7 @@ describe("SEC-C2 PR1 provider profiles", () => {
     expect(JSON.stringify(created.body)).not.toContain(VAULT_SECRET);
 
     await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(lastLlmKey).toBe(VAULT_SECRET);
+    expect(harness.lastLlmKey).toBe(VAULT_SECRET);
   });
 
   it("rejects another account's profile with 403 and does not decrypt", async () => {
@@ -188,7 +208,7 @@ describe("SEC-C2 PR1 provider profiles", () => {
     const plan2 = await request(app).post("/cad/plan").set(auth).send(planBody);
     expect(plan1.status).toBe(200);
     expect(plan2.status).toBe(200);
-    expect(lastPlannerKey).toBe(VAULT_SECRET);
+    expect(harness.lastPlannerKey).toBe(VAULT_SECRET);
 
     const resolved = await resolveOwnedActiveProfileSecret({
       accountId: accountA,
@@ -275,5 +295,61 @@ describe("SEC-C2 PR1 provider profiles", () => {
       .get("/cad/profiles")
       .set("Authorization", `Bearer ${sign(accountB)}`);
     expect(other.body.profiles).toEqual([]);
+  });
+
+  it("lets an in-flight job finish after revoke, but rejects new jobs with 403 not 500", async () => {
+    const { app, profileId } = await createOwnProfile(accountA);
+    const auth = { Authorization: `Bearer ${sign(accountA)}` };
+    harness.armHold();
+
+    const inFlight = await request(app)
+      .post("/cad/jobs")
+      .set(auth)
+      .send({ prompt: "Bracket 40mm aluminum", providerProfileId: profileId });
+    expect(inFlight.status).toBe(202);
+    const jobId = inFlight.body.jobId as string;
+
+    const revoked = await request(app).post(`/cad/profiles/${profileId}/revoke`).set(auth).send();
+    expect(revoked.status).toBe(200);
+
+    const nextJob = await request(app)
+      .post("/cad/jobs")
+      .set(auth)
+      .send({ prompt: "Second bracket 40mm", providerProfileId: profileId });
+    expect(nextJob.status).toBe(403);
+    expect(nextJob.body.code).toBe("forbidden");
+    expect(nextJob.body.error).toMatch(/Provider profile is revoked/i);
+    expect(nextJob.status).not.toBe(500);
+
+    harness.releaseHold();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const done = await request(app).get(`/cad/jobs/${jobId}`).set(auth);
+    expect(done.status).toBe(200);
+    expect(["done", "rendering", "generating", "queued"]).toContain(done.body.status);
+  });
+
+  it("does not accept a JWT signed with SUPABASE_JWT_SECRET when CAD_JWT_SECRET is set", async () => {
+    process.env.CAD_JWT_SECRET = JWT_SECRET;
+    process.env.SUPABASE_JWT_SECRET = SUPABASE_JWT_SECRET;
+    const app = createCadServer();
+    const confused = jwt.sign({ sub: accountA }, SUPABASE_JWT_SECRET, { algorithm: "HS256" });
+    const rejected = await request(app)
+      .get("/cad/profiles")
+      .set("Authorization", `Bearer ${confused}`);
+    expect(rejected.status).toBe(401);
+
+    const accepted = await request(app)
+      .get("/cad/profiles")
+      .set("Authorization", `Bearer ${sign(accountA)}`);
+    expect(accepted.status).toBe(200);
+  });
+
+  it("falls back to SUPABASE_JWT_SECRET only when CAD_JWT_SECRET is unset", async () => {
+    delete process.env.CAD_JWT_SECRET;
+    process.env.SUPABASE_JWT_SECRET = SUPABASE_JWT_SECRET;
+    const app = createCadServer();
+    const token = jwt.sign({ sub: accountA }, SUPABASE_JWT_SECRET, { algorithm: "HS256" });
+    const listed = await request(app).get("/cad/profiles").set("Authorization", `Bearer ${token}`);
+    expect(listed.status).toBe(200);
   });
 });

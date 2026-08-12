@@ -31,7 +31,20 @@ Public profile fields: `id`, `provider`, `capabilities`, `status`, `createdAt`, 
 
 - Profile path: JWT + ownership + `status=active`, then decrypt in memory, strip client key fields, pass plaintext only to the worker/provider.
 - Retry: send the same `providerProfileId` again; do not send key fields.
+- Revoke: new jobs/plan on that profile return **403** `Provider profile is revoked`. A job already queued/running keeps the secret already resolved in RAM and is not cancelled.
 - Legacy path (flag on): existing `openRouterApiKey` / `meshApiKey` / `piapiApiKey` still accepted. `request_class=legacy` in logs, no payload.
+
+## Telemetry
+
+`cadLog` writes to the CAD process stdout/stderr only (Railway logs). There is no Datadog/Sentry/PostHog hook on this path. `accountId` in those lines is internal operations identity, not an external analytics event. Payload bodies and secrets are not logged.
+
+## Encryption key rotation
+
+New ciphertext uses `CAD_PROFILE_ENCRYPTION_KEY` + `CAD_PROFILE_ENCRYPTION_KEY_VERSION`. Rows with an older `key_version` decrypt with `CAD_PROFILE_ENCRYPTION_KEY_Vn`. Bumping the version without keeping `KEY_Vn` fails closed. Optional later: re-encrypt via rotate-secret; not required to read old rows.
+
+## JWT source of truth
+
+`CAD_JWT_SECRET` wins exclusively. `SUPABASE_JWT_SECRET` is used only when `CAD_JWT_SECRET` is empty. Verification is a single `jwt.verify` with `algorithms: ["HS256"]` — tokens signed with the unused secret are rejected (no confusion attack).
 
 ## Database
 
@@ -46,9 +59,11 @@ Migration: `supabase/migrations/007_provider_profiles.sql`
 
 | Name | Role |
 |------|------|
-| `CAD_JWT_SECRET` / `SUPABASE_JWT_SECRET` | Verify Bearer JWT |
-| `CAD_PROFILE_ENCRYPTION_KEY` | 32-byte AES-256-GCM master key (64 hex or base64) |
-| `CAD_PROFILE_ENCRYPTION_KEY_VERSION` | Integer `keyVersion` (default 1) |
+| `CAD_JWT_SECRET` | Exclusive JWT verify secret when set. HS256 only. |
+| `SUPABASE_JWT_SECRET` | Fallback verify secret **only if** `CAD_JWT_SECRET` is unset. Never tried in parallel. |
+| `CAD_PROFILE_ENCRYPTION_KEY` | 32-byte AES-256-GCM master key for the **current** `keyVersion` (64 hex or base64) |
+| `CAD_PROFILE_ENCRYPTION_KEY_VERSION` | Integer current `keyVersion` (default 1). New encrypts use this. |
+| `CAD_PROFILE_ENCRYPTION_KEY_Vn` | Decrypt-only previous key, e.g. `CAD_PROFILE_ENCRYPTION_KEY_V1` after bumping to version 2. No re-encrypt script required for reads. |
 | `CAD_LEGACY_CLIENT_SECRET_PAYLOAD` | Default true. `false`/`0`/`off` rejects legacy key fields |
 | `CAD_ALLOW_ANONYMOUS` | Test/dev only. Production boot fails if set (unless `CAD_USE_LOCAL=1`) |
 | `CAD_API_KEY` | Optional service gate (unchanged) |

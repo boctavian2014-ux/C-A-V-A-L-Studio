@@ -19,17 +19,18 @@ export class ProfileEncryptionError extends Error {
   }
 }
 
-const parseKeyMaterial = (raw: string): Buffer => {
+const parseKeyMaterial = (raw: string, label: string): Buffer => {
   const trimmed = raw.trim();
   if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
     return Buffer.from(trimmed, "hex");
   }
   const fromB64 = Buffer.from(trimmed, "base64");
   if (fromB64.length === KEY_BYTES) return fromB64;
-  throw new ProfileEncryptionError(
-    "CAD_PROFILE_ENCRYPTION_KEY must be 32 bytes (64 hex chars or base64)"
-  );
+  throw new ProfileEncryptionError(`${label} must be 32 bytes (64 hex chars or base64)`);
 };
+
+export const previousProfileKeyEnv = (version: number): string =>
+  `CAD_PROFILE_ENCRYPTION_KEY_V${version}`;
 
 export const readProfileEncryptionKeyVersion = (): number => {
   const raw = process.env.CAD_PROFILE_ENCRYPTION_KEY_VERSION?.trim();
@@ -45,11 +46,30 @@ export const loadProfileEncryptionKey = (): { key: Buffer; version: number } => 
   if (!raw) {
     throw new ProfileEncryptionError("CAD_PROFILE_ENCRYPTION_KEY is not configured");
   }
-  const key = parseKeyMaterial(raw);
+  const key = parseKeyMaterial(raw, "CAD_PROFILE_ENCRYPTION_KEY");
   if (key.length !== KEY_BYTES) {
     throw new ProfileEncryptionError("CAD_PROFILE_ENCRYPTION_KEY must be 32 bytes");
   }
   return { key, version: readProfileEncryptionKeyVersion() };
+};
+
+/** Decrypt key for a stored keyVersion. Current version uses CAD_PROFILE_ENCRYPTION_KEY; older rows use CAD_PROFILE_ENCRYPTION_KEY_Vn. */
+export const loadKeyForVersion = (version: number): Buffer => {
+  if (!Number.isInteger(version) || version < 1) {
+    throw new ProfileEncryptionError("Invalid profile secret keyVersion");
+  }
+  const current = readProfileEncryptionKeyVersion();
+  if (version === current) {
+    return loadProfileEncryptionKey().key;
+  }
+  const label = previousProfileKeyEnv(version);
+  const raw = process.env[label]?.trim();
+  if (!raw) {
+    throw new ProfileEncryptionError(
+      `No decryption key for keyVersion ${version}; set ${label}`
+    );
+  }
+  return parseKeyMaterial(raw, label);
 };
 
 export const isProfileEncryptionConfigured = (): boolean => {
@@ -79,10 +99,7 @@ export const encryptProfileSecret = (plaintext: string): EncryptedProfileSecret 
 };
 
 export const decryptProfileSecret = (input: EncryptedProfileSecret): string => {
-  const { key, version } = loadProfileEncryptionKey();
-  if (input.keyVersion !== version) {
-    throw new ProfileEncryptionError("Profile secret keyVersion does not match server key");
-  }
+  const key = loadKeyForVersion(input.keyVersion);
   const iv = Buffer.from(input.iv, "base64");
   const authTag = Buffer.from(input.authTag, "base64");
   const ciphertext = Buffer.from(input.ciphertext, "base64");
