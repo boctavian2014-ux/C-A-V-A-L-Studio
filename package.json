@@ -45,6 +45,7 @@
     "marketplace:serve": "tsx marketplace/server/standalone.ts",
     "billing:serve": "tsx billing/standalone.ts",
     "cad:serve": "tsx engineering/cad-server/standalone.ts",
+    "c2:observe": "node scripts/check-c2-railway-observation.mjs",
     "docs": "node scripts/print-roadmap.js"
   },
   "keywords": [

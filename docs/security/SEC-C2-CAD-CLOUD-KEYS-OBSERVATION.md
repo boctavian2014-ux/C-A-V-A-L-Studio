@@ -20,6 +20,38 @@ PR1 backend este **BACKEND FINALIZAT** (PR #3). Desktop-ul continuă să folosea
 
 Observația confirmă că infrastructura (JWT, vault, flag legacy, redactare, joburi legacy) este sigură și disponibilă.
 
+## Script zilnic
+
+`scripts/check-c2-railway-observation.mjs` citește **deploy stdout** Railway (`railway logs --json`, serviciul CAD). Persistă **doar** raportul agregat în `artifacts/c2-observation/YYYY-MM-DD.json` (gitignored). **Nu** scrie raw Railway logs pe disk sau în Git — păstrează accesul la Railway Logs pentru RCA. Retenția Railway e limitată după plan; notează în jurnal `service`, `environment` și `deploymentIds` din raport.
+
+```bash
+npm install -g @railway/cli
+railway login
+set RAILWAY_CAD_SERVICE=cad
+set RAILWAY_ENVIRONMENT=production
+set C2_SINCE=24h
+set C2_LOG_LINES=5000
+node scripts/check-c2-railway-observation.mjs
+```
+
+PowerShell:
+
+```powershell
+$env:RAILWAY_CAD_SERVICE = "cad"
+$env:RAILWAY_ENVIRONMENT = "production"
+$env:C2_SINCE = "24h"
+$env:C2_LOG_LINES = "5000"
+node scripts/check-c2-railway-observation.mjs
+```
+
+| Rezultat | Acțiune |
+|----------|---------|
+| `status: "OK"`, `profile: 0`, `legacy > 0` | Comportament așteptat înainte de PR2; notează rezultatul în jurnal |
+| `status: "OK"`, `legacy: 0` | Nu demonstrează sănătatea fluxului legacy; marchează „fără trafic” și **nu** considera ziua drept dovadă de trafic real |
+| `profile > 0` înainte de PR2 | Investighează imediat; desktop-ul curent nu ar trebui să trimită `providerProfileId` |
+| `secretPatternHits > 0` (`status: "INCIDENT"`, exit 2) | Incident: oprește fereastra, **resetează cele 7 zile la zero**, păstrează doar metadata redactată, RCA **imediat** (nu la finalul zilei). Nu începe PR2. |
+| `cad_request > 0`, dar nici `job_completed`, nici eroare de domeniu | Investighează joburile rămase în curs înainte de a marca ziua OK |
+
 ## Cadență de monitorizare
 
 Verificare **zilnică** (poate fi manuală sau scriptată) a:
@@ -51,16 +83,16 @@ Pattern-uri de secret urmărite: `sk-or-v1-`, `openRouterApiKey`, `meshApiKey`, 
 
 Completează fiecare rând în ziua verificării. Gol = verificare neefectuată (fereastra nu avansează).
 
-| Dată | legacy | profile | secrete (0 = pass) | `cad_request` → `job_completed` sau eroare domeniu | Incident / note |
-|------|--------|---------|--------------------|-----------------------------------------------------|-----------------|
-| 2026-08-13 | | | | | |
-| 2026-08-14 | | | | | |
-| 2026-08-15 | | | | | |
-| 2026-08-16 | | | | | |
-| 2026-08-17 | | | | | |
-| 2026-08-18 | | | | | |
-| 2026-08-19 | | | | | |
-| 2026-08-20 | | | | | Earliest window-sufficient dacă 7 zile fără incident |
+| Dată | service / env / deployment | legacy | profile | secrete (0 = pass) | `cad_request` → `job_completed` sau eroare domeniu | Incident / note |
+|------|----------------------------|--------|---------|--------------------|-----------------------------------------------------|-----------------|
+| 2026-08-13 | | | | | | |
+| 2026-08-14 | | | | | | |
+| 2026-08-15 | | | | | | |
+| 2026-08-16 | | | | | | |
+| 2026-08-17 | | | | | | |
+| 2026-08-18 | | | | | | |
+| 2026-08-19 | | | | | | |
+| 2026-08-20 | | | | | | Earliest window-sufficient dacă 7 zile fără incident |
 
 ## Gate binar înainte de PR2 — șase confirmări în mediul țintă
 
