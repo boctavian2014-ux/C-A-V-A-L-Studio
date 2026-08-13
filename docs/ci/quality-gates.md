@@ -33,7 +33,8 @@ In addition to the PR gates:
 
 - Script: `npm run smoke:electron`
 - Strips `*_API_KEY` / cloud URLs from the child env
-- Allowlisted non-fatal warnings (temporar): React DevTools prompt; deprecated `console-message` arity; **Invalid accelerator token** → [SEC-UI-ACCELERATOR-001](../security/SEC-UI-ACCELERATOR-001.md) (Scăzut — scoate din allowlist după fix)
+- Allowlisted non-fatal warnings: React DevTools prompt; deprecated `console-message` arity.
+  Invalid accelerator tokens are **fatal** (SEC-UI-ACCELERATOR-001 **FINALIZAT**).
 - Logs: `.cicd-artifacts/electron-smoke-stdout.txt` and `electron-smoke-stderr.txt` (redacted)
 - GitHub PR job `smoke-electron` uses xvfb and `continue-on-error` **only** on `pull_request` (limitare temporară de infrastructură). Pe `push` la `main`/`develop` job-ul este blocant. Release preflight rulează smoke fără continue-on-error.
 

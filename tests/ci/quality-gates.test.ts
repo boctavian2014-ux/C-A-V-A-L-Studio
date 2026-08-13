@@ -50,6 +50,12 @@ describe("Q1-F Electron smoke env", () => {
     expect(ELECTRON_SMOKE_WARNING_ALLOWLIST.length).toBeGreaterThan(0);
   });
 
+  it("treats invalid menu accelerators as fatal after SEC-UI-ACCELERATOR-001", () => {
+    const line = "Invalid accelerator token: M CmdOrCtrl";
+    expect(isAllowedSmokeWarning(line)).toBe(false);
+    expect(isFatalSmokeLine(line)).toBe(true);
+  });
+
   it("treats missing worker modules as fatal", () => {
     expect(isFatalSmokeLine("Cannot find module 'dist/main/parallel-worker.js'")).toBe(true);
   });
