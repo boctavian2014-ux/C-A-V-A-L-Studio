@@ -22,7 +22,9 @@ Nu s-a adăugat un `tsconfig.base.json` local. Nu s-a scos proiectul din gate-ul
 
 ## Remediere
 
-După ce typecheck a trecut pe Actions, 3 teste din `tests/main` (nu security) eșuau pe Linux pentru că hardcodau `C:\...`. Ajustate cu `path.resolve` / `path.join`. Nu s-au atins C2, CAD, profiles sau quality gates.
+După ce typecheck a trecut pe Actions, 3 teste din `tests/main` hardcodau `C:\...`. Fixtures folosesc `path.join` / `path.resolve` pentru filesystem local, `path.posix` pentru segmente relative serializate, și `path.win32` pentru input Windows — fără `if (platform !== win32) return`.
+
+ProvidePlugin `global: "globalThis"` cerea un pachet inexistent; alias `globalThis` → `src/renderer/provide-global.js` ca webpack Linux să poată bundle `three-stdlib/chevrotain`.
 
 **De ce SDK 55:** același major ca install-ul accidental local care deja typecheck-uia; React 19.2.x (repo: `react@^19.2.7`); Node 20 pe GitHub Actions (SDK 57 cere Node 22). TypeScript 6 acceptă `module: "preserve"` din `expo/tsconfig.base`; `compilerOptions` locale (`module`/`moduleResolution` Node16, `jsx: react-jsx`) rămân peste preset.
 

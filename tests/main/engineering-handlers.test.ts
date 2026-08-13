@@ -10,7 +10,18 @@ describe("engineering-handlers helpers", () => {
 
   it("isPathInsideWorkspace accepts nested paths only", () => {
     const root = path.resolve("proj-demo");
-    expect(isPathInsideWorkspace(root, path.join(root, "out", "file.md"))).toBe(true);
-    expect(isPathInsideWorkspace(root, path.resolve(root, "..", "other", "file.md"))).toBe(false);
+    const nested = path.join(root, "out", "file.md");
+    const escaped = path.resolve(root, "..", "other", "file.md");
+    expect(isPathInsideWorkspace(root, nested)).toBe(true);
+    expect(isPathInsideWorkspace(root, escaped)).toBe(false);
+  });
+
+  it("parses Windows serialized paths with path.win32 on any runner", () => {
+    const root = "C:\\proj\\demo";
+    const nested = path.win32.join(root, "out", "file.md");
+    const escaped = path.win32.join("C:\\proj", "other", "file.md");
+    expect(nested).toBe("C:\\proj\\demo\\out\\file.md");
+    expect(path.win32.basename(nested)).toBe("file.md");
+    expect(path.win32.relative(root, escaped).startsWith("..")).toBe(true);
   });
 });
