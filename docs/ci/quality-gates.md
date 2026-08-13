@@ -17,6 +17,8 @@ These commands are defined once in `.cicd/scripts/quality-gates.ts` (`PR_QUALITY
 `npm run cicd:test` and `npm run release:preflight` (default, no `--phase`) use that list.
 Do not add a PR workflow that skips lint, test, or build.
 
+GitHub Actions `test` on `main` is the blocking cloud gate (no `continue-on-error`). Local typecheck/lint/test/build do not replace it.
+
 ## Release-only (`npm run release:preflight`, `release:win`)
 
 In addition to the PR gates:

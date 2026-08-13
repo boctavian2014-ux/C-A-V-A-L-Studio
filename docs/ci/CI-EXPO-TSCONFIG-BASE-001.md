@@ -4,7 +4,7 @@
 |------|---------|
 | ID | CI-EXPO-TSCONFIG-BASE-001 |
 | Severitate | Medie (gate CI cloud) |
-| Status | **În remediere** — GitHub [#4](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/issues/4). Remediat după typecheck verde pe Actions `main`. |
+| Status | **Remediat** — GitHub [#4](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/issues/4). PR [#5](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/5); `main` Actions run [31673190728](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/actions/runs/31673190728) (test + smoke-electron verde). |
 | Owner | Platform / CI |
 | Sprint | Separat de SEC-C2 / PR2 |
 | Depinde de | Nimic din CAD/provider profiles |
@@ -24,12 +24,10 @@ Nu s-a adăugat un `tsconfig.base.json` local. Nu s-a scos proiectul din gate-ul
 
 După ce typecheck a trecut pe Actions, 3 teste din `tests/main` hardcodau `C:\...`. Fixtures folosesc `path.join` / `path.resolve` pentru filesystem local, `path.posix` pentru segmente relative serializate, și `path.win32` pentru input Windows — fără `if (platform !== win32) return`.
 
-ProvidePlugin `global: "globalThis"` cerea un pachet inexistent; alias `globalThis` → `src/renderer/provide-global.js` ca webpack Linux să poată bundle `three-stdlib/chevrotain`.
+ProvidePlugin `global: "globalThis"` este **compatibilitate de bundling** (Linux webpack + `three-stdlib/chevrotain`), nu workaround de test. Alias-ul trebuie să rezolve `src/renderer/provide-global.js`; renderer-ul nu depinde de un pachet npm `globalThis`. Păstrat de `tests/ci/webpack-globalthis-alias.test.ts` și de jobul `build` pe Actions.
 
 **De ce SDK 55:** același major ca install-ul accidental local care deja typecheck-uia; React 19.2.x (repo: `react@^19.2.7`); Node 20 pe GitHub Actions (SDK 57 cere Node 22). TypeScript 6 acceptă `module: "preserve"` din `expo/tsconfig.base`; `compilerOptions` locale (`module`/`moduleResolution` Node16, `jsx: react-jsx`) rămân peste preset.
 
 ## Criteriu de acceptare
 
-- `npm ci` + `npm run typecheck` exit 0 pe Actions.
-- `node -p "require.resolve('expo/tsconfig.base')"` rezolvă `node_modules/expo/tsconfig.base.json` **în repo**.
-- Ticketul **Remediat** doar după un run verde pe `main`, nu după gate-uri locale.
+Îndeplinit pe `main` (2026-08-13): typecheck, test (fără `continue-on-error`), smoke Electron, suite locală 1028 passed / 2 skipped / 226 fișiere. Ticket **închis**.

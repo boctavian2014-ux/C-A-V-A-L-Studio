@@ -78,7 +78,7 @@ module.exports = [
           __dirname,
           "node_modules/monaco-editor/esm/vs/editor/editor.api.js"
         ),
-        // ProvidePlugin({ global: "globalThis" }) requires a module, not the identifier.
+        // Bundling compatibility (Linux webpack): ProvidePlugin requires a module path, not a Node package.
         globalThis: path.resolve(__dirname, "src/renderer/provide-global.js"),
       },
     },
