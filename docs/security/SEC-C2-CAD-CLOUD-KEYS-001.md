@@ -21,7 +21,7 @@ Merged: [PR #3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3).
 
 See [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md).
 
-- Verifică siguranța și disponibilitatea infrastructurii backend, **nu** adopția profilelor.
+- Verifică siguranța și disponibilitatea infrastructurii backend, **nu** adopția profilelor. Script zilnic: `scripts/check-c2-railway-observation.mjs` (raport agregat, fără raw logs).
 - `profile = 0` este așteptat până la PR2: desktop-ul folosește în continuare `attachMainCadSecrets`.
 - Orice pattern de secret în CAD logs este incident de securitate și **blochează PR2**.
 - PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) doar după fereastra de **7 zile** fără incident **și** cele șase confirmări **binare** din mediul țintă real.
