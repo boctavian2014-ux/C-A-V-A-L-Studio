@@ -59,13 +59,25 @@ node scripts/check-c2-railway-observation.mjs
 
 | Rezultat | Acțiune |
 |----------|---------|
-| `status: "OK"`, `profile: 0`, `legacy > 0`, `cad_request > 0` | Candidat Ziua N/7. Ideal: `job_completed` sau `job_failed` de domeniu pentru cererile observate (nu job rămas în curs) |
+| `status: "OK"`, `profile: 0`, `legacy > 0`, `cad_request > 0`, `job_completed > 0` | Candidat Ziua N/7 |
+| `status: "OK"`, `profile: 0`, `legacy > 0`, `cad_request > 0`, `job_failed` de **domeniu** (nu crash, config sau securitate) | Acceptabil în loc de `job_completed` |
 | `status: "OK"`, `legacy: 0` | **Fără trafic**, nu „legacy validat”. Nu e zi C2 |
 | `profile > 0` înainte de PR2 | Investighează imediat; desktop-ul curent nu ar trebui să trimită `providerProfileId` |
 | `secretPatternHits > 0` (`status: "INCIDENT"`, exit 2) | Incident: oprește fereastra, **resetează cele 7 zile la zero**, păstrează doar metadata redactată, RCA **imediat** (nu la finalul zilei). Nu începe PR2. |
-| `cad_request > 0`, dar nici `job_completed`, nici eroare de domeniu | Investighează joburile rămase în curs înainte de a marca ziua OK |
+| `cad_request > 0`, dar nici `job_completed`, nici `job_failed` de domeniu | Job posibil încă în curs. **Nu** închide ziua ca validată |
 
-**Ziua 1/7** numai dacă simultan: `status = OK`, `secretPatternHits = 0`, `requestClass.profile = 0`, `requestClass.legacy > 0`, `events.cad_request > 0`.
+**Ziua 1/7** numai dacă simultan:
+
+```text
+status = OK
+secretPatternHits = 0
+requestClass.profile = 0
+requestClass.legacy > 0
+events.cad_request > 0
+events.job_completed > 0
+```
+
+`job_failed` în loc de `job_completed` este acceptabil **numai** dacă este clar o eroare de domeniu, nu crash, eroare de configurație sau problemă de securitate. Altfel ziua nu se închide ca validată.
 
 ## Cadență de monitorizare
 
