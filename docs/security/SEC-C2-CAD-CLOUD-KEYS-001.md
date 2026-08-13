@@ -17,9 +17,14 @@ After C2, the renderer no longer receives/sends API keys. `cad-handlers.ts` stil
 
 Merged: [PR #3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3).
 
-## Observation window (2026-08-13 →)
+## Observation window (start: 2026-08-13)
 
-See [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md). Daily: `requestClass=legacy|profile`, no secret patterns in CAD logs, legacy jobs still complete. **Zero profile traffic is expected** until desktop sends `providerProfileId`. Do not start PR2 until JWT, profile endpoints, and backend logs are live in the target environment.
+See [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md).
+
+- Verifică siguranța și disponibilitatea infrastructurii backend, **nu** adopția profilelor.
+- `profile = 0` este așteptat până la PR2: desktop-ul folosește în continuare `attachMainCadSecrets`.
+- Orice pattern de secret în CAD logs este incident de securitate și **blochează PR2**.
+- PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) doar după cele șase confirmări din mediul țintă.
 
 - JWT Bearer (`sub`) is the only accountId for provider profiles.
 - `x-caval-user-id` never beats JWT and cannot access profiles.
@@ -46,8 +51,9 @@ See [SEC-C2-CAD-CLOUD-KEYS-PR1.md](./SEC-C2-CAD-CLOUD-KEYS-PR1.md).
 | Criteriu | Stare |
 |----------|--------|
 | CAD cloud reads keys from per-account vault | **PR1 BACKEND FINALIZAT** |
-| Observation: profile vs legacy, no secrets in logs, legacy jobs complete | **In progress** (2026-08-13) |
-| Main body contains no BYOK/API key fields | Pending PR2 |
+| Observation start 2026-08-13; profile=0 expected; infra not adoption | **In progress** |
+| Șase confirmări țintă înainte de PR2 | Pending |
+| Main body contains no BYOK/API key fields | Pending PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) |
 | E2E: outbound CAD JSON has no API-key patterns | Pending after PR2 |
 | `CAD_LEGACY_CLIENT_SECRET_PAYLOAD=false` without regression | Pending after profile adoption |
-| Mark this ticket **Remediat** | Only after PR2 + E2E + legacy off |
+| Mark this ticket **Remediat** | Only after PR2 E2E without keys **and** legacy off without regression |
