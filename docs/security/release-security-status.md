@@ -36,7 +36,7 @@ Quality gates (typecheck, lint `--max-warnings 0`, 1000 teste, build, `verify-ru
 |--------|------------|-------------|
 | [SEC-EXT-RUNTIME-PERMISSIONS-001](./SEC-EXT-RUNTIME-PERMISSIONS-001.md) | Mare | Nu activa rularea extensiilor până există sandbox și permission grants |
 | [SEC-MCP-REMOTE-001](./SEC-MCP-REMOTE-001.md) | Mare | MCP remote rămâne OFF până la transport, trust și egress controlate |
-| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | **Deschis / Mitigat.** Observație zilnică 2026-08-13; earliest 2026-08-20. PR2 doar după 7 zile fără incident **și** 6 confirmări binare țintă |
+| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | **Deschis / Mitigat.** Boot production SUCCESS (`284fc574`). Ziua 1/7 C2 **nu a început** (`legacy=0`). PR2 după 7 zile trafic real **și** 6 confirmări binare |
 | [SEC-MCP-STDERR-REDACTION-001](./SEC-MCP-STDERR-REDACTION-001.md) | Medie | Redactare stderr MCP end-to-end înainte de UI/log |
 | [SEC-P3-BLOB-REVOKE-001](./SEC-P3-BLOB-REVOKE-001.md) | Scăzut | `URL.revokeObjectURL` exact-once pentru preview STL |
 | [SEC-UI-ACCELERATOR-001](./SEC-UI-ACCELERATOR-001.md) | Scăzut | Repară acceleratorul invalid; scoate warning-ul din allowlist-ul de smoke |

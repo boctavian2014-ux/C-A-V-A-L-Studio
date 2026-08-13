@@ -6,7 +6,7 @@
 | **Severitate** | **Medie** |
 | **Status** | **Deschis / Mitigat** — PR1 ([#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3)) **BACKEND FINALIZAT**. Fereastră de observație [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md) pornită 2026-08-13. Desktop încă trimite chei (`attachMainCadSecrets`). Nu Remediat. |
 | **Owner** | CAD / platform |
-| **Sprint** | Observație zilnică 2026-08-13 → earliest 2026-08-20; PR2 doar după 7 zile fără incident **și** 6 confirmări țintă |
+| **Sprint** | Disponibilitate boot rezolvată (deploy `284fc574`). Ziua 1/7 C2 **nu a început** (`legacy=0`). PR2 blocat |
 | **Related** | Lot C2 renderer isolation (done); [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md) **Remediat** |
 
 ## Context
@@ -51,7 +51,7 @@ See [SEC-C2-CAD-CLOUD-KEYS-PR1.md](./SEC-C2-CAD-CLOUD-KEYS-PR1.md).
 | Criteriu | Stare |
 |----------|--------|
 | CAD cloud reads keys from per-account vault | **PR1 BACKEND FINALIZAT** |
-| Observation start 2026-08-13; cadență zilnică; 7 zile fără incident (earliest 2026-08-20) | **In progress** |
+| Observation start 2026-08-13; cadență zilnică; 7 zile fără incident (ceasul din Ziua 1) | **Disponibilitate gata. Nu e zi C2** (`legacy=0`) |
 | Șase confirmări **binare** în mediul țintă real înainte de PR2 | Pending |
 | Main body contains no BYOK/API key fields | Pending PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) |
 | E2E: outbound CAD JSON has no API-key patterns | Pending after PR2 |
