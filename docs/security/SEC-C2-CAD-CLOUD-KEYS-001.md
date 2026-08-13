@@ -6,7 +6,7 @@
 | **Severitate** | **Medie** |
 | **Status** | **Deschis / Mitigat** — PR1 ([#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3)) **BACKEND FINALIZAT**. Fereastră de observație [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md) pornită 2026-08-13. Desktop încă trimite chei (`attachMainCadSecrets`). Nu Remediat. |
 | **Owner** | CAD / platform |
-| **Sprint** | Observație legacy vs profile; PR2 desktop doar după JWT + profiles + logs live |
+| **Sprint** | Observație zilnică 2026-08-13 → earliest 2026-08-20; PR2 doar după 7 zile fără incident **și** 6 confirmări țintă |
 | **Related** | Lot C2 renderer isolation (done); [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md) **Remediat** |
 
 ## Context
@@ -24,7 +24,7 @@ See [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.m
 - Verifică siguranța și disponibilitatea infrastructurii backend, **nu** adopția profilelor.
 - `profile = 0` este așteptat până la PR2: desktop-ul folosește în continuare `attachMainCadSecrets`.
 - Orice pattern de secret în CAD logs este incident de securitate și **blochează PR2**.
-- PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) doar după cele șase confirmări din mediul țintă.
+- PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) doar după fereastra de **7 zile** fără incident **și** cele șase confirmări **binare** din mediul țintă real.
 
 - JWT Bearer (`sub`) is the only accountId for provider profiles.
 - `x-caval-user-id` never beats JWT and cannot access profiles.
@@ -51,8 +51,8 @@ See [SEC-C2-CAD-CLOUD-KEYS-PR1.md](./SEC-C2-CAD-CLOUD-KEYS-PR1.md).
 | Criteriu | Stare |
 |----------|--------|
 | CAD cloud reads keys from per-account vault | **PR1 BACKEND FINALIZAT** |
-| Observation start 2026-08-13; profile=0 expected; infra not adoption | **In progress** |
-| Șase confirmări țintă înainte de PR2 | Pending |
+| Observation start 2026-08-13; cadență zilnică; 7 zile fără incident (earliest 2026-08-20) | **In progress** |
+| Șase confirmări **binare** în mediul țintă real înainte de PR2 | Pending |
 | Main body contains no BYOK/API key fields | Pending PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) |
 | E2E: outbound CAD JSON has no API-key patterns | Pending after PR2 |
 | `CAD_LEGACY_CLIENT_SECRET_PAYLOAD=false` without regression | Pending after profile adoption |
