@@ -38,7 +38,7 @@ Public profile fields: `id`, `provider`, `capabilities`, `status`, `createdAt`, 
 
 `cadLog` writes to the CAD process stdout/stderr only (Railway logs). There is no Datadog/Sentry/PostHog hook on this path. `accountId` in those lines is internal operations identity, not an external analytics event. Payload bodies and secrets are not logged.
 
-Daily observation query: `"requestClass":"legacy"` vs `"requestClass":"profile"`. Start: **2026-08-13**. `profile=0` is expected until PR2. This window verifies backend infrastructure safety and availability, not profile adoption. Any secret pattern in CAD logs is a security incident and blocks PR2.
+Daily observation query: `"requestClass":"legacy"` vs `"requestClass":"profile"`. Start: **2026-08-13**. Cadence: **daily**. Minimum **7 days** of real legacy traffic without incident (earliest window-sufficient: **2026-08-20**). `profile=0` is expected until PR2. This window verifies backend infrastructure safety and availability, not profile adoption. Any secret pattern in CAD logs is a security incident, requires RCA, and blocks PR2. Six target-env confirmations are a **binary AND gate**, not suggestions.
 
 ## Encryption key rotation
 
