@@ -13,6 +13,8 @@ COPY engineering/cad-server ./engineering/cad-server
 # Shared toy OpenSCAD templates (imported by scad-prompt / job-processor)
 COPY ai/engineering/toy-vehicle-scad.ts ./ai/engineering/toy-vehicle-scad.ts
 COPY ai/engineering/toy-helicopter-scad.ts ./ai/engineering/toy-helicopter-scad.ts
+# Shared log redaction (imported at boot by cadLog / error-handler). No local imports.
+COPY src/shared/command-output-redaction.ts ./src/shared/command-output-redaction.ts
 # Supabase admin client only
 COPY billing/supabase/client.ts ./billing/supabase/client.ts
 
