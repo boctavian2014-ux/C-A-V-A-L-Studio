@@ -1,6 +1,6 @@
 # Release security status — post-remediere (2026-08-12)
 
-**HEAD documentat:** `main` după PR [#5](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/5) (CI-EXPO **Remediat**) și PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3) (SEC-C2 PR1 backend)
+**HEAD documentat:** `main` după PR [#6](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/6) (fereastră C2), PR [#5](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/5) (CI-EXPO **Remediat**), PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3) (SEC-C2 PR1)
 **Baseline pre-remediere (nu descrie starea actuală):** `AUDIT-CAVALLO-COMPLET.md` (2026-07-19, commit `defb984`, **fără remedieri**). Nu intra în release; păstrează-l local ca referință istorică.
 
 Acest document înlocuiește auditul vechi ca **sursă de adevăr pentru starea de securitate după loturile A–C5, P1–P3, Q1 și SEC-IPC-WS-BINDING-001**.
@@ -36,7 +36,7 @@ Quality gates (typecheck, lint `--max-warnings 0`, 1000 teste, build, `verify-ru
 |--------|------------|-------------|
 | [SEC-EXT-RUNTIME-PERMISSIONS-001](./SEC-EXT-RUNTIME-PERMISSIONS-001.md) | Mare | Nu activa rularea extensiilor până există sandbox și permission grants |
 | [SEC-MCP-REMOTE-001](./SEC-MCP-REMOTE-001.md) | Mare | MCP remote rămâne OFF până la transport, trust și egress controlate |
-| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | **Deschis / Mitigat.** PR1 BACKEND FINALIZAT. Observație [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md); PR2 blocat până JWT + profiles + logs live |
+| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | **Deschis / Mitigat.** Observație start 2026-08-13 (infra, nu adopție). PR2 `security/sec-c2-cad-cloud-keys-001-pr2` doar după 6 confirmări țintă |
 | [SEC-MCP-STDERR-REDACTION-001](./SEC-MCP-STDERR-REDACTION-001.md) | Medie | Redactare stderr MCP end-to-end înainte de UI/log |
 | [SEC-P3-BLOB-REVOKE-001](./SEC-P3-BLOB-REVOKE-001.md) | Scăzut | `URL.revokeObjectURL` exact-once pentru preview STL |
 | [SEC-UI-ACCELERATOR-001](./SEC-UI-ACCELERATOR-001.md) | Scăzut | Repară acceleratorul invalid; scoate warning-ul din allowlist-ul de smoke |

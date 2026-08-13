@@ -1,45 +1,46 @@
 # SEC-C2 observation window — profile vs legacy telemetry
 
-**Status:** **Deschis** (observație). Ticket [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) rămâne **Deschis / Mitigat**. PR2 desktop **nu** pornește în această fereastră.
+**Status:** **Deschis** (observație). Ticket [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) rămâne **Deschis / Mitigat**. Nu este Remediat.
 
 | Câmp | Valoare |
 |------|---------|
-| Start | 2026-08-13 |
+| **Start observație** | **2026-08-13** (PR [#6](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/6) pe `main`) |
 | Mediu | CAD cloud (Railway logs, `service: cad`) |
-| Owner | CAD / platform |
-| PR2 | Blocat până JWT, `/cad/profiles` și logurile backend sunt live în mediul țintă |
+| Ce verifică | Siguranța și disponibilitatea infrastructurii backend, **nu** adopția profilelor |
+| PR2 | Blocat până la cele șase confirmări din mediul țintă. Branch: `security/sec-c2-cad-cloud-keys-001-pr2` |
 
 ## Notă de start (2026-08-13)
 
-PR1 backend este **BACKEND FINALIZAT** pe `main` (PR #3). Desktop-ul curent încă apelează `attachMainCadSecrets` și trimite `openRouterApiKey` / `meshApiKey` / `piapiApiKey`.
+PR1 backend este **BACKEND FINALIZAT** (PR #3). Desktop-ul continuă să folosească `attachMainCadSecrets`.
 
-**Așteptare în fereastră:** `requestClass=legacy` dominant; `requestClass=profile` ≈ **zero**. Absența traficului profile **nu** este defect de backend.
+**`requestClass=profile` = 0 este comportament așteptat până la PR2.** Absența traficului profile nu este defect de backend și nu măsoară adopție.
 
-## Criterii verificabile (zilnic)
+Observația confirmă că infrastructura (JWT, vault, flag legacy, redactare, joburi legacy) este sigură și disponibilă.
 
-Interogare loguri CAD (stdout JSON, câmp camelCase `requestClass`):
+## Criterii zilnice
+
+Interogare loguri CAD (`requestClass` camelCase):
 
 ```text
 "requestClass":"legacy"
 "requestClass":"profile"
 ```
 
-| Check | Cum | Pass |
-|-------|-----|------|
-| Mix profile vs legacy | Count pe `cad_request` / `provider_profile_used` | Documentează counts. Profile=0 este **expected** până la PR2. |
-| Fără secrete în body/erori | Grep loguri: `sk-or-v1-`, `openRouterApiKey`, `meshApiKey`, `piapiApiKey`, `ghp_`, `Bearer eyJ` | Zero match-uri pe payload; `cadLog` redactează înainte de emit. |
-| Legacy completează joburi | După `cad_request` + `requestClass:legacy`, există `job_completed` (sau eroare de domeniu, nu 500 generic de vault) | Joburile legacy continuă să finalizeze. |
+| Check | Pass |
+|-------|------|
+| Counts profile vs legacy | Profile=0 expected. Documentează counts. |
+| Pattern-uri de secret | **Zero.** Orice match (`sk-or-v1-`, `openRouterApiKey`, `meshApiKey`, `piapiApiKey`, `ghp_`, `Bearer eyJ`) este **incident de securitate și blochează PR2**. |
+| Legacy jobs | `cad_request` + `requestClass:legacy` → `job_completed` **sau** eroare de domeniu. Nu vault/decrypt 500. |
 
-Nu interpreta spike-uri de 401 pe `/cad/profiles` de la clienți fără JWT ca regresii PR1.
+## Condiție de ieșire — șase confirmări în mediul țintă
 
-## Condiții înainte de PR2
+Înainte de a deschide `security/sec-c2-cad-cloud-keys-001-pr2`, toate trebuie să fie adevărate:
 
-Nu deschide PR2 desktop până sunt adevărate **toate**:
+1. JWT-ul este configurat și acceptat de CAD backend (`CAD_JWT_SECRET` exclusiv când e setat).
+2. `/cad/profiles` răspunde autentificat și nu expune material criptat sau secrete.
+3. `CAD_PROFILE_ENCRYPTION_KEY` și cheia activă versionată sunt configurate server-side.
+4. `CAD_LEGACY_CLIENT_SECRET_PAYLOAD=true` rămâne activ în această etapă.
+5. CAD logs redactează toate pattern-urile urmărite.
+6. Un flux legacy real produce `cad_request` → `job_completed` sau o eroare de domeniu, nu un vault/decrypt 500.
 
-1. Identitate JWT verificabilă în mediul țintă (`CAD_JWT_SECRET` exclusiv, sau fallback `SUPABASE_JWT_SECRET` dacă CAD este unset).
-2. Endpoint-uri profile live: `GET/POST /cad/profiles`, rotate, revoke.
-3. Logurile backend (`cadLog` pe Railway) interogabile pentru `requestClass`.
-
-## La finalul ferestrei
-
-Documentează observația: **zero profile expected, deoarece desktop-ul curent nu trimite încă `providerProfileId`**. Apoi deschide PR2 ca migrare desktop **separată** (Bearer JWT + `providerProfileId`, `attachMainCadSecrets` doar dacă `/health` semnalează legacy și userul nu are profil).
+Doar după aceste șase confirmări, deschide branch-ul desktop. Ticketul C2 rămâne **Deschis / Mitigat** până când PR2 demonstrează E2E că payload-ul CAD nu conține chei **și** până când flag-ul legacy poate fi dezactivat fără regresie.
