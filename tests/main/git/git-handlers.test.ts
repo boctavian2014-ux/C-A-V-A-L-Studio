@@ -1,120 +1,150 @@
-import { execSync } from "node:child_process";
-import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createIpcHarness } from "../ipc-harness";
 import { GIT_CHANNELS } from "../../../src/shared/git-ipc-channels";
-import type { GitBranch, GitLogEntry, GitStatus } from "../../../src/shared/git-contract";
+import type { GitOperationState, GitStatus } from "../../../src/shared/git-contract";
+import { gitService } from "../../../src/main/git/git-service";
 
 const harness = createIpcHarness();
 const boundRoots = new Map<number, string>();
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+const sendA = vi.fn();
+const sendB = vi.fn();
+const sendDestroyed = vi.fn();
+
+const { mockAssertTrustedSender } = vi.hoisted(() => ({
+  mockAssertTrustedSender: vi.fn(),
+}));
 
 vi.mock("electron", () => ({
   ipcMain: harness.ipcMain,
-  BrowserWindow: { fromWebContents: vi.fn(() => null) },
+  BrowserWindow: {
+    fromWebContents: vi.fn(() => null),
+    getAllWindows: vi.fn(() => [
+      { isDestroyed: () => false, webContents: { send: sendA } },
+      { isDestroyed: () => false, webContents: { send: sendB } },
+      { isDestroyed: () => true, webContents: { send: sendDestroyed } },
+    ]),
+  },
   dialog: {
     showMessageBox,
     showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
   },
 }));
 
-const hasGit = (() => {
-  try {
-    execSync("git --version", { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+vi.mock("../../../src/main/ipc-trust", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/main/ipc-trust")>();
+  return {
+    ...actual,
+    assertTrustedSender: (...args: unknown[]) => mockAssertTrustedSender(...args),
+  };
+});
 
-function initGitRepo(dir: string) {
-  execSync("git init", { cwd: dir, stdio: "pipe" });
-  execSync('git config user.email "test@caval.dev"', { cwd: dir, stdio: "pipe" });
-  execSync('git config user.name "Caval Test"', { cwd: dir, stdio: "pipe" });
-}
+const sampleStatus: GitStatus = {
+  branch: "main",
+  ahead: 0,
+  behind: 0,
+  files: [],
+  hasConflicts: false,
+  isClean: true,
+};
 
-type StatusPayload = GitStatus & { isRepo: boolean };
-
-describe.skipIf(!hasGit)("git handlers — typed contract", () => {
-  let repoPath: string;
+describe("git handlers — typed contract", () => {
+  const boundRoot = path.resolve(os.tmpdir(), "caval-git-bound-root");
 
   beforeEach(async () => {
     harness.reset();
-    vi.resetModules();
+    boundRoots.clear();
+    boundRoots.set(harness.sender.id, boundRoot);
+    sendA.mockClear();
+    sendB.mockClear();
+    sendDestroyed.mockClear();
+    mockAssertTrustedSender.mockReset();
+    mockAssertTrustedSender.mockImplementation(() => undefined);
     showMessageBox.mockClear();
     showMessageBox.mockResolvedValue({ response: 0 });
-    boundRoots.clear();
-
-    repoPath = await fs.mkdtemp(path.join(os.tmpdir(), "caval-git-contract-"));
-    initGitRepo(repoPath);
-    await fs.writeFile(path.join(repoPath, "app.ts"), "export const v = 1;\n", "utf8");
-    execSync("git add app.ts", { cwd: repoPath, stdio: "pipe" });
-    execSync('git commit -m "initial"', { cwd: repoPath, stdio: "pipe" });
-    boundRoots.set(harness.sender.id, repoPath);
-
     const { registerGitHandlers } = await import("../../../src/main/git-handlers");
     registerGitHandlers((id) => boundRoots.get(id));
   });
 
-  afterEach(async () => {
-    await fs.rm(repoPath, { recursive: true, force: true });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it("status() is bound to workspace and uses typed file statuses", async () => {
-    await fs.writeFile(path.join(repoPath, "app.ts"), "export const v = 2;\n", "utf8");
-    await fs.writeFile(path.join(repoPath, "new.txt"), "hello\n", "utf8");
-    const status = await harness.invoke<StatusPayload>(GIT_CHANNELS.status, "C:\\Windows\\System32");
-    expect(status.isRepo).toBe(true);
-    expect(status.files.some((file) => file.path === "app.ts" && file.status === "modified")).toBe(
-      true
-    );
-    expect(status.files.some((file) => file.path === "new.txt" && file.status === "untracked")).toBe(
-      true
-    );
-  });
-
-  it("stage(files[]) and commit({ message, files }) use the new payloads", async () => {
-    await fs.writeFile(path.join(repoPath, "app.ts"), "export const v = 7;\n", "utf8");
-    const staged = await harness.invoke<{ ok: boolean }>(GIT_CHANNELS.stage, ["app.ts"]);
-    expect(staged.ok).toBe(true);
-
-    const committed = await harness.invoke<{ ok: boolean; hash?: string }>(GIT_CHANNELS.commit, {
-      message: "Typed commit",
-      files: ["app.ts"],
+  it("calls assertTrustedSender before gitService for each typed handler", async () => {
+    const order: string[] = [];
+    mockAssertTrustedSender.mockImplementation(() => {
+      order.push("assert");
     });
-    expect(committed.ok).toBe(true);
-    expect(committed.hash).toMatch(/^[a-f0-9]+$/);
+    vi.spyOn(gitService, "status").mockImplementation(async () => {
+      order.push("service");
+      return { ...sampleStatus, isRepo: true, upstream: null };
+    });
 
-    const log = await harness.invoke<GitLogEntry[]>(GIT_CHANNELS.log, 3);
-    expect(log[0]?.message).toBe("Typed commit");
+    await harness.invoke(GIT_CHANNELS.status);
+    expect(order).toEqual(["assert", "service"]);
+    expect(mockAssertTrustedSender).toHaveBeenCalled();
   });
 
-  it("rejects relative paths that escape the workspace", async () => {
-    const staged = await harness.invoke<{ ok: boolean; error?: string }>(GIT_CHANNELS.stage, [
-      "../secret.ts",
-    ]);
-    expect(staged.ok).toBe(false);
-    expect(staged.error).toMatch(/outside|invalid/i);
+  it("does not call gitService when assertTrustedSender throws", async () => {
+    mockAssertTrustedSender.mockImplementation(() => {
+      throw new Error("Untrusted IPC sender");
+    });
+    const status = vi.spyOn(gitService, "status");
+    await expect(harness.invoke(GIT_CHANNELS.status)).rejects.toThrow(/Untrusted IPC sender/i);
+    expect(status).not.toHaveBeenCalled();
   });
 
-  it("checkout rejects invalid branch names", async () => {
-    const result = await harness.invoke<{ ok: boolean; error?: string }>(
-      GIT_CHANNELS.checkout,
-      "feat/ok",
-      "-evil"
+  it("uses the bound workspace root, not a cwd from the payload", async () => {
+    const status = vi.spyOn(gitService, "status").mockResolvedValue({
+      ...sampleStatus,
+      isRepo: true,
+      upstream: null,
+    });
+    await harness.invoke(GIT_CHANNELS.status, "C:\\Windows\\System32");
+    expect(status).toHaveBeenCalledTimes(1);
+    expect(status).toHaveBeenCalledWith(boundRoot);
+    expect(status.mock.calls[0]?.[0]).not.toMatch(/Windows\\System32/i);
+  });
+
+  it("rejects invalid files, branch, and message with TypeError before gitService", async () => {
+    const stage = vi.spyOn(gitService, "stage");
+    const checkout = vi.spyOn(gitService, "checkout");
+    const commit = vi.spyOn(gitService, "commit");
+    const discard = vi.spyOn(gitService, "discardChanges");
+
+    await expect(harness.invoke(GIT_CHANNELS.stage, ["../evil.ts"])).rejects.toThrow(TypeError);
+    await expect(harness.invoke(GIT_CHANNELS.checkout, "-x")).rejects.toThrow(TypeError);
+    await expect(harness.invoke(GIT_CHANNELS.commit, { message: "" })).rejects.toThrow(TypeError);
+    await expect(harness.invoke(GIT_CHANNELS.discardChanges, ["/etc/passwd"])).rejects.toThrow(
+      TypeError
     );
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/invalid/i);
+
+    expect(stage).not.toHaveBeenCalled();
+    expect(checkout).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
   });
 
-  it("branches() returns GitBranch objects", async () => {
-    const branches = await harness.invoke<GitBranch[]>(GIT_CHANNELS.branches);
-    expect(branches.length).toBeGreaterThan(0);
-    expect(branches.every((branch) => typeof branch.name === "string" && branch.name.length > 0)).toBe(
-      true
-    );
+  it("broadcasts status-changed and operation-changed to all live windows, not just the sender", () => {
+    const statusPayload = { ...sampleStatus };
+    const operationPayload: GitOperationState = {
+      operation: "stage",
+      status: "running",
+      error: null,
+      timestamp: Date.now(),
+    };
+
+    gitService.emit("status-changed", statusPayload);
+    gitService.emit("operation-changed", operationPayload);
+
+    expect(sendA).toHaveBeenCalledWith(GIT_CHANNELS.statusChanged, statusPayload);
+    expect(sendB).toHaveBeenCalledWith(GIT_CHANNELS.statusChanged, statusPayload);
+    expect(sendA).toHaveBeenCalledWith(GIT_CHANNELS.operationChanged, operationPayload);
+    expect(sendB).toHaveBeenCalledWith(GIT_CHANNELS.operationChanged, operationPayload);
+    expect(sendDestroyed).not.toHaveBeenCalled();
+    expect(harness.sender.send).not.toHaveBeenCalled();
   });
 });

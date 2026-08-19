@@ -4,8 +4,13 @@ import fs from "node:fs/promises";
 import fsSync from "node:fs";
 
 import { applyHunkToContent } from "../shared/diff-utils";
-import type { GitCommitInput } from "../shared/git-contract";
+import type { GitCommitInput, GitCommitResult, GitDiffResult } from "../shared/git-contract";
 import { GIT_CHANNELS } from "../shared/git-ipc-channels";
+import {
+  isValidBranchName,
+  isValidCommitMessage,
+  isValidFilePathArray,
+} from "../shared/git-security";
 import { normalizeGithubRepoUrl, repoTargetPath } from "./github-clone";
 import { assertTrustedSender } from "./ipc-trust";
 import {
@@ -16,6 +21,18 @@ import { gitExecFile, isGitRepo } from "./git-exec";
 import { gitService, toWorkspaceGitPath } from "./git/git-service";
 import { resolveSandboxedWorkspacePath } from "./path-security";
 import { workspaceGitMutex } from "../../ai/tools/workspace-execute-lock";
+
+function broadcastToAllWindows(channel: string, payload: unknown): void {
+  const windows =
+    typeof BrowserWindow.getAllWindows === "function" ? BrowserWindow.getAllWindows() : [];
+  for (const win of windows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, payload);
+    }
+  }
+}
+
+let listenersRegistered = false;
 
 function languageFromPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
@@ -102,27 +119,14 @@ function parseBranch(a: unknown, b: unknown): string {
   return "";
 }
 
-function parseDiffArgs(
-  a: unknown,
-  b: unknown,
-  c: unknown
-): { file?: string; staged: boolean } {
-  if (typeof c === "boolean" && typeof b === "string") {
-    return { file: b, staged: c };
-  }
-  if (typeof b === "boolean" && typeof a === "string") {
-    return { file: a, staged: b };
-  }
-  if (typeof a === "string" && a.trim() && typeof b !== "string") {
-    return { file: a, staged: false };
-  }
-  return { staged: false };
-}
-
 function parseLogLimit(a: unknown, b: unknown): number {
   if (typeof a === "number") return a;
   if (typeof b === "number") return b;
   return 50;
+}
+
+function isValidLogLimit(limit: unknown): limit is number {
+  return typeof limit === "number" && Number.isInteger(limit) && limit >= 1 && limit <= 1000;
 }
 
 /**
@@ -130,6 +134,24 @@ function parseLogLimit(a: unknown, b: unknown): number {
  * Renderer `projectPath` is ignored for cwd.
  */
 export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGetter) {
+  if (!listenersRegistered) {
+    gitService.on("status-changed", (status) => {
+      try {
+        broadcastToAllWindows(GIT_CHANNELS.statusChanged, status);
+      } catch {
+        // best-effort fan-out
+      }
+    });
+    gitService.on("operation-changed", (state) => {
+      try {
+        broadcastToAllWindows(GIT_CHANNELS.operationChanged, state);
+      } catch {
+        // best-effort fan-out
+      }
+    });
+    listenersRegistered = true;
+  }
+
   const boundRoot = (event: IpcMainInvokeEvent): string =>
     requireBoundWorkspaceRootFromEvent(
       event,
@@ -155,10 +177,17 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     return gitService.status(root);
   });
 
-  handle(GIT_CHANNELS.diff, async (event, a?: unknown, b?: unknown, c?: unknown): Promise<string> => {
+  handle(GIT_CHANNELS.diff, async (event, a?: unknown, b?: unknown, c?: unknown): Promise<string | GitDiffResult> => {
     const root = boundRoot(event);
-    const { file, staged } = parseDiffArgs(a, b, c);
-    return gitService.diff(root, file, staged);
+    const gitPanelStyle = typeof c === "boolean" && typeof b === "string";
+    if (gitPanelStyle) {
+      const result = await gitService.diff(root, b, c);
+      return result.diff;
+    }
+    if (a !== undefined && (typeof a !== "string" || !isValidFilePathArray([a]))) {
+      throw new TypeError("Invalid file path");
+    }
+    return gitService.diff(root, a as string | undefined, b === true);
   });
 
   handle(
@@ -240,6 +269,11 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
   );
 
   handle(GIT_CHANNELS.stage, async (event, a?: unknown, b?: unknown) => {
+    if (Array.isArray(a)) {
+      if (!isValidFilePathArray(a)) throw new TypeError("Invalid file paths");
+      const root = boundRoot(event);
+      return withGitLock(root, () => gitService.stage(root, a));
+    }
     try {
       const root = boundRoot(event);
       return await withGitLock(root, async () => {
@@ -252,6 +286,11 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
   });
 
   handle(GIT_CHANNELS.unstage, async (event, a?: unknown, b?: unknown) => {
+    if (Array.isArray(a)) {
+      if (!isValidFilePathArray(a)) throw new TypeError("Invalid file paths");
+      const root = boundRoot(event);
+      return withGitLock(root, () => gitService.unstage(root, a));
+    }
     try {
       const root = boundRoot(event);
       return await withGitLock(root, async () => {
@@ -261,6 +300,12 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     } catch (err: unknown) {
       return { ok: false, error: gitService.formatError(err) };
     }
+  });
+
+  handle(GIT_CHANNELS.discardChanges, async (event, files: unknown) => {
+    if (!isValidFilePathArray(files)) throw new TypeError("Invalid file paths");
+    const root = boundRoot(event);
+    return withGitLock(root, () => gitService.discardChanges(root, files));
   });
 
   handle(GIT_CHANNELS.stageAll, async (event) => {
@@ -307,14 +352,25 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.commit, async (event, a?: unknown, b?: unknown) => {
+  handle(GIT_CHANNELS.commit, async (event, a?: unknown, b?: unknown): Promise<GitCommitResult | { ok: boolean; hash?: string; error?: string }> => {
+    if (a && typeof a === "object" && !Array.isArray(a)) {
+      const { message, files } = a as { message?: unknown; files?: unknown };
+      if (!isValidCommitMessage(message)) throw new TypeError("Invalid commit message");
+      if (files !== undefined && !isValidFilePathArray(files)) throw new TypeError("Invalid file paths");
+      const root = boundRoot(event);
+      return withGitLock(root, () =>
+        gitService.commit(root, { message, files: files as string[] | undefined })
+      );
+    }
     const input = parseCommitInput(a, b);
     try {
-      assertCommitOrThrow(input);
+      if (!isValidCommitMessage(input.message)) {
+        throw new Error("Mesajul commit-ului este gol.");
+      }
       const root = boundRoot(event);
       return await withGitLock(root, async () => {
-        const hash = await gitService.commit(root, input);
-        return { ok: true, hash };
+        const result = await gitService.commit(root, input);
+        return { ok: true, hash: result.hash };
       });
     } catch (err: unknown) {
       return { ok: false, error: gitService.formatError(err) };
@@ -361,7 +417,17 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
 
   handle(GIT_CHANNELS.log, async (event, a?: unknown, b?: unknown) => {
     const root = boundRoot(event);
-    return gitService.log(root, parseLogLimit(a, b));
+    if (typeof a === "number" || a === undefined) {
+      if (a !== undefined && !isValidLogLimit(a)) {
+        throw new TypeError("Invalid log limit");
+      }
+      return gitService.log(root, a);
+    }
+    const limit = parseLogLimit(a, b);
+    if (b !== undefined && !isValidLogLimit(limit)) {
+      throw new TypeError("Invalid log limit");
+    }
+    return gitService.log(root, limit);
   });
 
   handle(GIT_CHANNELS.branches, async (event) => {
@@ -370,6 +436,11 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
   });
 
   handle(GIT_CHANNELS.checkout, async (event, a?: unknown, b?: unknown) => {
+    if (b === undefined) {
+      if (!isValidBranchName(a)) throw new TypeError("Invalid branch name");
+      const root = boundRoot(event);
+      return withGitLock(root, () => gitService.checkout(root, a));
+    }
     try {
       const root = boundRoot(event);
       return await withGitLock(root, async () => {
@@ -381,7 +452,26 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.createBranch, async (event, a?: unknown, b?: unknown) => {
+  handle(GIT_CHANNELS.createBranch, async (event, name: unknown, from: unknown) => {
+    if (isValidBranchName(name)) {
+      if (from !== undefined && !isValidBranchName(from)) {
+        throw new TypeError("Invalid source branch name");
+      }
+      const root = boundRoot(event);
+      return withGitLock(root, () => gitService.createBranch(root, name, from as string | undefined));
+    }
+    try {
+      const root = boundRoot(event);
+      return await withGitLock(root, async () => {
+        await gitService.createBranch(root, parseBranch(name, from));
+        return { ok: true };
+      });
+    } catch (err: unknown) {
+      return { ok: false, error: gitService.formatError(err) };
+    }
+  });
+
+  handle(GIT_CHANNELS.createBranchLegacy, async (event, a?: unknown, b?: unknown) => {
     try {
       const root = boundRoot(event);
       return await withGitLock(root, async () => {
@@ -520,10 +610,4 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
       }
     }
   );
-}
-
-function assertCommitOrThrow(input: GitCommitInput): void {
-  if (!String(input.message ?? "").trim()) {
-    throw new Error("Mesajul commit-ului este gol.");
-  }
 }

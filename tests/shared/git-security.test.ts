@@ -53,7 +53,13 @@ describe("isValidBranchName", () => {
 
   it("rejects dangerous characters", () => {
     expect(isValidBranchName("branch with spaces")).toBe(false);
-    expect(isValidBranchName("--upload-pack=evil")).toBe(true);
+    expect(isValidBranchName("--upload-pack=evil")).toBe(false);
+  });
+
+  it("rejects leading dash to prevent CLI flag injection", () => {
+    expect(isValidBranchName("-x")).toBe(false);
+    expect(isValidBranchName("--upload-pack=evil")).toBe(false);
+    expect(isValidBranchName("feature/m3-git")).toBe(true);
   });
 
   it("rejects path traversal patterns", () => {

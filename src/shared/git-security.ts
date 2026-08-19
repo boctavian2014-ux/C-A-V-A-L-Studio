@@ -29,6 +29,7 @@ export function isValidBranchName(name: unknown): name is string {
   if (name.includes("..")) return false;
   if (name.startsWith(".") || name.endsWith(".")) return false;
   if (name.startsWith("/") || name.endsWith("/")) return false;
+  if (name.startsWith("-")) return false;
   return true;
 }
 

@@ -1,24 +1,31 @@
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import path from "node:path";
 
-import {
-  isGitBranchName,
-  isGitRelPath,
-  type GitBranch,
-  type GitCommitInput,
-  type GitFileChange,
-  type GitFileStatus,
-  type GitLogEntry,
-  type GitStatus,
-} from "../../shared/git-contract";
-import { gitExecFile, isGitRepo, type GitExecResult } from "../git-exec";
-import { resolveSandboxedWorkspacePath } from "../path-security";
 import { redactSensitiveCommandOutput } from "../../shared/command-output-redaction";
+import type {
+  GitBranch,
+  GitCommitInput,
+  GitCommitResult,
+  GitDiffResult,
+  GitFileChange,
+  GitFileStatus,
+  GitLogEntry,
+  GitOperationState,
+  GitStatus,
+} from "../../shared/git-contract";
+import { isGitRelPath } from "../../shared/git-contract";
+import { isValidBranchName } from "../../shared/git-security";
+import { resolveSandboxedWorkspacePath } from "../path-security";
+import { sanitizeEnvForTerminal } from "../subprocess-env";
 
-export type GitExecFn = (
-  cwd: string,
-  args: string[],
-  options?: { timeoutMs?: number; maxBuffer?: number; allowNonZero?: boolean }
-) => Promise<GitExecResult>;
+export interface GitCommandResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+}
+
+export type GitRunner = (args: string[], cwd: string) => Promise<GitCommandResult>;
 
 export interface GitStatusSnapshot extends GitStatus {
   isRepo: boolean;
@@ -26,102 +33,59 @@ export interface GitStatusSnapshot extends GitStatus {
 }
 
 export interface GitServiceOptions {
-  exec?: GitExecFn;
-  isRepo?: (cwd: string) => Promise<boolean>;
+  runGit?: GitRunner;
 }
 
-const MAX_LOG = 500;
+const MAX_LOG = 1000;
 const MAX_FILES = 200;
 
-function mapPorcelainCode(code: string): GitFileStatus {
-  switch (code) {
-    case "A":
-    case "C":
-      return "added";
-    case "D":
-      return "deleted";
-    case "R":
-      return "renamed";
-    case "?":
-      return "untracked";
-    case "!":
-      return "ignored";
-    default:
-      return "modified";
-  }
-}
+const STATUS_CODE_MAP: Record<string, GitFileStatus> = {
+  M: "modified",
+  A: "added",
+  D: "deleted",
+  R: "renamed",
+  C: "copied",
+  "?": "untracked",
+  "!": "ignored",
+  U: "conflicted",
+};
 
 export function parsePorcelainStatus(raw: string): GitFileChange[] {
   const files: GitFileChange[] = [];
-  const lines = raw.split("\n").filter(Boolean);
+  const lines = raw.split("\n").filter((line) => line.length > 0);
 
   for (const line of lines) {
-    const xy = line.substring(0, 2);
-    const rest = line.substring(3);
-    const X = xy[0] ?? " ";
-    const Y = xy[1] ?? " ";
+    const stagedCode = line[0] ?? " ";
+    const unstagedCode = line[1] ?? " ";
+    const rest = line.slice(3);
 
-    if (X === "R" || Y === "R") {
-      const parts = rest.split(" -> ");
+    let filePath = rest;
+    let originalPath: string | undefined;
+    if (rest.includes(" -> ")) {
+      const [from, to] = rest.split(" -> ");
+      originalPath = from;
+      filePath = to ?? rest;
+    }
+
+    if (stagedCode !== " " && stagedCode !== "?") {
       files.push({
-        path: parts[1] || rest,
-        status: "renamed",
-        staged: X === "R",
+        path: filePath,
+        status: STATUS_CODE_MAP[stagedCode] ?? "modified",
+        staged: true,
+        originalPath,
       });
-      continue;
     }
-
-    if (X === "?" && Y === "?") {
-      files.push({ path: rest, status: "untracked", staged: false });
-      continue;
-    }
-
-    if (X !== " " && X !== "?") {
-      files.push({ path: rest, status: mapPorcelainCode(X), staged: true });
-    }
-
-    if (Y !== " " && Y !== "?") {
-      const existing = files.find((file) => file.path === rest && !file.staged);
-      if (!existing) {
-        files.push({ path: rest, status: mapPorcelainCode(Y), staged: false });
-      }
+    if (unstagedCode !== " ") {
+      files.push({
+        path: filePath,
+        status: STATUS_CODE_MAP[unstagedCode] ?? "modified",
+        staged: false,
+        originalPath,
+      });
     }
   }
 
   return files;
-}
-
-export function parseGitLog(raw: string): GitLogEntry[] {
-  if (!raw.trim()) return [];
-  const commits = raw.split("\x00").filter(Boolean);
-  return commits.map((block) => {
-    const parts = block.split("\x1f");
-    return {
-      hash: parts[0] || "",
-      message: parts[1] || "",
-      author: parts[2] || "",
-      date: parts[3] || "",
-    };
-  });
-}
-
-export function parseBranchList(raw: string): GitBranch[] {
-  return raw
-    .split(/\r?\n/)
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const parts = line.split("\t");
-      const markedCurrent = parts[0] === "*";
-      const nameIndex = markedCurrent || parts[0] === "" || parts[0] === " " ? 1 : 0;
-      const name = (parts[nameIndex] ?? "").trim();
-      const remote = (parts[nameIndex + 1] ?? "").trim() || null;
-      return {
-        name,
-        current: markedCurrent,
-        remote,
-      };
-    })
-    .filter((branch) => branch.name.length > 0);
 }
 
 export function toWorkspaceGitPath(root: string, filePath: string): string {
@@ -141,19 +105,8 @@ export function toWorkspaceGitPath(root: string, filePath: string): string {
 
 export function assertBranchName(name: string): string {
   const trimmed = String(name ?? "").trim();
-  if (!isGitBranchName(trimmed)) {
+  if (!isValidBranchName(trimmed)) {
     throw new Error("Invalid branch name");
-  }
-  return trimmed;
-}
-
-export function assertCommitMessage(message: string): string {
-  const trimmed = String(message ?? "").trim();
-  if (!trimmed) {
-    throw new Error("Mesajul commit-ului este gol.");
-  }
-  if (trimmed.length > 4000) {
-    throw new Error("Commit message too long.");
   }
   return trimmed;
 }
@@ -163,196 +116,353 @@ function errMessage(err: unknown): string {
   return redactSensitiveCommandOutput(String(err));
 }
 
-export class GitService {
-  private readonly exec: GitExecFn;
-  private readonly isRepo: (cwd: string) => Promise<boolean>;
+function runGitSpawn(args: string[], cwd: string): Promise<GitCommandResult> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const proc = spawn("git", args, {
+      cwd,
+      shell: false,
+      windowsHide: true,
+      env: sanitizeEnvForTerminal(),
+    });
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err) => {
+      rejectPromise(err);
+    });
+    proc.on("close", (code) => {
+      resolvePromise({
+        stdout: redactSensitiveCommandOutput(stdout),
+        stderr: redactSensitiveCommandOutput(stderr),
+        code: code ?? -1,
+      });
+    });
+  });
+}
+
+export class GitService extends EventEmitter {
+  private readonly run: GitRunner;
+  private operationState: GitOperationState | null = null;
 
   constructor(options: GitServiceOptions = {}) {
-    this.exec = options.exec ?? gitExecFile;
-    this.isRepo = options.isRepo ?? isGitRepo;
+    super();
+    this.run = options.runGit ?? runGitSpawn;
+  }
+
+  private emitOperation(
+    operation: GitOperationState["operation"],
+    status: GitOperationState["status"],
+    error: string | null = null
+  ): void {
+    this.operationState = { operation, status, error, timestamp: Date.now() };
+    this.emit("operation-changed", this.operationState);
+  }
+
+  private async emitStatusChanged(cwd: string): Promise<void> {
+    try {
+      const status = await this.status(cwd);
+      this.emit("status-changed", status);
+    } catch {
+      // best-effort broadcast; don't throw from here
+    }
+  }
+
+  private async runChecked(args: string[], cwd: string): Promise<GitCommandResult> {
+    const result = await this.run(args, cwd);
+    if (result.code !== 0) {
+      throw new Error(result.stderr || `git ${args[0] ?? "command"} failed`);
+    }
+    return result;
   }
 
   async status(cwd: string): Promise<GitStatusSnapshot> {
-    if (!(await this.isRepo(cwd))) {
-      return { branch: "", ahead: 0, behind: 0, files: [], isRepo: false, upstream: null };
+    const branchResult = await this.run(["branch", "--show-current"], cwd);
+    if (branchResult.code !== 0) {
+      return {
+        branch: "",
+        ahead: 0,
+        behind: 0,
+        files: [],
+        hasConflicts: false,
+        isClean: true,
+        isRepo: false,
+        upstream: null,
+      };
     }
 
-    const branchRaw = await this.exec(cwd, ["branch", "--show-current"], { allowNonZero: true });
-    const branch = branchRaw.stdout.trim() || "HEAD detached";
+    const branch = branchResult.stdout.trim() || "HEAD";
+    const statusResult = await this.run(["status", "--porcelain=v1", "--branch"], cwd);
+    const files = parsePorcelainStatus(
+      statusResult.stdout
+        .split("\n")
+        .filter((line) => !line.startsWith("##"))
+        .join("\n")
+    );
 
-    let upstream: string | null = null;
-    let ahead = 0;
-    let behind = 0;
+    const branchLine = statusResult.stdout.split("\n").find((line) => line.startsWith("##")) ?? "";
+    const aheadMatch = branchLine.match(/ahead (\d+)/);
+    const behindMatch = branchLine.match(/behind (\d+)/);
+    const upstreamMatch = branchLine.match(/^## [^\s.]+(\.\.\.(\S+))?/);
+    const hasConflicts = files.some((file) => file.status === "conflicted");
 
-    try {
-      const upstreamRaw = await this.exec(cwd, [
-        "rev-parse",
-        "--abbrev-ref",
-        "--symbolic-full-name",
-        "@{u}",
-      ]);
-      upstream = upstreamRaw.stdout.trim();
-
-      const revListRaw = await this.exec(cwd, ["rev-list", "--count", "--left-right", "@{u}...HEAD"]);
-      const [b, a] = revListRaw.stdout.trim().split("\t").map(Number);
-      ahead = a || 0;
-      behind = b || 0;
-    } catch {
-      // no upstream
-    }
-
-    const statusRaw = await this.exec(cwd, ["status", "--porcelain=v1", "-u"], {
-      allowNonZero: true,
-    });
     return {
       branch,
-      upstream,
-      ahead,
-      behind,
-      files: parsePorcelainStatus(statusRaw.stdout),
+      ahead: aheadMatch?.[1] ? parseInt(aheadMatch[1], 10) : 0,
+      behind: behindMatch?.[1] ? parseInt(behindMatch[1], 10) : 0,
+      files,
+      hasConflicts,
+      isClean: files.length === 0,
       isRepo: true,
+      upstream: upstreamMatch?.[2] ?? null,
     };
   }
 
   async stage(cwd: string, files: string[]): Promise<void> {
-    await this.requireRepo(cwd);
-    const rels = this.normalizeFiles(cwd, files);
-    await this.exec(cwd, ["add", "--", ...rels]);
+    this.emitOperation("stage", "running");
+    try {
+      const rels = this.normalizeFiles(cwd, files);
+      await this.runChecked(["add", "--", ...rels], cwd);
+      this.emitOperation("stage", "success");
+    } catch (err) {
+      this.emitOperation("stage", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async unstage(cwd: string, files: string[]): Promise<void> {
-    await this.requireRepo(cwd);
-    const rels = this.normalizeFiles(cwd, files);
+    this.emitOperation("unstage", "running");
     try {
-      await this.exec(cwd, ["restore", "--staged", "--", ...rels]);
-    } catch {
-      await this.exec(cwd, ["reset", "HEAD", "--", ...rels], { allowNonZero: true });
+      const rels = this.normalizeFiles(cwd, files);
+      try {
+        await this.runChecked(["restore", "--staged", "--", ...rels], cwd);
+      } catch {
+        await this.runChecked(["reset", "HEAD", "--", ...rels], cwd);
+      }
+      this.emitOperation("unstage", "success");
+    } catch (err) {
+      this.emitOperation("unstage", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
     }
   }
 
-  async commit(cwd: string, input: GitCommitInput): Promise<string | undefined> {
-    await this.requireRepo(cwd);
-    const message = assertCommitMessage(input.message);
-    if (input.files?.length) {
-      const rels = this.normalizeFiles(cwd, input.files);
-      await this.exec(cwd, ["add", "--", ...rels]);
+  async discardChanges(cwd: string, files: string[]): Promise<void> {
+    this.emitOperation("checkout", "running");
+    try {
+      const rels = this.normalizeFiles(cwd, files);
+      await this.runChecked(["checkout", "--", ...rels], cwd);
+      this.emitOperation("checkout", "success");
+    } catch (err) {
+      this.emitOperation("checkout", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
     }
-    const { stdout } = await this.exec(cwd, ["commit", "-m", message]);
-    return stdout.match(/\[[\w\s/-]+ ([a-f0-9]+)\]/)?.[1];
+  }
+
+  async commit(cwd: string, input: GitCommitInput): Promise<GitCommitResult> {
+    this.emitOperation("commit", "running");
+    try {
+      if (input.files && input.files.length > 0) {
+        const rels = this.normalizeFiles(cwd, input.files);
+        await this.runChecked(["add", "--", ...rels], cwd);
+      }
+      const result = await this.run(["commit", "-m", input.message], cwd);
+      if (result.code !== 0) {
+        throw new Error(result.stderr || "Commit failed");
+      }
+      const hashResult = await this.run(["rev-parse", "HEAD"], cwd);
+      const hash = hashResult.stdout.trim();
+      this.emitOperation("commit", "success");
+      return { hash, message: input.message };
+    } catch (err) {
+      this.emitOperation("commit", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async branches(cwd: string): Promise<GitBranch[]> {
-    if (!(await this.isRepo(cwd))) return [];
-    const raw = await this.exec(
-      cwd,
-      ["for-each-ref", "--format=%(HEAD)%09%(refname:short)%09%(upstream:short)", "refs/heads"],
-      { allowNonZero: true }
-    );
-    const branches = parseBranchList(raw.stdout);
-    if (branches.some((branch) => branch.current)) return branches;
-    const currentRaw = await this.exec(cwd, ["branch", "--show-current"], { allowNonZero: true });
-    const current = currentRaw.stdout.trim();
-    return branches.map((branch) => ({ ...branch, current: branch.name === current }));
+    const result = await this.run(["branch", "-vv"], cwd);
+    if (result.code !== 0) return [];
+    const lines = result.stdout.split("\n").filter((line) => line.trim().length > 0);
+
+    return lines.map((line) => {
+      const current = line.startsWith("*");
+      const cleaned = line.replace(/^\*?\s+/, "");
+      const nameMatch = cleaned.match(/^(\S+)/);
+      const name = nameMatch?.[1] ?? cleaned;
+      const remoteMatch = cleaned.match(/\[([^\]:]+)/);
+      const aheadMatch = cleaned.match(/ahead (\d+)/);
+      const behindMatch = cleaned.match(/behind (\d+)/);
+
+      return {
+        name,
+        current,
+        remote: remoteMatch?.[1] ?? null,
+        ahead: aheadMatch?.[1] ? parseInt(aheadMatch[1], 10) : 0,
+        behind: behindMatch?.[1] ? parseInt(behindMatch[1], 10) : 0,
+      };
+    });
   }
 
   async checkout(cwd: string, branch: string): Promise<void> {
-    await this.requireRepo(cwd);
-    const name = assertBranchName(branch);
-    await this.exec(cwd, ["checkout", name]);
+    this.emitOperation("checkout", "running");
+    try {
+      const name = assertBranchName(branch);
+      const result = await this.run(["checkout", name], cwd);
+      if (result.code !== 0) {
+        throw new Error(result.stderr || "Checkout failed");
+      }
+      this.emitOperation("checkout", "success");
+    } catch (err) {
+      this.emitOperation("checkout", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
-  async diff(cwd: string, file?: string, staged = false): Promise<string> {
-    if (!(await this.isRepo(cwd))) return "";
-    const args = staged ? ["diff", "--staged"] : ["diff"];
-    if (file) {
-      const rel = toWorkspaceGitPath(cwd, file);
-      args.push("--", rel);
-    }
-    const raw = await this.exec(cwd, args, { allowNonZero: true });
-
-    if (!raw.stdout.trim() && !staged && file) {
-      try {
-        const rel = toWorkspaceGitPath(cwd, file);
-        const abs = resolveSandboxedWorkspacePath(cwd, rel);
-        const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
-        const untracked = await this.exec(cwd, ["diff", "--no-index", nullDevice, abs], {
-          allowNonZero: true,
-        });
-        return untracked.stdout;
-      } catch {
-        return "";
+  async createBranch(cwd: string, name: string, from?: string): Promise<void> {
+    this.emitOperation("checkout", "running");
+    try {
+      const branch = assertBranchName(name);
+      const startPoint = from === undefined ? undefined : assertBranchName(from);
+      const args = startPoint
+        ? ["checkout", "-b", branch, startPoint]
+        : ["checkout", "-b", branch];
+      const result = await this.run(args, cwd);
+      if (result.code !== 0) {
+        throw new Error(result.stderr || "Create branch failed");
       }
+      this.emitOperation("checkout", "success");
+    } catch (err) {
+      this.emitOperation("checkout", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
     }
-    return raw.stdout;
+  }
+
+  async diff(cwd: string, file?: string, staged?: boolean): Promise<GitDiffResult> {
+    const args = ["diff"];
+    if (staged) args.push("--cached");
+    if (file) args.push("--", toWorkspaceGitPath(cwd, file));
+
+    const result = await this.run(args, cwd);
+    const binary = result.stdout.includes("Binary files");
+
+    return {
+      path: file ?? "",
+      diff: result.stdout,
+      binary,
+    };
   }
 
   async log(cwd: string, limit = 50): Promise<GitLogEntry[]> {
-    if (!(await this.isRepo(cwd))) return [];
     const n = Math.min(Math.max(Number(limit) || 50, 1), MAX_LOG);
-    const format = "%H%x1f%s%x1f%an%x1f%aI%x00";
-    const raw = await this.exec(cwd, ["log", `--format=${format}`, "-n", String(n)], {
-      allowNonZero: true,
+    const format = "%H%x00%h%x00%s%x00%an%x00%ae%x00%aI";
+    const result = await this.run(["log", `-${n}`, `--pretty=format:${format}`], cwd);
+
+    if (!result.stdout.trim()) return [];
+
+    return result.stdout.split("\n").map((line) => {
+      const [hash, shortHash, message, author, email, date] = line.split("\x00");
+      return {
+        hash: hash ?? "",
+        shortHash: shortHash ?? "",
+        message: message ?? "",
+        author: author ?? "",
+        email: email ?? "",
+        date: date ?? "",
+      };
     });
-    return parseGitLog(raw.stdout);
   }
 
   async stageAll(cwd: string): Promise<void> {
-    await this.requireRepo(cwd);
-    await this.exec(cwd, ["add", "-A"]);
+    this.emitOperation("stage", "running");
+    try {
+      await this.runChecked(["add", "-A"], cwd);
+      this.emitOperation("stage", "success");
+    } catch (err) {
+      this.emitOperation("stage", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async unstageAll(cwd: string): Promise<void> {
-    await this.requireRepo(cwd);
-    await this.exec(cwd, ["reset", "HEAD"], { allowNonZero: true });
+    this.emitOperation("unstage", "running");
+    try {
+      await this.run(["reset", "HEAD"], cwd);
+      this.emitOperation("unstage", "success");
+    } catch (err) {
+      this.emitOperation("unstage", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async discard(cwd: string, filePath: string): Promise<void> {
-    await this.requireRepo(cwd);
     const rel = toWorkspaceGitPath(cwd, filePath);
-    await this.exec(cwd, ["restore", "--", rel]);
-  }
-
-  async createBranch(cwd: string, name: string): Promise<void> {
-    await this.requireRepo(cwd);
-    const branch = assertBranchName(name);
-    await this.exec(cwd, ["checkout", "-b", branch]);
+    await this.discardChanges(cwd, [rel]);
   }
 
   async init(cwd: string): Promise<void> {
-    await this.exec(cwd, ["init"]);
+    await this.runChecked(["init"], cwd);
   }
 
   async stash(cwd: string, message?: string): Promise<void> {
-    await this.requireRepo(cwd);
     const args =
       message && message.trim() ? (["stash", "push", "-m", message.trim()] as string[]) : ["stash"];
-    await this.exec(cwd, args);
+    await this.runChecked(args, cwd);
   }
 
   async stashPop(cwd: string): Promise<void> {
-    await this.requireRepo(cwd);
-    await this.exec(cwd, ["stash", "pop"]);
+    await this.runChecked(["stash", "pop"], cwd);
   }
 
   async push(cwd: string, setUpstream?: boolean): Promise<void> {
-    await this.requireRepo(cwd);
-    const args = setUpstream ? ["push", "--set-upstream", "origin", "HEAD"] : ["push"];
-    await this.exec(cwd, args, { timeoutMs: 180_000 });
+    this.emitOperation("push", "running");
+    try {
+      const args = setUpstream ? ["push", "--set-upstream", "origin", "HEAD"] : ["push"];
+      await this.runChecked(args, cwd);
+      this.emitOperation("push", "success");
+    } catch (err) {
+      this.emitOperation("push", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async pull(cwd: string): Promise<void> {
-    await this.requireRepo(cwd);
-    await this.exec(cwd, ["pull"], { timeoutMs: 180_000 });
+    this.emitOperation("pull", "running");
+    try {
+      await this.runChecked(["pull"], cwd);
+      this.emitOperation("pull", "success");
+    } catch (err) {
+      this.emitOperation("pull", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   formatError(err: unknown): string {
     return errMessage(err);
-  }
-
-  private async requireRepo(cwd: string): Promise<void> {
-    if (!(await this.isRepo(cwd))) {
-      throw new Error("Not a git repository");
-    }
   }
 
   private normalizeFiles(cwd: string, files: string[]): string[] {
