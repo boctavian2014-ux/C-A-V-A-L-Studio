@@ -45,6 +45,11 @@ export const previewApi: PreviewApi = {
     return ipcRenderer.invoke(PREVIEW_CHANNELS.openConfig) as Promise<void>;
   },
 
+  async openUrl(target) {
+    assertTarget(target);
+    return ipcRenderer.invoke(PREVIEW_CHANNELS.openUrl, target) as Promise<void>;
+  },
+
   onStateChange(cb) {
     const listener = (_event: Electron.IpcRendererEvent, state: PreviewState) => {
       cb(state);

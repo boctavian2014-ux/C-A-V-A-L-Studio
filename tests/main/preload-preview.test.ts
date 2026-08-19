@@ -58,6 +58,12 @@ describe("preload-preview", () => {
     expect(invoke).toHaveBeenNthCalledWith(4, PREVIEW_CHANNELS.getLogs, "mobile");
   });
 
+  it("openUrl invokes preview:open-url with the target", async () => {
+    invoke.mockResolvedValue(undefined);
+    await previewApi.openUrl("web");
+    expect(invoke).toHaveBeenCalledWith(PREVIEW_CHANNELS.openUrl, "web");
+  });
+
   it("openConfig invokes preview:open-config without extra payload", async () => {
     invoke.mockResolvedValue(undefined);
     await previewApi.openConfig();

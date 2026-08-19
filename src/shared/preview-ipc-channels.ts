@@ -6,6 +6,7 @@ export const PREVIEW_CHANNELS = {
   restart: "preview:restart",
   getLogs: "preview:get-logs",
   openConfig: "preview:open-config",
+  openUrl: "preview:open-url",
   stateChanged: "preview:state-changed",
   logLine: "preview:log-line",
 } as const;

@@ -34,6 +34,7 @@ export type PreviewSpawn = (
 export interface PreviewLauncherOptions {
   spawnFn?: PreviewSpawn;
   maxLogLines?: number;
+  openUrlFn?: (url: string) => void | Promise<void>;
 }
 
 interface ProcessInfo {
@@ -44,12 +45,14 @@ interface ProcessInfo {
   startedAt: number;
   logs: PreviewLogLine[];
   state: PreviewState;
+  openedUrl: string | null;
 }
 
 interface LaunchPlan {
   cwd: string;
   command: string;
   url: string | null;
+  source: "config" | "detection";
 }
 
 function stoppedState(target: PreviewTarget): PreviewState {
@@ -113,16 +116,49 @@ export class PreviewLauncher extends EventEmitter {
   private readonly processes = new Map<PreviewTarget, ProcessInfo>();
   private readonly spawnFn: PreviewSpawn;
   private readonly maxLogLines: number;
+  private openUrlFn?: (url: string) => void | Promise<void>;
 
   constructor(options: PreviewLauncherOptions = {}) {
     super();
     this.spawnFn = options.spawnFn ?? spawn;
     this.maxLogLines = options.maxLogLines ?? DEFAULT_MAX_LOG_LINES;
+    this.openUrlFn = options.openUrlFn;
+  }
+
+  setOpenUrlHandler(fn: ((url: string) => void | Promise<void>) | undefined): void {
+    this.openUrlFn = fn;
   }
 
   getState(target: PreviewTarget): PreviewState {
     const info = this.processes.get(target);
     return info?.state ?? stoppedState(target);
+  }
+
+  async getStateForWorkspace(target: PreviewTarget, workspaceRoot: string): Promise<PreviewState> {
+    const live = this.processes.get(target);
+    if (live) return live.state;
+    const plan = await this.resolveLaunchPlan(target, workspaceRoot);
+    if (!plan) {
+      return notConfiguredState(
+        target,
+        `No preview command detected for ${target} in ${workspaceRoot}`
+      );
+    }
+    return {
+      target,
+      status: "stopped",
+      url: plan.url,
+      pid: null,
+      startedAt: null,
+      lastError: null,
+    };
+  }
+
+  async openCurrentUrl(target: PreviewTarget): Promise<void> {
+    const url = this.getState(target).url;
+    if (!url) return;
+    const allowed = assertAllowedPreviewOpenUrl(url, target);
+    await this.openUrlFn?.(allowed);
   }
 
   getLogs(target: PreviewTarget): PreviewLogLine[] {
@@ -161,10 +197,26 @@ export class PreviewLauncher extends EventEmitter {
       this.emit("log", line);
 
       const expoUrl = extractValidatedExpoUrl(raw);
-      if (expoUrl) {
+      if (expoUrl && expoUrl !== info.state.url) {
         info.state = { ...info.state, url: expoUrl };
+        this.emitState(info.state);
+        this.maybeOpenUrl(info);
       }
     }
+  }
+
+  private maybeOpenUrl(info: ProcessInfo): void {
+    const raw = info.state.url;
+    if (!raw) return;
+    let allowed: string;
+    try {
+      allowed = assertAllowedPreviewOpenUrl(raw, info.target);
+    } catch {
+      return;
+    }
+    if (info.openedUrl === allowed) return;
+    info.openedUrl = allowed;
+    void this.openUrlFn?.(allowed);
   }
 
   private async resolveLaunchPlan(
@@ -179,6 +231,7 @@ export class PreviewLauncher extends EventEmitter {
         cwd: resolvePreviewCwd(workspaceRoot, targetConfig.cwd),
         command: targetConfig.command.trim(),
         url: resolveUrlFromConfig(target, targetConfig, null),
+        source: "config",
       };
     }
 
@@ -190,6 +243,7 @@ export class PreviewLauncher extends EventEmitter {
       cwd: detected.cwd,
       command,
       url: resolveUrlFromConfig(target, targetConfig, detected.suggestedUrl),
+      source: "detection",
     };
   }
 
@@ -225,6 +279,7 @@ export class PreviewLauncher extends EventEmitter {
       workspaceRoot,
       startedAt,
       logs: [],
+      openedUrl: null,
       state: {
         target,
         status: "starting",
@@ -242,6 +297,7 @@ export class PreviewLauncher extends EventEmitter {
       this.appendLog(info, "stdout", String(chunk));
       if (info.state.status === "starting") {
         this.setState(info, "running");
+        this.maybeOpenUrl(info);
       }
     });
 
@@ -249,6 +305,7 @@ export class PreviewLauncher extends EventEmitter {
       this.appendLog(info, "stderr", String(chunk));
       if (info.state.status === "starting") {
         this.setState(info, "running");
+        this.maybeOpenUrl(info);
       }
     });
 

@@ -30,6 +30,7 @@ function createPreviewMock(initial: Record<PreviewTarget, PreviewState>) {
     restart: vi.fn(async (target) => initial[target]),
     getLogs: vi.fn(async () => []),
     openConfig: vi.fn(async () => undefined),
+    openUrl: vi.fn(async () => undefined),
     onStateChange: vi.fn((cb) => {
       stateListeners.push(cb);
       return unsubscribeState;
@@ -94,20 +95,25 @@ describe("PreviewPanel", () => {
     const { container } = await renderPanel(api);
     expect(container.textContent).toContain("Web preview is not configured.");
     expect(container.textContent).toContain("Configure in caval.jsonc");
+    expect(container.querySelector('[data-testid="preview-web-config"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="preview-web-status"]')?.textContent).toBe(
+      "Not configured"
+    );
     const configButtons = Array.from(container.querySelectorAll("button")).filter((btn) =>
       btn.textContent?.includes("Configure in caval.jsonc")
     );
     expect(configButtons.length).toBeGreaterThan(0);
   });
 
-  it("calls window.caval.preview.start('web') when Start is clicked", async () => {
+  it("calls window.caval.preview.start('web') when Open Web is clicked", async () => {
     const { api } = createPreviewMock({
       web: idle("web", "stopped"),
       mobile: idle("mobile", "stopped"),
     });
     const { container } = await renderPanel(api);
-    const startWeb = container.querySelector('[aria-label="Start Web preview"]');
+    const startWeb = container.querySelector('[data-testid="preview-web-start"]');
     expect(startWeb).toBeTruthy();
+    expect(startWeb?.textContent).toContain("Open Web");
     act(() => {
       startWeb?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -134,9 +140,13 @@ describe("PreviewPanel", () => {
     });
     expect(container.querySelector('[aria-label="Restart Web preview"]')).toBeTruthy();
     expect(container.querySelector('[aria-label="Stop Web preview"]')).toBeTruthy();
-    const link = container.querySelector("a.preview-target-url");
+    const link = container.querySelector('[data-testid="preview-web-url"]');
     expect(link).toBeTruthy();
     expect(link?.textContent).toBe("http://127.0.0.1:5173");
+    act(() => {
+      link?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(api.openUrl).toHaveBeenCalledWith("web");
   });
 
   it("sets target=_blank and rel=noopener noreferrer on the preview URL", async () => {
@@ -150,7 +160,7 @@ describe("PreviewPanel", () => {
       mobile: idle("mobile", "stopped"),
     });
     const { container } = await renderPanel(api);
-    const link = container.querySelector("a.preview-target-url");
+    const link = container.querySelector('[data-testid="preview-web-url"]');
     expect(link?.getAttribute("href")).toBe("http://127.0.0.1:5173");
     expect(link?.getAttribute("target")).toBe("_blank");
     expect(link?.getAttribute("rel")).toBe("noopener noreferrer");

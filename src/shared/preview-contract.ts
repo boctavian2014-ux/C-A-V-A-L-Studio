@@ -37,6 +37,7 @@ export interface PreviewApi {
   restart(target: PreviewTarget): Promise<PreviewState>;
   getLogs(target: PreviewTarget): Promise<PreviewLogLine[]>;
   openConfig(): Promise<void>;
+  openUrl(target: PreviewTarget): Promise<void>;
   onStateChange(cb: (state: PreviewState) => void): () => void;
   onLog(cb: (line: PreviewLogLine) => void): () => void;
 }

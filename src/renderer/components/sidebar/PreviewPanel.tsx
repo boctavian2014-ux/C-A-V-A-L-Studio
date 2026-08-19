@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
 
 import type {
   PreviewLogLine,
   PreviewState,
   PreviewTarget,
 } from "../../../shared/preview-contract";
+import { idlePreviewState } from "../../../shared/preview-contract";
 
 interface TargetPanelProps {
   target: PreviewTarget;
@@ -26,6 +27,9 @@ function TargetPanel({ target, label }: TargetPanelProps) {
       .getState(target)
       .then((next) => {
         if (!cancelled) setState(next);
+      })
+      .catch(() => {
+        if (!cancelled) setState(idlePreviewState(target));
       });
     const unsubscribeState = previewApi().onStateChange((next) => {
       if (next.target === target) setState(next);
@@ -62,13 +66,21 @@ function TargetPanel({ target, label }: TargetPanelProps) {
     setShowLogs((open) => !open);
   }, [target, showLogs]);
 
+  const handleOpenUrl = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      void previewApi().openUrl(target);
+    },
+    [target]
+  );
+
   const status = state?.status ?? "stopped";
 
   return (
-    <div className="preview-target-panel" data-status={status}>
+    <div className="preview-target-panel" data-status={status} data-testid={`preview-${target}`}>
       <div className="preview-target-header">
         <span className="preview-target-label">{label}</span>
-        <StatusBadge status={status} />
+        <StatusBadge status={status} testId={`preview-${target}-status`} />
       </div>
 
       {status === "not-configured" ? (
@@ -77,6 +89,7 @@ function TargetPanel({ target, label }: TargetPanelProps) {
           <button
             type="button"
             className="btn-ghost"
+            data-testid={`preview-${target}-config`}
             onClick={() => void previewApi().openConfig()}
           >
             Configure in caval.jsonc
@@ -88,16 +101,18 @@ function TargetPanel({ target, label }: TargetPanelProps) {
             <button
               type="button"
               className="btn-primary"
+              data-testid={`preview-${target}-start`}
               onClick={handleStart}
-              aria-label={`Start ${label} preview`}
+              aria-label={`Open ${label}`}
             >
-              Start
+              Open {label}
             </button>
           ) : (
             <>
               <button
                 type="button"
                 className="btn-secondary"
+                data-testid={`preview-${target}-restart`}
                 onClick={handleRestart}
                 aria-label={`Restart ${label} preview`}
               >
@@ -106,6 +121,7 @@ function TargetPanel({ target, label }: TargetPanelProps) {
               <button
                 type="button"
                 className="btn-ghost"
+                data-testid={`preview-${target}-stop`}
                 onClick={handleStop}
                 aria-label={`Stop ${label} preview`}
               >
@@ -116,6 +132,7 @@ function TargetPanel({ target, label }: TargetPanelProps) {
           <button
             type="button"
             className="btn-icon"
+            data-testid={`preview-${target}-logs`}
             onClick={() => void handleToggleLogs()}
             aria-label={`Toggle logs for ${label}`}
           >
@@ -130,6 +147,8 @@ function TargetPanel({ target, label }: TargetPanelProps) {
           target="_blank"
           rel="noopener noreferrer"
           className="preview-target-url"
+          data-testid={`preview-${target}-url`}
+          onClick={handleOpenUrl}
         >
           {state.url}
         </a>
@@ -142,7 +161,12 @@ function TargetPanel({ target, label }: TargetPanelProps) {
       )}
 
       {showLogs && (
-        <div className="preview-target-logs" role="log" aria-live="polite">
+        <div
+          className="preview-target-logs"
+          role="log"
+          aria-live="polite"
+          data-testid={`preview-${target}-log-content`}
+        >
           {logs.length === 0 ? (
             <p className="preview-target-logs-empty">No logs yet.</p>
           ) : (
@@ -158,7 +182,13 @@ function TargetPanel({ target, label }: TargetPanelProps) {
   );
 }
 
-function StatusBadge({ status }: { status: PreviewState["status"] }) {
+function StatusBadge({
+  status,
+  testId,
+}: {
+  status: PreviewState["status"];
+  testId: string;
+}) {
   const labelMap: Record<PreviewState["status"], string> = {
     "not-configured": "Not configured",
     stopped: "Stopped",
@@ -166,7 +196,11 @@ function StatusBadge({ status }: { status: PreviewState["status"] }) {
     running: "Running",
     failed: "Failed",
   };
-  return <span className={`status-badge status-badge-${status}`}>{labelMap[status]}</span>;
+  return (
+    <span className={`status-badge status-badge-${status}`} data-testid={testId}>
+      {labelMap[status]}
+    </span>
+  );
 }
 
 export function PreviewPanel() {

@@ -65,6 +65,9 @@ async function ensurePreviewConfig(workspaceRoot: string): Promise<string> {
 
 export function registerPreviewHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGetter): void {
   wirePreviewLauncherEvents();
+  previewLauncher.setOpenUrlHandler(async (url) => {
+    await shell.openExternal(url);
+  });
 
   const boundRoot = (event: IpcMainInvokeEvent): string =>
     requireBoundWorkspaceRootFromEvent(
@@ -83,9 +86,10 @@ export function registerPreviewHandlers(getBoundWorkspaceRoot: BoundWorkspaceRoo
     });
   };
 
-  handle(PREVIEW_CHANNELS.getState, (_event, target: unknown) => {
+  handle(PREVIEW_CHANNELS.getState, async (event, target: unknown) => {
     const validTarget = parsePreviewTarget(target);
-    return previewLauncher.getState(validTarget);
+    const workspaceRoot = boundRoot(event);
+    return previewLauncher.getStateForWorkspace(validTarget, workspaceRoot);
   });
 
   handle(PREVIEW_CHANNELS.start, async (event, target: unknown) => {
@@ -114,6 +118,11 @@ export function registerPreviewHandlers(getBoundWorkspaceRoot: BoundWorkspaceRoo
     const workspaceRoot = boundRoot(event);
     const configPath = await ensurePreviewConfig(workspaceRoot);
     await shell.openPath(configPath);
+  });
+
+  handle(PREVIEW_CHANNELS.openUrl, async (_event, target: unknown) => {
+    const validTarget = parsePreviewTarget(target);
+    await previewLauncher.openCurrentUrl(validTarget);
   });
 }
 
