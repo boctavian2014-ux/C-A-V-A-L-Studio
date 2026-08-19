@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { cavalGitPreload } from "./preload-git";
 import { previewApi } from "./preload-preview";
 import { cavalTerminalPreload } from "./preload-terminal";
 
@@ -770,39 +771,7 @@ contextBridge.exposeInMainWorld("caval", {
 
   preview: previewApi,
 
-  git: {
-    status: (projectPath: string) => ipcRenderer.invoke("git:status", projectPath),
-    diff: (projectPath: string, filePath: string, staged: boolean) =>
-      ipcRenderer.invoke("git:diff", projectPath, filePath, staged),
-    filePair: (projectPath: string, filePath: string, staged: boolean) =>
-      ipcRenderer.invoke("git:filePair", projectPath, filePath, staged) as Promise<{
-        original: string;
-        modified: string;
-        language: string;
-      }>,
-    revertHunk: (projectPath: string, filePath: string, hunkPatch: string) =>
-      ipcRenderer.invoke("git:revertHunk", projectPath, filePath, hunkPatch) as Promise<{
-        ok: boolean;
-        error?: string;
-      }>,
-    stage: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:stage", projectPath, filePath),
-    unstage: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:unstage", projectPath, filePath),
-    stageAll: (projectPath: string) => ipcRenderer.invoke("git:stageAll", projectPath),
-    unstageAll: (projectPath: string) => ipcRenderer.invoke("git:unstageAll", projectPath),
-    discard: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:discard", projectPath, filePath),
-    commit: (projectPath: string, message: string) => ipcRenderer.invoke("git:commit", projectPath, message),
-    push: (projectPath: string, setUpstream?: boolean) => ipcRenderer.invoke("git:push", projectPath, setUpstream),
-    pull: (projectPath: string) => ipcRenderer.invoke("git:pull", projectPath),
-    log: (projectPath: string, limit?: number) => ipcRenderer.invoke("git:log", projectPath, limit),
-    branches: (projectPath: string) => ipcRenderer.invoke("git:branches", projectPath),
-    checkout: (projectPath: string, branch: string) => ipcRenderer.invoke("git:checkout", projectPath, branch),
-    createBranch: (projectPath: string, name: string) => ipcRenderer.invoke("git:createBranch", projectPath, name),
-    init: (projectPath: string) => ipcRenderer.invoke("git:init", projectPath),
-    stash: (projectPath: string, message?: string) => ipcRenderer.invoke("git:stash", projectPath, message),
-    stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath),
-    clone: (input: { url: string; parentDir?: string }) =>
-      ipcRenderer.invoke("git:clone", input) as Promise<{ ok: boolean; path?: string; error?: string }>,
-  },
+  git: cavalGitPreload,
 
 
   preload: {
