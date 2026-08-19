@@ -1,110 +1,71 @@
-import { ipcRenderer } from "electron";
+// src/main/preload-git.ts
 
+import { ipcRenderer } from "electron";
+import { GIT_CHANNELS } from "../shared/git-ipc-channels";
 import type {
   GitApi,
   GitBranch,
   GitCommitInput,
-  GitFileChange,
-  GitFileStatus,
+  GitCommitResult,
+  GitDiffResult,
   GitLogEntry,
+  GitOperationState,
   GitStatus,
 } from "../shared/git-contract";
-import { isGitBranchName, isGitRelPath } from "../shared/git-contract";
-import { GIT_CHANNELS } from "../shared/git-ipc-channels";
+import {
+  isValidBranchName,
+  isValidCommitMessage,
+  isValidFilePathArray,
+} from "../shared/git-security";
 
-export function assertGitRelPath(filePath: string): void {
-  if (!isGitRelPath(filePath)) {
-    throw new TypeError("Invalid git path");
+function assertFiles(files: unknown): asserts files is string[] {
+  if (!isValidFilePathArray(files)) {
+    throw new TypeError("Invalid file paths: must be an array of relative paths without traversal");
   }
 }
 
-export function assertGitBranchName(name: string): void {
-  if (!isGitBranchName(name)) {
+function assertBranchName(name: unknown): asserts name is string {
+  if (!isValidBranchName(name)) {
     throw new TypeError("Invalid branch name");
   }
 }
 
-function toPorcelain(status: GitFileStatus): string {
-  switch (status) {
-    case "added":
-      return "A";
-    case "deleted":
-      return "D";
-    case "renamed":
-      return "R";
-    case "untracked":
-      return "?";
-    case "ignored":
-      return "!";
-    default:
-      return "M";
+function assertCommitInput(input: unknown): asserts input is GitCommitInput {
+  if (typeof input !== "object" || input === null) {
+    throw new TypeError("Commit input must be an object");
   }
-}
-
-interface GitStatusPayload extends GitStatus {
-  isRepo?: boolean;
-  upstream?: string | null;
-}
-
-function asGitStatus(payload: GitStatusPayload): GitStatus {
-  return {
-    branch: payload.branch,
-    ahead: payload.ahead,
-    behind: payload.behind,
-    files: payload.files,
-  };
-}
-
-function asCompatStatus(payload: GitStatusPayload) {
-  return {
-    branch: payload.branch,
-    ahead: payload.ahead,
-    behind: payload.behind,
-    files: payload.files.map((file: GitFileChange) => ({
-      ...file,
-      status: toPorcelain(file.status),
-    })),
-    isRepo: payload.isRepo ?? true,
-    upstream: payload.upstream ?? null,
-  };
-}
-
-function asCompatLog(entries: GitLogEntry[]) {
-  return entries.map((entry) => ({
-    hash: entry.hash,
-    shortHash: entry.hash.slice(0, 7),
-    subject: entry.message,
-    author: entry.author,
-    date: entry.date,
-    refs: "",
-  }));
-}
-
-function asCompatBranches(branches: GitBranch[]): string[] {
-  return branches.map((branch) => branch.name);
+  const { message, files } = input as GitCommitInput;
+  if (!isValidCommitMessage(message)) {
+    throw new TypeError("Invalid commit message");
+  }
+  if (files !== undefined) {
+    assertFiles(files);
+  }
 }
 
 export const gitApi: GitApi = {
   async status() {
-    const payload = (await ipcRenderer.invoke(GIT_CHANNELS.status)) as GitStatusPayload;
-    return asGitStatus(payload);
+    return ipcRenderer.invoke(GIT_CHANNELS.status) as Promise<GitStatus>;
   },
 
   async stage(files) {
-    for (const file of files) assertGitRelPath(file);
-    await ipcRenderer.invoke(GIT_CHANNELS.stage, files);
+    assertFiles(files);
+    return ipcRenderer.invoke(GIT_CHANNELS.stage, files) as Promise<void>;
   },
 
   async unstage(files) {
-    for (const file of files) assertGitRelPath(file);
-    await ipcRenderer.invoke(GIT_CHANNELS.unstage, files);
+    assertFiles(files);
+    return ipcRenderer.invoke(GIT_CHANNELS.unstage, files) as Promise<void>;
+  },
+
+  async discardChanges(files) {
+    assertFiles(files);
+    return ipcRenderer.invoke(GIT_CHANNELS.discardChanges, files) as Promise<void>;
   },
 
   async commit(input) {
-    if (input.files) {
-      for (const file of input.files) assertGitRelPath(file);
-    }
-    await ipcRenderer.invoke(GIT_CHANNELS.commit, input);
+    assertCommitInput(input);
+    return ipcRenderer.invoke(GIT_CHANNELS.commit, input) as Promise<GitCommitResult>;
   },
 
   async branches() {
@@ -112,125 +73,53 @@ export const gitApi: GitApi = {
   },
 
   async checkout(branch) {
-    assertGitBranchName(branch);
-    await ipcRenderer.invoke(GIT_CHANNELS.checkout, branch);
+    assertBranchName(branch);
+    return ipcRenderer.invoke(GIT_CHANNELS.checkout, branch) as Promise<void>;
   },
 
-  async diff(file) {
-    if (file) assertGitRelPath(file);
-    return ipcRenderer.invoke(GIT_CHANNELS.diff, file) as Promise<string>;
+  async createBranch(name, from) {
+    assertBranchName(name);
+    if (from !== undefined) {
+      assertBranchName(from);
+    }
+    return ipcRenderer.invoke(GIT_CHANNELS.createBranch, name, from) as Promise<void>;
+  },
+
+  async diff(file, staged) {
+    if (file !== undefined) {
+      if (typeof file !== "string" || !isValidFilePathArray([file])) {
+        throw new TypeError("Invalid file path for diff");
+      }
+    }
+    return ipcRenderer.invoke(GIT_CHANNELS.diff, file, staged) as Promise<GitDiffResult>;
   },
 
   async log(limit) {
+    if (limit !== undefined) {
+      if (typeof limit !== "number" || limit < 1 || limit > 1000 || !Number.isInteger(limit)) {
+        throw new TypeError("Log limit must be an integer between 1 and 1000");
+      }
+    }
     return ipcRenderer.invoke(GIT_CHANNELS.log, limit) as Promise<GitLogEntry[]>;
   },
-};
 
-/**
- * GitPanel still calls status(projectPath), stage(projectPath, file), etc.
- * Keep those until the renderer store moves to GitApi.
- */
-export const cavalGitPreload = {
-  ...gitApi,
-
-  status(projectPath?: string) {
-    const pending = ipcRenderer.invoke(GIT_CHANNELS.status) as Promise<GitStatusPayload>;
-    if (typeof projectPath === "string") {
-      return pending.then(asCompatStatus);
-    }
-    return pending.then(asGitStatus);
+  onStatusChange(cb) {
+    const listener = (_event: Electron.IpcRendererEvent, status: GitStatus) => {
+      cb(status);
+    };
+    ipcRenderer.on(GIT_CHANNELS.statusChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(GIT_CHANNELS.statusChanged, listener);
+    };
   },
 
-  stage(projectPathOrFiles: string | string[], filePath?: string) {
-    if (Array.isArray(projectPathOrFiles)) {
-      return gitApi.stage(projectPathOrFiles);
-    }
-    if (typeof filePath === "string") {
-      assertGitRelPath(filePath);
-      return ipcRenderer.invoke(GIT_CHANNELS.stage, projectPathOrFiles, filePath);
-    }
-    return gitApi.stage([projectPathOrFiles]);
+  onOperationChange(cb) {
+    const listener = (_event: Electron.IpcRendererEvent, state: GitOperationState) => {
+      cb(state);
+    };
+    ipcRenderer.on(GIT_CHANNELS.operationChanged, listener);
+    return () => {
+      ipcRenderer.removeListener(GIT_CHANNELS.operationChanged, listener);
+    };
   },
-
-  unstage(projectPathOrFiles: string | string[], filePath?: string) {
-    if (Array.isArray(projectPathOrFiles)) {
-      return gitApi.unstage(projectPathOrFiles);
-    }
-    if (typeof filePath === "string") {
-      assertGitRelPath(filePath);
-      return ipcRenderer.invoke(GIT_CHANNELS.unstage, projectPathOrFiles, filePath);
-    }
-    return gitApi.unstage([projectPathOrFiles]);
-  },
-
-  commit(projectPathOrInput: string | GitCommitInput, message?: string) {
-    if (typeof projectPathOrInput === "object") {
-      return gitApi.commit(projectPathOrInput);
-    }
-    return ipcRenderer.invoke(GIT_CHANNELS.commit, projectPathOrInput, message);
-  },
-
-  diff(projectPathOrFile?: string, filePath?: string, staged?: boolean) {
-    if (typeof filePath === "string") {
-      assertGitRelPath(filePath);
-      return ipcRenderer.invoke(GIT_CHANNELS.diff, projectPathOrFile, filePath, staged) as Promise<string>;
-    }
-    return gitApi.diff(projectPathOrFile);
-  },
-
-  log(projectPathOrLimit?: string | number, limit?: number) {
-    if (typeof projectPathOrLimit === "string") {
-      return (ipcRenderer.invoke(GIT_CHANNELS.log, projectPathOrLimit, limit) as Promise<GitLogEntry[]>).then(
-        asCompatLog
-      );
-    }
-    return gitApi.log(projectPathOrLimit);
-  },
-
-  branches(projectPath?: string) {
-    const pending = ipcRenderer.invoke(GIT_CHANNELS.branches) as Promise<GitBranch[]>;
-    if (typeof projectPath === "string") {
-      return pending.then(asCompatBranches);
-    }
-    return pending;
-  },
-
-  checkout(projectPathOrBranch: string, branch?: string) {
-    if (typeof branch === "string") {
-      assertGitBranchName(branch);
-      return ipcRenderer.invoke(GIT_CHANNELS.checkout, projectPathOrBranch, branch);
-    }
-    return gitApi.checkout(projectPathOrBranch);
-  },
-
-  filePair: (projectPath: string, filePath: string, staged: boolean) =>
-    ipcRenderer.invoke(GIT_CHANNELS.filePair, projectPath, filePath, staged) as Promise<{
-      original: string;
-      modified: string;
-      language: string;
-    }>,
-  revertHunk: (projectPath: string, filePath: string, hunkPatch: string) =>
-    ipcRenderer.invoke(GIT_CHANNELS.revertHunk, projectPath, filePath, hunkPatch) as Promise<{
-      ok: boolean;
-      error?: string;
-    }>,
-  stageAll: (projectPath: string) => ipcRenderer.invoke(GIT_CHANNELS.stageAll, projectPath),
-  unstageAll: (projectPath: string) => ipcRenderer.invoke(GIT_CHANNELS.unstageAll, projectPath),
-  discard: (projectPath: string, filePath: string) =>
-    ipcRenderer.invoke(GIT_CHANNELS.discard, projectPath, filePath),
-  push: (projectPath: string, setUpstream?: boolean) =>
-    ipcRenderer.invoke(GIT_CHANNELS.push, projectPath, setUpstream),
-  pull: (projectPath: string) => ipcRenderer.invoke(GIT_CHANNELS.pull, projectPath),
-  createBranch: (projectPath: string, name: string) =>
-    ipcRenderer.invoke(GIT_CHANNELS.createBranch, projectPath, name),
-  init: (projectPath: string) => ipcRenderer.invoke(GIT_CHANNELS.init, projectPath),
-  stash: (projectPath: string, message?: string) =>
-    ipcRenderer.invoke(GIT_CHANNELS.stash, projectPath, message),
-  stashPop: (projectPath: string) => ipcRenderer.invoke(GIT_CHANNELS.stashPop, projectPath),
-  clone: (input: { url: string; parentDir?: string }) =>
-    ipcRenderer.invoke(GIT_CHANNELS.clone, input) as Promise<{
-      ok: boolean;
-      path?: string;
-      error?: string;
-    }>,
 };
