@@ -10,19 +10,25 @@ export type GitFileStatus =
   | "added"
   | "deleted"
   | "renamed"
+  | "copied"
   | "untracked"
-  | "ignored";
+  | "ignored"
+  | "conflicted";
 
 export interface GitFileChange {
   path: string;
   status: GitFileStatus;
   staged: boolean;
+  /** Present for renamed / copied files. */
+  originalPath?: string;
 }
 
 export interface GitBranch {
   name: string;
   current: boolean;
   remote: string | null;
+  ahead: number;
+  behind: number;
 }
 
 export interface GitStatus {
@@ -30,42 +36,58 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   files: GitFileChange[];
+  hasConflicts: boolean;
+  isClean: boolean;
 }
 
 export interface GitCommitInput {
   message: string;
+  /** If omitted, main commits what is already staged — not the whole workspace. */
   files?: string[];
+}
+
+export interface GitCommitResult {
+  hash: string;
+  message: string;
 }
 
 export interface GitLogEntry {
   hash: string;
+  shortHash: string;
   message: string;
   author: string;
+  email: string;
   date: string;
+}
+
+export interface GitDiffResult {
+  path: string;
+  diff: string;
+  binary: boolean;
+}
+
+export type GitOperationStatus = "idle" | "running" | "success" | "failed";
+
+export interface GitOperationState {
+  operation: "stage" | "unstage" | "commit" | "checkout" | "fetch" | "pull" | "push";
+  status: GitOperationStatus;
+  error: string | null;
+  timestamp: number;
 }
 
 export interface GitApi {
   status(): Promise<GitStatus>;
   stage(files: string[]): Promise<void>;
   unstage(files: string[]): Promise<void>;
-  commit(input: GitCommitInput): Promise<void>;
+  discardChanges(files: string[]): Promise<void>;
+  commit(input: GitCommitInput): Promise<GitCommitResult>;
   branches(): Promise<GitBranch[]>;
   checkout(branch: string): Promise<void>;
-  diff(file?: string): Promise<string>;
+  createBranch(name: string, from?: string): Promise<void>;
+  diff(file?: string, staged?: boolean): Promise<GitDiffResult>;
   log(limit?: number): Promise<GitLogEntry[]>;
-}
-
-const GIT_FILE_STATUSES = new Set<GitFileStatus>([
-  "modified",
-  "added",
-  "deleted",
-  "renamed",
-  "untracked",
-  "ignored",
-]);
-
-export function isGitFileStatus(value: unknown): value is GitFileStatus {
-  return typeof value === "string" && GIT_FILE_STATUSES.has(value as GitFileStatus);
+  onStatusChange(cb: (status: GitStatus) => void): () => void;
+  onOperationChange(cb: (state: GitOperationState) => void): () => void;
 }
 
 /** Relative workspace path for git argv — no NUL, no flag-looking names. */
