@@ -4,6 +4,8 @@ import path from "node:path";
 import { stripJsonc } from "../../ai/config/caval-config-shared";
 import type { CavalPreviewConfig } from "../shared/preview-types";
 
+export { stripJsonc };
+
 export type CavalPreviewFileConfig = CavalPreviewConfig;
 
 interface CavalPreviewFileSlice {
