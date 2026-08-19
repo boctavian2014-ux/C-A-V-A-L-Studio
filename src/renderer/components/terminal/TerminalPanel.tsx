@@ -9,15 +9,203 @@ import {
   useProblemsStore,
 } from '../../store/problems-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
-import {
-  createInitialTerminalSession,
-  createTerminalSessionMeta,
-  type TerminalSessionMeta,
-} from '../../terminal/terminal-sessions';
 import type { TerminalPanelTab } from '../../terminal/terminal-events';
-import { TerminalSession } from './TerminalSession';
+import { dispatchTerminalNew } from '../../terminal/terminal-events';
+import type { TerminalInfo, TerminalOutputLine } from '../../../shared/terminal-contract';
+import { TerminalInput } from './TerminalInput';
 
 const TERMINAL_HEIGHT_KEY = 'caval-terminal-height';
+
+interface TerminalTab {
+  id: string;
+  title: string;
+  info: TerminalInfo;
+}
+
+export function TerminalSessions() {
+  const [tabs, setTabs] = useState<TerminalTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [output, setOutput] = useState<Map<string, TerminalOutputLine[]>>(new Map());
+  const outputEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const api = window.caval?.terminal;
+    if (!api?.list) return;
+    void api.list().then((terminals) => {
+      const loadedTabs = terminals.map((info) => ({
+        id: info.id,
+        title: info.title || info.shell,
+        info,
+      }));
+      setTabs(loadedTabs);
+      setActiveTabId((current) => current ?? loadedTabs[0]?.id ?? null);
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.caval?.terminal?.onOutput?.((line) => {
+      setOutput((prev) => {
+        const next = new Map(prev);
+        const lines = next.get(line.terminalId) ?? [];
+        next.set(line.terminalId, [...lines.slice(-999), line]);
+        return next;
+      });
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.caval?.terminal?.onExit?.((info) => {
+      setTabs((prev) => prev.map((tab) => (tab.id === info.id ? { ...tab, info } : tab)));
+    });
+    return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [output, activeTabId]);
+
+  const handleCreateTab = useCallback(async () => {
+    const api = window.caval?.terminal;
+    if (!api?.create) return;
+    const info = await api.create({
+      title: `Terminal ${tabs.length + 1}`,
+    });
+    const newTab: TerminalTab = {
+      id: info.id,
+      title: info.title || info.shell,
+      info,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(info.id);
+  }, [tabs.length]);
+
+  useEffect(() => {
+    const onNew = () => {
+      void handleCreateTab();
+    };
+    document.addEventListener('caval:terminal-new', onNew);
+    document.addEventListener('caval:terminal-split', onNew);
+    return () => {
+      document.removeEventListener('caval:terminal-new', onNew);
+      document.removeEventListener('caval:terminal-split', onNew);
+    };
+  }, [handleCreateTab]);
+
+  const handleCloseTab = useCallback(async (id: string) => {
+    await window.caval?.terminal?.destroy?.(id);
+    setTabs((prev) => {
+      const next = prev.filter((tab) => tab.id !== id);
+      setActiveTabId((current) => (current === id ? next[0]?.id ?? null : current));
+      return next;
+    });
+  }, []);
+
+  const handleInput = useCallback(
+    async (data: string) => {
+      if (!activeTabId) return;
+      await window.caval?.terminal?.write?.(activeTabId, data);
+    },
+    [activeTabId]
+  );
+
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const activeOutput = activeTabId ? output.get(activeTabId) ?? [] : [];
+  const filteredOutput = searchQuery
+    ? activeOutput.filter((line) => line.data.toLowerCase().includes(searchQuery.toLowerCase()))
+    : activeOutput;
+
+  return (
+    <div className="terminal-panel" role="region" aria-label="Terminal" data-testid="terminal-sessions">
+      <div className="terminal-tabs" role="tablist" aria-label="Terminal sessions">
+        {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              role="tab"
+              tabIndex={0}
+              className={`terminal-tab ${tab.id === activeTabId ? 'active' : ''}`}
+              onClick={() => setActiveTabId(tab.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setActiveTabId(tab.id);
+                }
+              }}
+              aria-label={`Switch to ${tab.title}`}
+              aria-selected={tab.id === activeTabId}
+              data-testid={`terminal-tab-${tab.id}`}
+            >
+            <span className="terminal-tab-title">{tab.title}</span>
+            <span
+              className={`terminal-tab-status status-${tab.info.status}`}
+              aria-label={`Status: ${tab.info.status}`}
+            />
+            <button
+              type="button"
+              className="terminal-tab-close"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleCloseTab(tab.id);
+              }}
+              aria-label={`Close ${tab.title}`}
+            >
+              ×
+            </button>
+            </div>
+        ))}
+        <button
+          type="button"
+          className="terminal-tab-add"
+          onClick={() => void handleCreateTab()}
+          aria-label="New terminal"
+          data-testid="terminal-tab-add"
+        >
+          +
+        </button>
+      </div>
+
+      <div className="terminal-toolbar">
+        <input
+          type="search"
+          placeholder="Search output…"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          className="terminal-search"
+          aria-label="Search terminal output"
+          data-testid="terminal-search"
+        />
+      </div>
+
+      <div className="terminal-output" role="log" aria-live="polite" data-testid="terminal-output">
+        {filteredOutput.map((line, index) => (
+          <div key={`${line.timestamp}-${index}`} className="terminal-line">
+            {line.data}
+          </div>
+        ))}
+        <div ref={outputEndRef} />
+      </div>
+
+      {activeTab && (
+        <TerminalInput
+          key={activeTab.id}
+          terminalId={activeTab.id}
+          onInput={handleInput}
+          disabled={activeTab.info.status !== 'active'}
+        />
+      )}
+
+      {tabs.length === 0 && (
+        <div className="terminal-empty" data-testid="terminal-empty">
+          <p>No terminals open.</p>
+          <button type="button" className="btn-primary" onClick={() => void handleCreateTab()}>
+            Open Terminal
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function readStoredTerminalHeight(): number {
   try {
@@ -32,9 +220,6 @@ function readStoredTerminalHeight(): number {
 
 export function TerminalPanel() {
   const projectPath = useEditorStore((s) => s.projectPath);
-  const initialSessionRef = useRef(createInitialTerminalSession());
-  const [sessions, setSessions] = useState<TerminalSessionMeta[]>(() => [initialSessionRef.current]);
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => initialSessionRef.current.id);
   const [activeTab, setActiveTab] = useState<TerminalPanelTab>('terminal');
   const [height, setHeight] = useState(readStoredTerminalHeight);
   const [isVisible, setIsVisible] = useState(true);
@@ -66,24 +251,11 @@ export function TerminalPanel() {
     queueChatFromPanel(text);
   }, [queueChatFromPanel]);
 
-  const createSession = useCallback(() => {
-    const meta = createTerminalSessionMeta(sessions.length);
-    setSessions((prev) => [...prev, meta]);
-    setActiveSessionId(meta.id);
+  const openTerminalTab = useCallback(() => {
     setIsVisible(true);
     setActiveTab('terminal');
-  }, [sessions.length]);
-
-  const closeSession = useCallback((id: string) => {
-    setSessions((prev) => {
-      if (prev.length <= 1) return prev;
-      const next = prev.filter((s) => s.id !== id);
-      if (activeSessionId === id) {
-        setActiveSessionId(next[next.length - 1]?.id ?? '');
-      }
-      return next;
-    });
-  }, [activeSessionId]);
+    dispatchTerminalNew();
+  }, []);
 
   useEffect(() => {
     const showPanel = (e: Event) => {
@@ -95,23 +267,17 @@ export function TerminalPanel() {
       setIsVisible(true);
       setActiveTab('terminal');
     };
-    const onNew = () => createSession();
-    const onSplit = () => createSession();
     const onToggle = () => setIsVisible((v) => !v);
 
     document.addEventListener('caval:terminal-panel-tab', showPanel);
     document.addEventListener('caval:run-in-terminal', onRunInTerminal);
-    document.addEventListener('caval:terminal-new', onNew);
-    document.addEventListener('caval:terminal-split', onSplit);
     document.addEventListener('caval:terminal-toggle', onToggle);
     return () => {
       document.removeEventListener('caval:terminal-panel-tab', showPanel);
       document.removeEventListener('caval:run-in-terminal', onRunInTerminal);
-      document.removeEventListener('caval:terminal-new', onNew);
-      document.removeEventListener('caval:terminal-split', onSplit);
       document.removeEventListener('caval:terminal-toggle', onToggle);
     };
-  }, [createSession]);
+  }, []);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -219,39 +385,6 @@ export function TerminalPanel() {
           </span>
         ))}
 
-        {activeTab === 'terminal' && sessions.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', marginLeft: 8, gap: 2, overflow: 'auto' }}>
-            {sessions.map((s) => (
-              <span
-                key={s.id}
-                onClick={() => setActiveSessionId(s.id)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
-                  fontSize: 10, fontFamily: 'var(--font-mono)',
-                  background: activeSessionId === s.id ? 'rgba(0,224,255,0.12)' : 'transparent',
-                  color: activeSessionId === s.id ? 'var(--caval-text)' : 'var(--caval-text-muted)',
-                }}
-              >
-                {s.title}
-                {sessions.length > 1 && (
-                  <button
-                    type="button"
-                    title="Închide terminal"
-                    onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}
-                    style={{
-                      border: 'none', background: 'none', color: 'inherit',
-                      cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1,
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
-
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, padding: '0 8px', alignItems: 'center' }}>
           {activeTab === 'problems' && problems.length > 0 && (
             <ChatActionBtn title="Trimite toate erorile în chat" onClick={sendAllProblemsToChat}>
@@ -263,21 +396,21 @@ export function TerminalPanel() {
               → Chat
             </ChatActionBtn>
           )}
-          <PanelBtn title="Terminal nou" onClick={createSession}>+</PanelBtn>
+          <PanelBtn title="Terminal nou" onClick={openTerminalTab}>+</PanelBtn>
           <PanelBtn title="Minimizează" onClick={() => setIsVisible(false)}>⌄</PanelBtn>
         </div>
       </div>
 
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {sessions.map((s) => (
-          <TerminalSession
-            key={s.id}
-            sessionId={s.id}
-            containerId={s.containerId}
-            cwd={projectPath}
-            isActive={activeTab === 'terminal' && activeSessionId === s.id}
-          />
-        ))}
+        <div
+          style={{
+            display: activeTab === 'terminal' ? 'flex' : 'none',
+            height: '100%',
+            flexDirection: 'column',
+          }}
+        >
+          <TerminalSessions />
+        </div>
 
         {activeTab === 'output' && (
           <div style={{
