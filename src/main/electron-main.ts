@@ -28,6 +28,7 @@ import {
 } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
 import { registerTerminalHandlers } from "./terminal-handlers";
+import { registerPreviewHandlers, stopAllPreviewProcesses } from "./preview/preview-handlers";
 import {
   addRecentWorkspace,
   listRecentWorkspaces,
@@ -148,6 +149,7 @@ export function getBoundWorkspaceRoot(senderId: number): string | undefined {
 
 registerGitHandlers(getBoundWorkspaceRoot);
 registerTerminalHandlers(getBoundWorkspaceRoot);
+registerPreviewHandlers(getBoundWorkspaceRoot);
 registerEngineeringHandlers(getBoundWorkspaceRoot);
 registerModelHandlers(
   (id) => workspaceRoots.get(id) ?? process.cwd(),
@@ -1755,6 +1757,7 @@ app.on("window-all-closed", () => {
       terminal.kill();
     }
   }
+  void stopAllPreviewProcesses();
   stopCadLocalServer();
   stopMarketplaceServer();
   if (process.platform !== "darwin") {
