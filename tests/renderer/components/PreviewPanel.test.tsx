@@ -87,7 +87,7 @@ describe("PreviewPanel", () => {
     return result;
   }
 
-  it("renders not-configured copy and the config button", async () => {
+  it("keeps Open Web / Open Mobile visible when preview is not configured", async () => {
     const { api } = createPreviewMock({
       web: idle("web", "not-configured"),
       mobile: idle("mobile", "not-configured"),
@@ -99,10 +99,31 @@ describe("PreviewPanel", () => {
     expect(container.querySelector('[data-testid="preview-web-status"]')?.textContent).toBe(
       "Not configured"
     );
+    expect(container.querySelector('[data-testid="preview-web-start"]')?.textContent).toContain(
+      "Open Web"
+    );
+    expect(container.querySelector('[data-testid="preview-mobile-start"]')?.textContent).toContain(
+      "Open Mobile"
+    );
     const configButtons = Array.from(container.querySelectorAll("button")).filter((btn) =>
       btn.textContent?.includes("Configure in caval.jsonc")
     );
     expect(configButtons.length).toBeGreaterThan(0);
+  });
+
+  it("still renders Open Web when the preview API is missing", async () => {
+    window.caval = {} as Window["caval"];
+    const result = mount(<PreviewPanel />);
+    mounted = result;
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.container.querySelector('[data-testid="preview-web-start"]')?.textContent).toContain(
+      "Open Web"
+    );
+    expect(result.container.querySelector('[data-testid="preview-mobile-start"]')?.textContent).toContain(
+      "Open Mobile"
+    );
   });
 
   it("calls window.caval.preview.start('web') when Open Web is clicked", async () => {

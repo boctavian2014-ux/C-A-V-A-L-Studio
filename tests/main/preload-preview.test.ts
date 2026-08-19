@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invoke, on, removeListener } = vi.hoisted(() => ({
@@ -128,5 +130,16 @@ describe("preload-preview", () => {
   it("rejects invalid targets before ipcRenderer.invoke", async () => {
     await expect(previewApi.start("desktop" as "web")).rejects.toThrow(TypeError);
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("does not import node:path or preview-security (Electron sandbox)", () => {
+    const files = ["preload.ts", "preload-preview.ts"].map((name) =>
+      path.join(__dirname, "../../src/main", name)
+    );
+    for (const file of files) {
+      const src = fs.readFileSync(file, "utf8");
+      expect(src, file).not.toMatch(/from ["']node:path["']/);
+      expect(src, file).not.toMatch(/preview-security/);
+    }
   });
 });

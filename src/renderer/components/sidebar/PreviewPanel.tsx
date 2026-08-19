@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type MouseEvent } from "react";
 
 import type {
+  PreviewApi,
   PreviewLogLine,
   PreviewState,
   PreviewTarget,
@@ -12,18 +13,32 @@ interface TargetPanelProps {
   label: string;
 }
 
-function previewApi() {
-  return window.caval.preview;
+function getPreviewApi(): PreviewApi | null {
+  try {
+    const preview = window.caval?.preview;
+    return preview ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function TargetPanel({ target, label }: TargetPanelProps) {
   const [state, setState] = useState<PreviewState | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<PreviewLogLine[]>([]);
+  const [apiMissing, setApiMissing] = useState(false);
 
   useEffect(() => {
+    const api = getPreviewApi();
+    if (!api) {
+      setApiMissing(true);
+      setState(idlePreviewState(target));
+      return;
+    }
+
     let cancelled = false;
-    void previewApi()
+    setApiMissing(false);
+    void api
       .getState(target)
       .then((next) => {
         if (!cancelled) setState(next);
@@ -31,10 +46,10 @@ function TargetPanel({ target, label }: TargetPanelProps) {
       .catch(() => {
         if (!cancelled) setState(idlePreviewState(target));
       });
-    const unsubscribeState = previewApi().onStateChange((next) => {
+    const unsubscribeState = api.onStateChange((next) => {
       if (next.target === target) setState(next);
     });
-    const unsubscribeLog = previewApi().onLog((line) => {
+    const unsubscribeLog = api.onLog((line) => {
       if (line.target === target) {
         setLogs((prev) => [...prev.slice(-199), line]);
       }
@@ -47,20 +62,21 @@ function TargetPanel({ target, label }: TargetPanelProps) {
   }, [target]);
 
   const handleStart = useCallback(() => {
-    void previewApi().start(target);
+    void getPreviewApi()?.start(target);
   }, [target]);
 
   const handleStop = useCallback(() => {
-    void previewApi().stop(target);
+    void getPreviewApi()?.stop(target);
   }, [target]);
 
   const handleRestart = useCallback(() => {
-    void previewApi().restart(target);
+    void getPreviewApi()?.restart(target);
   }, [target]);
 
   const handleToggleLogs = useCallback(async () => {
-    if (!showLogs) {
-      const existing = await previewApi().getLogs(target);
+    const api = getPreviewApi();
+    if (!showLogs && api) {
+      const existing = await api.getLogs(target);
       setLogs(existing);
     }
     setShowLogs((open) => !open);
@@ -69,12 +85,13 @@ function TargetPanel({ target, label }: TargetPanelProps) {
   const handleOpenUrl = useCallback(
     (event: MouseEvent<HTMLAnchorElement>) => {
       event.preventDefault();
-      void previewApi().openUrl(target);
+      void getPreviewApi()?.openUrl(target);
     },
     [target]
   );
 
   const status = state?.status ?? "stopped";
+  const showOpen = status === "stopped" || status === "failed" || status === "not-configured";
 
   return (
     <div className="preview-target-panel" data-status={status} data-testid={`preview-${target}`}>
@@ -83,62 +100,79 @@ function TargetPanel({ target, label }: TargetPanelProps) {
         <StatusBadge status={status} testId={`preview-${target}-status`} />
       </div>
 
-      {status === "not-configured" ? (
-        <div className="preview-target-empty">
-          <p>{label} preview is not configured.</p>
+      <div className="preview-target-actions">
+        {showOpen ? (
           <button
             type="button"
-            className="btn-ghost"
+            className="preview-open-btn"
+            data-testid={`preview-${target}-start`}
+            onClick={handleStart}
+            disabled={apiMissing}
+            aria-label={`Open ${label}`}
+          >
+            Open {label}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="preview-secondary-btn"
+              data-testid={`preview-${target}-restart`}
+              onClick={handleRestart}
+              disabled={apiMissing}
+              aria-label={`Restart ${label} preview`}
+            >
+              Restart
+            </button>
+            <button
+              type="button"
+              className="preview-ghost-btn"
+              data-testid={`preview-${target}-stop`}
+              onClick={handleStop}
+              disabled={apiMissing}
+              aria-label={`Stop ${label} preview`}
+            >
+              Stop
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          className="preview-ghost-btn"
+          data-testid={`preview-${target}-logs`}
+          onClick={() => void handleToggleLogs()}
+          disabled={apiMissing}
+          aria-label={`Toggle logs for ${label}`}
+        >
+          Logs
+        </button>
+        {(status === "not-configured" || apiMissing) && (
+          <button
+            type="button"
+            className="preview-ghost-btn"
             data-testid={`preview-${target}-config`}
-            onClick={() => void previewApi().openConfig()}
+            onClick={() => void getPreviewApi()?.openConfig()}
+            disabled={apiMissing}
           >
             Configure in caval.jsonc
           </button>
-        </div>
-      ) : (
-        <div className="preview-target-actions">
-          {status === "stopped" || status === "failed" ? (
-            <button
-              type="button"
-              className="btn-primary"
-              data-testid={`preview-${target}-start`}
-              onClick={handleStart}
-              aria-label={`Open ${label}`}
-            >
-              Open {label}
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="btn-secondary"
-                data-testid={`preview-${target}-restart`}
-                onClick={handleRestart}
-                aria-label={`Restart ${label} preview`}
-              >
-                Restart
-              </button>
-              <button
-                type="button"
-                className="btn-ghost"
-                data-testid={`preview-${target}-stop`}
-                onClick={handleStop}
-                aria-label={`Stop ${label} preview`}
-              >
-                Stop
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            className="btn-icon"
-            data-testid={`preview-${target}-logs`}
-            onClick={() => void handleToggleLogs()}
-            aria-label={`Toggle logs for ${label}`}
-          >
-            Logs
-          </button>
-        </div>
+        )}
+      </div>
+
+      {apiMissing && (
+        <p className="preview-target-error" role="status">
+          Restart CAVAL Studio after webpack finishes so Preview can start.
+        </p>
+      )}
+
+      {status === "not-configured" && !apiMissing && (
+        <p className="preview-target-hint">
+          {label} preview is not configured. Open still tries detection, or add preview in caval.jsonc.
+        </p>
+      )}
+
+      {status === "starting" && (
+        <p className="preview-target-hint">{label} preview is starting…</p>
       )}
 
       {state?.url && status === "running" && (

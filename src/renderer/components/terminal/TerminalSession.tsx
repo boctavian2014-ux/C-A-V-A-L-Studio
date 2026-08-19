@@ -112,6 +112,11 @@ export function TerminalSession({
       container.addEventListener('contextmenu', onContextMenu);
     }
 
+    const resizeObserver = new ResizeObserver(() => {
+      if (isActiveRef.current) fitTerminal();
+    });
+    if (container) resizeObserver.observe(container);
+
     const caval = window.caval;
     if (!caval?.terminal) {
       term.writeln('\r\n\x1b[33mTerminal indisponibil — repornește aplicația.\x1b[0m');
@@ -140,11 +145,6 @@ export function TerminalSession({
         term.write(data);
       });
     });
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (isActive) fitTerminal();
-    });
-    if (container) resizeObserver.observe(container);
 
     const onTerminalWrite = (e: Event) => {
       const detail = (e as CustomEvent<{ data?: string; cmd?: string; sessionId?: string }>).detail;

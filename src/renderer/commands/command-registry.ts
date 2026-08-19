@@ -123,6 +123,28 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       run: () => ctx.toggleSidebar(),
     },
     {
+      id: 'preview:open-web',
+      label: 'Preview: Open Web',
+      category: 'Preview',
+      keywords: ['preview', 'web', 'run', 'dev', 'browser'],
+      run: () => {
+        ctx.setActiveActivity('explorer');
+        ctx.setSidebarOpen(true);
+        void window.caval?.preview?.start('web');
+      },
+    },
+    {
+      id: 'preview:open-mobile',
+      label: 'Preview: Open Mobile',
+      category: 'Preview',
+      keywords: ['preview', 'mobile', 'expo', 'run'],
+      run: () => {
+        ctx.setActiveActivity('explorer');
+        ctx.setSidebarOpen(true);
+        void window.caval?.preview?.start('mobile');
+      },
+    },
+    {
       id: 'run:tests',
       label: 'Run: npm test (verify workspace)',
       category: 'Run',

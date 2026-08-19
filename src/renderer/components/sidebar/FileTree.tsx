@@ -269,7 +269,9 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
         </div>
       </div>
 
-      <PreviewPanel />
+      <div style={{ flexShrink: 0 }}>
+        <PreviewPanel />
+      </div>
 
       {/* Tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}

@@ -1,13 +1,13 @@
 import { ipcRenderer } from "electron";
 
-import type {
-  PreviewApi,
-  PreviewLogLine,
-  PreviewState,
-  PreviewTarget,
+import {
+  isPreviewTarget,
+  type PreviewApi,
+  type PreviewLogLine,
+  type PreviewState,
+  type PreviewTarget,
 } from "../shared/preview-contract";
 import { PREVIEW_CHANNELS } from "../shared/preview-ipc-channels";
-import { isPreviewTarget } from "../shared/preview-security";
 
 function assertTarget(target: PreviewTarget): void {
   if (!isPreviewTarget(target)) {

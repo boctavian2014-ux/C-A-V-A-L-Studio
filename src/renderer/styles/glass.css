@@ -104,8 +104,10 @@
 .preview-panel {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: var(--space-3, 10px);
   padding: var(--space-3, 10px) var(--space-3, 12px);
+  border-bottom: 1px solid var(--caval-border, rgba(255, 255, 255, 0.08));
 }
 
 .preview-panel-title {
@@ -144,10 +146,41 @@
   gap: var(--space-2, 8px);
 }
 
-.preview-target-empty p {
+.preview-target-empty p,
+.preview-target-hint {
   margin: 0;
   font-size: 12px;
   color: var(--color-text-muted, #8a95a6);
+}
+
+.preview-open-btn {
+  padding: 6px 12px;
+  background: var(--caval-accent, #00e0ff);
+  color: #0e0e0f;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.preview-open-btn:disabled,
+.preview-secondary-btn:disabled,
+.preview-ghost-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.preview-secondary-btn,
+.preview-ghost-btn {
+  padding: 6px 10px;
+  background: var(--color-surface-offset, rgba(255, 255, 255, 0.06));
+  color: var(--color-text, #d7dee8);
+  border: 1px solid var(--caval-border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .preview-target-url {
