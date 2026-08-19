@@ -1,20 +1,19 @@
-import { create } from 'zustand';
-import { useEditorStore } from './editor-store';
+import { create } from "zustand";
 
-// ──────────────────────────────────────────────
-//  Git Store — CAVALLO Studio
-//  Gestionează starea Git: branch, fișiere modificate,
-//  staged, diff activ, commit history, operații async.
-// ──────────────────────────────────────────────
+import type {
+  GitApi,
+  GitBranch,
+  GitFileChange,
+  GitLogEntry,
+  GitOperationState,
+  GitStatus,
+} from "../../shared/git-contract";
+import { useEditorStore } from "./editor-store";
 
-export type GitTabId = 'changes' | 'history';
+export type GitTabId = "changes" | "history";
 
-export interface GitFileStatus {
-  path: string;
-  status: string;
-  staged: boolean;
-  oldPath?: string;
-}
+/** @deprecated Use GitFileChange from the shared contract. Kept as a store alias. */
+export type GitFileStatus = GitFileChange;
 
 export interface GitCommit {
   hash: string;
@@ -25,73 +24,102 @@ export interface GitCommit {
   refs: string;
 }
 
+function getGitApi(): GitApi {
+  const git = window.caval?.git;
+  if (!git) {
+    throw new Error("Git API unavailable");
+  }
+  return git as unknown as GitApi;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
+function applyStatusFields(status: GitStatus): Pick<
+  GitState,
+  "isRepo" | "branch" | "upstream" | "ahead" | "behind" | "files" | "loading" | "error"
+> {
+  const extra = status as GitStatus & { isRepo?: boolean; upstream?: string | null };
+  return {
+    isRepo: extra.isRepo ?? true,
+    branch: status.branch,
+    upstream: extra.upstream ?? null,
+    ahead: status.ahead,
+    behind: status.behind,
+    files: status.files,
+    loading: false,
+    error: null,
+  };
+}
+
+function logToCommit(entry: GitLogEntry): GitCommit {
+  return {
+    hash: entry.hash,
+    shortHash: entry.shortHash,
+    subject: entry.message,
+    author: entry.author,
+    date: entry.date,
+    refs: "",
+  };
+}
+
 export interface GitState {
-  // ── Status ──
   isRepo: boolean;
   branch: string;
   upstream: string | null;
   ahead: number;
   behind: number;
-  files: GitFileStatus[];
+  files: GitFileChange[];
 
-  // ── UI state ──
   activeTab: GitTabId;
-  selectedFile: GitFileStatus | null;
+  selectedFile: GitFileChange | null;
   diffContent: string;
-  filePair: { original: string; modified: string; language: string } | null;
+  diffBinary: boolean;
   isDiffStaged: boolean;
   commitMessage: string;
 
-  // ── History ──
   commits: GitCommit[];
 
-  // ── Loading / Error ──
   loading: boolean;
   diffLoading: boolean;
-  filePairLoading: boolean;
   opLoading: boolean;
   error: string | null;
   opResult: { ok: boolean; message: string } | null;
+  operation: GitOperationState | null;
 
-  // ── Branch picker ──
-  branches: string[];
+  branches: GitBranch[];
   showBranchPicker: boolean;
   newBranchName: string;
 
-  // ── Actions ──
-  refresh:      () => Promise<void>;
-  loadDiff:     (file: GitFileStatus) => Promise<void>;
-  stage:        (filePath: string) => Promise<void>;
-  unstage:      (filePath: string) => Promise<void>;
-  stageAll:     () => Promise<void>;
-  unstageAll:   () => Promise<void>;
-  discard:      (filePath: string) => Promise<void>;
-  revertHunk:   (hunkPatch: string) => Promise<boolean>;
-  commit:       () => Promise<void>;
-  push:         () => Promise<void>;
-  pull:         () => Promise<void>;
-  loadLog:      () => Promise<void>;
+  refresh: () => Promise<void>;
+  applyStatus: (status: GitStatus) => void;
+  setOperation: (operation: GitOperationState) => void;
+  loadDiff: (file: GitFileChange, staged?: boolean) => Promise<void>;
+  stage: (filePath: string) => Promise<void>;
+  unstage: (filePath: string) => Promise<void>;
+  stageAll: () => Promise<void>;
+  unstageAll: () => Promise<void>;
+  discard: (filePath: string) => Promise<void>;
+  commit: () => Promise<void>;
+  push: () => Promise<void>;
+  pull: () => Promise<void>;
+  loadLog: () => Promise<void>;
   loadBranches: () => Promise<void>;
-  checkout:     (branch: string) => Promise<void>;
+  checkout: (branch: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
-  initRepo:     () => Promise<void>;
-  stash:        () => Promise<void>;
-  stashPop:     () => Promise<void>;
+  initRepo: () => Promise<void>;
+  stash: () => Promise<void>;
+  stashPop: () => Promise<void>;
 
-  // ── Setters UI ──
-  setActiveTab:       (tab: GitTabId) => void;
-  setCommitMessage:   (msg: string) => void;
+  setActiveTab: (tab: GitTabId) => void;
+  setCommitMessage: (msg: string) => void;
   setShowBranchPicker: (v: boolean) => void;
-  setNewBranchName:   (name: string) => void;
-  clearOpResult:      () => void;
+  setNewBranchName: (name: string) => void;
+  clearOpResult: () => void;
+  resetForTests: () => void;
 }
 
-// Helper: obține projectPath din editor store
-function getProjectPath(): string | null {
-  return useEditorStore.getState().projectPath;
-}
-
-// Helper: setează opResult și îl curăță după 3s
 let opResultTimer: ReturnType<typeof setTimeout> | null = null;
 
 function setOpResult(set: (partial: Partial<GitState>) => void, result: { ok: boolean; message: string }) {
@@ -102,308 +130,276 @@ function setOpResult(set: (partial: Partial<GitState>) => void, result: { ok: bo
   }, 4000);
 }
 
-export const useGitStore = create<GitState>((set, get) => ({
-  // ── Stare inițială ──
+const GIT_STORE_DEFAULTS: Pick<
+  GitState,
+  | "isRepo"
+  | "branch"
+  | "upstream"
+  | "ahead"
+  | "behind"
+  | "files"
+  | "activeTab"
+  | "selectedFile"
+  | "diffContent"
+  | "diffBinary"
+  | "isDiffStaged"
+  | "commitMessage"
+  | "commits"
+  | "loading"
+  | "diffLoading"
+  | "opLoading"
+  | "error"
+  | "opResult"
+  | "operation"
+  | "branches"
+  | "showBranchPicker"
+  | "newBranchName"
+> = {
   isRepo: false,
-  branch: '',
+  branch: "",
   upstream: null,
   ahead: 0,
   behind: 0,
   files: [],
-
-  activeTab: 'changes',
+  activeTab: "changes",
   selectedFile: null,
-  diffContent: '',
-  filePair: null,
+  diffContent: "",
+  diffBinary: false,
   isDiffStaged: false,
-  commitMessage: '',
-
+  commitMessage: "",
   commits: [],
-
-  loading: false,
+  loading: true,
   diffLoading: false,
-  filePairLoading: false,
   opLoading: false,
   error: null,
   opResult: null,
-
+  operation: null,
   branches: [],
   showBranchPicker: false,
-  newBranchName: '',
+  newBranchName: "",
+};
 
-  // ──────────────────────────────────────────
-  //  refresh — reîncarcă status complet
-  // ──────────────────────────────────────────
+export const useGitStore = create<GitState>((set, get) => ({
+  ...GIT_STORE_DEFAULTS,
+
   refresh: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-
     set({ loading: true, error: null });
     try {
-      const status = await window.caval.git.status(projectPath);
-      set({
-        isRepo:   status.isRepo,
-        branch:   status.branch,
-        upstream: status.upstream,
-        ahead:    status.ahead,
-        behind:   status.behind,
-        files:    status.files,
-        loading:  false,
-      });
-
-      // Dacă fișierul selectat nu mai există în status, deselecționează
-      const { selectedFile } = get();
-      if (selectedFile) {
-        const still = status.files.find((f: GitFileStatus) => f.path === selectedFile.path && f.staged === selectedFile.staged);
-        if (!still) set({ selectedFile: null, diffContent: '', filePair: null });
-      }
-
-      const { selectedFile: current } = get();
-      if (!current && status.files.length > 0) {
-        void get().loadDiff(status.files[0]);
-      }
-    } catch (err: any) {
-      set({ loading: false, error: err.message });
+      const status = await getGitApi().status();
+      get().applyStatus(status);
+    } catch (err: unknown) {
+      set({ loading: false, error: errorMessage(err, "Git status failed") });
     }
   },
 
-  // ──────────────────────────────────────────
-  //  loadDiff — diff pentru fișierul selectat
-  // ──────────────────────────────────────────
-  loadDiff: async (file: GitFileStatus) => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
+  applyStatus: (status) => {
+    const fields = applyStatusFields(status);
+    const { selectedFile } = get();
+    let nextSelected = selectedFile;
+    let clearDiff = false;
+    if (selectedFile) {
+      const still = status.files.find(
+        (file) => file.path === selectedFile.path && file.staged === selectedFile.staged
+      );
+      if (!still) {
+        nextSelected = null;
+        clearDiff = true;
+      }
+    }
+    set({
+      ...fields,
+      selectedFile: nextSelected,
+      ...(clearDiff ? { diffContent: "", diffBinary: false } : {}),
+    });
+  },
 
-    set({ selectedFile: file, diffLoading: true, filePairLoading: true, isDiffStaged: file.staged, filePair: null });
+  setOperation: (operation) => {
+    const opLoading = operation.status === "running";
+    const error =
+      operation.status === "failed" ? operation.error ?? "Git operation failed" : get().error;
+    set({ operation, opLoading, error: operation.status === "failed" ? error : get().error });
+    if (operation.status === "failed" && operation.error) {
+      setOpResult(set, { ok: false, message: operation.error });
+    }
+  },
+
+  loadDiff: async (file, staged = file.staged) => {
+    set({ selectedFile: file, diffLoading: true, isDiffStaged: staged });
     try {
-      const [diff, pair] = await Promise.all([
-        window.caval.git.diff(projectPath, file.path, file.staged),
-        window.caval.git.filePair(projectPath, file.path, file.staged),
-      ]);
-      set({ diffContent: diff, filePair: pair, diffLoading: false, filePairLoading: false });
-    } catch {
-      set({ diffContent: '', filePair: null, diffLoading: false, filePairLoading: false });
+      const result = await getGitApi().diff(file.path, staged);
+      set({
+        diffContent: result.diff,
+        diffBinary: result.binary,
+        diffLoading: false,
+      });
+    } catch (err: unknown) {
+      set({
+        diffContent: "",
+        diffBinary: false,
+        diffLoading: false,
+        error: errorMessage(err, "Could not load diff"),
+      });
     }
   },
 
-  // ──────────────────────────────────────────
-  //  Stage / Unstage
-  // ──────────────────────────────────────────
-  stage: async (filePath: string) => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    await window.caval.git.stage(projectPath, filePath);
-    await get().refresh();
+  stage: async (filePath) => {
+    set({ error: null });
+    try {
+      await getGitApi().stage([filePath]);
+      await get().refresh();
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not stage file") });
+    }
   },
 
-  unstage: async (filePath: string) => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    await window.caval.git.unstage(projectPath, filePath);
-    await get().refresh();
+  unstage: async (filePath) => {
+    set({ error: null });
+    try {
+      await getGitApi().unstage([filePath]);
+      await get().refresh();
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not unstage file") });
+    }
   },
 
   stageAll: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    await window.caval.git.stageAll(projectPath);
-    await get().refresh();
+    const paths = get()
+      .files.filter((file) => !file.staged)
+      .map((file) => file.path);
+    if (paths.length === 0) return;
+    set({ error: null });
+    try {
+      await getGitApi().stage(paths);
+      await get().refresh();
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not stage files") });
+    }
   },
 
   unstageAll: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    await window.caval.git.unstageAll(projectPath);
-    await get().refresh();
-  },
-
-  // ──────────────────────────────────────────
-  //  Discard
-  // ──────────────────────────────────────────
-  discard: async (filePath: string) => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    await window.caval.git.discard(projectPath, filePath);
-    await useEditorStore.getState().reloadTabForPath(filePath);
-    await get().refresh();
-    const { selectedFile } = get();
-    if (selectedFile?.path === filePath) {
-      await get().loadDiff(selectedFile);
+    const paths = get()
+      .files.filter((file) => file.staged)
+      .map((file) => file.path);
+    if (paths.length === 0) return;
+    set({ error: null });
+    try {
+      await getGitApi().unstage(paths);
+      await get().refresh();
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not unstage files") });
     }
   },
 
-  revertHunk: async (hunkPatch: string) => {
-    const projectPath = getProjectPath();
-    const { selectedFile } = get();
-    if (!projectPath || !selectedFile || selectedFile.staged) return false;
-
-    const result = await window.caval.git.revertHunk(projectPath, selectedFile.path, hunkPatch);
-    if (!result.ok) {
-      set({ error: result.error ?? 'Revert hunk failed' });
-      return false;
+  discard: async (filePath) => {
+    set({ error: null });
+    try {
+      await getGitApi().discardChanges([filePath]);
+      await useEditorStore.getState().reloadTabForPath(filePath);
+      await get().refresh();
+      const selected = get().selectedFile;
+      if (selected?.path === filePath) {
+        await get().loadDiff(selected);
+      }
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not discard changes") });
     }
-
-    await useEditorStore.getState().reloadTabForPath(selectedFile.path);
-    await get().refresh();
-    const still = get().files.find((f) => f.path === selectedFile.path && !f.staged) ?? get().files.find((f) => f.path === selectedFile.path);
-    if (still) await get().loadDiff(still);
-    return true;
   },
 
-  // ──────────────────────────────────────────
-  //  Commit
-  // ──────────────────────────────────────────
   commit: async () => {
-    const projectPath = getProjectPath();
     const { commitMessage, files } = get();
-    if (!projectPath) return;
-    if (!commitMessage.trim()) {
-      set({ error: 'Introdu un mesaj pentru commit.' });
-      return;
-    }
-    const staged = files.filter((f) => f.staged);
-    if (staged.length === 0) {
-      set({ error: 'Nu există fișiere staged pentru commit.' });
-      return;
-    }
+    const message = commitMessage.trim();
+    if (!message || !files.some((file) => file.staged)) return;
 
     set({ opLoading: true, error: null });
-    const result = await window.caval.git.commit(projectPath, commitMessage);
-    if (result.ok) {
-      set({ commitMessage: '' });
+    try {
+      const result = await getGitApi().commit({ message });
+      set({ commitMessage: "" });
       setOpResult(set, { ok: true, message: `Commit creat: ${result.hash}` });
       await get().refresh();
-    } else {
-      setOpResult(set, { ok: false, message: result.error || 'Commit eșuat.' });
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Commit failed") });
+      set({ error: errorMessage(err, "Commit failed") });
     }
   },
 
-  // ──────────────────────────────────────────
-  //  Push / Pull
-  // ──────────────────────────────────────────
   push: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    set({ opLoading: true, error: null });
-    const { upstream } = get();
-    const result = await window.caval.git.push(projectPath, !upstream);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? 'Push realizat cu succes.' : (result.error || 'Push eșuat.'),
+    set({
+      opLoading: false,
+      error: "Push rămâne pe canalul confirmat din main — Pas 4.5.",
     });
-    if (result.ok) await get().refresh();
   },
 
   pull: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    set({ opLoading: true, error: null });
-    const result = await window.caval.git.pull(projectPath);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? 'Pull realizat cu succes.' : (result.error || 'Pull eșuat.'),
+    set({
+      opLoading: false,
+      error: "Pull rămâne pe canalul confirmat din main — Pas 4.5.",
     });
-    if (result.ok) await get().refresh();
   },
 
-  // ──────────────────────────────────────────
-  //  Log / History
-  // ──────────────────────────────────────────
   loadLog: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    const commits = await window.caval.git.log(projectPath, 100);
-    set({ commits });
+    try {
+      const entries = await getGitApi().log(100);
+      set({ commits: entries.map(logToCommit) });
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not load history") });
+    }
   },
 
-  // ──────────────────────────────────────────
-  //  Branch operations
-  // ──────────────────────────────────────────
   loadBranches: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    const branches = await window.caval.git.branches(projectPath);
-    set({ branches });
-  },
-
-  checkout: async (branch: string) => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    set({ opLoading: true });
-    const result = await window.caval.git.checkout(projectPath, branch);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? `Schimbat pe branch: ${branch}` : (result.error || 'Checkout eșuat.'),
-    });
-    if (result.ok) {
-      set({ showBranchPicker: false });
-      await get().refresh();
+    try {
+      const branches = await getGitApi().branches();
+      set({ branches });
+    } catch (err: unknown) {
+      set({ error: errorMessage(err, "Could not load branches") });
     }
   },
 
-  createBranch: async (name: string) => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    set({ opLoading: true });
-    const result = await window.caval.git.createBranch(projectPath, name);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? `Branch creat: ${name}` : (result.error || 'Creare branch eșuată.'),
-    });
-    if (result.ok) {
-      set({ showBranchPicker: false, newBranchName: '' });
-      await get().refresh();
-    }
-  },
-
-  // ──────────────────────────────────────────
-  //  Init repo
-  // ──────────────────────────────────────────
-  initRepo: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
+  checkout: async (branch) => {
     set({ opLoading: true, error: null });
-    const result = await window.caval.git.init(projectPath);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? 'Repository Git inițializat.' : (result.error || 'git init eșuat.'),
-    });
-    if (result.ok) await get().refresh();
+    try {
+      await getGitApi().checkout(branch);
+      set({ showBranchPicker: false, opLoading: false });
+      setOpResult(set, { ok: true, message: `Schimbat pe branch: ${branch}` });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Checkout failed") });
+      set({ error: errorMessage(err, "Checkout failed") });
+    }
   },
 
-  // ──────────────────────────────────────────
-  //  Stash
-  // ──────────────────────────────────────────
-  stash: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    set({ opLoading: true });
-    const result = await window.caval.git.stash(projectPath);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? 'Modificări salvate în stash.' : (result.error || 'Stash eșuat.'),
+  createBranch: async (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set({ opLoading: true, error: null });
+    try {
+      await getGitApi().createBranch(trimmed);
+      set({ showBranchPicker: false, newBranchName: "", opLoading: false });
+      setOpResult(set, { ok: true, message: `Branch creat: ${trimmed}` });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Create branch failed") });
+      set({ error: errorMessage(err, "Create branch failed") });
+    }
+  },
+
+  initRepo: async () => {
+    set({
+      error: "git init rămâne pe canalul legacy — Pas 4.5.",
     });
-    if (result.ok) await get().refresh();
+  },
+
+  stash: async () => {
+    set({ error: "Stash rămâne pe canalul legacy — Pas 4.5." });
   },
 
   stashPop: async () => {
-    const projectPath = getProjectPath();
-    if (!projectPath) return;
-    set({ opLoading: true });
-    const result = await window.caval.git.stashPop(projectPath);
-    setOpResult(set, {
-      ok: result.ok,
-      message: result.ok ? 'Stash aplicat.' : (result.error || 'Stash pop eșuat.'),
-    });
-    if (result.ok) await get().refresh();
+    set({ error: "Stash pop rămâne pe canalul legacy — Pas 4.5." });
   },
 
-  // ──────────────────────────────────────────
-  //  Setters UI
-  // ──────────────────────────────────────────
-  setActiveTab:        (tab)  => set({ activeTab: tab }),
-  setCommitMessage:    (msg)  => set({ commitMessage: msg, error: null }),
-  setShowBranchPicker: (v)    => set({ showBranchPicker: v }),
-  setNewBranchName:    (name) => set({ newBranchName: name }),
-  clearOpResult:       ()     => set({ opResult: null }),
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  setCommitMessage: (msg) => set({ commitMessage: msg, error: null }),
+  setShowBranchPicker: (v) => set({ showBranchPicker: v }),
+  setNewBranchName: (name) => set({ newBranchName: name }),
+  clearOpResult: () => set({ opResult: null }),
+  resetForTests: () => set({ ...GIT_STORE_DEFAULTS }),
 }));
