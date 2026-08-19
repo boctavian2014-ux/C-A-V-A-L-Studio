@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AIMessage, ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
+import { isByokModel, checkModelReadiness } from '../models/model-readiness';
 import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
@@ -2269,14 +2269,14 @@ export const useAIStore = create<AIStore>()(
         if (state.includeMode === 'file') {
           state.includeMode = 'project';
         }
-        if (state.selectedModel === 'caval-auto/free') {
+        // Keep caval-auto/free as default for users without cloud keys.
+        if (
+          state.selectedModel === 'caval-auto/balanced' ||
+          state.selectedModel === 'caval-auto/frontier'
+        ) {
           void getCaval()?.secretsGet?.().then((res) => {
-            const secrets: Record<string, string> = {};
-            for (const [key, isSet] of Object.entries(res?.configured ?? {})) {
-              if (isSet) secrets[key] = '__configured__';
-            }
-            if (hasOpenRouterKey(undefined, secrets)) {
-              useAIStore.setState({ selectedModel: 'caval-auto/balanced' });
+            if (!res?.configured?.OPENROUTER_API_KEY) {
+              useAIStore.setState({ selectedModel: 'caval-auto/free' });
             }
           });
         }
