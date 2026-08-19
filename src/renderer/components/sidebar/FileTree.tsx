@@ -5,6 +5,7 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
 import { IconFolder } from '../brand/CavaloIcons';
+import { PreviewPanel } from './PreviewPanel';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -267,6 +268,8 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
           {onClose && <SidebarCloseButton onClick={onClose} />}
         </div>
       </div>
+
+      <PreviewPanel />
 
       {/* Tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}

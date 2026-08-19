@@ -100,3 +100,104 @@
   border-radius: 50%;
   background: #10b981;
 }
+
+.preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 10px);
+  padding: var(--space-3, 10px) var(--space-3, 12px);
+}
+
+.preview-panel-title {
+  margin: 0;
+  font-size: var(--text-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #8a95a6);
+}
+
+.preview-target-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.preview-target-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+}
+
+.preview-target-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text, #d7dee8);
+}
+
+.preview-target-actions,
+.preview-target-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+.preview-target-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted, #8a95a6);
+}
+
+.preview-target-url {
+  font-size: 11px;
+  color: var(--color-text-muted, #8a95a6);
+  word-break: break-all;
+}
+
+.preview-target-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-error, #f07178);
+}
+
+.preview-target-logs {
+  max-height: 160px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted, #8a95a6);
+}
+
+.preview-target-logs-empty {
+  margin: 0;
+}
+
+.log-line-stderr {
+  color: var(--color-error, #f07178);
+}
+
+.status-badge {
+  font-size: var(--text-xs, 11px);
+  padding: var(--space-1, 2px) var(--space-2, 6px);
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-surface-offset, rgba(255, 255, 255, 0.06));
+  color: var(--color-text-muted, #8a95a6);
+}
+
+.status-badge-running {
+  background: color-mix(in oklch, var(--color-success, #3dd68c) 15%, var(--color-surface, #12141a));
+  color: var(--color-success, #3dd68c);
+}
+
+.status-badge-failed {
+  background: color-mix(in oklch, var(--color-error, #f07178) 15%, var(--color-surface, #12141a));
+  color: var(--color-error, #f07178);
+}
+
+.status-badge-starting {
+  background: color-mix(in oklch, var(--color-warning, #e6b450) 15%, var(--color-surface, #12141a));
+  color: var(--color-warning, #e6b450);
+}

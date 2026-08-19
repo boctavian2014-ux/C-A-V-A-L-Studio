@@ -427,6 +427,8 @@ interface CavalSchematicApi {
   }>;
 }
 
+type CavalPreviewApi = import("../shared/preview-contract").PreviewApi;
+
 interface CavalBridge {
   version?: string;
   productName?: string;
@@ -726,6 +728,7 @@ interface CavalBridge {
   };
   fs: CavalFsApi;
   terminal: CavalTerminalApi;
+  preview: CavalPreviewApi;
   extensions?: {
     list: () => Promise<{ ok: boolean; extensions?: unknown[] }>;
     register: (manifest: { id: string; name: string; version: string }) => Promise<{ ok: boolean; error?: string }>;
