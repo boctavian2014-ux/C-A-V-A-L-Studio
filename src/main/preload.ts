@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { previewApi } from "./preload-preview";
+import { cavalTerminalPreload } from "./preload-terminal";
 
 export interface CavalOpenedFile {
   path: string;
@@ -765,19 +766,7 @@ contextBridge.exposeInMainWorld("caval", {
     reveal: (filePath: string) => ipcRenderer.invoke("fs:reveal", filePath)
   },
 
-  terminal: {
-    create: (id: string, options?: { cwd?: string }) => ipcRenderer.invoke("terminal:create", id, options),
-    write: (id: string, data: string) => ipcRenderer.invoke("terminal:write", id, data),
-    resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke("terminal:resize", id, cols, rows),
-    destroy: (id: string) => ipcRenderer.invoke("terminal:destroy", id),
-    ensurePowerShell: () => ipcRenderer.invoke("terminal:ensurePowerShell"),
-    onData: (id: string, cb: (data: string) => void) => {
-      const channel = `terminal:data:${id}`;
-      const listener = (_event: Electron.IpcRendererEvent, data: string) => cb(data);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    }
-  },
+  terminal: cavalTerminalPreload,
 
   preview: previewApi,
 
