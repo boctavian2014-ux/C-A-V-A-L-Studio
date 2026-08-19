@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { previewApi } from "./preload-preview";
 
 export interface CavalOpenedFile {
   path: string;
@@ -249,7 +250,7 @@ export interface CavalPipelineEvent {
 
 contextBridge.exposeInMainWorld("caval", {
   version: "0.1.0",
-  productName: "CAVALLO Studio",
+  productName: "CAVAL Studio",
   ready: () => ipcRenderer.send("caval:renderer-ready"),
   onMenuCommand: (callback: (command: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, command: string) => callback(command);
@@ -642,6 +643,46 @@ contextBridge.exposeInMainWorld("caval", {
   settingsSave: (settings: Record<string, string>) =>
     ipcRenderer.invoke("caval:settings-save", settings) as Promise<{ ok: boolean }>,
   settingsLoad: () => ipcRenderer.invoke("caval:settings-load") as Promise<{ ok: boolean; settings?: Record<string, string> }>,
+  localAiStatus: () =>
+    ipcRenderer.invoke("caval:local-ai-status") as Promise<{
+      ok: boolean;
+      status?: {
+        supported: boolean;
+        platform: string;
+        installed: boolean;
+        running: boolean;
+        configuredUrl: string;
+        runtimePath?: string;
+        models: string[];
+        defaultModel: string;
+        defaultModelReady: boolean;
+        managedByCaval: boolean;
+        inProgress: boolean;
+        policy: string;
+      };
+      error?: string;
+    }>,
+  localAiSetup: (input?: { installRuntime?: boolean; pullModel?: boolean; modelName?: string }) =>
+    ipcRenderer.invoke("caval:local-ai-setup", input) as Promise<{
+      ok: boolean;
+      changed?: boolean;
+      summary?: string;
+      error?: string;
+      status?: {
+        supported: boolean;
+        platform: string;
+        installed: boolean;
+        running: boolean;
+        configuredUrl: string;
+        runtimePath?: string;
+        models: string[];
+        defaultModel: string;
+        defaultModelReady: boolean;
+        managedByCaval: boolean;
+        inProgress: boolean;
+        policy: string;
+      };
+    }>,
   billingUserId: () =>
     ipcRenderer.invoke("caval:billing-user-id") as Promise<{ ok: boolean; userId?: string }>,
   billingEntitlements: () =>
@@ -737,6 +778,8 @@ contextBridge.exposeInMainWorld("caval", {
       return () => ipcRenderer.removeListener(channel, listener);
     }
   },
+
+  preview: previewApi,
 
   git: {
     status: (projectPath: string) => ipcRenderer.invoke("git:status", projectPath),
