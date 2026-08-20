@@ -30,7 +30,7 @@ import { registerGitHandlers } from "./git-handlers";
 import { registerProblemsHandlers } from "./problems-handlers";
 import { registerTasksHandlers, shutdownAllTasksSync } from "./tasks-handlers";
 import { registerTerminalHandlers, stopAllInteractiveTerminals } from "./terminal-handlers";
-import { registerPreviewHandlers, stopAllPreviewProcesses } from "./preview/preview-handlers";
+import { registerPreviewHandlers, shutdownAllPreviewSync } from "./preview/preview-handlers";
 import {
   addRecentWorkspace,
   listRecentWorkspaces,
@@ -1761,7 +1761,7 @@ app.on("window-all-closed", () => {
       terminal.kill();
     }
   }
-  void stopAllPreviewProcesses();
+  shutdownAllPreviewSync();
   stopAllInteractiveTerminals();
   shutdownAllTasksSync();
   stopCadLocalServer();

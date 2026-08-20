@@ -194,6 +194,24 @@ describe("preview-launcher", () => {
     expect(launcher.getState("mobile").status).toBe("stopped");
   });
 
+  it("shutdownAllSync stops every active preview process before returning", async () => {
+    const webRoot = workspace("shutdown-sync-web");
+    const mobileRoot = workspace("shutdown-sync-mobile");
+    writeViteProject(webRoot);
+    writeExpoProject(mobileRoot);
+    const { launcher, spawnFn, child } = createHarness();
+    const kill = vi.spyOn(child, "kill");
+    await launcher.start("web", webRoot);
+    await launcher.start("mobile", mobileRoot);
+    expect(spawnFn).toHaveBeenCalledTimes(2);
+    launcher.shutdownAllSync();
+    expect(kill).toHaveBeenCalled();
+    expect(launcher.getState("web").status).toBe("stopped");
+    expect(launcher.getState("mobile").status).toBe("stopped");
+    await launcher.start("web", webRoot);
+    expect(spawnFn).toHaveBeenCalledTimes(3);
+  });
+
   it("caps stored logs at maxLogLines", async () => {
     const root = workspace("logs");
     writeViteProject(root);

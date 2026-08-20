@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 import type { PreviewLogLine, PreviewState, PreviewTarget } from "../../shared/preview-contract";
@@ -360,25 +360,46 @@ export class PreviewLauncher extends EventEmitter {
     await Promise.all(targets.map((target) => this.stop(target)));
   }
 
+  /** Blocking kill for `window-all-closed` — must finish before `app.quit()`. */
+  shutdownAllSync(): void {
+    const targets = [...this.processes.keys()];
+    for (const target of targets) {
+      const info = this.processes.get(target);
+      if (!info) continue;
+      try {
+        this.forceKill(info.proc, "SIGKILL");
+      } catch {
+        // best-effort
+      }
+      this.setState(info, "stopped");
+      this.processes.delete(target);
+    }
+  }
+
+  /**
+   * Windows: taskkill /T /F first while the parent is still alive, so npm/vite
+   * children are not reparented and left orphaned. Unix: SIGTERM/SIGKILL the
+   * process only — Preview is not detached, so we never kill(-pid).
+   */
   private forceKill(proc: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
     const pid = proc.pid;
+    if (
+      this.spawnFn === spawn &&
+      typeof pid === "number" &&
+      pid > 1 &&
+      process.platform === "win32"
+    ) {
+      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+        timeout: 8_000,
+      });
+    }
     try {
       proc.kill(signal);
     } catch {
       // already gone
     }
-    if (typeof pid !== "number" || pid <= 1 || process.platform !== "win32") {
-      return;
-    }
-    spawn(
-      "taskkill",
-      ["/pid", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])],
-      {
-        shell: false,
-        windowsHide: true,
-        stdio: "ignore",
-      }
-    );
   }
 }
 

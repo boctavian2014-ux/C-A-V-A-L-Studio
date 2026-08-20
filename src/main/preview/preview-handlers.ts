@@ -129,3 +129,7 @@ export function registerPreviewHandlers(getBoundWorkspaceRoot: BoundWorkspaceRoo
 export async function stopAllPreviewProcesses(): Promise<void> {
   await previewLauncher.shutdownAll();
 }
+
+export function shutdownAllPreviewSync(): void {
+  previewLauncher.shutdownAllSync();
+}
