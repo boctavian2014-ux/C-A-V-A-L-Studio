@@ -222,7 +222,7 @@ const createWindow = (): BrowserWindow => {
     minHeight: 650,
     resizable: true,
     maximizable: true,
-    title: "CAVALLO",
+    title: "CAVAL",
     ...(fsSync.existsSync(iconPath) ? { icon: iconPath } : {}),
     backgroundColor: "#090B12",
     webPreferences: getRendererWebPreferences(path.join(__dirname, "preload.js")),
@@ -613,7 +613,7 @@ const installApplicationMenu = (): void => {
         { type: "separator" },
         { label: "Check for Updates...", click: () => sendMenuCommand("check-updates") },
         {
-          label: "CAVALLO Studio Docs",
+          label: "CAVAL Studio Docs",
           click: () =>
             void openExternalUrl("https://caval.studio", {
               origin: "INTERNAL_CONSTANT",
@@ -696,8 +696,8 @@ const withTimeout = async <T>(operation: (signal: AbortSignal) => Promise<T>, ti
 
 const systemPromptForMode = (mode: "ask" | "plan"): string =>
   mode === "plan"
-    ? "Esti CAVALLO Studio AI in modul Plan. Raspunde cu pasi clari, fisiere relevante, riscuri si validari. Nu modifica direct codul."
-    : "Esti CAVALLO Studio AI in modul Ask. Raspunde concis si practic, folosind contextul fisierului activ cand exista.";
+    ? "Esti CAVAL Studio AI in modul Plan. Raspunde cu pasi clari, fisiere relevante, riscuri si validari. Nu modifica direct codul."
+    : "Esti CAVAL Studio AI in modul Ask. Raspunde concis si practic, folosind contextul fisierului activ cand exista.";
 
 const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatResponse> => {
   const endpoint = process.env.CAVAL_CLOUD_AI_URL;
@@ -1628,7 +1628,7 @@ ipcMain.handle(
 );
 
 app.whenReady().then(() => {
-  app.setName("CAVALLO");
+  app.setName("CAVAL");
   installRendererSessionPolicy();
   installWebContentsSecurity();
   installApplicationMenu();
