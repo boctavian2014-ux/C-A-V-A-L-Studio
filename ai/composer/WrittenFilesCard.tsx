@@ -12,22 +12,27 @@ import {
   revertAppliedNewWrites,
 } from "./chat-apply-controller";
 import { formatWrittenFilesHeadline, joinWorkspaceRelativePath } from "./written-files";
+import { useAiHistoryStore } from "../../src/renderer/store/ai-history-store";
 
 export function WrittenFilesCard({
   files,
   proposedWrites,
   messageId,
+  historicalWrittenFiles,
 }: {
   files?: string[];
   proposedWrites?: ProposedWrite[];
   messageId?: string;
+  historicalWrittenFiles?: Array<{ id: string; filePath: string }>;
 }) {
   const projectPath = useEditorStore((s) => s.projectPath);
   const openFile = useEditorStore((s) => s.openFile);
+  const revertWrittenFile = useAiHistoryStore((s) => s.revertWrittenFile);
   const monaco = useMonaco();
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [appliedNew, setAppliedNew] = useState<ProposedWrite[] | null>(null);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   const proposed = proposedWrites ?? [];
   const isProposed = proposed.length > 0;
@@ -182,7 +187,13 @@ export function WrittenFilesCard({
   }
 
   const list = files ?? [];
-  if (!list.length) return null;
+  const historical = historicalWrittenFiles ?? [];
+  if (!list.length && !historical.length) return null;
+
+  const rows =
+    historical.length > 0
+      ? historical
+      : list.map((filePath) => ({ id: "", filePath }));
 
   return (
     <div
@@ -199,7 +210,7 @@ export function WrittenFilesCard({
         color: "var(--caval-success)",
       }}
     >
-      <div style={{ fontWeight: 600 }}>{formatWrittenFilesHeadline(list.length)}</div>
+      <div style={{ fontWeight: 600 }}>{formatWrittenFilesHeadline(rows.length)}</div>
       <ul
         style={{
           margin: "8px 0 0",
@@ -212,16 +223,19 @@ export function WrittenFilesCard({
           gap: 2,
         }}
       >
-        {list.map((file) => (
-          <li key={file}>
+        {rows.map((row) => (
+          <li
+            key={row.id || row.filePath}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
             <button
               type="button"
               data-testid="written-file-open"
-              title={`Deschide ${file}`}
-              onClick={() => openRel(file)}
+              title={`Deschide ${row.filePath}`}
+              onClick={() => openRel(row.filePath)}
               style={{
                 display: "block",
-                width: "100%",
+                flex: 1,
                 textAlign: "left",
                 background: "none",
                 border: "none",
@@ -233,8 +247,33 @@ export function WrittenFilesCard({
                 wordBreak: "break-all",
               }}
             >
-              {file}
+              {row.filePath}
             </button>
+            {row.id ? (
+              <button
+                type="button"
+                data-testid="written-file-revert-history"
+                disabled={revertingId === row.id}
+                onClick={() => {
+                  setRevertingId(row.id);
+                  void revertWrittenFile(row.id).finally(() => setRevertingId(null));
+                }}
+                style={{
+                  flexShrink: 0,
+                  height: 22,
+                  padding: "0 8px",
+                  borderRadius: 4,
+                  border: "1px solid var(--caval-border)",
+                  background: "transparent",
+                  color: "var(--caval-text-muted)",
+                  fontSize: 10,
+                  cursor: "pointer",
+                }}
+                title="Restore accepted snapshot"
+              >
+                {revertingId === row.id ? "…" : "Revert"}
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -257,7 +296,9 @@ export function WrittenFilesCard({
         </button>
       </div>
       <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--caval-text-muted)" }}>
-        Apasă un fișier ca să-l deschizi. Preview e și în Explorer, sub proiect.
+        {historical.length
+          ? "Revert restores the accepted snapshot from history."
+          : "Apasă un fișier ca să-l deschizi. Preview e și în Explorer, sub proiect."}
       </p>
     </div>
   );

@@ -472,6 +472,31 @@ contextBridge.exposeInMainWorld("caval", {
       deleted: string[];
       errors?: string[];
     }>,
+  aiHistory: {
+    listConversations: () =>
+      ipcRenderer.invoke("caval:ai-history-list") as Promise<{
+        ok: boolean;
+        conversations?: import("../shared/ai-history-contract").ConversationSummary[];
+        error?: string;
+      }>,
+    getConversation: (conversationId: string) =>
+      ipcRenderer.invoke("caval:ai-history-get", { conversationId }) as Promise<{
+        ok: boolean;
+        conversation?: import("../shared/ai-history-contract").AiHistoryConversationPayload;
+        error?: string;
+      }>,
+    deleteConversation: (conversationId: string) =>
+      ipcRenderer.invoke("caval:ai-history-delete", { conversationId }) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
+    revertWrittenFile: (writtenFileId: string) =>
+      ipcRenderer.invoke("caval:ai-history-revert-written", { writtenFileId }) as Promise<{
+        ok: boolean;
+        error?: string;
+        filePath?: string;
+      }>,
+  },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{
       ok: boolean;

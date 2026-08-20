@@ -38,6 +38,7 @@ import { registerEngineeringHandlers } from "./engineering-handlers";
 import { registerModelHandlers, abortAllStreamsForSender } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
 import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
+import { registerAiHistoryHandlers } from "./ai/ai-history-handlers";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
@@ -156,6 +157,7 @@ registerModelHandlers(
   getBoundWorkspaceRoot
 );
 registerChatApplyHandlers(getBoundWorkspaceRoot);
+registerAiHistoryHandlers(getBoundWorkspaceRoot);
 registerMcpHandlers(getBoundWorkspaceRoot);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);

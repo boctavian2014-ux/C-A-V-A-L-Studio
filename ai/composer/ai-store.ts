@@ -120,6 +120,13 @@ export interface ChatMessage {
   reasoning?: string;
   reasoningExpanded?: boolean;
   writtenFiles?: string[];
+  /** Pas 7a.4 — restored written_files rows (id for historical Revert). */
+  historicalWrittenFiles?: Array<{
+    id: string;
+    filePath: string;
+    messageId?: string;
+    createdAt?: number;
+  }>;
   /** Pas 6.4 — proposed chat applies awaiting Accept. */
   proposedWrites?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
   proposeStageKey?: string;

@@ -41,12 +41,22 @@ export interface WrittenFile {
   snapshot: string;
   createdAt?: number;
   id?: string;
+  messageId?: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
 }
 
 export interface AiPersistence {
   createConversation(workspaceRoot: string, title?: string, id?: string): string;
   getConversation(id: string): Conversation | null;
   listConversations(workspaceRoot: string): Conversation[];
+  listConversationSummaries(workspaceRoot: string): ConversationSummary[];
   updateConversationTitle(id: string, title: string): void;
   deleteConversation(id: string): void;
 
@@ -57,12 +67,14 @@ export interface AiPersistence {
     streamId?: string
   ): string;
   getMessages(conversationId: string): Message[];
+  getMessage(id: string): Message | null;
 
   addTimelineEvents(messageId: string, events: TimelineEvent[]): void;
   getTimelineEvents(messageId: string): TimelineEvent[];
 
   addWrittenFiles(messageId: string, files: WrittenFile[]): void;
   getWrittenFiles(messageId: string): WrittenFile[];
+  getWrittenFile(id: string): WrittenFile | null;
 
   close(): void;
 }
@@ -179,6 +191,19 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     ORDER BY updated_at DESC
   `);
 
+  const listSummariesByWorkspace = db.prepare(`
+    SELECT c.id AS id,
+           c.title AS title,
+           c.created_at AS createdAt,
+           c.updated_at AS updatedAt,
+           (
+             SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id
+           ) AS messageCount
+    FROM conversations c
+    WHERE c.workspace_root = ?
+    ORDER BY c.updated_at DESC
+  `);
+
   const updateTitle = db.prepare(`
     UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?
   `);
@@ -196,6 +221,13 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     FROM messages
     WHERE conversation_id = ?
     ORDER BY created_at ASC, rowid ASC
+  `);
+
+  const selectMessageById = db.prepare(`
+    SELECT id, conversation_id AS conversationId, role, content,
+           stream_id AS streamId, created_at AS createdAt
+    FROM messages
+    WHERE id = ?
   `);
 
   const messageExists = db.prepare(`SELECT 1 AS ok FROM messages WHERE id = ?`);
@@ -221,10 +253,16 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
   `);
 
   const selectWritten = db.prepare(`
-    SELECT id, file_path AS filePath, snapshot, created_at AS createdAt
+    SELECT id, message_id AS messageId, file_path AS filePath, snapshot, created_at AS createdAt
     FROM written_files
     WHERE message_id = ?
     ORDER BY created_at ASC, rowid ASC
+  `);
+
+  const selectWrittenById = db.prepare(`
+    SELECT id, message_id AS messageId, file_path AS filePath, snapshot, created_at AS createdAt
+    FROM written_files
+    WHERE id = ?
   `);
 
   function mapConversation(row: Record<string, unknown> | undefined): Conversation | null {
@@ -279,6 +317,18 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       return rows.map((r) => mapConversation(r)!).filter(Boolean);
     },
 
+    listConversationSummaries(root: string): ConversationSummary[] {
+      const ws = normalizeWorkspaceRoot(root);
+      const rows = listSummariesByWorkspace.all(ws) as Array<Record<string, unknown>>;
+      return rows.map((r) => ({
+        id: String(r.id),
+        title: r.title == null ? null : String(r.title),
+        createdAt: Number(r.createdAt),
+        updatedAt: Number(r.updatedAt),
+        messageCount: Number(r.messageCount) || 0,
+      }));
+    },
+
     updateConversationTitle(id: string, title: string): void {
       const safe = gatePersistedText(title.trim(), 500);
       updateTitle.run(safe, Date.now(), id);
@@ -325,6 +375,19 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
         streamId: r.streamId == null ? null : String(r.streamId),
         createdAt: Number(r.createdAt),
       }));
+    },
+
+    getMessage(id: string): Message | null {
+      const r = selectMessageById.get(id) as Record<string, unknown> | undefined;
+      if (!r) return null;
+      return {
+        id: String(r.id),
+        conversationId: String(r.conversationId),
+        role: r.role as "user" | "assistant",
+        content: String(r.content),
+        streamId: r.streamId == null ? null : String(r.streamId),
+        createdAt: Number(r.createdAt),
+      };
     },
 
     addTimelineEvents(messageId: string, events: TimelineEvent[]): void {
@@ -397,10 +460,23 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       const rows = selectWritten.all(messageId) as Array<Record<string, unknown>>;
       return rows.map((r) => ({
         id: String(r.id),
+        messageId: String(r.messageId),
         filePath: String(r.filePath),
         snapshot: String(r.snapshot),
         createdAt: Number(r.createdAt),
       }));
+    },
+
+    getWrittenFile(id: string): WrittenFile | null {
+      const row = selectWrittenById.get(id) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      return {
+        id: String(row.id),
+        messageId: String(row.messageId),
+        filePath: String(row.filePath),
+        snapshot: String(row.snapshot),
+        createdAt: Number(row.createdAt),
+      };
     },
 
     close(): void {

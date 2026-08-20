@@ -24,6 +24,8 @@ import { formatProjectCompletionWaitMessage } from './project-completion-announc
 import { RoleMapPanel } from './RoleMapPanel';
 import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
 import { WrittenFilesCard } from './WrittenFilesCard';
+import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
+import { formatHistoryWhen } from '../../src/shared/ai-history-contract';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -466,12 +468,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
         {!isUser &&
           ((message.proposedWrites && message.proposedWrites.length > 0) ||
-            (message.writtenFiles && message.writtenFiles.length > 0)) &&
+            (message.writtenFiles && message.writtenFiles.length > 0) ||
+            (message.historicalWrittenFiles && message.historicalWrittenFiles.length > 0)) &&
           !message.isStreaming && (
           <WrittenFilesCard
             files={message.writtenFiles}
             proposedWrites={message.proposedWrites}
             messageId={message.id}
+            historicalWrittenFiles={message.historicalWrittenFiles}
           />
         )}
 
@@ -712,6 +716,16 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const editorSelection = useEditorStore((s) => s.editorSelection);
   const tabs = useEditorStore((s) => s.tabs);
   const activeTabId = useEditorStore((s) => s.activeTabId);
+  const historyConversations = useAiHistoryStore((s) => s.conversations);
+  const historyLoading = useAiHistoryStore((s) => s.loading);
+  const activeHistoryId = useAiHistoryStore((s) => s.activeHistoryId);
+  const refreshHistory = useAiHistoryStore((s) => s.refresh);
+  const openHistoryConversation = useAiHistoryStore((s) => s.openConversation);
+  const deleteHistoryConversation = useAiHistoryStore((s) => s.deleteConversation);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [projectPath, refreshHistory]);
 
   const inputDraftHash = useMemo(
     () => (input.trim() ? hashChatDraft(input, selectedModel, projectPath) : null),
@@ -973,7 +987,11 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </span>
         <button
           type="button"
-          onClick={() => newThread()}
+          onClick={() => {
+            newThread();
+            useAiHistoryStore.setState({ activeHistoryId: null });
+            void refreshHistory();
+          }}
           title="Chat nou"
           style={{
             padding: '2px 10px',
@@ -990,6 +1008,106 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           Chat nou
         </button>
       </div>
+
+      {projectPath && (
+        <div
+          data-testid="ai-history-list"
+          style={{
+            maxHeight: 132,
+            overflowY: 'auto',
+            borderBottom: `1px solid ${theme.colors.border}`,
+            flexShrink: 0,
+            padding: `4px ${PANEL_PAD_X}px 6px`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 9.5,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: 'var(--caval-text-muted)',
+              marginBottom: 4,
+            }}
+          >
+            History {historyLoading ? '…' : ''}
+          </div>
+          {historyConversations.length === 0 ? (
+            <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
+              No saved conversations yet
+            </div>
+          ) : (
+            historyConversations.map((c) => {
+              const selected = activeHistoryId === c.id;
+              return (
+                <div
+                  key={c.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    marginBottom: 2,
+                  }}
+                >
+                  <button
+                    type="button"
+                    data-testid="ai-history-item"
+                    onClick={() => void openHistoryConversation(c.id)}
+                    title={`${c.title} · ${c.messageCount} messages`}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      textAlign: 'left',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '4px 6px',
+                      background: selected ? 'var(--caval-accent-glow)' : 'transparent',
+                      color: selected ? 'var(--caval-accent)' : 'var(--caval-text)',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                    }}
+                  >
+                    <div
+                      style={{
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        fontWeight: selected ? 600 : 500,
+                      }}
+                    >
+                      {c.title}
+                    </div>
+                    <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)' }}>
+                      {formatHistoryWhen(c.updatedAt)} · {c.messageCount} msg
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="ai-history-delete"
+                    title="Delete conversation"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void deleteHistoryConversation(c.id).then(() => refreshHistory());
+                    }}
+                    style={{
+                      width: 22,
+                      height: 22,
+                      border: 'none',
+                      borderRadius: 4,
+                      background: 'transparent',
+                      color: 'var(--caval-text-muted)',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* ── Messages ───────────────────────── */}
       <div ref={messagesScrollRef} className="ai-messages-scroll caval-selectable" style={{

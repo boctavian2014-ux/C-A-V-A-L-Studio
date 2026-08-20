@@ -554,6 +554,24 @@ interface CavalBridge {
   chatApplyRevertNew?: (input: {
     writes: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
   }) => Promise<{ ok: boolean; deleted: string[]; errors?: string[] }>;
+  aiHistory?: {
+    listConversations: () => Promise<{
+      ok: boolean;
+      conversations?: import('../../src/shared/ai-history-contract').ConversationSummary[];
+      error?: string;
+    }>;
+    getConversation: (conversationId: string) => Promise<{
+      ok: boolean;
+      conversation?: import('../../src/shared/ai-history-contract').AiHistoryConversationPayload;
+      error?: string;
+    }>;
+    deleteConversation: (conversationId: string) => Promise<{ ok: boolean; error?: string }>;
+    revertWrittenFile: (writtenFileId: string) => Promise<{
+      ok: boolean;
+      error?: string;
+      filePath?: string;
+    }>;
+  };
   pipelineResumeStream?: (
     input: {
       runId: string;
