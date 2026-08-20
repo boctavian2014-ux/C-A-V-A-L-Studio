@@ -7,6 +7,7 @@ import type {
 import { normalizeQuickFixRelPath } from "../../shared/ai-quick-fix-contract";
 import type { Problem } from "../../shared/problems-contract";
 import { useAIStore } from "../../../ai/composer/ai-store";
+import { useEditorStore } from "../store/editor-store";
 
 function generateStreamId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -77,6 +78,8 @@ function runQuickFixStream(input: {
         mode: "code",
         streamId: input.streamId,
         skipMultiAgent: true,
+        conversationId: useAIStore.getState().activeThreadId,
+        workspaceRoot: useEditorStore.getState().projectPath ?? undefined,
         ...(input.quickFix ? { quickFix: input.quickFix } : {}),
         ...(input.quickFixAccept ? { quickFixAccept: input.quickFixAccept } : {}),
       },

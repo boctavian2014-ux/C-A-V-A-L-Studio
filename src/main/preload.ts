@@ -451,6 +451,9 @@ contextBridge.exposeInMainWorld("caval", {
   chatApplyAccept: (input: {
     stageKey?: string;
     writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+    conversationId?: string;
+    messageId?: string;
+    streamId?: string;
   }) =>
     ipcRenderer.invoke("caval:chat-apply-accept", input) as Promise<{
       ok: boolean;

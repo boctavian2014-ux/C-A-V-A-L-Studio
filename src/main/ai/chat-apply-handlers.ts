@@ -1,5 +1,6 @@
 /**
  * Pas 6.4 — apply / reject staged chat proposals (main writes disk only on Accept).
+ * Pas 7a.3 — after Accept, persist post-apply snapshots into written_files.
  */
 
 import { ipcMain } from "electron";
@@ -14,6 +15,7 @@ import {
   clearProposedWrites,
   getProposedWrites,
 } from "./proposed-writes-buffer";
+import { persistAcceptedWrittenFiles } from "./written-files-persistence";
 import { assertTrustedSender } from "../ipc-trust";
 import type { BoundWorkspaceRootGetter } from "../bound-workspace";
 import { requireBoundWorkspaceRoot } from "../bound-workspace";
@@ -25,7 +27,13 @@ export function registerChatApplyHandlers(
     "caval:chat-apply-accept",
     async (
       event,
-      input: { stageKey?: string; writes?: ProposedWrite[] }
+      input: {
+        stageKey?: string;
+        writes?: ProposedWrite[];
+        conversationId?: string;
+        messageId?: string;
+        streamId?: string;
+      }
     ) => {
       assertTrustedSender(event);
       const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
@@ -41,6 +49,22 @@ export function registerChatApplyHandlers(
       }
       const { applied, errors } = applyProposedWritesToDisk(root, writes);
       if (input.stageKey) clearProposedWrites(input.stageKey);
+
+      if (applied.length > 0) {
+        const inlineSnapshots: Record<string, string> = {};
+        for (const w of writes) {
+          if (applied.includes(w.path)) inlineSnapshots[w.path] = w.content;
+        }
+        persistAcceptedWrittenFiles({
+          workspaceRoot: root,
+          filePaths: applied,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          streamId: input.streamId,
+          inlineSnapshots,
+        });
+      }
+
       return {
         ok: errors.length === 0 && applied.length > 0,
         applied,

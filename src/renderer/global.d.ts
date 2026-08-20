@@ -540,6 +540,9 @@ interface CavalBridge {
   chatApplyAccept?: (input: {
     stageKey?: string;
     writes?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+    conversationId?: string;
+    messageId?: string;
+    streamId?: string;
   }) => Promise<{
     ok: boolean;
     applied: string[];

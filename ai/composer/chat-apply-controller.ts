@@ -43,6 +43,9 @@ export async function acceptProposedWritesForMessage(messageId: string): Promise
   const result = await caval.chatApplyAccept({
     stageKey: msg.proposeStageKey,
     writes: msg.proposedWrites,
+    conversationId: useAIStore.getState().activeThreadId,
+    messageId,
+    streamId: msg.streamId,
   });
   if (!result.ok) return;
 

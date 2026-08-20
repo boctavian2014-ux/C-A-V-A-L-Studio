@@ -73,6 +73,7 @@ import {
   discardIncompleteStreamTimeline,
   persistAssistantMessageAndFlush,
 } from "./ai/timeline-persistence";
+import { persistAcceptedWrittenFiles } from "./ai/written-files-persistence";
 import {
   emitQuickFixAcceptTimeline,
   emitQuickFixProposeTimeline,
@@ -1015,11 +1016,19 @@ async function streamQuickFixToRenderer(
       });
       return;
     }
+    const writtenRel = acceptPayload.filePath.replace(/\\/g, "/");
+    // Pas 7a.3 — snapshot post-Accept (editor already wrote disk / buffer).
+    persistAcceptedWrittenFiles({
+      workspaceRoot,
+      filePaths: [writtenRel],
+      conversationId: request.conversationId,
+      streamId,
+    });
     markOperationTerminal(streamId, "completed");
     stream.send({
       type: "done",
       quickFix: acceptResult,
-      writtenFiles: [acceptPayload.filePath.replace(/\\/g, "/")],
+      writtenFiles: [writtenRel],
     });
     return;
   }
