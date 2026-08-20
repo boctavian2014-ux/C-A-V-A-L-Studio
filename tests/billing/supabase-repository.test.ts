@@ -62,7 +62,7 @@ describe("supabase repository (mock client)", () => {
       insert: vi.fn().mockResolvedValue({ error: { code: "23505", message: "duplicate" } }),
     });
 
-    const { insertBillingEvent: insertWithDb } = await import("../../billing/supabase/repository");
+    const { insertBillingEvent: insertWithDb } = await import("../../billing/supabase/repository.js");
     const inserted = await insertWithDb({
       externalEventId: "evt_dup_db",
       eventType: "checkout.session.completed",

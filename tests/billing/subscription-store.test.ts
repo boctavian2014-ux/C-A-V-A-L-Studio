@@ -15,6 +15,7 @@ function rcEvent(overrides: Partial<MappedBillingEvent> = {}): MappedBillingEven
     entitlements: ["pro"],
     type: "subscription_activated",
     expiresAt: "2026-12-31T00:00:00.000Z",
+    rawType: "INITIAL_PURCHASE",
     ...overrides,
   };
 }
@@ -47,7 +48,7 @@ describe("subscription-store", () => {
       entitlements: ["pro"],
       status: "active",
       plan: "pro",
-      expiresAt: null,
+      expiresAt: undefined,
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     expect(listSubscriptions()).toHaveLength(1);
