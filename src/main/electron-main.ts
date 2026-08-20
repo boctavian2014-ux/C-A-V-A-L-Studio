@@ -29,7 +29,7 @@ import {
 import { registerGitHandlers } from "./git-handlers";
 import { registerProblemsHandlers } from "./problems-handlers";
 import { registerTasksHandlers, shutdownAllTasksSync } from "./tasks-handlers";
-import { registerTerminalHandlers, stopAllInteractiveTerminals } from "./terminal-handlers";
+import { registerTerminalHandlers, stopAllInteractiveTerminalsSync } from "./terminal-handlers";
 import { registerPreviewHandlers, shutdownAllPreviewSync } from "./preview/preview-handlers";
 import {
   addRecentWorkspace,
@@ -1762,7 +1762,7 @@ app.on("window-all-closed", () => {
     }
   }
   shutdownAllPreviewSync();
-  stopAllInteractiveTerminals();
+  stopAllInteractiveTerminalsSync();
   shutdownAllTasksSync();
   stopCadLocalServer();
   stopMarketplaceServer();

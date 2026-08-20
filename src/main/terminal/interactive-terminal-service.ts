@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as pty from "node-pty";
 
@@ -12,9 +13,15 @@ export interface InteractivePty {
   pid?: number;
   write(data: string): void;
   resize(cols: number, rows: number): void;
-  kill(): void;
+  kill(signal?: string): void;
   onData(cb: (data: string) => void): void;
   onExit?(cb: (event: { exitCode: number; signal?: number }) => void): void;
+}
+
+export interface PtyKillDeps {
+  platform?: NodeJS.Platform;
+  spawnSyncFn?: typeof spawnSync;
+  killGroupFn?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 export interface InteractivePtySpawnOptions {
@@ -53,6 +60,56 @@ export interface InteractiveTerminalServiceOptions {
   resolveShell?: () => ResolvedShell;
   now?: () => number;
   idFactory?: () => string;
+  killDeps?: PtyKillDeps;
+}
+
+/**
+ * Kill a PTY and its descendants.
+ * Windows: taskkill /T /F while the PTY is still alive so shell children are not orphaned.
+ * POSIX: SIGKILL the process group (PTY is typically the leader); fall back to pty.kill.
+ */
+export function killPtyProcess(sessionPty: InteractivePty, deps: PtyKillDeps = {}): void {
+  const platform = deps.platform ?? process.platform;
+  const pid = sessionPty.pid;
+
+  try {
+    if (typeof pid === "number" && pid > 1 && platform === "win32") {
+      const run = deps.spawnSyncFn ?? spawnSync;
+      run("taskkill", ["/pid", String(pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+        timeout: 8_000,
+      });
+      try {
+        sessionPty.kill("SIGKILL");
+      } catch {
+        // PTY handle already gone
+      }
+      return;
+    }
+
+    if (typeof pid === "number" && pid > 1) {
+      const killGroup =
+        deps.killGroupFn ??
+        ((groupPid: number, signal: NodeJS.Signals) => {
+          process.kill(-groupPid, signal);
+        });
+      try {
+        killGroup(pid, "SIGKILL");
+      } catch {
+        sessionPty.kill("SIGKILL");
+        return;
+      }
+    }
+
+    sessionPty.kill("SIGKILL");
+  } catch {
+    try {
+      sessionPty.kill("SIGKILL");
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 function defaultSpawn(
@@ -73,12 +130,14 @@ export class InteractiveTerminalService {
   private readonly resolveShell: () => ResolvedShell;
   private readonly now: () => number;
   private readonly idFactory: () => string;
+  private readonly killDeps: PtyKillDeps;
 
   constructor(options: InteractiveTerminalServiceOptions = {}) {
     this.spawnFn = options.spawnFn ?? defaultSpawn;
     this.resolveShell = options.resolveShell ?? resolvePreferredShell;
     this.now = options.now ?? Date.now;
     this.idFactory = options.idFactory ?? defaultId;
+    this.killDeps = options.killDeps ?? {};
   }
 
   create(input: SpawnTerminalInput): TerminalInfo {
@@ -149,11 +208,7 @@ export class InteractiveTerminalService {
   destroy(id: string): { ok: true } {
     const session = this.sessions.get(id);
     if (session) {
-      try {
-        session.pty.kill();
-      } catch {
-        /* ignore */
-      }
+      killPtyProcess(session.pty, this.killDeps);
       this.sessions.delete(id);
     }
     return { ok: true };
@@ -163,6 +218,19 @@ export class InteractiveTerminalService {
     for (const id of [...this.sessions.keys()]) {
       this.destroy(id);
     }
+  }
+
+  /** Blocking kill for `window-all-closed` — must finish before `app.quit()`. */
+  stopAllInteractiveTerminalsSync(): void {
+    const sessions = [...this.sessions.values()];
+    for (const session of sessions) {
+      try {
+        killPtyProcess(session.pty, this.killDeps);
+      } catch {
+        // best-effort
+      }
+    }
+    this.sessions.clear();
   }
 
   sessionCount(): number {
@@ -178,4 +246,8 @@ export const interactiveTerminalService = new InteractiveTerminalService();
 
 export function stopAllInteractiveTerminals(): void {
   interactiveTerminalService.destroyAll();
+}
+
+export function stopAllInteractiveTerminalsSync(): void {
+  interactiveTerminalService.stopAllInteractiveTerminalsSync();
 }

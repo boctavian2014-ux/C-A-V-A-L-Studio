@@ -12,9 +12,10 @@ import { ensureLatestPowerShellInstalled } from "./powershell-shell";
 import {
   interactiveTerminalService,
   stopAllInteractiveTerminals,
+  stopAllInteractiveTerminalsSync,
 } from "./terminal/interactive-terminal-service";
 
-export { stopAllInteractiveTerminals };
+export { stopAllInteractiveTerminals, stopAllInteractiveTerminalsSync };
 
 export function clearInteractiveTerminalSessionsForTests(): void {
   interactiveTerminalService.destroyAll();
