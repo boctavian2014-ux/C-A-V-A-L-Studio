@@ -6,11 +6,11 @@ Audit de clasificare (fără feature code). Pattern: suprafețe după risc → g
 
 | Operație | Scrie? | Gate | Stare actuală (repo) |
 |---|---|---|---|
-| Explain / hover | Nu | Safe direct, fără confirmare | Nu există ca flow AI dedicat |
-| Inline completion | Doar la Tab | Safe — user acceptă fiecare inserție | Stub `registerInlineCompletionsProvider` + `caval.autocomplete` în `MonacoEditor.tsx` (ghost text; fără timeline / gate explicit documentat) |
-| Quick fix pe diagnostics | Da, mic, localizat | Diff preview + undo nativ Monaco | Lipsă; Problems există (`problems-store`, `ProblemsPanel`, `revealProblem`) |
-| Refactor multi-fișier | Da, larg | Confirmare explicită + diff complet + undo | ✅ 6.5 — stream `refactor`, diff multi-fișier, Accept all |
-| Apply din chat | Da | writtenFiles + timeline (M5) | Parțial acoperit (M5 / composer) |
+| Explain / hover | Nu | Safe direct, fără confirmare | ✅ 6.3 |
+| Inline completion | Doar la Tab | Safe — user acceptă fiecare inserție | ✅ 6.2 |
+| Quick fix pe diagnostics | Da, mic, localizat | Diff preview + undo nativ Monaco | ✅ 6.1 |
+| Refactor multi-fișier | Da, larg | Confirmare explicită + diff complet + undo | ✅ 6.5 |
+| Apply din chat | Da | writtenFiles + timeline (M5) | ✅ 6.4 |
 
 ## Clasificare de siguranță (rezumat)
 
@@ -64,9 +64,9 @@ Implementat: scaffold chat → `proposedWrites` (fără disc), card Accept/Rejec
 
 Implementat: stream `refactor` (fără IPC nou), max 5 fișiere / 10 edituri / 16 KB, path + redacție, prompt context mărginit, **fără** write pe disc în main. Diff unificat (taburi Monaco) Accept all / Reject all; apply cu undo Monaco pe tab deschis + write/delete pe disc; Revert pentru new/deleted; `file_write` per fișier la Accept. Entry: context menu / Ctrl+Shift+R „Refactor with AI”. Smoke: `tests/ai/refactor-gated.test.ts`.
 
-### 6.x — Smoke / E2E editor AI
+### 6.x — Smoke / E2E editor AI ✅
 
-Extinde smoke-ul M5 (sau fixture dedicat): Problems → quick fix → timeline `file_write` → undo; optional Tab-accept pe inline; optional refactor multi-fișier pe același workspace. Fără Playwright / LLM live, același stil in-process ca 5.5.
+Implementat: `tests/e2e/m6-editor-ai-unified-smoke.test.ts` — un workspace, fără Playwright / LLM live. Traseu: quick fix → inline Tab → explain → chat apply → refactor; timeline per `streamId`, undo/Revert, redacție secrete, cleanup fără orfani.
 
 ## Decizie 6.1
 
