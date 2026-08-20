@@ -109,4 +109,15 @@ describe("AbortRegistry", () => {
     expect(() => registry.abort("missing")).not.toThrow();
     expect(registry.isAborted("missing")).toBe(false);
   });
+
+  it("releaseTree drops parent and descendants without leaving entries", () => {
+    const chat = registry.create("chat");
+    const loop = registry.create("tool-loop", chat.id);
+    registry.create("multi-agent", loop.id);
+    expect(registry.size()).toBe(3);
+    registry.releaseTree(chat.id);
+    expect(registry.size()).toBe(0);
+    expect(registry.getSignal(chat.id)).toBeUndefined();
+    expect(registry.getSignal(loop.id)).toBeUndefined();
+  });
 });

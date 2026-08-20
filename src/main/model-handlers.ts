@@ -10,6 +10,7 @@ import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { clearOpenRouterCache } from "../../ai/models/openrouter-catalog";
 
 import { resolveModelSelection } from "../../ai/models/auto-router";
+import { getModelProfile } from "../../ai/model-profiles";
 
 import {
 
@@ -45,9 +46,15 @@ import {
   markOperationTerminal,
   registerStreamOperation,
 } from "./operation-registry";
+import {
+  abortAbortableStream,
+  finishAbortableStream,
+  parseAbortStreamId,
+  startAbortableStream,
+} from "./abort/stream-abort";
 import { cancelCadJobRemote } from "./cad-handlers";
 import { releaseCadWorkspaceLock } from "./cad-workspace-lock";
-import { loadReasoningConfig } from "../../ai/composer/multi-agent/config";
+import { loadMultiAgentConfig, loadReasoningConfig, usesAgenticToolRuntime } from "../../ai/composer/multi-agent/config";
 import {
   buildWorkspaceBootstrap,
   mergeProjectContextWithBootstrap,
@@ -188,7 +195,9 @@ function capabilityForMode(mode?: string): CompleteModelTextInput["capability"] 
 
   if (mode === "debug") return "debug";
 
-  if (mode === "code" || mode === "agentic") return "code";
+  if (mode === "code") return "code";
+
+  if (mode === "agentic") return "chat";
 
   return "chat";
 
@@ -292,6 +301,20 @@ function scaffoldSystemAddon(): string {
   ].join("\n");
 }
 
+function agenticToolLoopAddon(): string {
+  return [
+    "",
+    "TOOL LOOP MODE:",
+    "- Use tools first: list_dir, search_codebase, read_file, then write_file with REAL relative paths.",
+    "- Prefer targeted reads before edits; avoid rewriting unrelated files.",
+    "- After edits, verify with run_command or run_terminal using allowlisted commands such as npm install, npm run build, npm test, npm run typecheck.",
+    "- Iterate on tool outputs until the task is complete or a concrete blocker remains.",
+    "- Do NOT emit ```lang:path``` fenced files unless the user explicitly asks for raw code in chat.",
+    "- Never invent placeholder paths like src/index_17.tsx or unnamed generated files.",
+    "- Keep chat output short; the work should happen through tools and real files.",
+  ].join("\n");
+}
+
 function injectProjectContextIntoMessages(
   msgs: ChatStreamMessage[],
   projectContext: string
@@ -319,7 +342,14 @@ function injectProjectContextIntoMessages(
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
 
   let system = systemPromptForMode(request.mode, request.workspaceRoot);
-  if (request.mode === "agentic" && request.workspaceRoot) {
+  const multiAgentConfig = request.workspaceRoot?.trim()
+    ? loadMultiAgentConfig(request.workspaceRoot)
+    : undefined;
+  const usesToolLoopAgentic =
+    request.mode === "agentic" && usesAgenticToolRuntime(multiAgentConfig);
+  if (usesToolLoopAgentic) {
+    system += agenticToolLoopAddon();
+  } else if (request.mode === "agentic" && request.workspaceRoot) {
     system += scaffoldSystemAddon();
   } else if (request.scaffoldMode && request.mode === "agentic") {
     system += scaffoldSystemAddon();
@@ -450,11 +480,13 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 
 
 
-function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
+export function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
   if (!workspaceRoot?.trim()) return false;
-  if (mode !== "code" && mode !== "debug") return false;
+  if (mode !== "code" && mode !== "debug" && mode !== "agentic") return false;
   if (!model || model === "ollama-local") return false;
   if (model.startsWith("caval-auto/free")) return false;
+  const profile = getModelProfile(model);
+  if (profile?.provider === "open_source" || profile?.costEstimate === "local") return false;
   return true;
 }
 
@@ -671,6 +703,7 @@ export function abortAllStreamsForSender(senderId: number): void {
   const streams = activeStreamsBySender.get(senderId);
   if (!streams?.size) return;
   for (const streamId of [...streams]) {
+    abortAbortableStream(streamId, "sender gone");
     abortMultiAgentPipeline(streamId);
   }
   streams.clear();
@@ -691,12 +724,16 @@ async function streamToRenderer(
   const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim();
   const userBoundWorkspace = Boolean(explicitRoot || boundRoot);
   const workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
+  const multiAgentConfig = workspaceRoot?.trim()
+    ? loadMultiAgentConfig(workspaceRoot)
+    : undefined;
   streamOwners.set(streamId, { senderId, workspaceRoot: workspaceRoot?.trim() ?? "" });
   registerStreamOperation({
     streamId,
     senderId,
     workspaceRoot: workspaceRoot?.trim() ?? "",
   });
+  const abortRoot = startAbortableStream(streamId);
   request = { ...request, workspaceRoot };
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 
@@ -715,7 +752,7 @@ async function streamToRenderer(
 
   const useMultiAgent =
     !request.skipMultiAgent &&
-    shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot, undefined, {
+    shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot, multiAgentConfig, {
       userBoundWorkspace,
     });
 
@@ -725,7 +762,11 @@ async function streamToRenderer(
     sendStatusChunk(stream, "route", "active");
     sendMultiAgentStatusChunk(stream, "context", "active", "pipeline start");
 
-    const result = await runCavalloMultiAgentPipeline(sender, streamId, request, {
+    const result = await runCavalloMultiAgentPipeline(
+      sender,
+      streamId,
+      request,
+      {
       onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
         sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
@@ -750,7 +791,9 @@ async function streamToRenderer(
         if (!stream.isAlive()) return;
         sendStatusChunk(stream, phase, status, detail);
       },
-    });
+    },
+      abortRoot.id
+    );
 
     if (!stream.isAlive()) return;
 
@@ -813,7 +856,8 @@ async function streamToRenderer(
     toolRegistry,
     useTools,
     workspaceRoot,
-    signal: getStreamAbortSignal(streamId),
+    signal: getStreamAbortSignal(streamId) ?? abortRoot.signal,
+    abortParentId: abortRoot.id,
   };
 
   sendStatusChunk(stream, "prepare", "done");
@@ -838,7 +882,8 @@ async function streamToRenderer(
     },
     onToolCall: (toolName, status, detail, writtenPath) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
-      const isDirectCodingMode = fusedRequest.mode === "code" || fusedRequest.mode === "debug";
+      const isDirectCodingMode =
+        fusedRequest.mode === "code" || fusedRequest.mode === "debug" || fusedRequest.mode === "agentic";
       if (!isDirectCodingMode) {
         const notice = formatToolCallNotice(toolName, status, detail);
         if (notice) {
@@ -890,6 +935,7 @@ async function streamToRenderer(
   });
 
   } finally {
+    finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
   }
 }
@@ -910,6 +956,12 @@ async function streamResumeToRenderer(
   trackActiveStream(senderId, streamId);
   const stream = createStreamChunkSender(sender, senderId, streamId);
   try {
+    registerStreamOperation({
+      streamId,
+      senderId,
+      workspaceRoot: input.workspaceRoot?.trim() ?? "",
+    });
+    const abortRoot = startAbortableStream(streamId);
     if (!stream.isAlive()) return;
     sendStatusChunk(stream, "prepare", "done");
     sendMultiAgentStatusChunk(stream, "subagent", "active", "UI delivery resume");
@@ -935,7 +987,7 @@ async function streamResumeToRenderer(
         if (!stream.isAlive()) return;
         sendStatusChunk(stream, phase, status, detail);
       },
-    });
+    }, abortRoot.id);
 
     if (!stream.isAlive()) return;
 
@@ -970,6 +1022,7 @@ async function streamResumeToRenderer(
       error: safeErrorMessageForUi(result.error ?? "Pipeline resume failed"),
     });
   } finally {
+    finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
   }
 }
@@ -1117,24 +1170,28 @@ export function registerModelHandlers(
     return { ok: true, started: true };
   });
 
-  ipcMain.handle("caval:ai-stream-abort", async (event, streamId: string) => {
+  ipcMain.handle("caval:ai-stream-abort", async (event, streamId: unknown) => {
     assertTrustedSender(event);
     allowAiAbort();
-    const sid = String(streamId ?? "");
-    const owned = assertStreamOwnedBySender(event.sender.id, sid);
+    const parsed = parseAbortStreamId(streamId);
+    if (!parsed.ok) {
+      return { ok: false, error: parsed.error };
+    }
+    const owned = assertStreamOwnedBySender(event.sender.id, parsed.streamId);
     if (!owned.ok) {
       return { ok: false, error: owned.error };
     }
+    const cascaded = abortAbortableStream(parsed.streamId, "user cancelled");
     const cancel = beginCancelOperation({
-      streamId: sid,
+      streamId: parsed.streamId,
       senderId: event.sender.id,
     });
-    abortMultiAgentPipeline(sid);
-    untrackActiveStream(event.sender.id, sid);
+    abortMultiAgentPipeline(parsed.streamId);
+    untrackActiveStream(event.sender.id, parsed.streamId);
     return {
       ok: cancel.ok,
       status: cancel.status,
-      signalAborted: cancel.signalAborted,
+      signalAborted: cascaded || Boolean(cancel.signalAborted),
       error: cancel.error,
     };
   });
@@ -1189,6 +1246,7 @@ export function registerModelHandlers(
       }
 
       if (streamId) {
+        abortAbortableStream(streamId, "user cancelled");
         abortMultiAgentPipeline(streamId);
         untrackActiveStream(event.sender.id, streamId);
       }

@@ -272,6 +272,8 @@ export const DEFAULT_SELF_AUDIT_CONFIG: SelfAuditConfig = {
 
 export interface MultiAgentConfig {
   enabled: boolean;
+  /** Agentic can use the legacy pipeline or the tool loop runtime. */
+  agenticRuntime: 'tools' | 'pipeline';
   maxTasks: number;
   parallelSubAgents: number;
   supervisorRetries: number;
@@ -299,6 +301,7 @@ export interface MultiAgentConfig {
 
 export const DEFAULT_MULTI_AGENT_CONFIG: MultiAgentConfig = {
   enabled: true,
+  agenticRuntime: 'tools',
   maxTasks: 8,
   parallelSubAgents: 2,
   supervisorRetries: 1,
@@ -332,6 +335,8 @@ export interface MultiAgentPipelineCallbacks {
   onDelta?: (delta: string) => void;
   onReasoning?: (delta: string) => void;
   onStatus?: (phase: import('../chat-activity-types').ChatActivityPhase, status: 'active' | 'done', detail?: string) => void;
+  /** In-process abort for stage LLM fetches. Not sent over IPC. */
+  abortSignal?: AbortSignal;
 }
 
 export type MultiAgentPipelineResult =

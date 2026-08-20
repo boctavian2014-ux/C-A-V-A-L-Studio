@@ -87,6 +87,7 @@ async function runComplete(
     callbacks?: MultiAgentPipelineCallbacks;
     maxTokens?: number;
     timeoutMs?: number;
+    abortSignal?: AbortSignal;
   }
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }> {
   const messages: CompletionMessage[] = [
@@ -104,6 +105,7 @@ async function runComplete(
     useTools: false,
     maxTokens: opts.maxTokens ?? (opts.capability === 'code' ? 8192 : 2048),
     timeoutMs: opts.timeoutMs ?? (opts.capability === 'planning' ? 90_000 : 120_000),
+    signal: opts.abortSignal ?? opts.callbacks?.abortSignal,
   });
 
   if (!result.ok) {
@@ -139,6 +141,11 @@ export async function runModelOrchestrator(
   const complexity = complexityFromFastPipeline(opts?.config?.fastPipeline !== false);
   const heuristic = buildArenaModelPlan(primaryModel, rotator, { complexity });
   const orchModel = (heuristic.roleModelMap.coordinator ?? planningPool[0] ?? primaryModel) as ModelSelectionId;
+
+  if (opts?.config?.fastPipeline !== false) {
+    emitStage(callbacks, 'modelOrch', 'done', heuristic.summary, orchModel, 'modelOrch');
+    return { plan: heuristic, orchestratorModel: orchModel };
+  }
 
   const user = [
     `User request:\n${userMessage.slice(0, 2_000)}`,
@@ -540,6 +547,7 @@ export async function runFinalComposer(
       requestId: opts?.waveIndex ? `ma-compose-w${opts.waveIndex}` : 'ma-compose',
       useTools: false,
       maxTokens: 16_384,
+      signal: callbacks?.abortSignal,
     },
     {
       onMeta: callbacks?.onMeta,

@@ -86,6 +86,21 @@ export class AbortRegistry extends EventEmitter {
     this.entries.delete(id);
   }
 
+  /** Drop this node and every descendant. Does not abort. */
+  releaseTree(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    for (const childId of [...entry.children]) {
+      this.releaseTree(childId);
+    }
+    this.release(id);
+  }
+
+  /** @internal tests */
+  size(): number {
+    return this.entries.size;
+  }
+
   onAbort(cb: (id: string, scope: AbortScope, reason?: string) => void): () => void {
     this.on("abort", cb);
     return () => {

@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import type { WebContents } from 'electron';
 
+import { abortRegistry } from '../../../src/main/abort/abort-registry';
 import type { CavalChatStreamRequest } from '../../../src/main/model-handlers';
 
 import {
@@ -41,6 +42,7 @@ import {
 } from './programmatic-supervisor';
 import { detectFashionArchetype } from '../../scaffolds/fashion-matching/archetype';
 import { remediateWorkspaceBeforeGate } from '../../scaffolds/workspace-cleanup';
+import { scheduleBackgroundVerify } from '../../../src/main/pipeline-verify-worker';
 
 import { PipelineContextStore, CAVALLO_AUTO_UI_PREFERENCES } from './pipeline-context-store';
 import { partitionTasksByUiPhase, hasUiSpecInPrompt } from '../ui-spec-detector';
@@ -342,7 +344,9 @@ export async function runCavalloMultiAgentPipeline(
 
   request: CavalChatStreamRequest,
 
-  callbacks: MultiAgentPipelineCallbacks
+  callbacks: MultiAgentPipelineCallbacks,
+
+  abortParentId?: string
 
 ): Promise<MultiAgentPipelineResult> {
 
@@ -357,19 +361,12 @@ export async function runCavalloMultiAgentPipeline(
 
   const runId = newRunId();
 
-  let aborted = false;
-
-
-
+  const agentAbort = abortRegistry.create('multi-agent', abortParentId);
   registerMultiAgentAbort(streamId, () => {
-
-    aborted = true;
-
+    agentAbort.abort('pipeline cancelled');
   });
-
-
-
-  const isAborted = () => aborted;
+  const isAborted = () => agentAbort.signal.aborted;
+  callbacks.abortSignal = agentAbort.signal;
 
 
 
@@ -486,7 +483,8 @@ export async function runCavalloMultiAgentPipeline(
   try {
 
     if (workspaceRoot?.trim()) {
-      await ensureMcpServersReady(workspaceRoot).catch(() => undefined);
+      // MCP (Semgrep/uvx) must not block the first LLM stage.
+      void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
     }
 
     callbacks.onStatus?.('prepare', 'done');
@@ -1103,7 +1101,6 @@ export async function runCavalloMultiAgentPipeline(
       config.enableDevToolsIntegration &&
       finalWrittenFiles.length > 0
     ) {
-      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker.js');
       scheduleBackgroundVerify(sender, {
         workspaceRoot,
         runId,
@@ -1188,6 +1185,8 @@ export async function runCavalloMultiAgentPipeline(
 
   } finally {
 
+    abortRegistry.release(agentAbort.id);
+
     clearMultiAgentAbort(streamId);
 
   }
@@ -1206,7 +1205,8 @@ export async function resumeCavalloMultiAgentPipeline(
     model: string;
     strictReview?: boolean;
   },
-  callbacks: MultiAgentPipelineCallbacks
+  callbacks: MultiAgentPipelineCallbacks,
+  abortParentId?: string
 ): Promise<MultiAgentPipelineResult> {
   const cp =
     getCheckpoint(input.runId) ?? loadCheckpointFromDisk(input.workspaceRoot, input.runId);
@@ -1222,11 +1222,12 @@ export async function resumeCavalloMultiAgentPipeline(
   const model = (input.model || cp.model) as ModelSelectionId;
   const runId = cp.runId;
 
-  let aborted = false;
+  const agentAbort = abortRegistry.create('multi-agent', abortParentId);
   registerMultiAgentAbort(streamId, () => {
-    aborted = true;
+    agentAbort.abort('pipeline cancelled');
   });
-  const isAborted = () => aborted;
+  const isAborted = () => agentAbort.signal.aborted;
+  callbacks.abortSignal = agentAbort.signal;
 
   const store = PipelineContextStore.fromSnapshot({
     context: cp.context,
@@ -1253,6 +1254,7 @@ export async function resumeCavalloMultiAgentPipeline(
 
   const pipelineCallbacks: MultiAgentPipelineCallbacks = {
     ...callbacks,
+    abortSignal: agentAbort.signal,
     onMultiAgentStatus: (stage, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
       callbacks.onMultiAgentStatus?.(stage, status, detail, modelId, stepId, auditBadge, parallelGroup);
     },
@@ -1376,7 +1378,6 @@ export async function resumeCavalloMultiAgentPipeline(
       config.enableDevToolsIntegration &&
       writtenFiles.length > 0
     ) {
-      const { scheduleBackgroundVerify } = await import('../../../src/main/pipeline-verify-worker.js');
       scheduleBackgroundVerify(_sender, {
         workspaceRoot,
         runId,
@@ -1424,6 +1425,7 @@ export async function resumeCavalloMultiAgentPipeline(
       },
     };
   } finally {
+    abortRegistry.release(agentAbort.id);
     clearMultiAgentAbort(streamId);
   }
 }
