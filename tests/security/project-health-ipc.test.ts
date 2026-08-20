@@ -24,11 +24,13 @@ const { harness, healthRunnerMock } = vi.hoisted(() => {
   };
   return {
     healthRunnerMock: {
-      runProjectHealthSnapshot: vi.fn(async () => ({
-        packageFound: true,
-        packageName: "test-pkg",
-        checks: [],
-      })),
+      runProjectHealthSnapshot: vi.fn(
+        async (_workspaceRoot: string, _options?: { execute?: boolean }) => ({
+          packageFound: true,
+          packageName: "test-pkg",
+          checks: [],
+        })
+      ),
     },
     harness: {
       ipcMain,
@@ -65,7 +67,7 @@ describe("project-health IPC security", () => {
     healthRunnerMock.runProjectHealthSnapshot.mockClear();
 
     vi.resetModules();
-    const { registerModelHandlers } = await import("../../src/main/model-handlers");
+    const { registerModelHandlers } = await import("../../src/main/model-handlers.js");
     registerModelHandlers(
       () => process.cwd(),
       (senderId) => boundRoots.get(senderId)
@@ -77,7 +79,7 @@ describe("project-health IPC security", () => {
   });
 
   it("assertTrustedSender throws for https (untrusted) sender", async () => {
-    const { assertTrustedSender } = await import("../../src/main/ipc-trust");
+    const { assertTrustedSender } = await import("../../src/main/ipc-trust.js");
     const untrusted = {
       sender: {
         ...harness.sender,

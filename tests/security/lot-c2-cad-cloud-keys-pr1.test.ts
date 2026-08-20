@@ -214,10 +214,11 @@ describe("SEC-C2 PR1 provider profiles", () => {
       accountId: accountA,
       profileId,
     });
-    const retried = applyResolvedSecretToCadInput(
-      { prompt: jobBody.prompt, providerProfileId: profileId },
-      resolved
-    );
+    const retried = applyResolvedSecretToCadInput<{
+      prompt: string;
+      providerProfileId: string;
+      openRouterApiKey?: string;
+    }>({ prompt: jobBody.prompt, providerProfileId: profileId }, resolved);
     expect(retried.openRouterApiKey).toBe(VAULT_SECRET);
     expect(JSON.stringify({ prompt: jobBody.prompt, providerProfileId: profileId })).not.toMatch(
       /openRouterApiKey/

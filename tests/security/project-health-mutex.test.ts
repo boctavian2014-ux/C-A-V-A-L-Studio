@@ -37,7 +37,7 @@ describe("project-health execute mutex (per workspace)", () => {
       JSON.stringify({ name: "b", scripts: { typecheck: "echo b" } })
     );
 
-    const { clearProjectHealthExecuteLocks } = await import("../../ai/tools/project-health-runner");
+    const { clearProjectHealthExecuteLocks } = await import("../../ai/tools/project-health-runner.js");
     clearProjectHealthExecuteLocks();
   });
 
@@ -48,7 +48,7 @@ describe("project-health execute mutex (per workspace)", () => {
 
   it("allows concurrent execute on different workspace roots", async () => {
     const { runProjectHealthSnapshot, isProjectHealthExecuteInFlight } = await import(
-      "../../ai/tools/project-health-runner"
+      "../../ai/tools/project-health-runner.js"
     );
 
     const p1 = runProjectHealthSnapshot(tmpA, { execute: true });
@@ -73,7 +73,7 @@ describe("project-health execute mutex (per workspace)", () => {
     });
 
     const { runProjectHealthSnapshot, isProjectHealthExecuteInFlight } = await import(
-      "../../ai/tools/project-health-runner"
+      "../../ai/tools/project-health-runner.js"
     );
 
     const first = runProjectHealthSnapshot(tmpA, { execute: true });

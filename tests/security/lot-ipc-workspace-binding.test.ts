@@ -32,7 +32,7 @@ describe("SEC-IPC-WS-BINDING-001 workspace bind", () => {
     fs.writeFileSync(filePath, "x");
 
     const { registerWorkspaceBindingHandlers } = await import(
-      "../../src/main/workspace-binding-handlers"
+      "../../src/main/workspace-binding-handlers.js"
     );
     registerWorkspaceBindingHandlers({
       bindWorkspace: (senderId, root) => {
