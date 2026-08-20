@@ -67,7 +67,7 @@ import { assertTrustedSender } from "./ipc-trust";
 import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
 import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
 import type { IdeContextPayload } from "../shared/ai-context-contract";
-import { applyIdeContextToChatRequest } from "./ai/ide-context-collector";
+import { applyIdeContextToChatRequest, applyEnhancedContextToChatRequest } from "./ai/ide-context-collector";
 import { emitTimelineEvent } from "./ai/timeline-emit";
 import {
   discardIncompleteStreamTimeline,
@@ -1137,6 +1137,16 @@ async function streamToRenderer(
   request = { ...request, workspaceRoot };
   if (request.ideContext !== undefined) {
     request = applyIdeContextToChatRequest(request, request.ideContext);
+  }
+  // Pas 7d.3 — related workspace files from lexical index search (skip editor micro-ops).
+  if (
+    !request.quickFix &&
+    !request.quickFixAccept &&
+    !request.timelineFileWrite &&
+    !request.explain &&
+    !request.refactor
+  ) {
+    request = await applyEnhancedContextToChatRequest(request, workspaceRoot);
   }
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 

@@ -50,11 +50,21 @@ Continuă din M7e (polish). Pattern: inventar → prioritate → pași increment
 
 ### 7d.2 — Căutare
 
-- Matching pe simboluri/path/importuri; embeddings doar dacă e nevoie fără a bloca.
+- Matching lexical pe simboluri / path / importuri / exporturi (`fuzzyMatch`, fără embeddings).
+- IPC `caval:workspace-search-query` (read-only peste indexul din memorie).
+- UI: overlay Search Workspace Symbols (`Ctrl+T` / Go to Symbol in Workspace).
+- Gate: limit 20, debounce 300 ms, fallback „Index not available…”.
+- Smoke: `tests/main/workspace/workspace-search.test.ts`
+- Commit: `feat(ai): add workspace symbol and file search over index`
 
 ### 7d.3 — Context chat
 
-- Injectare fișiere relevante în prompt (caps + redaction).
+- Injectare fișiere relevante în prompt din `searchIndex` (caps + redaction).
+- Contract: `EnhancedContext*` în `src/shared/ai-context-contract.ts`
+- Builder: `src/main/ai/enhanced-context.ts` + wire în `streamToRenderer`
+- Gate: max 3 related, ≥0.6 score, 2000 tokens/fișier, untrusted delimiters, fallback current file
+- Smoke: `tests/main/ai/enhanced-context.test.ts`
+- Commit: `feat(ai): enhance chat context with workspace search results`
 
 ## Non-goals (7d.1)
 
@@ -69,5 +79,5 @@ Continuă din M7e (polish). Pattern: inventar → prioritate → pași increment
 |---|---|
 | Audit | ✅ acest document |
 | 7d.1 Indexare | ✅ scan + JSON + watcher + IPC status |
-| 7d.2 Căutare | ⏳ |
-| 7d.3 Context AI | ⏳ |
+| 7d.2 Căutare | ✅ lexical search + IPC + Ctrl+T overlay |
+| 7d.3 Context AI | ✅ search → related files in chat prompt |

@@ -61,3 +61,34 @@ export const IDE_CONTEXT_FILE_CHARS = 3_000;
 export const IDE_CONTEXT_OUTPUT_CHARS = 1_000;
 export const IDE_CONTEXT_PROBLEMS_MAX = 25;
 export const IDE_CONTEXT_GIT_FILES_MAX = 40;
+
+/** Pas 7d.3 — workspace-search-backed related files for chat. */
+export const ENHANCED_CONTEXT_DEFAULT_MAX_FILES = 3;
+export const ENHANCED_CONTEXT_DEFAULT_MAX_TOKENS_PER_FILE = 2000;
+export const ENHANCED_CONTEXT_MIN_RELEVANCE = 0.6;
+
+export interface EnhancedContextRequest {
+  userMessage: string;
+  /** Relative or absolute path of the active editor file. */
+  currentFile?: string;
+  currentSelection?: IdeContextSelection;
+  maxFiles?: number;
+  maxTokensPerFile?: number;
+}
+
+export interface FileContext {
+  path: string;
+  /** Redacted, size-capped content. */
+  content: string;
+  /** 0–1 from workspace search (current file is always 1.0). */
+  relevanceScore: number;
+  symbols: import("./workspace-index-contract").IndexedSymbol[];
+}
+
+export interface EnhancedContext {
+  currentFile?: FileContext;
+  relatedFiles: FileContext[];
+  /** Keyword / identifier extracted from the user message. */
+  searchQuery: string;
+  totalTokens: number;
+}
