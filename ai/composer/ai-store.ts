@@ -244,6 +244,7 @@ interface CavalWindow {
         scaffoldMode?: boolean;
         skipMultiAgent?: boolean;
         strictReview?: boolean;
+        conversationId?: string;
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
@@ -1873,6 +1874,7 @@ export const useAIStore = create<AIStore>()(
               mode: agentMode === 'ask' ? 'ask' : agentMode,
               streamId,
               workspaceRoot: boundWorkspace ?? undefined,
+              conversationId: get().activeThreadId,
               skipMultiAgent: !isAgenticPipelineMode(agentMode),
               messages: contextMessages.map((m) => ({
                 role: m.role,

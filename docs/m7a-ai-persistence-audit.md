@@ -137,7 +137,7 @@ Indici: obligatorii pentru listă conversații + restore mesaje.
 | Pas | Descriere |
 |---|---|
 | **7a.1** ✅ | Contract + SQLite store + CRUD conversații/mesaje (+ timeline/written_files API); gate redacție/caps/CASCADE/izolation. Smoke unit: `tests/main/db/ai-persistence.test.ts` |
-| **7a.2** | Flush timeline la final de mesaj assistant (nu mid-`emitTimelineEvent`) |
+| **7a.2** ✅ | Flush timeline la final de mesaj assistant (buffer pe `streamId`, nu mid-`emitTimelineEvent`). Abort/error → `clearTimelineBuffer`. Smoke: `tests/main/ai/timeline-persistence.test.ts` |
 | **7a.3** | Persistență `written_files` cu snapshot la Accept |
 | **7a.4** | Încărcare istoric în UI (listă + restore); migrare blândă din localStorage dacă e fezabilă |
 | **7a.5** | Export sesiune JSON/MD, redactat, efemer |

@@ -70,6 +70,10 @@ import type { IdeContextPayload } from "../shared/ai-context-contract";
 import { applyIdeContextToChatRequest } from "./ai/ide-context-collector";
 import { emitTimelineEvent } from "./ai/timeline-emit";
 import {
+  discardIncompleteStreamTimeline,
+  persistAssistantMessageAndFlush,
+} from "./ai/timeline-persistence";
+import {
   emitQuickFixAcceptTimeline,
   emitQuickFixProposeTimeline,
   proposeQuickFix,
@@ -179,6 +183,9 @@ export interface CavalChatStreamRequest {
 
   /** Pas 6.5 — gated multi-file refactor propose (no disk write). */
   refactor?: RefactorRequest;
+
+  /** Pas 7a.2 — UI thread id used as conversation_id at assistant completion. */
+  conversationId?: string;
 
 }
 
@@ -814,6 +821,7 @@ export function abortAllStreamsForSender(senderId: number): void {
   const streams = activeStreamsBySender.get(senderId);
   if (!streams?.size) return;
   for (const streamId of [...streams]) {
+    discardIncompleteStreamTimeline(streamId);
     abortAbortableStream(streamId, "sender gone");
     abortMultiAgentPipeline(streamId);
   }
@@ -1284,6 +1292,12 @@ async function streamToRenderer(
         });
       }
       // Pas 6.4 — no file_write until Accept; paths listed as proposed only.
+      persistAssistantMessageAndFlush({
+        workspaceRoot,
+        conversationId: request.conversationId,
+        streamId,
+        content: result.composeText ?? result.text ?? "",
+      });
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -1423,6 +1437,12 @@ async function streamToRenderer(
 
   if (result.ok) {
     markOperationTerminal(streamId, "completed");
+    persistAssistantMessageAndFlush({
+      workspaceRoot,
+      conversationId: request.conversationId,
+      streamId,
+      content: result.text ?? "",
+    });
     stream.send({
       type: "done",
       model: result.resolvedModel,
@@ -1438,12 +1458,13 @@ async function streamToRenderer(
     success: false,
     detail: summarizeToolDetail(result.error, false),
   });
-  stream.send({
-    type: "error",
-    error: safeErrorMessageForUi(result.error ?? "Stream failed"),
-  });
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Stream failed"),
+    });
 
   } finally {
+    discardIncompleteStreamTimeline(streamId);
     finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
   }
@@ -1524,6 +1545,12 @@ async function streamResumeToRenderer(
           success: true,
         });
       }
+      persistAssistantMessageAndFlush({
+        workspaceRoot: input.workspaceRoot,
+        conversationId: undefined,
+        streamId,
+        content: result.composeText ?? result.text ?? "",
+      });
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -1553,6 +1580,7 @@ async function streamResumeToRenderer(
       error: safeErrorMessageForUi(result.error ?? "Pipeline resume failed"),
     });
   } finally {
+    discardIncompleteStreamTimeline(streamId);
     finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
   }
@@ -1712,6 +1740,7 @@ export function registerModelHandlers(
     if (!owned.ok) {
       return { ok: false, error: owned.error };
     }
+    discardIncompleteStreamTimeline(parsed.streamId);
     const cascaded = abortAbortableStream(parsed.streamId, "user cancelled");
     const cancel = beginCancelOperation({
       streamId: parsed.streamId,

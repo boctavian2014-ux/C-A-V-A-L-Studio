@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   clipTimelineText,
   sanitizeTimelineEvent,
   summarizeToolDetail,
 } from "../../src/shared/ai-timeline-contract";
-import { emitTimelineEvent } from "../../src/main/ai/timeline-emit";
+import { emitTimelineEvent, resetTimelineBuffersForTests } from "../../src/main/ai/timeline-emit";
 import { mergeUnifiedTimelineRows } from "../../ai/composer/ChatUnifiedTimeline";
 
 describe("ai-timeline-contract", () => {
@@ -39,6 +39,9 @@ describe("ai-timeline-contract", () => {
 });
 
 describe("emitTimelineEvent", () => {
+  afterEach(() => {
+    resetTimelineBuffersForTests();
+  });
   it("sends a timeline chunk on the existing stream channel", () => {
     const sent: Array<Record<string, unknown>> = [];
     const event = emitTimelineEvent(
@@ -82,6 +85,9 @@ describe("emitTimelineEvent", () => {
 });
 
 describe("tool_call before tool_result ordering", () => {
+  afterEach(() => {
+    resetTimelineBuffersForTests();
+  });
   it("preserves emission order in the chunk list", () => {
     const sent: Array<Record<string, unknown>> = [];
     const stream = {

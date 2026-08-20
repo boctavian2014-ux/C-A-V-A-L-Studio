@@ -44,7 +44,7 @@ export interface WrittenFile {
 }
 
 export interface AiPersistence {
-  createConversation(workspaceRoot: string, title?: string): string;
+  createConversation(workspaceRoot: string, title?: string, id?: string): string;
   getConversation(id: string): Conversation | null;
   listConversations(workspaceRoot: string): Conversation[];
   updateConversationTitle(id: string, title: string): void;
@@ -239,22 +239,34 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
   }
 
   const api: AiPersistence = {
-    createConversation(root: string, title?: string): string {
+    createConversation(root: string, title?: string, id?: string): string {
       const ws = normalizeWorkspaceRoot(root);
-      const id = randomUUID();
+      const requested = id?.trim();
+      if (requested) {
+        const existing = mapConversation(
+          selectConversation.get(requested) as Record<string, unknown> | undefined
+        );
+        if (existing) {
+          if (normalizeWorkspaceRoot(existing.workspaceRoot) !== ws) {
+            throw new Error("Conversation workspace mismatch");
+          }
+          return existing.id;
+        }
+      }
+      const convId = requested || randomUUID();
       const now = Date.now();
       const safeTitle =
         typeof title === "string" && title.trim()
           ? gatePersistedText(title.trim(), 500)
           : null;
       insertConversation.run({
-        id,
+        id: convId,
         workspace_root: ws,
         title: safeTitle,
         created_at: now,
         updated_at: now,
       });
-      return id;
+      return convId;
     },
 
     getConversation(id: string): Conversation | null {

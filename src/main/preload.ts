@@ -91,6 +91,8 @@ export interface CavalChatStreamRequest {
   explain?: import("../shared/ai-explain-contract").ExplainRequest;
   /** Pas 6.5 — gated multi-file refactor propose. */
   refactor?: import("../shared/ai-refactor-contract").RefactorRequest;
+  /** Pas 7a.2 — UI thread id; used as conversation_id when persisting the assistant message. */
+  conversationId?: string;
   context?: {
     filePath?: string;
     fileContent?: string;

@@ -479,6 +479,7 @@ interface CavalBridge {
       timelineFileWrite?: import('../../src/shared/ai-inline-completion-contract').TimelineFileWriteRequest;
       explain?: import('../../src/shared/ai-explain-contract').ExplainRequest;
       refactor?: import('../../src/shared/ai-refactor-contract').RefactorRequest;
+      conversationId?: string;
       context?: {
         filePath?: string;
         fileContent?: string;
