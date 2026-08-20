@@ -138,7 +138,7 @@ describe("Preview flow", () => {
 
   function createHarness() {
     const child = createFakeChild();
-    const openUrlFn = vi.fn(async () => undefined);
+    const openUrlFn = vi.fn(async (_url: string) => undefined);
     const spawnFn = vi.fn(() => child as unknown as ReturnType<PreviewSpawn>);
     const launcher = createPreviewLauncherForTests({ spawnFn, openUrlFn });
     return { launcher, spawnFn, child, openUrlFn };
