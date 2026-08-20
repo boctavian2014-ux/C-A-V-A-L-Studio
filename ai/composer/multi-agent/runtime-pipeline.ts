@@ -31,8 +31,8 @@ import { formatOrchestratorSummary } from './orchestrator-plan';
 
 import { ModelRotator, planExecutionWithRoles } from './orchestrator';
 import { applyRoleModelsToPlan } from './arena-model-orchestrator';
-import { runArenaConsistencyOnly, runArenaPostCompose } from './arena-post-compose';
-import { buildArenaContinueMessage, buildGateRepairMessage } from '../../prompts/arena-continue';
+import { runArenaPostCompose } from './arena-post-compose';
+import { buildGateRepairMessage } from '../../prompts/arena-continue';
 
 import { evaluateCompletionGate } from '../project-completion-gate';
 import { resolveDeliveryOutcome } from './delivery-status';
@@ -47,6 +47,7 @@ import { scheduleBackgroundVerify } from '../../../src/main/pipeline-verify-work
 import { PipelineContextStore, CAVALLO_AUTO_UI_PREFERENCES } from './pipeline-context-store';
 import { partitionTasksByUiPhase, hasUiSpecInPrompt } from '../ui-spec-detector';
 import { applyPipelineScaffold } from '../scaffold-apply-node';
+import { getProposedWrites } from '../../../src/main/ai/proposed-writes-buffer';
 import { ensureMcpServersReady } from '../../tools/tool-runtime';
 
 import { getCheckpoint, loadCheckpointFromDisk, clearCheckpoint } from './pipeline-checkpoint';
@@ -837,13 +838,17 @@ export async function runCavalloMultiAgentPipeline(
 
     pipelineCallbacks.onMultiAgentStatus?.('integrate', 'active', 'Git/verify');
 
-    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
+    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store, {
+      stageKey: runId,
+      defer: true,
+    });
 
     let finalWrittenFiles = writtenFiles;
+    // Pas 6.4 — proposals only (no disk). Arena disk scans / repair deferred until Accept.
     let arenaPost = await runArenaPostCompose({
       workspaceRoot,
-      writtenFiles,
-      tasks: decomp.tasks,
+      writtenFiles: [],
+      tasks: store.getTasks(),
       plan,
       store,
       config,
@@ -852,47 +857,15 @@ export async function runCavalloMultiAgentPipeline(
       callbacks: pipelineCallbacks,
       isAborted,
     });
-    finalWrittenFiles = arenaPost.writtenFiles;
-
-    const maxArenaRepairWaves = config.fullDelivery.maxArenaRepairWaves;
-    let arenaRepairWave = 0;
-    while (
-      !arenaPost.consistencyOk &&
-      arenaPost.consistencyScan &&
-      arenaRepairWave < maxArenaRepairWaves &&
-      !isAborted()
-    ) {
-      arenaRepairWave += 1;
-      pipelineCallbacks.onMultiAgentStatus?.(
-        'compose',
-        'active',
-        `arena repair ${arenaRepairWave}/${maxArenaRepairWaves}`
-      );
-      const repair = await runFinalComposer(
-        composeModelId,
-        store,
-        workspaceRoot,
-        pipelineCallbacks,
-        isAborted,
-        {
-          waveIndex: composeWaves + arenaRepairWave,
-          repairMessage: buildArenaContinueMessage(arenaPost.consistencyScan),
-        }
-      );
-      if (!repair.ok) break;
-      composeText = `${composeText}\n\n${repair.text}`;
-      const repaired = applyPipelineScaffold(workspaceRoot, repair.text, store);
-      finalWrittenFiles = [...new Set([...finalWrittenFiles, ...repaired])];
-      const scan = await runArenaConsistencyOnly(workspaceRoot, finalWrittenFiles);
-      arenaPost = {
-        ...arenaPost,
-        writtenFiles: finalWrittenFiles,
-        consistencyOk: scan.ok,
-        consistencyScan: scan,
-        summaries: { ...arenaPost.summaries, consistency: scan.summary },
-      };
-      pipelineCallbacks.onMultiAgentStatus?.('compose', 'done', scan.summary.slice(0, 80));
-    }
+    arenaPost = {
+      ...arenaPost,
+      writtenFiles: finalWrittenFiles,
+      consistencyOk: true,
+      summaries: {
+        ...arenaPost.summaries,
+        consistency: 'deferred until chat apply Accept (6.4)',
+      },
+    };
 
     const remediation = remediateWorkspaceBeforeGate(workspaceRoot, request.message);
     if (remediation.deleted.length > 0 || remediation.created.length > 0) {
@@ -968,21 +941,27 @@ export async function runCavalloMultiAgentPipeline(
         pipelineCallbacks,
         isAborted,
         {
-          waveIndex: composeWaves + maxArenaRepairWaves + gateRepairWave,
+          waveIndex: composeWaves + gateRepairWave,
           repairMessage: buildGateRepairMessage(failedVerify?.output ?? '', gateRepairWave),
         }
       );
       if (!gateRepair.ok) break;
       composeText = `${composeText}\n\n${gateRepair.text}`;
-      const gateRepaired = applyPipelineScaffold(workspaceRoot, gateRepair.text, store);
+      const gateRepaired = applyPipelineScaffold(workspaceRoot, gateRepair.text, store, {
+        stageKey: runId,
+        defer: true,
+      });
       finalWrittenFiles = [...new Set([...finalWrittenFiles, ...gateRepaired])];
 
       if (config.enableDevToolsIntegration) {
+        // Pas 6.4 — disk verify waits until Accept; skip while proposals are staged.
         state.devTools = await runDevToolsIntegration(workspaceRoot, {
-          verify: finalWrittenFiles.length > 0,
-          autoInstall: config.fullDelivery.autoInstallDependencies,
+          verify: false,
+          autoInstall: false,
           writtenFiles: finalWrittenFiles,
         });
+      } else {
+        break;
       }
       pipelineCallbacks.onMultiAgentStatus?.(
         'integrate',
@@ -1096,7 +1075,9 @@ export async function runCavalloMultiAgentPipeline(
       writtenFiles: finalWrittenFiles,
     });
 
+    // Pas 6.4 — background verify runs after Accept (proposals not on disk yet).
     if (
+      false &&
       config.devtoolsAsyncVerify &&
       config.enableDevToolsIntegration &&
       finalWrittenFiles.length > 0
@@ -1109,7 +1090,7 @@ export async function runCavalloMultiAgentPipeline(
         autoInstall: config.fullDelivery.autoInstallDependencies,
         writtenFiles: finalWrittenFiles,
         userMessage: request.message,
-        taskCount: decomp.tasks.length,
+        taskCount: store.getTasks().length,
         supervisorApproved: llmSupervisor?.approved,
         supervisorRaw: llmSupervisor?.raw,
         supervisorFallback: config.supervisorFallback,
@@ -1127,6 +1108,8 @@ export async function runCavalloMultiAgentPipeline(
       composeText,
 
       writtenFiles: finalWrittenFiles,
+
+      proposedWrites: getProposedWrites(runId),
 
       resolvedModel: composeModel,
 
@@ -1322,15 +1305,10 @@ export async function resumeCavalloMultiAgentPipeline(
       if (!config.fullDelivery.enabled) break;
     }
 
-    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store);
-
-    const devTools = config.enableDevToolsIntegration && !config.devtoolsAsyncVerify
-      ? await runDevToolsIntegration(workspaceRoot, {
-          verify: writtenFiles.length > 0,
-          autoInstall: config.fullDelivery.autoInstallDependencies,
-          writtenFiles,
-        })
-      : undefined;
+    const writtenFiles = applyPipelineScaffold(workspaceRoot, composeText, store, {
+      stageKey: runId,
+      defer: true,
+    });
 
     const gateResult = evaluateCompletionGate({
       workspaceRoot,
@@ -1338,7 +1316,7 @@ export async function resumeCavalloMultiAgentPipeline(
       userMessage: cp.userMessage,
       recap: supervisor.summary,
       taskCount: cp.tasks.length,
-      verify: devTools?.verify,
+      verify: undefined,
       supervisorApproved: supervisor.approved,
       supervisorRaw: supervisor.raw,
       supervisorFallback: config.supervisorFallback,
@@ -1399,6 +1377,7 @@ export async function resumeCavalloMultiAgentPipeline(
       text: delivery.text,
       composeText,
       writtenFiles,
+      proposedWrites: getProposedWrites(runId),
       resolvedModel: composeModel,
       provider: composeProvider,
       runId,

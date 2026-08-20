@@ -56,9 +56,9 @@ Out of scope 6.2: multi-line agresive, FIM avansat, completion în terminal/diff
 
 Implementat: stream `explain` (fără IPC nou), context ±10 linii redactat/untrusted, selecție max 2 KB, explicație max 4 KB, debounce hover 500 ms + cancel, UI hover Monaco + panou selecție / acțiune „Explain with AI”. Timeline: `tool_call → tool_result` **fără** `file_write`. Smoke: `tests/ai/explain-read-only.test.ts`.
 
-### 6.4 — Apply din chat ↔ editor parity
+### 6.4 — Apply din chat ↔ editor parity ✅
 
-Închide golurile rămase față de writtenFiles + timeline: același `file_write`, același undo/diff unde e cazul, fără canal paralel.
+Implementat: scaffold chat → `proposedWrites` (fără disc), card Accept/Reject + Monaco diff, apply pe disc + undo Monaco pentru tab deschis, Revert pentru fișiere noi, `file_write` doar la Accept. Pipeline arena/verify pe disc e amânat până după Accept. Smoke: `tests/ai/chat-apply-parity.test.ts`.
 
 ### 6.5 — Refactor multi-fișier (gated)
 

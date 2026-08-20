@@ -120,6 +120,9 @@ export interface ChatMessage {
   reasoning?: string;
   reasoningExpanded?: boolean;
   writtenFiles?: string[];
+  /** Pas 6.4 — proposed chat applies awaiting Accept. */
+  proposedWrites?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  proposeStageKey?: string;
   /** Pas 5.4 — unified activity timeline for this assistant message. */
   timelineEvents?: TimelineEvent[];
   timelineExpanded?: boolean;
@@ -1384,7 +1387,11 @@ export const useAIStore = create<AIStore>()(
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
-          const skipScaffold = !appliesScaffold || !projectPath || extra?.error;
+          const skipScaffold =
+            !appliesScaffold ||
+            !projectPath ||
+            extra?.error ||
+            Boolean(extra?.proposedWrites?.length);
           const blockOnDiff = Boolean(diff);
           if (skipScaffold || blockOnDiff) return;
 
@@ -1801,9 +1808,14 @@ export const useAIStore = create<AIStore>()(
             if (chunk.writtenFiles?.length) {
               pipelineWrittenFiles = chunk.writtenFiles;
             }
+            const proposedWrites = chunk.proposedWrites ?? [];
+            const proposeStageKey = chunk.proposeStageKey;
             updateAssistant({
               isStreaming: false,
               ...(pipelineWrittenFiles.length ? { writtenFiles: pipelineWrittenFiles } : {}),
+              ...(proposedWrites.length
+                ? { proposedWrites, proposeStageKey, writtenFiles: [] }
+                : {}),
             });
             const finalSteps = markAllActivityDone(
               get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
@@ -1822,6 +1834,9 @@ export const useAIStore = create<AIStore>()(
                 resolvedModel: resolved,
                 activitySteps: finalSteps,
                 reasoningBrief: capturedReasoningBrief,
+                ...(proposedWrites.length
+                  ? { proposedWrites, proposeStageKey, writtenFiles: [] as string[] }
+                  : {}),
               },
               activeTabPath
             );

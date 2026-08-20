@@ -354,6 +354,8 @@ export type MultiAgentPipelineResult =
       /** Raw final composer output (may differ from chat summary text) */
       composeText?: string;
       writtenFiles?: string[];
+      /** Pas 6.4 — staged scaffold content; not on disk until Accept. */
+      proposedWrites?: import('../../../src/shared/ai-chat-apply-contract').ProposedWrite[];
       completionGate?: import('../project-completion-gate').CompletionGateResult;
       deliveryBlocked?: boolean;
       needsReview?: boolean;

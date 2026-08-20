@@ -464,8 +464,15 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <DiffBlock message={message} />
         )}
 
-        {!isUser && message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && (
-          <WrittenFilesCard files={message.writtenFiles} />
+        {!isUser &&
+          ((message.proposedWrites && message.proposedWrites.length > 0) ||
+            (message.writtenFiles && message.writtenFiles.length > 0)) &&
+          !message.isStreaming && (
+          <WrittenFilesCard
+            files={message.writtenFiles}
+            proposedWrites={message.proposedWrites}
+            messageId={message.id}
+          />
         )}
 
         {/* Eroare */}

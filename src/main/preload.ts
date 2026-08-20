@@ -153,6 +153,9 @@ export interface CavalStreamChunk {
   quickFix?: import("../shared/ai-quick-fix-contract").QuickFixResult;
   /** Pas 6.3 — read-only explain result. */
   explain?: import("../shared/ai-explain-contract").ExplainResult;
+  /** Pas 6.4 — staged file proposals (not on disk until Accept). */
+  proposedWrites?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+  proposeStageKey?: string;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;
@@ -438,6 +441,27 @@ contextBridge.exposeInMainWorld("caval", {
         pipelineRecapMeta?: unknown;
         finishedAt: string;
       } | null;
+    }>,
+  chatApplyAccept: (input: {
+    stageKey?: string;
+    writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+  }) =>
+    ipcRenderer.invoke("caval:chat-apply-accept", input) as Promise<{
+      ok: boolean;
+      applied: string[];
+      writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+      errors?: string[];
+      error?: string;
+    }>,
+  chatApplyReject: (input: { stageKey?: string }) =>
+    ipcRenderer.invoke("caval:chat-apply-reject", input) as Promise<{ ok: boolean }>,
+  chatApplyRevertNew: (input: {
+    writes: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+  }) =>
+    ipcRenderer.invoke("caval:chat-apply-revert-new", input) as Promise<{
+      ok: boolean;
+      deleted: string[];
+      errors?: string[];
     }>,
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{

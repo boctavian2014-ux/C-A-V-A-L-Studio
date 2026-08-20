@@ -1168,15 +1168,21 @@ async function streamToRenderer(
       if (result.text?.includes('```')) {
         if (!stream.send({ type: "delta", delta: result.text })) return;
       }
-      for (const filePath of result.writtenFiles ?? []) {
-        if (!filePath?.trim()) continue;
+      const proposedWrites = result.proposedWrites ?? [];
+      if (proposedWrites.length > 0) {
         emitTimelineEvent(stream, streamId, {
-          type: "file_write",
-          label: `Updated ${filePath.replace(/\\/g, "/")}`,
-          filePath: filePath.replace(/\\/g, "/"),
+          type: "tool_call",
+          label: `propose ${proposedWrites.length} file(s)`,
+          toolName: "chat_apply",
+        });
+        emitTimelineEvent(stream, streamId, {
+          type: "tool_result",
+          label: `${proposedWrites.length} change(s) awaiting Accept`,
+          toolName: "chat_apply",
           success: true,
         });
       }
+      // Pas 6.4 — no file_write until Accept; paths listed as proposed only.
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -1184,7 +1190,9 @@ async function streamToRenderer(
         reasoningBrief: result.reasoningBrief,
         pipelineRecapMeta: result.pipelineRecapMeta,
         composeText: result.composeText ?? result.text,
-        writtenFiles: result.writtenFiles,
+        writtenFiles: [],
+        proposedWrites,
+        proposeStageKey: result.runId,
         completionGate: result.completionGate,
         deliveryBlocked: result.deliveryBlocked,
         needsReview: result.needsReview,
@@ -1401,12 +1409,17 @@ async function streamResumeToRenderer(
       if (result.text?.includes("```")) {
         if (!stream.send({ type: "delta", delta: result.text })) return;
       }
-      for (const filePath of result.writtenFiles ?? []) {
-        if (!filePath?.trim()) continue;
+      const proposedWrites = result.proposedWrites ?? [];
+      if (proposedWrites.length > 0) {
         emitTimelineEvent(stream, streamId, {
-          type: "file_write",
-          label: `Updated ${filePath.replace(/\\/g, "/")}`,
-          filePath: filePath.replace(/\\/g, "/"),
+          type: "tool_call",
+          label: `propose ${proposedWrites.length} file(s)`,
+          toolName: "chat_apply",
+        });
+        emitTimelineEvent(stream, streamId, {
+          type: "tool_result",
+          label: `${proposedWrites.length} change(s) awaiting Accept`,
+          toolName: "chat_apply",
           success: true,
         });
       }
@@ -1417,7 +1430,9 @@ async function streamResumeToRenderer(
         reasoningBrief: result.reasoningBrief,
         pipelineRecapMeta: result.pipelineRecapMeta,
         composeText: result.composeText ?? result.text,
-        writtenFiles: result.writtenFiles,
+        writtenFiles: [],
+        proposedWrites,
+        proposeStageKey: result.runId ?? input.runId,
         completionGate: result.completionGate,
         deliveryBlocked: result.deliveryBlocked,
         needsReview: result.needsReview,

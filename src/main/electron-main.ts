@@ -37,6 +37,7 @@ import { createProjectOnDesktop } from "./desktop-project";
 import { registerEngineeringHandlers } from "./engineering-handlers";
 import { registerModelHandlers, abortAllStreamsForSender } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
+import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
@@ -154,6 +155,7 @@ registerModelHandlers(
   (id) => workspaceRoots.get(id) ?? process.cwd(),
   getBoundWorkspaceRoot
 );
+registerChatApplyHandlers(getBoundWorkspaceRoot);
 registerMcpHandlers(getBoundWorkspaceRoot);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);

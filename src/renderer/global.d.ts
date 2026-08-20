@@ -176,6 +176,8 @@ interface CavalStreamChunk {
   event?: import('../../src/shared/ai-timeline-contract').TimelineEvent;
   quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixResult;
   explain?: import('../../src/shared/ai-explain-contract').ExplainResult;
+  proposedWrites?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  proposeStageKey?: string;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;
@@ -532,6 +534,20 @@ interface CavalBridge {
       finishedAt: string;
     } | null;
   }>;
+  chatApplyAccept?: (input: {
+    stageKey?: string;
+    writes?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  }) => Promise<{
+    ok: boolean;
+    applied: string[];
+    writes?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+    errors?: string[];
+    error?: string;
+  }>;
+  chatApplyReject?: (input: { stageKey?: string }) => Promise<{ ok: boolean }>;
+  chatApplyRevertNew?: (input: {
+    writes: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  }) => Promise<{ ok: boolean; deleted: string[]; errors?: string[] }>;
   pipelineResumeStream?: (
     input: {
       runId: string;
