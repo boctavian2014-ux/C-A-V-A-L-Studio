@@ -251,6 +251,8 @@ export function MonacoEditor() {
         path: tab.path,
         startLine: sel.startLineNumber,
         endLine: sel.endLineNumber,
+        startColumn: sel.startColumn,
+        endColumn: sel.endColumn,
       });
       const word = model.getWordAtPosition({
         lineNumber: sel.positionLineNumber,
@@ -339,6 +341,49 @@ export function MonacoEditor() {
       }
     );
 
+    const hoverProvider = monacoApi.languages.registerHoverProvider(lang, {
+      provideHover: async (model, position, token) => {
+        const word = model.getWordAtPosition(position);
+        if (!word?.word || token.isCancellationRequested) return null;
+        const tab = useEditorStore.getState().tabs.find(
+          (t) => t.id === useEditorStore.getState().activeTabId
+        );
+        const filePath = tab?.path ?? 'untitled.ts';
+        const explained = await import('../../ai/explain-client.js').then((m) =>
+          m.explainSymbolWithDebounce({
+            filePath,
+            symbol: word.word,
+            language: tab?.language ?? 'typescript',
+            token,
+          })
+        );
+        if (!explained || token.isCancellationRequested) return null;
+        return {
+          range: new monacoApi.Range(
+            position.lineNumber,
+            word.startColumn,
+            position.lineNumber,
+            word.endColumn
+          ),
+          contents: [
+            { value: '**AI Explain**' },
+            { value: explained.explanation },
+          ],
+        };
+      },
+    });
+
+    const explainSelectionAction = editor.addAction({
+      id: 'caval.explainSelection',
+      label: 'Explain with AI',
+      keybindings: [monacoApi.KeyMod.CtrlCmd | monacoApi.KeyMod.Shift | monacoApi.KeyCode.KeyE],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.6,
+      run: () => {
+        void import('../../ai/explain-controller.js').then((m) => m.startExplainForSelection());
+      },
+    });
+
     const codeActionProvider = monacoApi.languages.registerCodeActionProvider(
       ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
       {
@@ -412,6 +457,8 @@ export function MonacoEditor() {
       codeActionProvider.dispose();
       cmd.dispose();
       inlineAcceptCmd.dispose();
+      hoverProvider.dispose();
+      explainSelectionAction.dispose();
       registerMonacoEditor(null);
     });
   }, [monaco, saveTab]);

@@ -30,6 +30,8 @@ export interface EditorSelection {
   path: string;
   startLine: number;
   endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 interface EditorStore {

@@ -175,6 +175,7 @@ interface CavalStreamChunk {
   reasoningBrief?: { goal: string; approach: string; modules: string[] };
   event?: import('../../src/shared/ai-timeline-contract').TimelineEvent;
   quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixResult;
+  explain?: import('../../src/shared/ai-explain-contract').ExplainResult;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;
@@ -473,6 +474,7 @@ interface CavalBridge {
       quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixRequest;
       quickFixAccept?: import('../../src/shared/ai-quick-fix-contract').QuickFixAcceptRequest;
       timelineFileWrite?: import('../../src/shared/ai-inline-completion-contract').TimelineFileWriteRequest;
+      explain?: import('../../src/shared/ai-explain-contract').ExplainRequest;
       context?: {
         filePath?: string;
         fileContent?: string;

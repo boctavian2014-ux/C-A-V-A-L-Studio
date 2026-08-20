@@ -87,6 +87,8 @@ export interface CavalChatStreamRequest {
   quickFixAccept?: import("../shared/ai-quick-fix-contract").QuickFixAcceptRequest;
   /** Pas 6.2 — after inline completion Tab accept: emit file_write on timeline only. */
   timelineFileWrite?: import("../shared/ai-inline-completion-contract").TimelineFileWriteRequest;
+  /** Pas 6.3 — read-only explain on hover / selection. */
+  explain?: import("../shared/ai-explain-contract").ExplainRequest;
   context?: {
     filePath?: string;
     fileContent?: string;
@@ -149,6 +151,8 @@ export interface CavalStreamChunk {
   event?: import("../shared/ai-timeline-contract").TimelineEvent;
   /** Pas 6.1 — proposed / accept result for quick fix. */
   quickFix?: import("../shared/ai-quick-fix-contract").QuickFixResult;
+  /** Pas 6.3 — read-only explain result. */
+  explain?: import("../shared/ai-explain-contract").ExplainResult;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;

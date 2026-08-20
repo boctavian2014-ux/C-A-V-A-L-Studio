@@ -81,6 +81,14 @@ import type {
   QuickFixResult,
 } from "../shared/ai-quick-fix-contract";
 import type { TimelineFileWriteRequest } from "../shared/ai-inline-completion-contract";
+import type {
+  ExplainRequest,
+  ExplainResult,
+} from "../shared/ai-explain-contract";
+import {
+  emitExplainTimeline,
+  runExplain,
+} from "./ai/explain-runner";
 
 
 
@@ -157,6 +165,9 @@ export interface CavalChatStreamRequest {
 
   /** Pas 6.2 — after inline completion Tab accept: emit file_write on timeline only. */
   timelineFileWrite?: TimelineFileWriteRequest;
+
+  /** Pas 6.3 — read-only explain on hover / selection. */
+  explain?: ExplainRequest;
 
 }
 
@@ -798,6 +809,79 @@ export function abortAllStreamsForSender(senderId: number): void {
   streams.clear();
 }
 
+async function streamExplainToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const explain = request.explain;
+  if (!explain) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: ExplainResult = { success: false, error: "No bound workspace" };
+    emitExplainTimeline(stream, streamId, explain.filePath, result, explain.symbol ?? "selection");
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Explain.",
+      explain: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "explain");
+
+  const result = await runExplain({
+    workspaceRoot,
+    request: { ...explain, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "analysis",
+        capability: "chat",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        temperature: 0.2,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  const focus = explain.symbol ?? "selection";
+  emitExplainTimeline(stream, streamId, explain.filePath, result, focus);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Explain failed"),
+      explain: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    explain: result,
+  });
+}
+
 async function streamQuickFixToRenderer(
   stream: StreamChunkSender,
   streamId: string,
@@ -984,6 +1068,29 @@ async function streamToRenderer(
       return;
     }
     await streamQuickFixToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 6.3 — read-only explain (no file_write).
+  if (request.explain) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: ExplainResult = { success: false, error: "No bound workspace" };
+      emitExplainTimeline(
+        stream,
+        streamId,
+        request.explain.filePath,
+        result,
+        request.explain.symbol ?? "selection"
+      );
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Explain.",
+        explain: result,
+      });
+      return;
+    }
+    await streamExplainToRenderer(stream, streamId, request, abortRoot.signal);
     return;
   }
 

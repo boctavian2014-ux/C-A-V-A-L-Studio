@@ -52,9 +52,9 @@ Implementat: debounce 300 ms + `CancellationToken`, context ±20 linii redactat/
 
 Out of scope 6.2: multi-line agresive, FIM avansat, completion în terminal/diff.
 
-### 6.3 — Explain / hover (read-only)
+### 6.3 — Explain / hover (read-only) ✅
 
-Simbol / selecție → explicație AI. Zero scriere. Poate reutiliza context IDE (5.2).
+Implementat: stream `explain` (fără IPC nou), context ±10 linii redactat/untrusted, selecție max 2 KB, explicație max 4 KB, debounce hover 500 ms + cancel, UI hover Monaco + panou selecție / acțiune „Explain with AI”. Timeline: `tool_call → tool_result` **fără** `file_write`. Smoke: `tests/ai/explain-read-only.test.ts`.
 
 ### 6.4 — Apply din chat ↔ editor parity
 

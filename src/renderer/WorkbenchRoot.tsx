@@ -27,6 +27,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
 import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
 import { QuickFixDiffPreview } from './components/editor/QuickFixDiffPreview';
+import { ExplainSelectionPanel } from './components/editor/ExplainSelectionPanel';
 import { buildWorkbenchCommands } from './commands/command-registry';
 import { handleMenuCommand, type MenuCommandContext } from './commands/menu-command-router';
 import { showWorkbenchToast } from './commands/workbench-toast';
@@ -1135,6 +1136,7 @@ export function WorkbenchRoot() {
             }}
           />
           <QuickFixDiffPreview />
+          <ExplainSelectionPanel />
 
           {/* AI Panel — dreapta, 340px, ascundibil */}
           {aiPanelOpen && (
