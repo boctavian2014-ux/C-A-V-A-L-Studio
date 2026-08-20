@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DebugPanel } from '../debug/DebugPanel';
 import { ProblemsPanel } from '../problems/ProblemsPanel';
+import { TasksPanel } from '../tasks/TasksPanel';
 import { useOutputStore, formatOutputForChat } from '../../store/output-store';
 import {
   formatProblemForChat,
@@ -307,6 +308,7 @@ export function TerminalPanel() {
     { id: 'terminal', label: 'TERMINAL' },
     { id: 'output', label: 'OUTPUT' },
     { id: 'problems', label: 'PROBLEME' },
+    { id: 'tasks', label: 'TASKS' },
     { id: 'debug', label: 'DEBUG' },
   ];
 
@@ -433,6 +435,12 @@ export function TerminalPanel() {
           <ProblemsPanel
             onSendToChat={(problem) => sendProblemToChat(problemToEntry(problem))}
           />
+        )}
+
+        {activeTab === 'tasks' && (
+          <div style={{ height: '100%', overflow: 'auto' }}>
+            <TasksPanel />
+          </div>
         )}
 
         {activeTab === 'debug' && (

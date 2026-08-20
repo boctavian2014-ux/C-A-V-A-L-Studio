@@ -1,4 +1,4 @@
-export type TerminalPanelTab = 'terminal' | 'output' | 'problems' | 'debug';
+export type TerminalPanelTab = 'terminal' | 'output' | 'problems' | 'tasks' | 'debug';
 
 export function dispatchTerminalPanelTab(tab: TerminalPanelTab): void {
   document.dispatchEvent(

@@ -116,6 +116,13 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       run: () => dispatchTerminalPanelTab('problems'),
     },
     {
+      id: 'view:tasks',
+      label: 'View: Tasks',
+      category: 'View',
+      keywords: ['tasks', 'npm', 'scripts', 'run'],
+      run: () => dispatchTerminalPanelTab('tasks'),
+    },
+    {
       id: 'view:toggle-sidebar',
       label: 'View: Toggle Sidebar',
       category: 'View',
