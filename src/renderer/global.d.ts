@@ -633,6 +633,24 @@ interface CavalBridge {
       error?: string;
     }>;
   };
+  workspaceIndex?: {
+    getSummary: () => Promise<{
+      ok: boolean;
+      summary?: import('../../src/shared/workspace-index-contract').WorkspaceIndexSummary;
+      error?: string;
+    }>;
+    getIndex: () => Promise<{
+      ok: boolean;
+      index?: import('../../src/shared/workspace-index-contract').WorkspaceIndex;
+      error?: string;
+    }>;
+    refresh: () => Promise<{
+      ok: boolean;
+      index?: import('../../src/shared/workspace-index-contract').WorkspaceIndex;
+      summary?: import('../../src/shared/workspace-index-contract').WorkspaceIndexSummary;
+      error?: string;
+    }>;
+  };
   pipelineResumeStream?: (
     input: {
       runId: string;

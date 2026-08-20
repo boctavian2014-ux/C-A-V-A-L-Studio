@@ -40,6 +40,8 @@ import { registerMcpHandlers } from "./mcp-handlers";
 import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
 import { registerAiHistoryHandlers } from "./ai/ai-history-handlers";
 import { registerAiSettingsHandlers } from "./ai/ai-settings-handlers";
+import { registerWorkspaceIndexHandlers } from "./workspace/workspace-index-handlers";
+import { workspaceIndexService } from "./workspace/workspace-index-service";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
@@ -160,6 +162,7 @@ registerModelHandlers(
 registerChatApplyHandlers(getBoundWorkspaceRoot);
 registerAiHistoryHandlers(getBoundWorkspaceRoot);
 registerAiSettingsHandlers(getBoundWorkspaceRoot);
+registerWorkspaceIndexHandlers(getBoundWorkspaceRoot);
 registerMcpHandlers(getBoundWorkspaceRoot);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);
@@ -367,6 +370,7 @@ const openFile = async (): Promise<void> => {
   });
   bindWorkspace(window.webContents.id, projectPath);
   void contextEngine.indexWorkspace(projectPath).catch(() => undefined);
+  void workspaceIndexService.openWorkspace(projectPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(projectPath, projectFiles.map((f) => f.path));
   preloadForContext(inferPreloadContext(projectPath, projectFiles.map((f) => f.path)));
 };
@@ -419,6 +423,7 @@ const openFolder = async (): Promise<void> => {
   bindWorkspace(window.webContents.id, folderPath);
   addRecentWorkspace(folderPath, "folder");
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
+  void workspaceIndexService.openWorkspace(folderPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(folderPath);
   preloadForContext(inferPreloadContext(folderPath));
 };
@@ -442,6 +447,7 @@ const sendWorkspaceToRenderer = async (
     files,
   });
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
+  void workspaceIndexService.openWorkspace(folderPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(folderPath, files.map((f) => f.path));
   preloadForContext(inferPreloadContext(folderPath, files.map((f) => f.path)));
 };

@@ -561,6 +561,27 @@ contextBridge.exposeInMainWorld("caval", {
         error?: string;
       }>,
   },
+  workspaceIndex: {
+    getSummary: () =>
+      ipcRenderer.invoke("caval:workspace-index-summary") as Promise<{
+        ok: boolean;
+        summary?: import("../shared/workspace-index-contract").WorkspaceIndexSummary;
+        error?: string;
+      }>,
+    getIndex: () =>
+      ipcRenderer.invoke("caval:workspace-index-get") as Promise<{
+        ok: boolean;
+        index?: import("../shared/workspace-index-contract").WorkspaceIndex;
+        error?: string;
+      }>,
+    refresh: () =>
+      ipcRenderer.invoke("caval:workspace-index-refresh") as Promise<{
+        ok: boolean;
+        index?: import("../shared/workspace-index-contract").WorkspaceIndex;
+        summary?: import("../shared/workspace-index-contract").WorkspaceIndexSummary;
+        error?: string;
+      }>,
+  },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{
       ok: boolean;
