@@ -73,7 +73,7 @@ describe("llm-client without API key", () => {
   });
 
   it("fails instead of mock when no key and fallback disabled", async () => {
-    const { generateOpenScad } = await import("../../engineering/cad-server/llm-client");
+    const { generateOpenScad } = await import("../../engineering/cad-server/llm-client.js");
     const result = await generateOpenScad({ prompt: "wheel 100mm" });
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/OPENROUTER_API_KEY/i);

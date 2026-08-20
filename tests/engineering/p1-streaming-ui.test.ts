@@ -119,7 +119,7 @@ describe('P1 robotics streaming contract', () => {
     ]);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.aborted).toBe(true);
+    expect(result).toMatchObject({ ok: false, aborted: true });
     expect(abortChatStream).not.toHaveBeenCalled();
   });
 
