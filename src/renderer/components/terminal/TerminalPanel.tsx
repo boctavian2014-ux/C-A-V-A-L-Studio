@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DebugPanel } from '../debug/DebugPanel';
-import { useEditorStore } from '../../store/editor-store';
+import { ProblemsPanel } from '../problems/ProblemsPanel';
 import { useOutputStore, formatOutputForChat } from '../../store/output-store';
 import {
   formatProblemForChat,
   formatProblemsForChat,
-  revealProblem,
+  problemToEntry,
   useProblemsStore,
 } from '../../store/problems-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
@@ -219,7 +219,6 @@ function readStoredTerminalHeight(): number {
 }
 
 export function TerminalPanel() {
-  const projectPath = useEditorStore((s) => s.projectPath);
   const [activeTab, setActiveTab] = useState<TerminalPanelTab>('terminal');
   const [height, setHeight] = useState(readStoredTerminalHeight);
   const [isVisible, setIsVisible] = useState(true);
@@ -228,7 +227,6 @@ export function TerminalPanel() {
   const outputChannels = useOutputStore((s) => s.channels);
   const activeOutputChannel = useOutputStore((s) => s.activeChannel);
   const problems = useProblemsStore((s) => s.problems);
-  const focusedIndex = useProblemsStore((s) => s.focusedIndex);
   const queueChatFromPanel = useAIStore((s) => s.queueChatFromPanel);
 
   const sendAllProblemsToChat = useCallback(() => {
@@ -432,66 +430,9 @@ export function TerminalPanel() {
         )}
 
         {activeTab === 'problems' && (
-          <div style={{
-            padding: '4px 0', height: '100%', overflow: 'auto',
-            fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5,
-          }}>
-            {problems.length === 0 ? (
-              <div style={{ padding: '8px 14px', color: 'var(--caval-text-muted)' }}>
-                Nu există probleme detectate.
-              </div>
-            ) : (
-              problems.map((p, i) => (
-                <div
-                  key={p.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    background: i === focusedIndex ? 'rgba(0,224,255,0.08)' : 'transparent',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => revealProblem(p, projectPath)}
-                    style={{
-                      display: 'flex', flex: 1, minWidth: 0, textAlign: 'left',
-                      gap: 8, padding: '6px 14px', border: 'none',
-                      background: 'transparent',
-                      color: p.severity === 'error' ? '#EF4444' : '#F59E0B',
-                      cursor: 'pointer', fontFamily: 'inherit', fontSize: 'inherit',
-                    }}
-                  >
-                    <span style={{ flexShrink: 0 }}>{p.severity === 'error' ? '✕' : '⚠'}</span>
-                    <span style={{ color: 'var(--caval-text-muted)', flexShrink: 0 }}>
-                      {p.file}:{p.line}:{p.col}
-                    </span>
-                    <span style={{ color: 'var(--caval-text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {p.message}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    title="Trimite în chat"
-                    onClick={() => sendProblemToChat(p)}
-                    style={{
-                      flexShrink: 0,
-                      marginRight: 8,
-                      border: '1px solid var(--caval-border)',
-                      borderRadius: 4,
-                      background: 'rgba(0,224,255,0.06)',
-                      color: 'var(--caval-accent)',
-                      cursor: 'pointer',
-                      fontSize: 10,
-                      fontFamily: 'var(--font-mono)',
-                      padding: '2px 8px',
-                    }}
-                  >
-                    Chat
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
+          <ProblemsPanel
+            onSendToChat={(problem) => sendProblemToChat(problemToEntry(problem))}
+          />
         )}
 
         {activeTab === 'debug' && (

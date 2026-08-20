@@ -219,6 +219,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           t.id === id ? { ...t, isDirty: false } : t
         ),
       }));
+      document.dispatchEvent(
+        new CustomEvent("caval:file-saved", { detail: { path: tab.path } })
+      );
     }
   },
 

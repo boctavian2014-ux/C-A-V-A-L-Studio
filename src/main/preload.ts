@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { gitApi } from "./preload-git";
+import { problemsApi } from "./preload-problems";
 import { previewApi } from "./preload-preview";
 import { cavalTerminalPreload } from "./preload-terminal";
 
@@ -772,6 +773,8 @@ contextBridge.exposeInMainWorld("caval", {
   preview: previewApi,
 
   git: gitApi,
+
+  problems: problemsApi,
 
 
   preload: {
