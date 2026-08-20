@@ -88,6 +88,7 @@ import {
   installWebContentsSecurity,
 } from "./renderer-security";
 import { registerWorkspaceBindingHandlers } from "./workspace-binding-handlers";
+import { ensureLocalAiRuntime, ensureManagedLocalAiOnBoot, getLocalAiStatus } from "./local-ai-setup";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -1478,6 +1479,31 @@ ipcMain.handle("caval:settings-load", (event) => {
   return { ok: true, settings: withUser };
 });
 
+ipcMain.handle("caval:local-ai-status", async (event) => {
+  try {
+    assertTrustedSender(event);
+    const status = await getLocalAiStatus();
+    return { ok: true, status };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle(
+  "caval:local-ai-setup",
+  async (
+    event,
+    input?: { installRuntime?: boolean; pullModel?: boolean; modelName?: string }
+  ) => {
+    try {
+      assertTrustedSender(event);
+      return await ensureLocalAiRuntime(input);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+);
+
 const billingBaseUrl = (): string =>
   process.env.BILLING_URL ?? `http://127.0.0.1:${process.env.BILLING_PORT ?? 8790}`;
 
@@ -1640,6 +1666,7 @@ app.whenReady().then(() => {
     applyCadCloudEnvDefaults();
     warmOpenRouterConnection(true);
     preloadCoreModels();
+    void ensureManagedLocalAiOnBoot();
     void ensureLatestPowerShellInstalled().catch((err) => {
       console.warn("[shell] PowerShell 7 ensure skipped:", err instanceof Error ? err.message : err);
     });
