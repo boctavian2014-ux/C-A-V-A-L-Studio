@@ -141,7 +141,7 @@ Indici: obligatorii pentru listă conversații + restore mesaje.
 | **7a.3** ✅ | Persistență `written_files` cu snapshot la Accept (chat apply + quick fix / timelineFileWrite). Reject = zero INSERT. Smoke: `tests/main/ai/written-files-persistence.test.ts` |
 | **7a.4** ✅ | Încărcare istoric în UI (listă + restore mesaje/timeline/writtenFiles + Revert istoric + delete cascade). IPC `caval:ai-history-*`. Smoke: `tests/renderer/ai-history-restore.test.ts`, `tests/e2e/m7a-history-smoke.test.ts` |
 | **7a.5** ✅ | Export sesiune JSON/MD, redactat, efemer (fără snapshot-uri written_files; cap soft 5 MB + confirm). `caval:ai-history-export`. Smoke: `tests/main/ai/ai-history-export.test.ts` |
-| **7a.x** | Smoke E2E: conversație → „restart” (reload store din disc) → istoric restaurat → export fără secrete → cleanup |
+| **7a.x** ✅ | Smoke E2E unificat: persist → reload → restore → export fără secrete → revert → cascade + izolarea workspace. `tests/e2e/m7a-persistence-unified-smoke.test.ts` |
 
 ## Decizie 7a.1
 
