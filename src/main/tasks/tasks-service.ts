@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
@@ -19,6 +19,7 @@ interface PackageJson {
 }
 
 export interface TaskChildProcess {
+  pid?: number | null;
   stdout: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown } | null;
   stderr: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown } | null;
   on(event: "error", listener: (err: Error) => void): unknown;
@@ -116,6 +117,36 @@ export function resolveNpmRunInvocation(cwd: string, taskName: string): {
   };
 }
 
+/**
+ * Kill a task process and its descendants.
+ * Windows: taskkill /T /F first (same idea as Preview) while the parent is still
+ * alive, so `npm run` children are not reparented and left orphaned.
+ * Unix: SIGTERM/SIGKILL the detached process group, never Electron's own group.
+ */
+export function killTaskProcess(proc: TaskChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
+  const pid = proc.pid;
+  if (typeof pid === "number" && pid > 1 && process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+      timeout: 8_000,
+    });
+  }
+  try {
+    proc.kill(signal);
+  } catch {
+    // already gone
+  }
+  if (typeof pid !== "number" || pid <= 1 || process.platform === "win32") {
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // not a group leader, or already gone
+  }
+}
+
 function spawnNpmRun(taskName: string, cwd: string): ChildProcess {
   const invocation = resolveNpmRunInvocation(cwd, taskName);
   return spawn(invocation.command, invocation.args, {
@@ -124,6 +155,8 @@ function spawnNpmRun(taskName: string, cwd: string): ChildProcess {
     windowsHide: true,
     env: invocation.env,
     stdio: ["ignore", "pipe", "pipe"],
+    // New process group on POSIX so stop/shutdownAll can kill descendants without touching Electron.
+    detached: process.platform !== "win32",
   });
 }
 
@@ -269,7 +302,7 @@ export class TasksService extends EventEmitter {
 
     return new Promise((resolvePromise) => {
       const timeout = setTimeout(() => {
-        proc.kill("SIGKILL");
+        killTaskProcess(proc, "SIGKILL");
         this.finish(internal, "stopped", null);
         resolvePromise();
       }, STOP_TIMEOUT_MS);
@@ -281,7 +314,7 @@ export class TasksService extends EventEmitter {
       };
 
       proc.on("exit", onExit);
-      proc.kill();
+      killTaskProcess(proc, "SIGTERM");
     });
   }
 
@@ -307,6 +340,19 @@ export class TasksService extends EventEmitter {
         await this.stop(internal.cwd, id);
       })
     );
+  }
+
+  /** Blocking kill for `window-all-closed` — must finish before `app.quit()`. */
+  shutdownAllSync(): void {
+    const ids = [...this.processes.keys()];
+    for (const id of ids) {
+      const proc = this.processes.get(id);
+      const internal = this.internals.get(id);
+      if (!proc || !internal || internal.finished) continue;
+      internal.stopping = true;
+      killTaskProcess(proc, "SIGKILL");
+      this.finish(internal, "stopped", null);
+    }
   }
 
   private finish(internal: InternalRun, status: TaskRunStatus, exitCode: number | null): void {

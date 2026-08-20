@@ -183,6 +183,16 @@ describe("TasksService", () => {
     expect(service.getRuns(cwd).every((run) => run.status === "stopped")).toBe(true);
   });
 
+  it("shutdownAllSync stops every running process before returning", async () => {
+    const cwd = workspace({ a: "echo a", b: "echo b" });
+    const { service, spawned } = createService();
+    await service.run(cwd, "a");
+    await service.run(cwd, "b");
+    service.shutdownAllSync();
+    expect(spawned.every((item) => item.proc.killed)).toBe(true);
+    expect(service.getRuns(cwd).every((run) => run.status === "stopped")).toBe(true);
+  });
+
   it("does not return runs from another workspace", async () => {
     const a = workspace({ dev: "echo a" });
     const b = workspace({ dev: "echo b" });
@@ -192,4 +202,126 @@ describe("TasksService", () => {
     expect(service.getRuns(b)).toEqual([]);
     expect(service.getRuns(a)).toHaveLength(1);
   });
+});
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return predicate();
+}
+
+describe("TasksService real npm smoke", () => {
+  const dirs: string[] = [];
+  const services: TasksService[] = [];
+
+  afterEach(async () => {
+    await Promise.all(services.map((s) => s.shutdownAll()));
+    services.length = 0;
+    for (const dir of dirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    dirs.length = 0;
+  });
+
+  it(
+    "run goes starting → running → success and captures output",
+    async () => {
+      const cwd = tempWorkspace("caval-tasks-smoke-ok-");
+      dirs.push(cwd);
+      writePkg(cwd, {
+        ok: "node -e \"process.stdout.write('ok-smoke')\"",
+      });
+      const service = new TasksService();
+      services.push(service);
+      const events: TaskRun[] = [];
+      const outputs: string[] = [];
+      service.on("run-changed", (run: TaskRun) => events.push(run));
+      service.on("output", (chunk: { data: string }) => outputs.push(chunk.data));
+
+      const run = await service.run(cwd, "ok");
+      expect(["starting", "running"]).toContain(run.status);
+
+      const finished = await waitUntil(() => {
+        const status = service.getRun(cwd, run.id)?.status;
+        return status === "success" || status === "failed";
+      }, 20_000);
+
+      expect(finished).toBe(true);
+      expect(service.getRun(cwd, run.id)?.status).toBe("success");
+      expect(events.map((e) => e.status)).toEqual(
+        expect.arrayContaining(["starting", "running", "success"])
+      );
+      expect(outputs.join("")).toMatch(/ok-smoke/);
+    },
+    25_000
+  );
+
+  it(
+    "shutdownAll does not leave npm script descendants running",
+    async () => {
+      const cwd = tempWorkspace("caval-tasks-smoke-hang-");
+      dirs.push(cwd);
+      writePkg(cwd, {
+        hang: "node -e \"require('fs').writeFileSync('pid.txt', String(process.pid)); setInterval(()=>{}, 1000)\"",
+      });
+      const service = new TasksService();
+      services.push(service);
+
+      await service.run(cwd, "hang");
+      const pidPath = path.join(cwd, "pid.txt");
+      const appeared = await waitUntil(() => fs.existsSync(pidPath), 15_000);
+      expect(appeared).toBe(true);
+
+      const childPid = Number(fs.readFileSync(pidPath, "utf8").trim());
+      expect(childPid).toBeGreaterThan(1);
+      expect(isPidAlive(childPid)).toBe(true);
+
+      await service.shutdownAll();
+
+      const dead = await waitUntil(() => !isPidAlive(childPid), 8_000);
+      expect(dead).toBe(true);
+      expect(service.getRuns(cwd).every((run) => run.status === "stopped")).toBe(true);
+    },
+    30_000
+  );
+
+  it(
+    "shutdownAllSync does not leave npm script descendants running",
+    async () => {
+      const cwd = tempWorkspace("caval-tasks-smoke-sync-");
+      dirs.push(cwd);
+      writePkg(cwd, {
+        hang: "node -e \"require('fs').writeFileSync('pid.txt', String(process.pid)); setInterval(()=>{}, 1000)\"",
+      });
+      const service = new TasksService();
+      services.push(service);
+
+      await service.run(cwd, "hang");
+      const pidPath = path.join(cwd, "pid.txt");
+      const appeared = await waitUntil(() => fs.existsSync(pidPath), 15_000);
+      expect(appeared).toBe(true);
+
+      const childPid = Number(fs.readFileSync(pidPath, "utf8").trim());
+      expect(isPidAlive(childPid)).toBe(true);
+
+      service.shutdownAllSync();
+
+      const dead = await waitUntil(() => !isPidAlive(childPid), 8_000);
+      expect(dead).toBe(true);
+      expect(service.getRuns(cwd).every((run) => run.status === "stopped")).toBe(true);
+    },
+    30_000
+  );
 });

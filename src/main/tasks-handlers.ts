@@ -99,3 +99,7 @@ export function registerTasksHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootG
 export async function shutdownAllTasks(): Promise<void> {
   await tasksService.shutdownAll();
 }
+
+export function shutdownAllTasksSync(): void {
+  tasksService.shutdownAllSync();
+}

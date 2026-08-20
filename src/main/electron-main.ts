@@ -28,7 +28,7 @@ import {
 } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
 import { registerProblemsHandlers } from "./problems-handlers";
-import { registerTasksHandlers, shutdownAllTasks } from "./tasks-handlers";
+import { registerTasksHandlers, shutdownAllTasksSync } from "./tasks-handlers";
 import { registerTerminalHandlers, stopAllInteractiveTerminals } from "./terminal-handlers";
 import { registerPreviewHandlers, stopAllPreviewProcesses } from "./preview/preview-handlers";
 import {
@@ -1763,7 +1763,7 @@ app.on("window-all-closed", () => {
   }
   void stopAllPreviewProcesses();
   stopAllInteractiveTerminals();
-  void shutdownAllTasks();
+  shutdownAllTasksSync();
   stopCadLocalServer();
   stopMarketplaceServer();
   if (process.platform !== "darwin") {
