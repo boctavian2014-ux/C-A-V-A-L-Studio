@@ -67,8 +67,12 @@ Toate sunt **low-risk** față de M5/M6: nicio suprafață nouă de scriere AI �
 
 ### 7e.4 — Performanță + A11y
 
-- Lazy listă istoric; virtualizare dacă prag depășit.
-- Keyboard + screen-reader pe timeline.
+- Paginare `listConversations` (limit/offset) + index `idx_conversations_workspace_updated`.
+- Infinite scroll istoric (`HistoryList` + IntersectionObserver, fără dependință nouă).
+- `getMessageDetails` pentru lazy per-mesaj; restore conversație rămâne pe `getConversation` (doar la select).
+- Timeline: `role="log"`, `aria-live`, `aria-label`, Tab + Enter/Space pe detalii.
+- Smoke: `tests/main/db/ai-persistence-pagination.test.ts`, `tests/renderer/history-list-infinite-scroll.test.tsx`, `tests/renderer/timeline-a11y.test.tsx`.
+- Commit: `perf(ai): paginate history list and harden timeline accessibility`
 
 ## Non-goals
 
@@ -84,4 +88,4 @@ Toate sunt **low-risk** față de M5/M6: nicio suprafață nouă de scriere AI �
 | 7e.1 Onboarding | ✅ empty state + tip-uri prim-use (localStorage) |
 | 7e.2 Feedback 👍/👎 | ✅ `message_feedback` + IPC + UI pe assistant bubbles |
 | 7e.3 Setări granulare | ✅ settings.json + tool gate + caps/redaction/timeline |
-| 7e.4 | pending |
+| 7e.4 Perf + A11y | ✅ paginare istoric + infinite scroll + timeline a11y |

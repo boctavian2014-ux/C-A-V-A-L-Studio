@@ -475,8 +475,8 @@ contextBridge.exposeInMainWorld("caval", {
       errors?: string[];
     }>,
   aiHistory: {
-    listConversations: () =>
-      ipcRenderer.invoke("caval:ai-history-list") as Promise<{
+    listConversations: (params?: import("../shared/ai-history-contract").ListConversationsParams) =>
+      ipcRenderer.invoke("caval:ai-history-list", params) as Promise<{
         ok: boolean;
         conversations?: import("../shared/ai-history-contract").ConversationSummary[];
         error?: string;
@@ -485,6 +485,13 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.invoke("caval:ai-history-get", { conversationId }) as Promise<{
         ok: boolean;
         conversation?: import("../shared/ai-history-contract").AiHistoryConversationPayload;
+        error?: string;
+      }>,
+    getMessageDetails: (messageId: string) =>
+      ipcRenderer.invoke("caval:ai-history-message-details", { messageId }) as Promise<{
+        ok: boolean;
+        timeline?: import("../shared/ai-timeline-contract").TimelineEvent[];
+        writtenFiles?: import("../shared/ai-history-contract").HistoryWrittenFile[];
         error?: string;
       }>,
     deleteConversation: (conversationId: string) =>

@@ -9,11 +9,13 @@ import type { AiPersistence } from "../db/ai-persistence";
 import { getAiPersistence } from "./timeline-persistence";
 import {
   formatHistoryTitle,
+  normalizeListConversationsParams,
   type AiHistoryConversationPayload,
   type ConversationSummary,
   type HistoryWrittenFile,
   type MessageFeedback,
 } from "../../shared/ai-history-contract";
+import type { TimelineEvent } from "../../shared/ai-timeline-contract";
 import { normalizeProposedPath } from "../../shared/ai-chat-apply-contract";
 
 function joinWorkspace(root: string, rel: string): string {
@@ -24,12 +26,14 @@ function joinWorkspace(root: string, rel: string): string {
 
 export function listHistoryConversations(
   workspaceRoot: string,
-  persistence?: AiPersistence
+  persistence?: AiPersistence,
+  params?: import("../../shared/ai-history-contract").ListConversationsParams
 ): ConversationSummary[] {
   const root = workspaceRoot.trim();
   if (!root) return [];
   const db = persistence ?? getAiPersistence(root);
-  return db.listConversationSummaries(root).map((c) => ({
+  const { limit, offset } = normalizeListConversationsParams(params);
+  return db.listConversationSummaries(root, { limit, offset }).map((c) => ({
     id: c.id,
     title: formatHistoryTitle(c.title),
     createdAt: c.createdAt,
@@ -81,6 +85,32 @@ export function loadHistoryConversation(
   }
 
   return { messages, timelineByMessage, writtenFilesByMessage };
+}
+
+/** Pas 7e.4 — lazy details for a single message (timeline + written files paths). */
+export function loadHistoryMessageDetails(
+  workspaceRoot: string,
+  messageId: string,
+  persistence?: AiPersistence
+): { timeline: TimelineEvent[]; writtenFiles: HistoryWrittenFile[] } | null {
+  const root = workspaceRoot.trim();
+  const id = messageId.trim();
+  if (!root || !id) return null;
+  const db = persistence ?? getAiPersistence(root);
+  const msg = db.getMessage(id);
+  if (!msg) return null;
+  const conv = db.getConversation(msg.conversationId);
+  if (!conv || path.resolve(conv.workspaceRoot) !== path.resolve(root)) return null;
+  const details = db.getMessageDetails(id);
+  return {
+    timeline: details.timeline,
+    writtenFiles: details.writtenFiles.map((f) => ({
+      id: f.id!,
+      messageId: f.messageId ?? id,
+      filePath: f.filePath,
+      createdAt: f.createdAt ?? 0,
+    })),
+  };
 }
 
 export function deleteHistoryConversation(

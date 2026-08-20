@@ -15,18 +15,26 @@ import {
   getHistoryFeedback,
   listHistoryConversations,
   loadHistoryConversation,
+  loadHistoryMessageDetails,
   revertHistoryWrittenFile,
   setHistoryFeedback,
 } from "./ai-history-service";
+import type { ListConversationsParams } from "../../shared/ai-history-contract";
 
 export function registerAiHistoryHandlers(
   getBoundWorkspaceRoot: BoundWorkspaceRootGetter
 ): void {
-  ipcMain.handle("caval:ai-history-list", async (event) => {
-    assertTrustedSender(event);
-    const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
-    return { ok: true, conversations: listHistoryConversations(root) };
-  });
+  ipcMain.handle(
+    "caval:ai-history-list",
+    async (event, input?: ListConversationsParams) => {
+      assertTrustedSender(event);
+      const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+      return {
+        ok: true,
+        conversations: listHistoryConversations(root, undefined, input),
+      };
+    }
+  );
 
   ipcMain.handle(
     "caval:ai-history-get",
@@ -38,6 +46,19 @@ export function registerAiHistoryHandlers(
       const payload = loadHistoryConversation(root, id);
       if (!payload) return { ok: false, error: "Conversation not found" };
       return { ok: true, conversation: payload };
+    }
+  );
+
+  ipcMain.handle(
+    "caval:ai-history-message-details",
+    async (event, input: { messageId?: string }) => {
+      assertTrustedSender(event);
+      const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+      const id = input?.messageId?.trim();
+      if (!id) return { ok: false, error: "Missing messageId" };
+      const details = loadHistoryMessageDetails(root, id);
+      if (!details) return { ok: false, error: "Message not found" };
+      return { ok: true, ...details };
     }
   );
 

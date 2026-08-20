@@ -12,6 +12,34 @@ export interface ConversationSummary {
   messageCount: number;
 }
 
+/** Pas 7e.4 — paginated history list. */
+export interface ListConversationsParams {
+  limit?: number;
+  offset?: number;
+}
+
+export const HISTORY_LIST_PAGE_SIZE = 30;
+export const HISTORY_LIST_MAX_PAGE_SIZE = 100;
+
+export function normalizeListConversationsParams(
+  params?: ListConversationsParams
+): { limit: number; offset: number } {
+  const rawLimit = params?.limit ?? HISTORY_LIST_PAGE_SIZE;
+  const rawOffset = params?.offset ?? 0;
+  const limit = Math.max(
+    1,
+    Math.min(
+      HISTORY_LIST_MAX_PAGE_SIZE,
+      Number.isFinite(rawLimit) ? Math.floor(rawLimit) : HISTORY_LIST_PAGE_SIZE
+    )
+  );
+  const offset = Math.max(
+    0,
+    Number.isFinite(rawOffset) ? Math.floor(rawOffset) : 0
+  );
+  return { limit, offset };
+}
+
 export interface HistoryMessage {
   id: string;
   role: "user" | "assistant";
@@ -58,8 +86,11 @@ export interface ExportResult {
 export const HISTORY_EXPORT_WARN_BYTES = 5 * 1024 * 1024;
 
 export interface AiHistoryApi {
-  listConversations(): Promise<ConversationSummary[]>;
+  listConversations(params?: ListConversationsParams): Promise<ConversationSummary[]>;
   getConversation(id: string): Promise<AiHistoryConversationPayload | null>;
+  getMessageDetails?(
+    messageId: string
+  ): Promise<{ timeline: TimelineEvent[]; writtenFiles: HistoryWrittenFile[] } | null>;
   deleteConversation(id: string): Promise<{ ok: boolean; error?: string }>;
   revertWrittenFile(writtenFileId: string): Promise<{ ok: boolean; error?: string }>;
   exportConversation(req: ExportRequest): Promise<ExportResult>;

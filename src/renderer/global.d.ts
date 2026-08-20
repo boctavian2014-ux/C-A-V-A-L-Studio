@@ -564,7 +564,9 @@ interface CavalBridge {
     writes: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
   }) => Promise<{ ok: boolean; deleted: string[]; errors?: string[] }>;
   aiHistory?: {
-    listConversations: () => Promise<{
+    listConversations: (
+      params?: import('../../src/shared/ai-history-contract').ListConversationsParams
+    ) => Promise<{
       ok: boolean;
       conversations?: import('../../src/shared/ai-history-contract').ConversationSummary[];
       error?: string;
@@ -572,6 +574,12 @@ interface CavalBridge {
     getConversation: (conversationId: string) => Promise<{
       ok: boolean;
       conversation?: import('../../src/shared/ai-history-contract').AiHistoryConversationPayload;
+      error?: string;
+    }>;
+    getMessageDetails?: (messageId: string) => Promise<{
+      ok: boolean;
+      timeline?: import('../../src/shared/ai-timeline-contract').TimelineEvent[];
+      writtenFiles?: import('../../src/shared/ai-history-contract').HistoryWrittenFile[];
       error?: string;
     }>;
     deleteConversation: (conversationId: string) => Promise<{ ok: boolean; error?: string }>;

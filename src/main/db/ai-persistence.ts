@@ -57,7 +57,10 @@ export interface AiPersistence {
   createConversation(workspaceRoot: string, title?: string, id?: string): string;
   getConversation(id: string): Conversation | null;
   listConversations(workspaceRoot: string): Conversation[];
-  listConversationSummaries(workspaceRoot: string): ConversationSummary[];
+  listConversationSummaries(
+    workspaceRoot: string,
+    params?: { limit?: number; offset?: number }
+  ): ConversationSummary[];
   updateConversationTitle(id: string, title: string): void;
   deleteConversation(id: string): void;
 
@@ -72,6 +75,10 @@ export interface AiPersistence {
   getMessages(conversationId: string): Message[];
   getMessage(id: string): Message | null;
   getMessageByStreamId(streamId: string): Message | null;
+  getMessageDetails(messageId: string): {
+    timeline: TimelineEvent[];
+    writtenFiles: WrittenFile[];
+  };
 
   addTimelineEvents(messageId: string, events: TimelineEvent[]): void;
   getTimelineEvents(messageId: string): TimelineEvent[];
@@ -178,11 +185,12 @@ CREATE TABLE IF NOT EXISTS message_feedback (
   created_at INTEGER NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_root, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_workspace_updated ON conversations(workspace_root, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_timeline_message ON timeline_events(message_id);
 CREATE INDEX IF NOT EXISTS idx_written_message ON written_files(message_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_message ON message_feedback(message_id);
-CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_root, updated_at DESC);
 `;
 
 export function aiHistoryDbPath(workspaceRoot: string): string {
@@ -235,7 +243,7 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     ORDER BY updated_at DESC
   `);
 
-  const listSummariesByWorkspace = db.prepare(`
+  const listSummariesByWorkspacePage = db.prepare(`
     SELECT c.id AS id,
            c.title AS title,
            c.created_at AS createdAt,
@@ -246,6 +254,7 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     FROM conversations c
     WHERE c.workspace_root = ?
     ORDER BY c.updated_at DESC
+    LIMIT ? OFFSET ?
   `);
 
   const updateTitle = db.prepare(`
@@ -389,9 +398,24 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       return rows.map((r) => mapConversation(r)!).filter(Boolean);
     },
 
-    listConversationSummaries(root: string): ConversationSummary[] {
+    listConversationSummaries(
+      root: string,
+      params?: { limit?: number; offset?: number }
+    ): ConversationSummary[] {
       const ws = normalizeWorkspaceRoot(root);
-      const rows = listSummariesByWorkspace.all(ws) as Array<Record<string, unknown>>;
+      const limitRaw = params?.limit;
+      const offsetRaw = params?.offset ?? 0;
+      const limit =
+        typeof limitRaw === "number" && Number.isFinite(limitRaw)
+          ? Math.max(1, Math.min(100, Math.floor(limitRaw)))
+          : 50;
+      const offset =
+        typeof offsetRaw === "number" && Number.isFinite(offsetRaw)
+          ? Math.max(0, Math.floor(offsetRaw))
+          : 0;
+      const rows = listSummariesByWorkspacePage.all(ws, limit, offset) as Array<
+        Record<string, unknown>
+      >;
       return rows.map((r) => ({
         id: String(r.id),
         title: r.title == null ? null : String(r.title),
@@ -483,6 +507,16 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
         content: String(r.content),
         streamId: r.streamId == null ? null : String(r.streamId),
         createdAt: Number(r.createdAt),
+      };
+    },
+
+    getMessageDetails(messageId: string): {
+      timeline: TimelineEvent[];
+      writtenFiles: WrittenFile[];
+    } {
+      return {
+        timeline: api.getTimelineEvents(messageId),
+        writtenFiles: api.getWrittenFiles(messageId),
       };
     },
 

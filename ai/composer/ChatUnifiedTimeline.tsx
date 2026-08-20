@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import type { TimelineEvent } from '../../src/shared/ai-timeline-contract';
+import type { TimelineEvent, TimelineEventType } from '../../src/shared/ai-timeline-contract';
 import {
   MULTI_AGENT_LABELS,
   type MultiAgentStepRecord,
@@ -60,10 +60,37 @@ export function mergeUnifiedTimelineRows(
 }
 
 function rowTone(event: TimelineEvent): string {
-  if (event.type === 'error' || event.success === false) return 'var(--caval-danger, #ef4444)';
-  if (event.type === 'file_write' || event.success === true) return 'var(--caval-success)';
-  if (event.type === 'tool_call') return 'var(--caval-accent)';
+  // WCAG AA-oriented accents on dark surface (~#0D1117)
+  if (event.type === 'error' || event.success === false) return '#F87171';
+  if (event.type === 'file_write' || event.success === true) return '#34D399';
+  if (event.type === 'tool_call') return '#22D3EE';
   return 'var(--caval-text-muted)';
+}
+
+export function labelForTimelineType(type: TimelineEventType): string {
+  const labels: Record<TimelineEventType, string> = {
+    reasoning: 'Reasoning',
+    tool_call: 'Tool call',
+    tool_result: 'Tool result',
+    file_write: 'File written',
+    error: 'Error',
+  };
+  return labels[type] ?? type;
+}
+
+function iconForType(type: TimelineEventType): string {
+  switch (type) {
+    case 'tool_call':
+      return '›';
+    case 'tool_result':
+      return '·';
+    case 'file_write':
+      return '✎';
+    case 'error':
+      return '!';
+    default:
+      return '·';
+  }
 }
 
 export function ChatUnifiedTimeline({
@@ -77,6 +104,7 @@ export function ChatUnifiedTimeline({
   const streaming = Boolean(message.isStreaming);
   const timelineDetail = useAiSettingsStore((s) => s.settings.timelineDetail);
   const [localExpanded, setLocalExpanded] = useState(timelineDetail === 'verbose');
+  const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({});
   const expanded = streaming
     ? true
     : message.timelineExpanded ?? localExpanded;
@@ -91,8 +119,18 @@ export function ChatUnifiedTimeline({
   const visible = expanded ? rows : rows.slice(-2);
   const showDetail = timelineDetail === 'verbose';
 
+  const toggleDetail = (id: string) => {
+    setOpenDetails((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   return (
     <div
+      className="ai-timeline"
+      data-testid="ai-unified-timeline"
+      role="log"
+      aria-live={streaming ? 'polite' : 'off'}
+      aria-relevant="additions"
+      aria-label="AI activity"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -107,6 +145,7 @@ export function ChatUnifiedTimeline({
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -131,49 +170,85 @@ export function ChatUnifiedTimeline({
           {expanded ? 'Hide' : 'Show'}
         </span>
       </button>
-      {visible.map((event) => (
-        <div
-          key={event.id}
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 8,
-            fontSize: 11.5,
-            color: event.type === 'error' ? rowTone(event) : 'var(--caval-text)',
-            lineHeight: 1.35,
-          }}
-        >
-          <span
+      {visible.map((event) => {
+        const detailOpen = Boolean(openDetails[event.id]) || showDetail;
+        const hasDetail = Boolean(event.detail);
+        return (
+          <div
+            key={event.id}
+            role="listitem"
+            tabIndex={0}
+            data-testid="ai-timeline-event"
+            className={`timeline-event timeline-${event.type}`}
+            aria-label={`${labelForTimelineType(event.type)}: ${event.label}`}
+            aria-expanded={hasDetail ? detailOpen : undefined}
+            onKeyDown={(e) => {
+              if (!hasDetail) return;
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleDetail(event.id);
+              }
+            }}
+            onClick={() => {
+              if (hasDetail) toggleDetail(event.id);
+            }}
             style={{
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: 10,
-              color: 'var(--caval-text-muted)',
-              flexShrink: 0,
-              minWidth: 58,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              fontSize: 11.5,
+              color: event.type === 'error' ? rowTone(event) : 'var(--caval-text)',
+              lineHeight: 1.35,
+              cursor: hasDetail ? 'pointer' : 'default',
+              outline: 'none',
             }}
           >
-            {formatTime(event.timestamp)}
-          </span>
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              marginTop: 5,
-              background: rowTone(event),
-              flexShrink: 0,
-            }}
-          />
-          <span style={{ minWidth: 0 }}>
-            <span>{event.label}</span>
-            {showDetail && event.detail ? (
-              <span style={{ display: 'block', fontSize: 10.5, color: 'var(--caval-text-muted)' }}>
-                {event.detail}
-              </span>
-            ) : null}
-          </span>
-        </div>
-      ))}
+            <span
+              style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 10,
+                color: 'var(--caval-text-muted)',
+                flexShrink: 0,
+                minWidth: 58,
+              }}
+            >
+              {formatTime(event.timestamp)}
+            </span>
+            <span
+              aria-hidden="true"
+              title={labelForTimelineType(event.type)}
+              style={{
+                width: 14,
+                height: 14,
+                marginTop: 1,
+                flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: rowTone(event),
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {iconForType(event.type)}
+            </span>
+            <span style={{ minWidth: 0 }}>
+              <span>{event.label}</span>
+              {hasDetail && detailOpen ? (
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: 10.5,
+                    color: 'var(--caval-text-muted)',
+                  }}
+                >
+                  {event.detail}
+                </span>
+              ) : null}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

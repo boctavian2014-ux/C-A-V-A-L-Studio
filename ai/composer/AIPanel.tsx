@@ -27,9 +27,9 @@ import { WrittenFilesCard } from './WrittenFilesCard';
 import { AIOnboarding } from './AIOnboarding';
 import { MessageFeedbackButtons } from './MessageFeedback';
 import { AiSettingsPanel } from './AiSettingsPanel';
+import { HistoryList } from './HistoryList';
 import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
 import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
-import { formatHistoryWhen } from '../../src/shared/ai-history-contract';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -732,6 +732,9 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const openHistoryConversation = useAiHistoryStore((s) => s.openConversation);
   const deleteHistoryConversation = useAiHistoryStore((s) => s.deleteConversation);
   const exportHistoryConversation = useAiHistoryStore((s) => s.exportConversation);
+  const loadMoreHistory = useAiHistoryStore((s) => s.loadMore);
+  const historyHasMore = useAiHistoryStore((s) => s.hasMore);
+  const historyLoadingMore = useAiHistoryStore((s) => s.loadingMore);
   const activeThreadId = useAIStore((s) => s.activeThreadId);
   const exportConversationId = activeHistoryId ?? activeThreadId;
   const [showAiSettings, setShowAiSettings] = useState(false);
@@ -1117,80 +1120,22 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               </span>
             ) : null}
           </div>
-          {historyConversations.length === 0 ? (
+          {historyConversations.length === 0 && !historyLoading ? (
             <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
               No saved conversations yet
             </div>
           ) : (
-            historyConversations.map((c) => {
-              const selected = activeHistoryId === c.id;
-              return (
-                <div
-                  key={c.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    marginBottom: 2,
-                  }}
-                >
-                  <button
-                    type="button"
-                    data-testid="ai-history-item"
-                    onClick={() => void openHistoryConversation(c.id)}
-                    title={`${c.title} · ${c.messageCount} messages`}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      textAlign: 'left',
-                      border: 'none',
-                      borderRadius: 4,
-                      padding: '4px 6px',
-                      background: selected ? 'var(--caval-accent-glow)' : 'transparent',
-                      color: selected ? 'var(--caval-accent)' : 'var(--caval-text)',
-                      cursor: 'pointer',
-                      fontSize: 11,
-                    }}
-                  >
-                    <div
-                      style={{
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        fontWeight: selected ? 600 : 500,
-                      }}
-                    >
-                      {c.title}
-                    </div>
-                    <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)' }}>
-                      {formatHistoryWhen(c.updatedAt)} · {c.messageCount} msg
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="ai-history-delete"
-                    title="Delete conversation"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void deleteHistoryConversation(c.id).then(() => refreshHistory());
-                    }}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      border: 'none',
-                      borderRadius: 4,
-                      background: 'transparent',
-                      color: 'var(--caval-text-muted)',
-                      cursor: 'pointer',
-                      fontSize: 12,
-                      flexShrink: 0,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })
+            <HistoryList
+              conversations={historyConversations}
+              activeId={activeHistoryId}
+              hasMore={historyHasMore}
+              loadingMore={historyLoadingMore}
+              onSelect={(id) => void openHistoryConversation(id)}
+              onDelete={(id) => {
+                void deleteHistoryConversation(id).then(() => refreshHistory());
+              }}
+              onLoadMore={() => void loadMoreHistory()}
+            />
           )}
         </div>
       )}

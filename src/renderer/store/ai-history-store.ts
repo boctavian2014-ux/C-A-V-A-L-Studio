@@ -6,6 +6,7 @@ import type {
   ExportFormat,
   HistoryWrittenFile,
 } from "../../shared/ai-history-contract";
+import { HISTORY_LIST_PAGE_SIZE } from "../../shared/ai-history-contract";
 import type { ChatMessage } from "../../../ai/composer/ai-store";
 import { useAIStore } from "../../../ai/composer/ai-store";
 import { useEditorStore } from "./editor-store";
@@ -13,10 +14,13 @@ import { useEditorStore } from "./editor-store";
 interface AiHistoryStore {
   conversations: ConversationSummary[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   activeHistoryId: string | null;
   error: string | null;
   exportBusy: boolean;
   refresh: () => Promise<void>;
+  loadMore: () => Promise<void>;
   openConversation: (id: string) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<boolean>;
   revertWrittenFile: (writtenFileId: string) => Promise<boolean>;
@@ -54,6 +58,8 @@ export function historyPayloadToChatMessages(
 export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
   conversations: [],
   loading: false,
+  loadingMore: false,
+  hasMore: true,
   activeHistoryId: null,
   error: null,
   exportBusy: false,
@@ -61,19 +67,35 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
   refresh: async () => {
     const projectPath = useEditorStore.getState().projectPath;
     if (!projectPath || !window.caval?.aiHistory?.listConversations) {
-      set({ conversations: [], activeHistoryId: null, error: null });
+      set({
+        conversations: [],
+        activeHistoryId: null,
+        error: null,
+        hasMore: false,
+        loading: false,
+      });
       return;
     }
     set({ loading: true, error: null });
     try {
-      const res = await window.caval.aiHistory.listConversations();
+      const res = await window.caval.aiHistory.listConversations({
+        limit: HISTORY_LIST_PAGE_SIZE,
+        offset: 0,
+      });
       if (!res.ok) {
-        set({ loading: false, error: res.error ?? "Failed to list history", conversations: [] });
+        set({
+          loading: false,
+          error: res.error ?? "Failed to list history",
+          conversations: [],
+          hasMore: false,
+        });
         return;
       }
+      const page = res.conversations ?? [];
       set({
         loading: false,
-        conversations: res.conversations ?? [],
+        conversations: page,
+        hasMore: page.length >= HISTORY_LIST_PAGE_SIZE,
         error: null,
       });
     } catch (err) {
@@ -81,6 +103,42 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
         loading: false,
         error: err instanceof Error ? err.message : "Failed to list history",
         conversations: [],
+        hasMore: false,
+      });
+    }
+  },
+
+  loadMore: async () => {
+    const { loading, loadingMore, hasMore, conversations } = get();
+    if (loading || loadingMore || !hasMore) return;
+    const projectPath = useEditorStore.getState().projectPath;
+    if (!projectPath || !window.caval?.aiHistory?.listConversations) return;
+
+    set({ loadingMore: true, error: null });
+    try {
+      const res = await window.caval.aiHistory.listConversations({
+        limit: HISTORY_LIST_PAGE_SIZE,
+        offset: conversations.length,
+      });
+      if (!res.ok) {
+        set({
+          loadingMore: false,
+          error: res.error ?? "Failed to load more history",
+        });
+        return;
+      }
+      const page = res.conversations ?? [];
+      const seen = new Set(conversations.map((c) => c.id));
+      const appended = page.filter((c) => !seen.has(c.id));
+      set({
+        loadingMore: false,
+        conversations: [...conversations, ...appended],
+        hasMore: page.length >= HISTORY_LIST_PAGE_SIZE,
+      });
+    } catch (err) {
+      set({
+        loadingMore: false,
+        error: err instanceof Error ? err.message : "Failed to load more history",
       });
     }
   },
