@@ -35,11 +35,34 @@ export interface AiHistoryConversationPayload {
   writtenFilesByMessage: Record<string, HistoryWrittenFile[]>;
 }
 
+export type ExportFormat = "json" | "markdown";
+
+export interface ExportRequest {
+  conversationId: string;
+  format: ExportFormat;
+  /** Required to receive content when export exceeds HISTORY_EXPORT_WARN_BYTES. */
+  acknowledgeLarge?: boolean;
+}
+
+export interface ExportResult {
+  success: boolean;
+  content?: string;
+  suggestedFilename?: string;
+  error?: string;
+  /** True when export would exceed HISTORY_EXPORT_WARN_BYTES without acknowledgeLarge. */
+  sizeWarning?: boolean;
+  byteLength?: number;
+}
+
+/** Soft cap: warn before generating/returning oversized exports (paths only; no file snapshots). */
+export const HISTORY_EXPORT_WARN_BYTES = 5 * 1024 * 1024;
+
 export interface AiHistoryApi {
   listConversations(): Promise<ConversationSummary[]>;
   getConversation(id: string): Promise<AiHistoryConversationPayload | null>;
   deleteConversation(id: string): Promise<{ ok: boolean; error?: string }>;
   revertWrittenFile(writtenFileId: string): Promise<{ ok: boolean; error?: string }>;
+  exportConversation(req: ExportRequest): Promise<ExportResult>;
 }
 
 export function formatHistoryTitle(title: string | null | undefined, fallback = "Chat"): string {

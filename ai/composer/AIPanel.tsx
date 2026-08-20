@@ -719,9 +719,13 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const historyConversations = useAiHistoryStore((s) => s.conversations);
   const historyLoading = useAiHistoryStore((s) => s.loading);
   const activeHistoryId = useAiHistoryStore((s) => s.activeHistoryId);
+  const historyExportBusy = useAiHistoryStore((s) => s.exportBusy);
   const refreshHistory = useAiHistoryStore((s) => s.refresh);
   const openHistoryConversation = useAiHistoryStore((s) => s.openConversation);
   const deleteHistoryConversation = useAiHistoryStore((s) => s.deleteConversation);
+  const exportHistoryConversation = useAiHistoryStore((s) => s.exportConversation);
+  const activeThreadId = useAIStore((s) => s.activeThreadId);
+  const exportConversationId = activeHistoryId ?? activeThreadId;
 
   useEffect(() => {
     void refreshHistory();
@@ -1027,9 +1031,57 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               textTransform: 'uppercase',
               color: 'var(--caval-text-muted)',
               marginBottom: 4,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 6,
             }}
           >
-            History {historyLoading ? '…' : ''}
+            <span>History {historyLoading ? '…' : ''}</span>
+            {exportConversationId ? (
+              <span data-testid="ai-history-export-actions" style={{ display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  data-testid="ai-history-export-md"
+                  disabled={historyExportBusy}
+                  title="Export as Markdown"
+                  onClick={() => void exportHistoryConversation(exportConversationId, 'markdown')}
+                  style={{
+                    fontSize: 9,
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                    border: '1px solid var(--caval-accent-ring)',
+                    background: 'transparent',
+                    color: 'var(--caval-accent)',
+                    cursor: historyExportBusy ? 'wait' : 'pointer',
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                  }}
+                >
+                  MD
+                </button>
+                <button
+                  type="button"
+                  data-testid="ai-history-export-json"
+                  disabled={historyExportBusy}
+                  title="Export as JSON"
+                  onClick={() => void exportHistoryConversation(exportConversationId, 'json')}
+                  style={{
+                    fontSize: 9,
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                    border: '1px solid var(--caval-accent-ring)',
+                    background: 'transparent',
+                    color: 'var(--caval-accent)',
+                    cursor: historyExportBusy ? 'wait' : 'pointer',
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                  }}
+                >
+                  JSON
+                </button>
+              </span>
+            ) : null}
           </div>
           {historyConversations.length === 0 ? (
             <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>

@@ -496,6 +496,14 @@ contextBridge.exposeInMainWorld("caval", {
         error?: string;
         filePath?: string;
       }>,
+    exportConversation: (req: {
+      conversationId: string;
+      format: import("../shared/ai-history-contract").ExportFormat;
+      acknowledgeLarge?: boolean;
+    }) =>
+      ipcRenderer.invoke("caval:ai-history-export", req) as Promise<
+        import("../shared/ai-history-contract").ExportResult
+      >,
   },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{

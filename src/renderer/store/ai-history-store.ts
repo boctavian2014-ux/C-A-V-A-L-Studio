@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type {
   AiHistoryConversationPayload,
   ConversationSummary,
+  ExportFormat,
   HistoryWrittenFile,
 } from "../../shared/ai-history-contract";
 import type { ChatMessage } from "../../../ai/composer/ai-store";
@@ -14,10 +15,12 @@ interface AiHistoryStore {
   loading: boolean;
   activeHistoryId: string | null;
   error: string | null;
+  exportBusy: boolean;
   refresh: () => Promise<void>;
   openConversation: (id: string) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<boolean>;
   revertWrittenFile: (writtenFileId: string) => Promise<boolean>;
+  exportConversation: (conversationId: string, format: ExportFormat) => Promise<boolean>;
 }
 
 export function historyPayloadToChatMessages(
@@ -53,6 +56,7 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
   loading: false,
   activeHistoryId: null,
   error: null,
+  exportBusy: false,
 
   refresh: async () => {
     const projectPath = useEditorStore.getState().projectPath;
@@ -169,6 +173,59 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
     }
     await useEditorStore.getState().refreshTree();
     return true;
+  },
+
+  exportConversation: async (conversationId: string, format: ExportFormat) => {
+    const api = window.caval?.aiHistory;
+    if (!api?.exportConversation) {
+      set({ error: "Export unavailable — restart CAVAL Studio after rebuild" });
+      return false;
+    }
+    set({ exportBusy: true, error: null });
+    try {
+      let result = await api.exportConversation({ conversationId, format });
+      if (!result.success && result.sizeWarning) {
+        const ok =
+          typeof window.confirm === "function"
+            ? window.confirm(
+                `Export is large (${Math.ceil((result.byteLength ?? 0) / (1024 * 1024))} MB). Continue?`
+              )
+            : true;
+        if (!ok) {
+          set({ exportBusy: false });
+          return false;
+        }
+        result = await api.exportConversation({
+          conversationId,
+          format,
+          acknowledgeLarge: true,
+        });
+      }
+      if (!result.success || !result.content) {
+        set({ exportBusy: false, error: result.error ?? "Export failed" });
+        return false;
+      }
+
+      const save = window.caval?.saveFile;
+      if (!save) {
+        set({ exportBusy: false, error: "Save dialog unavailable" });
+        return false;
+      }
+      const saved = await save({
+        content: result.content,
+        saveAs: true,
+        path: result.suggestedFilename,
+      });
+      set({ exportBusy: false });
+      if (saved.canceled) return false;
+      return true;
+    } catch (err) {
+      set({
+        exportBusy: false,
+        error: err instanceof Error ? err.message : "Export failed",
+      });
+      return false;
+    }
   },
 }));
 

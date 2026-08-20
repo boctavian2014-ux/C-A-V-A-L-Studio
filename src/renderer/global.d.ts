@@ -579,6 +579,9 @@ interface CavalBridge {
       error?: string;
       filePath?: string;
     }>;
+    exportConversation: (
+      req: import('../../src/shared/ai-history-contract').ExportRequest
+    ) => Promise<import('../../src/shared/ai-history-contract').ExportResult>;
   };
   pipelineResumeStream?: (
     input: {
