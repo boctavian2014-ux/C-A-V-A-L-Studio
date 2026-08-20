@@ -16,6 +16,10 @@ import type { TerminalPanelTab } from '../../terminal/terminal-events';
 import { dispatchTerminalNew } from '../../terminal/terminal-events';
 import type { TerminalInfo, TerminalOutputLine } from '../../../shared/terminal-contract';
 import { TerminalInput } from './TerminalInput';
+import { TerminalExplainPopover } from './TerminalExplainPopover';
+import { buildScrollbackContext } from '../../ai/terminal-explain-client';
+import { useTerminalExplainStore } from '../../store/terminal-explain-store';
+import { showWorkbenchToast } from '../../commands/workbench-toast';
 
 const TERMINAL_HEIGHT_KEY = 'caval-terminal-height';
 
@@ -30,7 +34,13 @@ export function TerminalSessions() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [output, setOutput] = useState<Map<string, TerminalOutputLine[]>>(new Map());
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(
+    null
+  );
   const outputEndRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+  const explain = useTerminalExplainStore((s) => s.explain);
 
   useEffect(() => {
     const api = window.caval?.terminal;
@@ -117,6 +127,67 @@ export function TerminalSessions() {
     [activeTabId]
   );
 
+  const getSelectionInOutput = useCallback((): string => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) return '';
+    const root = outputRef.current;
+    if (!root) return '';
+    const anchor = sel.anchorNode;
+    const focus = sel.focusNode;
+    if (!anchor || !focus) return '';
+    if (!root.contains(anchor) || !root.contains(focus)) return '';
+    return sel.toString();
+  }, []);
+
+  const runExplainSelection = useCallback(
+    (selectedText: string) => {
+      if (!activeTabId) {
+        showWorkbenchToast('Niciun terminal activ');
+        return;
+      }
+      const text = selectedText.trim();
+      if (!text) {
+        showWorkbenchToast('Selectează output în terminal');
+        return;
+      }
+      const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
+      const scrollbackContext = buildScrollbackContext(lines.slice(-40));
+      void explain({
+        terminalId: activeTabId,
+        selectedText: text,
+        scrollbackContext,
+      });
+      setContextMenu(null);
+    },
+    [activeTabId, explain, output]
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!(ctrl && e.shiftKey && e.key.toLowerCase() === 'e')) return;
+      const root = panelRef.current;
+      if (!root) return;
+      const active = document.activeElement;
+      const focusedInTerminal = Boolean(active && root.contains(active));
+      const selection = getSelectionInOutput();
+      if (!focusedInTerminal && !selection) return;
+      if (!selection) return;
+      e.preventDefault();
+      e.stopPropagation();
+      runExplainSelection(selection);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [getSelectionInOutput, runExplainSelection]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [contextMenu]);
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeOutput = activeTabId ? output.get(activeTabId) ?? [] : [];
   const filteredOutput = searchQuery
@@ -124,7 +195,14 @@ export function TerminalSessions() {
     : activeOutput;
 
   return (
-    <div className="terminal-panel" role="region" aria-label="Terminal" data-testid="terminal-sessions">
+    <div
+      ref={panelRef}
+      className="terminal-panel"
+      role="region"
+      aria-label="Terminal"
+      data-testid="terminal-sessions"
+      style={{ position: 'relative' }}
+    >
       <div className="terminal-tabs" role="tablist" aria-label="Terminal sessions">
         {tabs.map((tab) => (
             <div
@@ -182,9 +260,40 @@ export function TerminalSessions() {
           aria-label="Search terminal output"
           data-testid="terminal-search"
         />
+        <button
+          type="button"
+          data-testid="terminal-explain-btn"
+          onClick={() => runExplainSelection(getSelectionInOutput())}
+          style={{
+            marginLeft: 8,
+            fontSize: 11,
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: '1px solid var(--caval-border)',
+            background: 'transparent',
+            color: 'var(--caval-text-muted)',
+            cursor: 'pointer',
+          }}
+          title="Explain selected output (Ctrl+Shift+E)"
+        >
+          Explain
+        </button>
       </div>
 
-      <div className="terminal-output" role="log" aria-live="polite" data-testid="terminal-output">
+      <div
+        ref={outputRef}
+        className="terminal-output"
+        role="log"
+        aria-live="polite"
+        data-testid="terminal-output"
+        style={{ userSelect: 'text', cursor: 'text' }}
+        onContextMenu={(event) => {
+          const text = getSelectionInOutput();
+          if (!text.trim()) return;
+          event.preventDefault();
+          setContextMenu({ x: event.clientX, y: event.clientY, text });
+        }}
+      >
         {filteredOutput.map((line, index) => (
           <div key={`${line.timestamp}-${index}`} className="terminal-line">
             {line.data}
@@ -192,6 +301,47 @@ export function TerminalSessions() {
         ))}
         <div ref={outputEndRef} />
       </div>
+
+      {contextMenu && (
+        <div
+          role="menu"
+          data-testid="terminal-explain-context-menu"
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 50,
+            background: 'var(--caval-surface)',
+            border: '1px solid var(--caval-border)',
+            borderRadius: 6,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+            padding: 4,
+            minWidth: 160,
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => runExplainSelection(contextMenu.text)}
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--caval-text)',
+              padding: '6px 10px',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            Explain with AI
+          </button>
+        </div>
+      )}
+
+      <TerminalExplainPopover />
 
       {activeTab && (
         <TerminalInput

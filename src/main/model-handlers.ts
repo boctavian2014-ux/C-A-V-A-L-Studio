@@ -95,6 +95,14 @@ import {
   runExplain,
 } from "./ai/explain-runner";
 import type {
+  TerminalExplainRequest,
+  TerminalExplainResult,
+} from "../shared/ai-terminal-contract";
+import {
+  emitTerminalExplainTimeline,
+  runTerminalExplain,
+} from "./ai/terminal-explain";
+import type {
   RefactorRequest,
   RefactorResult,
 } from "../shared/ai-refactor-contract";
@@ -181,6 +189,9 @@ export interface CavalChatStreamRequest {
 
   /** Pas 6.3 — read-only explain on hover / selection. */
   explain?: ExplainRequest;
+
+  /** Pas 7c.1 — read-only terminal output explain (no PTY/disk writes). */
+  terminalExplain?: TerminalExplainRequest;
 
   /** Pas 6.5 — gated multi-file refactor propose (no disk write). */
   refactor?: RefactorRequest;
@@ -978,6 +989,78 @@ async function streamExplainToRenderer(
   });
 }
 
+async function streamTerminalExplainToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const terminalExplain = request.terminalExplain;
+  if (!terminalExplain) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: TerminalExplainResult = { success: false, error: "No bound workspace" };
+    emitTerminalExplainTimeline(stream, streamId, terminalExplain.terminalId, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Explain.",
+      terminalExplain: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "explain terminal");
+
+  const result = await runTerminalExplain({
+    request: { ...terminalExplain, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "analysis",
+        capability: "chat",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        temperature: 0.2,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    discardIncompleteStreamTimeline(streamId);
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitTerminalExplainTimeline(stream, streamId, terminalExplain.terminalId, result);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Explain failed"),
+      terminalExplain: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    terminalExplain: result,
+  });
+}
+
 async function streamQuickFixToRenderer(
   stream: StreamChunkSender,
   streamId: string,
@@ -1144,6 +1227,7 @@ async function streamToRenderer(
     !request.quickFixAccept &&
     !request.timelineFileWrite &&
     !request.explain &&
+    !request.terminalExplain &&
     !request.refactor
   ) {
     request = await applyEnhancedContextToChatRequest(request, workspaceRoot);
@@ -1205,6 +1289,28 @@ async function streamToRenderer(
       return;
     }
     await streamExplainToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 7c.1 — read-only terminal output explain (no PTY / file_write).
+  if (request.terminalExplain) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: TerminalExplainResult = { success: false, error: "No bound workspace" };
+      emitTerminalExplainTimeline(
+        stream,
+        streamId,
+        request.terminalExplain.terminalId,
+        result
+      );
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Explain.",
+        terminalExplain: result,
+      });
+      return;
+    }
+    await streamTerminalExplainToRenderer(stream, streamId, request, abortRoot.signal);
     return;
   }
 

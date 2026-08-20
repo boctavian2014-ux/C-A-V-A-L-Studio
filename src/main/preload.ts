@@ -89,6 +89,8 @@ export interface CavalChatStreamRequest {
   timelineFileWrite?: import("../shared/ai-inline-completion-contract").TimelineFileWriteRequest;
   /** Pas 6.3 — read-only explain on hover / selection. */
   explain?: import("../shared/ai-explain-contract").ExplainRequest;
+  /** Pas 7c.1 — read-only terminal output explain. */
+  terminalExplain?: import("../shared/ai-terminal-contract").TerminalExplainRequest;
   /** Pas 6.5 — gated multi-file refactor propose. */
   refactor?: import("../shared/ai-refactor-contract").RefactorRequest;
   /** Pas 7a.2 — UI thread id; used as conversation_id when persisting the assistant message. */
@@ -159,6 +161,8 @@ export interface CavalStreamChunk {
   quickFix?: import("../shared/ai-quick-fix-contract").QuickFixResult;
   /** Pas 6.3 — read-only explain result. */
   explain?: import("../shared/ai-explain-contract").ExplainResult;
+  /** Pas 7c.1 — read-only terminal output explain result. */
+  terminalExplain?: import("../shared/ai-terminal-contract").TerminalExplainResult;
   /** Pas 6.5 — multi-file refactor proposal. */
   refactor?: import("../shared/ai-refactor-contract").RefactorResult;
   /** Pas 6.4 — staged file proposals (not on disk until Accept). */
