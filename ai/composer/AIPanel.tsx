@@ -30,6 +30,8 @@ import { AiSettingsPanel } from './AiSettingsPanel';
 import { HistoryList } from './HistoryList';
 import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
 import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
+import { extractShellCommandsFromAssistantText } from '../../src/shared/ai-terminal-contract';
+import { SuggestedCommandsCard } from '../../src/renderer/components/terminal/SuggestedCommandsCard';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -355,6 +357,10 @@ function ModelProfileChips({ modelId }: { modelId: string }) {
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
+  const shellCommands = useMemo(() => {
+    if (isUser || message.isStreaming || !message.content) return [];
+    return extractShellCommandsFromAssistantText(message.content);
+  }, [isUser, message.content, message.isStreaming]);
   const { modelLabels, agentMode } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
@@ -481,6 +487,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             messageId={message.id}
             historicalWrittenFiles={message.historicalWrittenFiles}
           />
+        )}
+
+        {!isUser && !message.isStreaming && shellCommands.length > 0 && (
+          <SuggestedCommandsCard commands={shellCommands} />
         )}
 
         {!isUser && !message.isStreaming && !message.error && (

@@ -4,6 +4,9 @@ import type { Task, TaskRun, TasksApi } from "../../../shared/tasks-contract";
 import { MAX_TASK_PANEL_LOG_LINES, takeLast } from "../../lib/panel-limits";
 import { useEditorStore } from "../../store/editor-store";
 import { useOutputStore } from "../../store/output-store";
+import { useTerminalSuggestStore } from "../../store/terminal-suggest-store";
+import { dispatchTerminalPanelTab } from "../../terminal/terminal-events";
+import { showWorkbenchToast } from "../../commands/workbench-toast";
 
 const STATUS_COLOR: Record<TaskRun["status"], string> = {
   starting: "#78B9E0",
@@ -26,6 +29,7 @@ export function TasksPanel() {
   const projectPath = useEditorStore((s) => s.projectPath);
   const appendBlock = useOutputStore((s) => s.appendBlock);
   const setActiveChannel = useOutputStore((s) => s.setActiveChannel);
+  const suggest = useTerminalSuggestStore((s) => s.suggest);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [runs, setRuns] = useState<TaskRun[]>([]);
@@ -111,6 +115,22 @@ export function TasksPanel() {
       setError(err instanceof Error ? err.message : "Could not stop task");
     }
   }, []);
+
+  const handleSuggestFix = useCallback(
+    (run: TaskRun) => {
+      const errorOutput =
+        logLines.slice(-40).join("\n").trim() ||
+        `Task "${run.taskName}" failed with status ${run.status}`;
+      dispatchTerminalPanelTab("terminal");
+      void suggest({
+        context: "task-failed",
+        errorOutput,
+        userQuery: `Fix failed task ${run.taskName}`,
+      });
+      showWorkbenchToast("Suggesting commands for failed task…");
+    },
+    [logLines, suggest]
+  );
 
   const activeRuns = useMemo(
     () => runs.filter((run) => run.status === "running" || run.status === "starting"),
@@ -250,6 +270,7 @@ export function TasksPanel() {
                     fontSize: 11,
                     padding: "3px 0",
                     color: STATUS_COLOR[run.status],
+                    alignItems: "center",
                   }}
                 >
                   <span className="task-run-name" style={{ color: "var(--caval-text)", minWidth: 0, flex: 1 }}>
@@ -259,6 +280,24 @@ export function TasksPanel() {
                   <span className="task-run-time" style={{ color: "var(--caval-text-muted)" }}>
                     {new Date(run.startedAt).toLocaleTimeString()}
                   </span>
+                  {run.status === "failed" && (
+                    <button
+                      type="button"
+                      data-testid="task-suggest-fix-btn"
+                      onClick={() => handleSuggestFix(run)}
+                      style={{
+                        border: "1px solid var(--caval-border)",
+                        background: "transparent",
+                        color: "var(--caval-text-muted)",
+                        cursor: "pointer",
+                        fontSize: 10,
+                        borderRadius: 4,
+                        padding: "2px 6px",
+                      }}
+                    >
+                      Suggest fix
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

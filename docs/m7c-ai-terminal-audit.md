@@ -61,12 +61,13 @@ Continuă din M7d (workspace intelligence). Pattern: inventar → prioritate →
 
 ### 7c.2 — Suggest commands
 
-- Contract + runner sibling; UI chips / listă în toolbar
-- Default `autoApply: false`; confirm înainte de `terminal.write`
-- Filtrare allowlist înainte de insert/run
-- Fix `caval:run-in-terminal` pe UI-ul activ (`TerminalSessions`)
-- Opțional: M7d enhanced-context pe tokeni din eroare
-- Commit: `feat(ai): suggest terminal commands from output context`
+- Contract + allowlist în `src/shared/ai-terminal-contract.ts`
+- Runner `src/main/ai/terminal-suggest.ts` (propose-only)
+- UI: `SuggestedCommandsCard` + insert în `TerminalInput` (fără Enter)
+- Entry: Terminal „Suggest fix”, Tasks failed „Suggest fix”, chat shell fences
+- Smoke: `tests/main/ai/terminal-suggest.test.ts`
+- Commit: `feat(ai): add terminal command suggestions with allowlist gate`
+- Stare: ✅
 
 ### 7c.3 — Polish + harden
 
@@ -100,5 +101,5 @@ Continuă din M7d (workspace intelligence). Pattern: inventar → prioritate →
 |---|---|
 | Audit | ✅ acest document |
 | 7c.1 Explain output | ✅ |
-| 7c.2 Suggest commands | ⏳ |
+| 7c.2 Suggest commands | ✅ |
 | 7c.3 Polish | ⏳ |

@@ -17,8 +17,10 @@ import { dispatchTerminalNew } from '../../terminal/terminal-events';
 import type { TerminalInfo, TerminalOutputLine } from '../../../shared/terminal-contract';
 import { TerminalInput } from './TerminalInput';
 import { TerminalExplainPopover } from './TerminalExplainPopover';
+import { SuggestedCommandsCard } from './SuggestedCommandsCard';
 import { buildScrollbackContext } from '../../ai/terminal-explain-client';
 import { useTerminalExplainStore } from '../../store/terminal-explain-store';
+import { useTerminalSuggestStore } from '../../store/terminal-suggest-store';
 import { showWorkbenchToast } from '../../commands/workbench-toast';
 
 const TERMINAL_HEIGHT_KEY = 'caval-terminal-height';
@@ -41,6 +43,7 @@ export function TerminalSessions() {
   const panelRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
   const explain = useTerminalExplainStore((s) => s.explain);
+  const suggest = useTerminalSuggestStore((s) => s.suggest);
 
   useEffect(() => {
     const api = window.caval?.terminal;
@@ -162,6 +165,26 @@ export function TerminalSessions() {
     [activeTabId, explain, output]
   );
 
+  const runSuggestFix = useCallback(() => {
+    if (!activeTabId) {
+      showWorkbenchToast('Niciun terminal activ');
+      return;
+    }
+    const selected = getSelectionInOutput().trim();
+    const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
+    const errorOutput = (selected || lines.slice(-30).join('\n')).trim();
+    if (!errorOutput) {
+      showWorkbenchToast('Nu există output pentru Suggest fix');
+      return;
+    }
+    void suggest({
+      context: 'error',
+      terminalId: activeTabId,
+      errorOutput,
+    });
+    setContextMenu(null);
+  }, [activeTabId, getSelectionInOutput, output, suggest]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
@@ -278,6 +301,24 @@ export function TerminalSessions() {
         >
           Explain
         </button>
+        <button
+          type="button"
+          data-testid="terminal-suggest-btn"
+          onClick={() => runSuggestFix()}
+          style={{
+            marginLeft: 6,
+            fontSize: 11,
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: '1px solid var(--caval-border)',
+            background: 'transparent',
+            color: 'var(--caval-text-muted)',
+            cursor: 'pointer',
+          }}
+          title="Suggest fix commands from selection or recent output"
+        >
+          Suggest fix
+        </button>
       </div>
 
       <div
@@ -338,9 +379,36 @@ export function TerminalSessions() {
           >
             Explain with AI
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              if (!activeTabId) return;
+              void suggest({
+                context: 'error',
+                terminalId: activeTabId,
+                errorOutput: contextMenu.text,
+              });
+              setContextMenu(null);
+            }}
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--caval-text)',
+              padding: '6px 10px',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            Suggest fix
+          </button>
         </div>
       )}
 
+      <SuggestedCommandsCard />
       <TerminalExplainPopover />
 
       {activeTab && (

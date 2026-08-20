@@ -97,11 +97,17 @@ import {
 import type {
   TerminalExplainRequest,
   TerminalExplainResult,
+  TerminalSuggestRequest,
+  TerminalSuggestResult,
 } from "../shared/ai-terminal-contract";
 import {
   emitTerminalExplainTimeline,
   runTerminalExplain,
 } from "./ai/terminal-explain";
+import {
+  emitTerminalSuggestTimeline,
+  runTerminalSuggest,
+} from "./ai/terminal-suggest";
 import type {
   RefactorRequest,
   RefactorResult,
@@ -192,6 +198,9 @@ export interface CavalChatStreamRequest {
 
   /** Pas 7c.1 — read-only terminal output explain (no PTY/disk writes). */
   terminalExplain?: TerminalExplainRequest;
+
+  /** Pas 7c.2 — propose-only terminal command suggestions. */
+  terminalSuggest?: TerminalSuggestRequest;
 
   /** Pas 6.5 — gated multi-file refactor propose (no disk write). */
   refactor?: RefactorRequest;
@@ -1061,6 +1070,78 @@ async function streamTerminalExplainToRenderer(
   });
 }
 
+async function streamTerminalSuggestToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const terminalSuggest = request.terminalSuggest;
+  if (!terminalSuggest) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: TerminalSuggestResult = { success: false, error: "No bound workspace" };
+    emitTerminalSuggestTimeline(stream, streamId, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Suggest.",
+      terminalSuggest: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "suggest commands");
+
+  const result = await runTerminalSuggest({
+    request: { ...terminalSuggest, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "analysis",
+        capability: "chat",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        temperature: 0.2,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    discardIncompleteStreamTimeline(streamId);
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitTerminalSuggestTimeline(stream, streamId, result);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Suggest failed"),
+      terminalSuggest: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    terminalSuggest: result,
+  });
+}
+
 async function streamQuickFixToRenderer(
   stream: StreamChunkSender,
   streamId: string,
@@ -1228,6 +1309,7 @@ async function streamToRenderer(
     !request.timelineFileWrite &&
     !request.explain &&
     !request.terminalExplain &&
+    !request.terminalSuggest &&
     !request.refactor
   ) {
     request = await applyEnhancedContextToChatRequest(request, workspaceRoot);
@@ -1311,6 +1393,23 @@ async function streamToRenderer(
       return;
     }
     await streamTerminalExplainToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 7c.2 — propose-only terminal command suggestions (no execute).
+  if (request.terminalSuggest) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: TerminalSuggestResult = { success: false, error: "No bound workspace" };
+      emitTerminalSuggestTimeline(stream, streamId, result);
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Suggest.",
+        terminalSuggest: result,
+      });
+      return;
+    }
+    await streamTerminalSuggestToRenderer(stream, streamId, request, abortRoot.signal);
     return;
   }
 

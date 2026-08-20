@@ -185,6 +185,7 @@ interface CavalStreamChunk {
   quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixResult;
   explain?: import('../../src/shared/ai-explain-contract').ExplainResult;
   terminalExplain?: import('../../src/shared/ai-terminal-contract').TerminalExplainResult;
+  terminalSuggest?: import('../../src/shared/ai-terminal-contract').TerminalSuggestResult;
   refactor?: import('../../src/shared/ai-refactor-contract').RefactorResult;
   proposedWrites?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
   proposeStageKey?: string;
@@ -488,6 +489,7 @@ interface CavalBridge {
       timelineFileWrite?: import('../../src/shared/ai-inline-completion-contract').TimelineFileWriteRequest;
       explain?: import('../../src/shared/ai-explain-contract').ExplainRequest;
       terminalExplain?: import('../../src/shared/ai-terminal-contract').TerminalExplainRequest;
+      terminalSuggest?: import('../../src/shared/ai-terminal-contract').TerminalSuggestRequest;
       refactor?: import('../../src/shared/ai-refactor-contract').RefactorRequest;
       conversationId?: string;
       assistantMessageId?: string;

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
+import { TERMINAL_INSERT_COMMAND_EVENT } from "../../ai/terminal-suggest-client";
+
 interface TerminalInputProps {
   terminalId: string;
   onInput: (data: string) => Promise<void>;
@@ -15,6 +17,23 @@ export function TerminalInput({ terminalId, onInput, disabled }: TerminalInputPr
   useEffect(() => {
     inputRef.current?.focus();
   }, [terminalId]);
+
+  // 7c.2 — insert into prompt only (no trailing newline / no PTY write).
+  useEffect(() => {
+    const onInsert = (event: Event) => {
+      const detail = (event as CustomEvent<{ command?: string }>).detail;
+      const command = detail?.command?.replace(/[\r\n]+/g, " ").trim();
+      if (!command) return;
+      setInput(command);
+      setHistoryIndex(-1);
+      window.requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(command.length, command.length);
+      });
+    };
+    document.addEventListener(TERMINAL_INSERT_COMMAND_EVENT, onInsert);
+    return () => document.removeEventListener(TERMINAL_INSERT_COMMAND_EVENT, onInsert);
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     if (!input.trim() || disabled) return;
