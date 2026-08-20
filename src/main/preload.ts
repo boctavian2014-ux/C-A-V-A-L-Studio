@@ -79,6 +79,8 @@ export interface CavalChatStreamRequest {
   skipMultiAgent?: boolean;
   /** Force merge + supervisor review in Agentic pipeline */
   strictReview?: boolean;
+  /** Pas 5.2 — optional IDE snapshot; omit when per-thread toggle is OFF. */
+  ideContext?: import("../shared/ai-context-contract").IdeContextPayload;
   context?: {
     filePath?: string;
     fileContent?: string;

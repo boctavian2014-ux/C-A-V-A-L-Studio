@@ -94,6 +94,8 @@ import {
 import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import type { PipelineRecapMeta } from './multi-agent/types';
 import { showWorkbenchToast } from '../../src/renderer/commands/workbench-toast';
+import type { IdeContextMode, IdeContextPayload } from '../../src/shared/ai-context-contract';
+import { collectRendererIdeContext } from './ide-context-collect';
 
 export interface ChatAttachment {
   id: string;
@@ -157,6 +159,8 @@ export interface ChatThread {
   workspacePath?: string | null;
   /** Hidden from Arena chat bar; messages retained in localStorage. */
   archived?: boolean;
+  /** Pas 5.2 — per-thread IDE context toggle; default enabled. */
+  ideContextMode?: IdeContextMode;
 }
 
 /** Mark one thread archived; optionally persist current messages into it. */
@@ -227,6 +231,8 @@ interface CavalWindow {
           mentions?: string[];
           attachments?: Array<{ path: string; name: string; content: string }>;
         };
+        /** Pas 5.2 — omit when per-thread toggle is OFF. */
+        ideContext?: IdeContextPayload;
         scaffoldMode?: boolean;
         skipMultiAgent?: boolean;
         strictReview?: boolean;
@@ -476,6 +482,9 @@ interface AIStore {
   prepareInFlight: boolean;
   includeMode: IncludeMode;
   setIncludeMode: (mode: IncludeMode) => void;
+  /** Active thread's IDE context mode (default enabled). */
+  ideContextMode: IdeContextMode;
+  setIdeContextMode: (mode: IdeContextMode) => void;
   strictReview: boolean;
   setStrictReview: (enabled: boolean) => void;
   modeSwitchNotice: string | null;
@@ -530,6 +539,7 @@ function createThread(title = 'Chat nou', workspacePath: string | null = null): 
     createdAt: Date.now(),
     updatedAt: Date.now(),
     workspacePath,
+    ideContextMode: 'enabled',
   };
 }
 
@@ -712,6 +722,7 @@ export const useAIStore = create<AIStore>()(
       modelLabels: {},
       activeResolvedModel: null,
       includeMode: 'project',
+      ideContextMode: 'enabled',
       strictReview: true,
       modeSwitchNotice: null,
       attachedFiles: [],
@@ -746,6 +757,14 @@ export const useAIStore = create<AIStore>()(
       },
       clearModeSwitchNotice: () => set({ modeSwitchNotice: null }),
       setIncludeMode: (mode) => set({ includeMode: mode }),
+      setIdeContextMode: (mode) => {
+        set((s) => ({
+          ideContextMode: mode,
+          threads: s.threads.map((t) =>
+            t.id === s.activeThreadId ? { ...t, ideContextMode: mode, updatedAt: Date.now() } : t
+          ),
+        }));
+      },
       setStrictReview: (enabled) => set({ strictReview: enabled }),
 
       addAttachments: async (paths) => {
@@ -851,6 +870,7 @@ export const useAIStore = create<AIStore>()(
             threads: [thread, ...threads],
             activeThreadId: thread.id,
             messages: [],
+            ideContextMode: thread.ideContextMode ?? 'enabled',
           };
         });
       },
@@ -891,6 +911,7 @@ export const useAIStore = create<AIStore>()(
               threads: [thread, ...threads],
               activeThreadId: thread.id,
               messages: [],
+              ideContextMode: thread.ideContextMode ?? 'enabled',
             };
           }
 
@@ -900,6 +921,7 @@ export const useAIStore = create<AIStore>()(
               threads,
               activeThreadId: existing.id,
               messages: existing.messages,
+              ideContextMode: existing.ideContextMode ?? 'enabled',
             };
           }
 
@@ -908,6 +930,7 @@ export const useAIStore = create<AIStore>()(
             threads: [thread, ...threads],
             activeThreadId: thread.id,
             messages: [],
+            ideContextMode: thread.ideContextMode ?? 'enabled',
           };
         });
       },
@@ -915,7 +938,11 @@ export const useAIStore = create<AIStore>()(
       selectThread: (id) => {
         const thread = get().threads.find((t) => t.id === id);
         if (!thread) return;
-        set({ activeThreadId: id, messages: thread.messages });
+        set({
+          activeThreadId: id,
+          messages: thread.messages,
+          ideContextMode: thread.ideContextMode ?? 'enabled',
+        });
       },
 
       deleteThread: (id) => {
@@ -1821,6 +1848,12 @@ export const useAIStore = create<AIStore>()(
                   content: f.content.slice(0, 16_000),
                 })),
               },
+              ...(get().ideContextMode !== 'disabled'
+                ? (() => {
+                    const ideContext = collectRendererIdeContext();
+                    return ideContext ? { ideContext } : {};
+                  })()
+                : {}),
               scaffoldMode,
               strictReview: isAgenticPipelineMode(agentMode) ? strictReview : undefined,
             },
@@ -2281,8 +2314,17 @@ export const useAIStore = create<AIStore>()(
           });
         }
         state.threads = migrateThreadsOnRehydrate(state.threads, state.activeThreadId);
+        state.threads = state.threads.map((t) => ({
+          ...t,
+          ideContextMode: t.ideContextMode === 'disabled' ? 'disabled' : 'enabled',
+        }));
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
-        if (thread) state.messages = thread.messages;
+        if (thread) {
+          state.messages = thread.messages;
+          state.ideContextMode = thread.ideContextMode ?? 'enabled';
+        } else {
+          state.ideContextMode = 'enabled';
+        }
         state.isStreaming = false;
         state.messages = state.messages.map((m) =>
           m.isStreaming ? { ...m, isStreaming: false } : m

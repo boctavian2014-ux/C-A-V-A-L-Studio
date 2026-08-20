@@ -66,6 +66,8 @@ import { parseProjectHealthAction } from "../../src/shared/project-health-check"
 import { assertTrustedSender } from "./ipc-trust";
 import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
 import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
+import type { IdeContextPayload } from "../shared/ai-context-contract";
+import { applyIdeContextToChatRequest } from "./ai/ide-context-collector";
 
 
 
@@ -126,6 +128,13 @@ export interface CavalChatStreamRequest {
 
   /** Force merge + supervisor review (overrides fastPipeline from caval.jsonc) */
   strictReview?: boolean;
+
+  /**
+   * Optional IDE snapshot from the renderer (Pas 5.2).
+   * Main re-validates and budgets; absent when the per-thread toggle is OFF.
+   * Must not carry workspaceRoot as authority.
+   */
+  ideContext?: IdeContextPayload;
 
 }
 
@@ -734,7 +743,11 @@ async function streamToRenderer(
     workspaceRoot: workspaceRoot?.trim() ?? "",
   });
   const abortRoot = startAbortableStream(streamId);
+  // Bound workspace is authoritative — never trust renderer cwd for context.
   request = { ...request, workspaceRoot };
+  if (request.ideContext !== undefined) {
+    request = applyIdeContextToChatRequest(request, request.ideContext);
+  }
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 
   if (workspaceRoot?.trim()) {

@@ -22,6 +22,7 @@ import { workspaceFolderTitle } from './workspace-session';
 import { formatProjectCompletionWaitMessage } from './project-completion-announce';
 import { RoleMapPanel } from './RoleMapPanel';
 import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
+import { WrittenFilesCard } from './WrittenFilesCard';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -289,6 +290,7 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
       )}
       {message.reasoningBrief && !message.recap && (
         <CompactArenaStatus
+          live={isStreaming}
           text={planText || formatArenaReasoning(message.reasoningBrief, undefined, isStreaming)}
         />
       )}
@@ -306,7 +308,7 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
             planText ||
             formatChatPanelSummary(summarizeForChatPanel(message.content)) ||
             (message.writtenFiles?.length
-              ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
+              ? `✓ ${message.writtenFiles.length} fișier(e) — vezi lista de mai jos.`
               : '')
           }
         />
@@ -412,34 +414,21 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           Boolean(message.reasoning) ? (
             <ArenaWorkPanel message={message} />
           ) : (
-            <>
-              <CompactArenaStatus text={arenaStatusText || (message.writtenFiles?.length ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.` : '')} />
-              {message.writtenFiles && message.writtenFiles.length > 0 ? (
-                <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--caval-success)' }}>
-                  {message.writtenFiles.slice(0, 3).join(', ')}
-                  {message.writtenFiles.length > 3 ? '…' : ''}
-                </div>
-              ) : null}
-            </>
+            <CompactArenaStatus text={arenaStatusText || (message.writtenFiles?.length ? `✓ ${message.writtenFiles.length} fișier(e) — vezi lista de mai jos.` : '')} />
           )
         ) : arenaMode && !isUser ? (
           <>
             <CompactArenaStatus
+              live={Boolean(message.isStreaming)}
               text={
                 displayText ||
                 (message.writtenFiles?.length
-                  ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
+                  ? `✓ ${message.writtenFiles.length} fișier(e) — vezi lista de mai jos.`
                   : message.isStreaming
                     ? '⚡ Scriu în editor…'
                     : '')
               }
             />
-            {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming ? (
-              <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--caval-success)' }}>
-                {message.writtenFiles.slice(0, 3).join(', ')}
-                {message.writtenFiles.length > 3 ? '…' : ''}
-              </div>
-            ) : null}
           </>
         ) : message.isStreaming && message.activitySteps?.length ? (
           <>
@@ -468,15 +457,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <DiffBlock message={message} />
         )}
 
-        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && (
-          <div style={{
-            marginTop: 10, padding: '8px 12px', borderRadius: 6,
-            background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
-            fontSize: 11.5, color: 'var(--caval-success)',
-          }}>
-            ✓ {message.writtenFiles.length} fișier(e) create în workspace: {message.writtenFiles.slice(0, 4).join(', ')}
-            {message.writtenFiles.length > 4 ? '…' : ''}
-          </div>
+        {!isUser && message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && (
+          <WrittenFilesCard files={message.writtenFiles} />
         )}
 
         {/* Eroare */}
@@ -490,14 +472,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-function CompactArenaStatus({ text }: { text: string }) {
+function CompactArenaStatus({ text, live }: { text: string; live?: boolean }) {
   return (
     <div
       title={text}
+      className={live ? 'caval-stream-text' : undefined}
       style={{
-        fontSize: 12,
-        lineHeight: 1.45,
-        color: 'var(--caval-text-muted)',
+        fontSize: live ? 10 : 12,
+        lineHeight: live ? 1.45 : 1.45,
+        letterSpacing: live ? '0.05em' : undefined,
+        fontFamily: live ? "'JetBrains Mono', ui-monospace, monospace" : undefined,
+        color: live ? 'rgba(186, 230, 253, 0.62)' : 'var(--caval-text-muted)',
         maxHeight: '5.8em',
         overflow: 'hidden',
         display: '-webkit-box',
@@ -570,7 +555,12 @@ function StreamingText({ content }: { content: string }) {
         overflowWrap: 'break-word',
         userSelect: 'text',
         WebkitUserSelect: 'text',
-        lineHeight: 1.6,
+        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        fontSize: 10,
+        lineHeight: 1.42,
+        letterSpacing: '0.055em',
+        fontWeight: 400,
+        color: 'rgba(186, 230, 253, 0.58)',
       }}
     >
       {content}
@@ -621,6 +611,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     modeSwitchNotice, clearModeSwitchNotice,
     verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
     includeMode, setIncludeMode,
+    ideContextMode, setIdeContextMode,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
@@ -1003,6 +994,29 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       }}>
         <ChatModeSelect />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() =>
+              setIdeContextMode(ideContextMode === 'disabled' ? 'enabled' : 'disabled')
+            }
+            title={
+              ideContextMode === 'disabled'
+                ? 'Activează context IDE (fișier, problems, git, output) pentru acest chat'
+                : 'Dezactivează context IDE pentru acest chat'
+            }
+            style={{
+              fontSize: 10,
+              padding: '3px 8px',
+              borderRadius: 999,
+              border: `1px solid ${ideContextMode !== 'disabled' ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
+              background:
+                ideContextMode !== 'disabled' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
+              color: ideContextMode !== 'disabled' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            {ideContextMode !== 'disabled' ? '◉' : '○'} IDE context
+          </button>
           {editorSelection?.text && (
             <button
               type="button"
