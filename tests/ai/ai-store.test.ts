@@ -26,8 +26,8 @@ vi.mock("../../ai/safety/renderer-chat-guard", () => ({
   assertRendererChatAllowed: vi.fn(),
 }));
 
-vi.mock("../../ai/models/model-readiness", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../ai/models/model-readiness")>();
+vi.mock("../../ai/models/model-readiness.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../ai/models/model-readiness.js")>();
   return {
     ...actual,
     checkModelReadiness: vi.fn().mockResolvedValue({ ready: true }),
@@ -47,7 +47,7 @@ beforeAll(() => {
 
   (globalThis as { localStorage?: Storage }).localStorage = localStorage;
 
-  (globalThis as { window?: { caval?: Record<string, unknown>; localStorage?: Storage } }).window = {
+  (globalThis as unknown as { window: { caval?: Record<string, unknown>; localStorage?: Storage } }).window = {
     localStorage,
     caval: {
       resolveModel: vi.fn().mockResolvedValue({ ok: true, resolved: { modelId: "test" } }),
@@ -60,7 +60,7 @@ beforeAll(() => {
 
 describe("ai-store helpers", () => {
   it("getModelDisplayLabel resolves catalog and openrouter aliases", async () => {
-    const { getModelDisplayLabel } = await import("../../ai/composer/ai-store");
+    const { getModelDisplayLabel } = await import("../../ai/composer/ai-store.js");
     const labels = {
       "caval-auto/balanced": "Auto Balanced",
       "openrouter:anthropic/claude-sonnet-4": "Claude Sonnet 4",
@@ -71,7 +71,7 @@ describe("ai-store helpers", () => {
   });
 
   it("formatWorkingModel shows secondary for auto selection", async () => {
-    const { formatWorkingModel } = await import("../../ai/composer/ai-store");
+    const { formatWorkingModel } = await import("../../ai/composer/ai-store.js");
     const labels = { "caval-auto/balanced": "Auto Balanced", "stepfun/step-3.5-flash": "Step Flash" };
     const pending = formatWorkingModel("caval-auto/balanced", null, labels);
     expect(pending.primary).toBe("Auto Balanced");
@@ -85,14 +85,14 @@ describe("ai-store helpers", () => {
 
 describe("ai-store sendMessage readiness gate", () => {
   it("finish with error when model not ready in code mode", async () => {
-    const { checkModelReadiness } = await import("../../ai/models/model-readiness");
+    const { checkModelReadiness } = await import("../../ai/models/model-readiness.js");
     vi.mocked(checkModelReadiness).mockResolvedValueOnce({
       ready: false,
       reason: "Missing API key",
       hint: "Add key in Settings",
     });
 
-    const { useAIStore } = await import("../../ai/composer/ai-store");
+    const { useAIStore } = await import("../../ai/composer/ai-store.js");
     const store = useAIStore.getState();
     store.setAgentMode("code");
     await store.sendMessage("hello world");
@@ -105,7 +105,7 @@ describe("ai-store sendMessage readiness gate", () => {
 
   it("blocks agentic send without project folder", async () => {
     editorState.projectPath = null;
-    const { useAIStore } = await import("../../ai/composer/ai-store");
+    const { useAIStore } = await import("../../ai/composer/ai-store.js");
     useAIStore.setState({ agentMode: "agentic" });
     const store = useAIStore.getState();
     await store.sendMessage("build a full app");

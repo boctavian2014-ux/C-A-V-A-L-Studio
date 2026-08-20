@@ -3,11 +3,14 @@ import {
   isPartialRunRequest,
   shouldUseMultiAgentPipeline,
   applyMultiAgentOverrides,
+  usesAgenticToolRuntime,
 } from '../../../ai/composer/multi-agent/config';
-import { DEFAULT_MULTI_AGENT_CONFIG } from '../../../ai/composer/multi-agent/types';
+import { DEFAULT_MULTI_AGENT_CONFIG, type MultiAgentConfig } from '../../../ai/composer/multi-agent/types';
 
-const baseCfg = {
+const baseCfg: MultiAgentConfig = {
+  ...DEFAULT_MULTI_AGENT_CONFIG,
   enabled: true,
+  agenticRuntime: 'pipeline',
   maxTasks: 8,
   parallelSubAgents: 3,
   supervisorRetries: 1,
@@ -43,9 +46,17 @@ describe('multi-agent config', () => {
     ).toBe(false);
   });
 
+  it('defaults agentic runtime to tools unless pipeline is explicit', () => {
+    expect(usesAgenticToolRuntime()).toBe(true);
+    expect(usesAgenticToolRuntime({ agenticRuntime: 'tools' })).toBe(true);
+    expect(usesAgenticToolRuntime({ agenticRuntime: 'pipeline' })).toBe(false);
+  });
+
   it('strictReview override disables fastPipeline', () => {
-    const base = {
+    const base: MultiAgentConfig = {
+      ...DEFAULT_MULTI_AGENT_CONFIG,
       enabled: true,
+      agenticRuntime: 'tools',
       maxTasks: 3,
       parallelSubAgents: 2,
       supervisorRetries: 1,
@@ -54,6 +65,7 @@ describe('multi-agent config', () => {
       fastPipeline: true,
       enableDevToolsIntegration: true,
       reasoningLayer: {
+        ...DEFAULT_MULTI_AGENT_CONFIG.reasoningLayer,
         enabled: true,
         showEarlyBrief: true,
         showFinalRecap: true,

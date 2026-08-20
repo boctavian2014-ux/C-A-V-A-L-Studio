@@ -13,6 +13,7 @@
  *   node scripts/fix-ts2835.mjs tests/ai --tsconfig tsconfig.diag.json
  */
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -33,10 +34,10 @@ if (!fs.existsSync(tsconfig)) {
 
 console.log(`Scanning TS2835 under ${targetPrefix} via ${tsconfig}...`);
 
-const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+const tscBin = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 const result = spawnSync(
-  npx,
-  ["tsc", "--noEmit", "--pretty", "false", "-p", tsconfig],
+  process.execPath,
+  [tscBin, "--noEmit", "--pretty", "false", "-p", tsconfig],
   {
     encoding: "utf8",
     shell: false,
@@ -45,6 +46,10 @@ const result = spawnSync(
 );
 
 const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+if (result.error || (!output.trim() && result.status !== 0)) {
+  console.error("tsc failed to produce diagnostics.", result.error ?? `status=${result.status}`);
+  process.exit(1);
+}
 const ts2835 =
   /^(?<file>.+?)\(\d+,\d+\): error TS2835: .*Did you mean '(?<suggested>[^']+)'\?/gm;
 

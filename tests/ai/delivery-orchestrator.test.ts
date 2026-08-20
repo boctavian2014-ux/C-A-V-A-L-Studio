@@ -41,6 +41,8 @@ describe('delivery-orchestrator', () => {
     const gate: CompletionGateResult = {
       ok: false,
       issues: [{ code: 'verify_failed', message: 'build failed' }],
+      blockingIssues: [{ code: 'verify_failed', message: 'build failed' }],
+      softIssues: [],
       suggestedContinueMessage: 'DELIVERY_CONTINUE\nfix build',
     };
     expect(

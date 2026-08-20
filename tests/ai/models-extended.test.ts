@@ -82,7 +82,7 @@ describe("model-loader", () => {
       vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
     );
 
-    const { loadModel } = await import("../../ai/models/model-loader");
+    const { loadModel } = await import("../../ai/models/model-loader.js");
     const config = getModelConfig(CORE_MODEL_IDS.reasoning);
     expect(config).toBeTruthy();
     const handle = await loadModel(config!);

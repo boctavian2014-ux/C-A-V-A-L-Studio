@@ -3,6 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AtomicPatchApplier } from "../../ai/composer/patch/patch-applier";
+import type { ComposerPatchSet } from "../../ai/composer/types";
+
+function patchSet(files: ComposerPatchSet["files"]): ComposerPatchSet {
+  return { summary: "test patch", files };
+}
 
 describe("AtomicPatchApplier", () => {
   let tempDir = "";
@@ -19,9 +24,9 @@ describe("AtomicPatchApplier", () => {
     await fs.writeFile(target, "old", "utf8");
 
     const applier = new AtomicPatchApplier();
-    const result = await applier.apply(tempDir, {
-      files: [{ path: "hello.txt", patch: "new content", fullContent: "new content" }]
-    });
+    const result = await applier.apply(tempDir, patchSet([
+      { path: "hello.txt", patch: "new content", fullContent: "new content" },
+    ]));
     expect(result.changedFiles).toEqual(["hello.txt"]);
     expect(await fs.readFile(target, "utf8")).toBe("new content");
   });
@@ -29,9 +34,9 @@ describe("AtomicPatchApplier", () => {
   it("refuses path traversal outside workspace", async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "caval-patch-"));
     const applier = new AtomicPatchApplier();
-    await expect(applier.apply(tempDir, {
-      files: [{ path: "../outside.txt", patch: "hack", fullContent: "hack" }]
-    })).rejects.toThrow(/outside workspace/i);
+    await expect(applier.apply(tempDir, patchSet([
+      { path: "../outside.txt", patch: "hack", fullContent: "hack" },
+    ]))).rejects.toThrow(/outside workspace/i);
   });
 
   it("supports dry run without writing files", async () => {
@@ -40,9 +45,9 @@ describe("AtomicPatchApplier", () => {
     await fs.writeFile(target, "before", "utf8");
 
     const applier = new AtomicPatchApplier();
-    await applier.apply(tempDir, {
-      files: [{ path: "dry.txt", patch: "", fullContent: "after" }]
-    }, true);
+    await applier.apply(tempDir, patchSet([
+      { path: "dry.txt", patch: "", fullContent: "after" },
+    ]), true);
     expect(await fs.readFile(target, "utf8")).toBe("before");
   });
 });

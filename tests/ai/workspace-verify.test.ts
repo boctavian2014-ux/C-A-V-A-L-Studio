@@ -82,7 +82,7 @@ describe('workspace-verify', () => {
 
 describe('run_command tool', () => {
   it('is listed in builtin tools', async () => {
-    const { BUILTIN_TOOLS } = await import('../../ai/tools/tool-registry');
+    const { BUILTIN_TOOLS } = await import('../../ai/tools/tool-registry.js');
     expect(BUILTIN_TOOLS.some((t) => t.name === 'run_command')).toBe(true);
   });
 });

@@ -17,8 +17,9 @@ describe('agent modes', () => {
   });
 
   it('does not include build or release modes', () => {
-    expect(AGENT_MODES.some((m) => m.id === 'build')).toBe(false);
-    expect(AGENT_MODES.some((m) => m.id === 'release')).toBe(false);
+    const ids: string[] = AGENT_MODES.map((m) => m.id);
+    expect(ids.includes('build')).toBe(false);
+    expect(ids.includes('release')).toBe(false);
   });
 
   it('isAgenticPipelineMode is true only for agentic', () => {

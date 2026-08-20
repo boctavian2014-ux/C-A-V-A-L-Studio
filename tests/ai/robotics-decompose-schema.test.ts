@@ -51,10 +51,11 @@ describe('robotics standard catalog classifier', () => {
   });
 
   it('fuzzy matches names to catalog', () => {
-    const c = classifyAgainstCatalog(
-      { name: 'MG996R servo bracket', mode: 'custom' as const },
-      ROBOTICS_STANDARD_CATALOG
-    );
+    const input: { name: string; mode: "standard" | "custom"; standardKey?: string } = {
+      name: "MG996R servo bracket",
+      mode: "custom",
+    };
+    const c = classifyAgainstCatalog(input, ROBOTICS_STANDARD_CATALOG);
     expect(c.mode).toBe('standard');
     expect(c.standardKey).toBe('mg996r_servo_bracket');
   });
