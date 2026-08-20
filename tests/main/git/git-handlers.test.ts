@@ -69,8 +69,8 @@ describe("git handlers — typed contract", () => {
     showMessageBox.mockResolvedValue({ response: 0 });
     showOpenDialog.mockClear();
     showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
-    const { registerGitHandlers } = await import("../../../src/main/git-handlers");
-    registerGitHandlers((id) => boundRoots.get(id));
+    const { registerGitHandlers } = await import("../../../src/main/git-handlers.js");
+    registerGitHandlers((id: number) => boundRoots.get(id));
   });
 
   afterEach(() => {

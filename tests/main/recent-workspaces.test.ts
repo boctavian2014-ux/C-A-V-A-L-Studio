@@ -23,7 +23,7 @@ describe('recent-workspaces', () => {
   });
 
   it('adds, dedupes, and lists recent workspaces', async () => {
-    const { addRecentWorkspace, listRecentWorkspaces } = await import('../../src/main/recent-workspaces');
+    const { addRecentWorkspace, listRecentWorkspaces } = await import('../../src/main/recent-workspaces.js');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'caval-ws-'));
 
     addRecentWorkspace(root, 'folder');
@@ -42,7 +42,7 @@ describe('recent-workspaces', () => {
 
   it('removes a recent workspace entry', async () => {
     const { addRecentWorkspace, removeRecentWorkspace, listRecentWorkspaces } = await import(
-      '../../src/main/recent-workspaces'
+      '../../src/main/recent-workspaces.js'
     );
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'caval-ws-'));
     addRecentWorkspace(root, 'folder');

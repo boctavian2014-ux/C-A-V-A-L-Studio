@@ -60,8 +60,8 @@ describe("problems handlers — typed contract", () => {
     sendDestroyed.mockClear();
     mockAssertTrustedSender.mockReset();
     mockAssertTrustedSender.mockImplementation(() => undefined);
-    const { registerProblemsHandlers } = await import("../../../src/main/problems-handlers");
-    registerProblemsHandlers((id) => boundRoots.get(id));
+    const { registerProblemsHandlers } = await import("../../../src/main/problems-handlers.js");
+    registerProblemsHandlers((id: number) => boundRoots.get(id));
   });
 
   afterEach(() => {

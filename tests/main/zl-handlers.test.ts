@@ -54,7 +54,7 @@ describe("zl-handlers", () => {
     harness.reset();
     vi.resetModules();
     zlMocks.prepare.mockClear();
-    const { registerZLHandlers } = await import("../../src/main/zl-handlers");
+    const { registerZLHandlers } = await import("../../src/main/zl-handlers.js");
     registerZLHandlers(() => "/workspace");
   });
 

@@ -21,7 +21,7 @@ describe("search-handlers", () => {
       "export const hello = 'world';\n",
       "utf8"
     );
-    const { registerSearchHandlers } = await import("../../src/main/search-handlers");
+    const { registerSearchHandlers } = await import("../../src/main/search-handlers.js");
     registerSearchHandlers(() => workspace);
   });
 

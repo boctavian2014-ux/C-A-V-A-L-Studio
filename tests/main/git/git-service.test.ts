@@ -10,6 +10,7 @@ import {
   parsePorcelainStatus,
   toWorkspaceGitPath,
   type GitCommandResult,
+  type GitRunner,
 } from "../../../src/main/git/git-service";
 
 function ok(stdout = ""): GitCommandResult {
@@ -221,7 +222,7 @@ describe("GitService", () => {
   });
 
   it("push/pull/stash/init/clone use hardcoded argv and a -- separator on clone", async () => {
-    const runGit = vi.fn(async () => ok());
+    const runGit = vi.fn<GitRunner>(async () => ok());
     const service = new GitService({ runGit });
     const cwd = "/repo";
 

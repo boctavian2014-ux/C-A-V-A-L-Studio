@@ -59,8 +59,8 @@ describe("tasks handlers — typed contract", () => {
     sendDestroyed.mockClear();
     mockAssertTrustedSender.mockReset();
     mockAssertTrustedSender.mockImplementation(() => undefined);
-    const { registerTasksHandlers } = await import("../../../src/main/tasks-handlers");
-    registerTasksHandlers((id) => boundRoots.get(id));
+    const { registerTasksHandlers } = await import("../../../src/main/tasks-handlers.js");
+    registerTasksHandlers((id: number) => boundRoots.get(id));
   });
 
   afterEach(() => {

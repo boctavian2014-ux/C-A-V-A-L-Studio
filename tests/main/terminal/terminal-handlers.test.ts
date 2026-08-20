@@ -91,8 +91,8 @@ describe("terminal handlers — typed contract", () => {
     workspace = fs.mkdtempSync(path.join(os.tmpdir(), "caval-term-contract-"));
     boundRoots.set(harness.sender.id, workspace);
 
-    const { registerTerminalHandlers } = await import("../../../src/main/terminal-handlers");
-    registerTerminalHandlers((id) => boundRoots.get(id));
+    const { registerTerminalHandlers } = await import("../../../src/main/terminal-handlers.js");
+    registerTerminalHandlers((id: number) => boundRoots.get(id));
   });
 
   afterEach(() => {

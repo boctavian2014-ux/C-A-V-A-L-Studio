@@ -73,9 +73,9 @@ describe("MCP IPC integration", () => {
       "utf8"
     );
 
-    const { setMcpTrustStorePathForTests } = await import("../../ai/mcp/mcp-trust");
+    const { setMcpTrustStorePathForTests } = await import("../../ai/mcp/mcp-trust.js");
     setMcpTrustStorePathForTests(path.join(workspaceRoot, "mcp-trust.json"));
-    const { registerMcpHandlers } = await import("../../src/main/mcp-handlers");
+    const { registerMcpHandlers } = await import("../../src/main/mcp-handlers.js");
     registerMcpHandlers(() => workspaceRoot);
   });
 

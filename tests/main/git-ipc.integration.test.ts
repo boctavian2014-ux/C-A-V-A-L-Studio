@@ -53,8 +53,8 @@ describe.skipIf(!hasGit)("Git IPC integration (Lot B Zone C)", () => {
 
     boundRoots.set(harness.sender.id, repoPath);
 
-    const { registerGitHandlers } = await import("../../src/main/git-handlers");
-    registerGitHandlers((id) => boundRoots.get(id));
+    const { registerGitHandlers } = await import("../../src/main/git-handlers.js");
+    registerGitHandlers((id: number) => boundRoots.get(id));
   });
 
   afterEach(async () => {
