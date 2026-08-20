@@ -111,7 +111,7 @@ describe("GitPanel typed API", () => {
   });
 
   async function renderPanel(api: GitApi) {
-    window.caval = { git: api } as Window["caval"];
+    window.caval = { git: api } as unknown as Window["caval"];
     const result = mount(<GitPanel />);
     mounted = result;
     await act(async () => {
@@ -126,7 +126,7 @@ describe("GitPanel typed API", () => {
     await renderPanel(api);
     expect(api.status).toHaveBeenCalledTimes(1);
     expect(api.status).toHaveBeenCalledWith();
-    expect(api.status.mock.calls[0]?.length).toBe(0);
+    expect(vi.mocked(api.status).mock.calls[0]?.length).toBe(0);
   });
 
   it("unsubscribes onStatusChange and onOperationChange on unmount", async () => {
@@ -181,8 +181,8 @@ describe("GitPanel typed API", () => {
     });
     expect(api.commit).toHaveBeenCalledTimes(1);
     expect(api.commit).toHaveBeenCalledWith({ message: "fix: typed commit" });
-    expect(api.commit.mock.calls[0]?.length).toBe(1);
-    expect(api.commit.mock.calls[0]?.[0]).not.toHaveProperty("files");
+    expect(vi.mocked(api.commit).mock.calls[0]?.length).toBe(1);
+    expect(vi.mocked(api.commit).mock.calls[0]?.[0]).not.toHaveProperty("files");
   });
 
   it("disables commit without a message or staged files", async () => {
@@ -287,7 +287,7 @@ describe("GitPanel typed API", () => {
     });
     expect(api.push).toHaveBeenCalledTimes(1);
     expect(api.push).toHaveBeenCalledWith({ setUpstream: true });
-    expect(api.push.mock.calls[0]?.length).toBe(1);
+    expect(vi.mocked(api.push).mock.calls[0]?.length).toBe(1);
 
     act(() => {
       pullBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -296,6 +296,6 @@ describe("GitPanel typed API", () => {
       await Promise.resolve();
     });
     expect(api.pull).toHaveBeenCalledTimes(1);
-    expect(api.pull.mock.calls[0]?.length).toBe(0);
+    expect(vi.mocked(api.pull).mock.calls[0]?.length).toBe(0);
   });
 });

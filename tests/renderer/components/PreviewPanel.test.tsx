@@ -24,10 +24,10 @@ function createPreviewMock(initial: Record<PreviewTarget, PreviewState>) {
   const unsubscribeLog = vi.fn();
 
   const api: PreviewApi = {
-    getState: vi.fn(async (target) => initial[target]),
-    start: vi.fn(async (target) => initial[target]),
-    stop: vi.fn(async (target) => idle(target, "stopped")),
-    restart: vi.fn(async (target) => initial[target]),
+    getState: vi.fn(async (target: PreviewTarget) => initial[target]),
+    start: vi.fn(async (target: PreviewTarget) => initial[target]),
+    stop: vi.fn(async (target: PreviewTarget) => idle(target, "stopped")),
+    restart: vi.fn(async (target: PreviewTarget) => initial[target]),
     getLogs: vi.fn(async () => []),
     openConfig: vi.fn(async () => undefined),
     openUrl: vi.fn(async () => undefined),

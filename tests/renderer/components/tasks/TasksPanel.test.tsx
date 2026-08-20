@@ -85,7 +85,7 @@ describe("TasksPanel", () => {
   });
 
   async function renderPanel(api: TasksApi) {
-    window.caval = { tasks: api } as Window["caval"];
+    window.caval = { tasks: api } as unknown as Window["caval"];
     const result = mount(<TasksPanel />);
     mounted = result;
     await act(async () => {

@@ -96,7 +96,7 @@ describe("ProblemsPanel", () => {
   });
 
   async function renderPanel(api: ProblemsApi) {
-    window.caval = { problems: api } as Window["caval"];
+    window.caval = { problems: api } as unknown as Window["caval"];
     const result = mount(<ProblemsPanel />);
     mounted = result;
     await act(async () => {
