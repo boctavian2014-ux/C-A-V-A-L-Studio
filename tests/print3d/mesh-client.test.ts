@@ -12,7 +12,7 @@ describe("mesh-client provider routing", () => {
   });
 
   it("requires a provider when none configured", async () => {
-    const { generateMeshFromPrompt } = await import("../../engineering/cad-server/mesh-client");
+    const { generateMeshFromPrompt } = await import("../../engineering/cad-server/mesh-client.js");
     const result = await generateMeshFromPrompt({ prompt: "cartoon mouse" });
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/PIAPI_API_KEY|MESHY_API_KEY|MESH_WORKER|No text-to-3D/i);
@@ -60,7 +60,7 @@ describe("mesh-client provider routing", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const { generateMeshFromPrompt } = await import("../../engineering/cad-server/mesh-client");
+    const { generateMeshFromPrompt } = await import("../../engineering/cad-server/mesh-client.js");
     const result = await generateMeshFromPrompt({ prompt: "a red fox" });
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("piapi-trellis");
@@ -69,7 +69,7 @@ describe("mesh-client provider routing", () => {
 
   it("reports mesh configured with only PIAPI_API_KEY", async () => {
     process.env.PIAPI_API_KEY = "piapi-test";
-    const { isMeshGenerationConfigured } = await import("../../engineering/cad-server/mesh-client");
+    const { isMeshGenerationConfigured } = await import("../../engineering/cad-server/mesh-client.js");
     expect(isMeshGenerationConfigured()).toBe(true);
   });
 
@@ -88,7 +88,7 @@ describe("mesh-client provider routing", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { generateMeshFromPrompt } = await import("../../engineering/cad-server/mesh-client");
+    const { generateMeshFromPrompt } = await import("../../engineering/cad-server/mesh-client.js");
     const result = await generateMeshFromPrompt({ prompt: "a red fox" });
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("trellis");
