@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewPanel } from "../../../src/renderer/components/sidebar/PreviewPanel";
+import { usePreviewStore } from "../../../src/renderer/store/preview-store";
 import type { PreviewApi, PreviewLogLine, PreviewState, PreviewTarget } from "../../../src/shared/preview-contract";
 
 function idle(target: PreviewTarget, status: PreviewState["status"] = "not-configured"): PreviewState {
@@ -69,11 +70,13 @@ describe("PreviewPanel", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     document.body.innerHTML = "";
+    usePreviewStore.getState().clearPreview();
   });
 
   afterEach(() => {
     mounted?.unmount();
     mounted = undefined;
+    usePreviewStore.getState().clearPreview();
     vi.restoreAllMocks();
   });
 
@@ -211,5 +214,46 @@ describe("PreviewPanel", () => {
     const alert = container.querySelector('[role="alert"]');
     expect(alert).toBeTruthy();
     expect(alert?.textContent).toBe("Process exited with code 1");
+  });
+
+  it("starts web preview from sidebar icon and marks it active", async () => {
+    const { api } = createPreviewMock({
+      web: idle("web", "stopped"),
+      mobile: idle("mobile", "stopped"),
+    });
+    const { container } = await renderPanel(api);
+    const icon = container.querySelector('[data-testid="preview-icon-web"]');
+    expect(icon).toBeTruthy();
+    act(() => {
+      icon?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(api.start).toHaveBeenCalledWith("web");
+    expect(usePreviewStore.getState().activePreview).toBe("web");
+    expect(icon?.classList.contains("active")).toBe(true);
+  });
+
+  it("renders iframe when preview store has a running URL", async () => {
+    const { api, stateListeners } = createPreviewMock({
+      web: idle("web", "stopped"),
+      mobile: idle("mobile", "stopped"),
+    });
+    const { container } = await renderPanel(api);
+    act(() => {
+      for (const listener of stateListeners) {
+        listener({
+          target: "web",
+          status: "running",
+          url: "http://127.0.0.1:5173",
+          pid: 42,
+          startedAt: Date.now(),
+          lastError: null,
+        });
+      }
+    });
+    const iframe = container.querySelector('[data-testid="preview-iframe"]') as HTMLIFrameElement | null;
+    expect(iframe).toBeTruthy();
+    expect(iframe?.getAttribute("src")).toBe("http://127.0.0.1:5173");
+    expect(iframe?.className).toContain("preview-frame-web");
+    expect(usePreviewStore.getState().previewUrl).toBe("http://127.0.0.1:5173");
   });
 });

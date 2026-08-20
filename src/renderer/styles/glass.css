@@ -119,6 +119,112 @@
   color: var(--color-text-muted, #8a95a6);
 }
 
+.sidebar-icons {
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-icon-btn img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.sidebar-icon-btn:hover {
+  background: var(--caval-surface-raised, rgba(255, 255, 255, 0.06));
+}
+
+.sidebar-icon-btn.active {
+  background: var(--caval-accent-glow, rgba(0, 224, 255, 0.12));
+  border-color: var(--caval-accent, #00e0ff);
+}
+
+.preview-empty {
+  margin: 0;
+  padding: 8px 4px;
+  font-size: 11px;
+  color: var(--color-text-muted, #8a95a6);
+}
+
+.preview-empty p {
+  margin: 0;
+}
+
+.preview-frame-host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preview-type {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--caval-text, #d7dee8);
+  flex-shrink: 0;
+}
+
+.preview-url {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--color-text-muted, #8a95a6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.preview-frame-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--caval-border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.preview-frame-web {
+  width: 100%;
+  height: 220px;
+  border: none;
+  background: #fff;
+}
+
+.preview-frame-mobile {
+  width: 190px;
+  height: 340px;
+  border: none;
+  border-radius: 12px;
+  background: #fff;
+  margin: 8px auto;
+  transform: scale(0.85);
+  transform-origin: top center;
+}
+
 .preview-target-panel {
   display: flex;
   flex-direction: column;

@@ -8,6 +8,10 @@ import type {
 } from "../../../shared/preview-contract";
 import { idlePreviewState } from "../../../shared/preview-contract";
 import { MAX_PREVIEW_LOG_LINES, takeLast } from "../../lib/panel-limits";
+import { usePreviewStore } from "../../store/preview-store";
+
+import webSidebarIcon from "../../../../assets/icons/3d/png_256/WEB SIDEBAR.jpg";
+import mobileSidebarIcon from "../../../../assets/icons/3d/png_256/MOBILE SIDEBAR.jpg";
 
 interface TargetPanelProps {
   target: PreviewTarget;
@@ -28,6 +32,9 @@ function TargetPanel({ target, label }: TargetPanelProps) {
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<PreviewLogLine[]>([]);
   const [apiMissing, setApiMissing] = useState(false);
+  const activatePreview = usePreviewStore((s) => s.activatePreview);
+  const clearPreview = usePreviewStore((s) => s.clearPreview);
+  const activePreview = usePreviewStore((s) => s.activePreview);
 
   useEffect(() => {
     const api = getPreviewApi();
@@ -48,7 +55,17 @@ function TargetPanel({ target, label }: TargetPanelProps) {
         if (!cancelled) setState(idlePreviewState(target));
       });
     const unsubscribeState = api.onStateChange((next) => {
-      if (next.target === target) setState(next);
+      if (next.target !== target) return;
+      setState(next);
+      // Pas M5 open_preview / launcher → sync UI store when this target runs.
+      if (next.status === "running" && next.url) {
+        activatePreview(target, next.url);
+      } else if (
+        usePreviewStore.getState().activePreview === target &&
+        (next.status === "stopped" || next.status === "failed" || next.status === "not-configured")
+      ) {
+        clearPreview();
+      }
     });
     const unsubscribeLog = api.onLog((line) => {
       if (line.target === target) {
@@ -60,19 +77,22 @@ function TargetPanel({ target, label }: TargetPanelProps) {
       unsubscribeState();
       unsubscribeLog();
     };
-  }, [target]);
+  }, [target, activatePreview, clearPreview]);
 
   const handleStart = useCallback(() => {
+    activatePreview(target, null);
     void getPreviewApi()?.start(target);
-  }, [target]);
+  }, [target, activatePreview]);
 
   const handleStop = useCallback(() => {
     void getPreviewApi()?.stop(target);
-  }, [target]);
+    if (activePreview === target) clearPreview();
+  }, [target, activePreview, clearPreview]);
 
   const handleRestart = useCallback(() => {
+    activatePreview(target, null);
     void getPreviewApi()?.restart(target);
-  }, [target]);
+  }, [target, activatePreview]);
 
   const handleToggleLogs = useCallback(async () => {
     const api = getPreviewApi();
@@ -238,12 +258,100 @@ function StatusBadge({
   );
 }
 
+function PreviewIconButtons() {
+  const activePreview = usePreviewStore((s) => s.activePreview);
+  const activatePreview = usePreviewStore((s) => s.activatePreview);
+
+  const select = (target: PreviewTarget) => {
+    activatePreview(target, null);
+    void getPreviewApi()?.start(target);
+  };
+
+  return (
+    <div className="sidebar-icons" data-testid="preview-sidebar-icons">
+      <button
+        type="button"
+        className={`sidebar-icon-btn${activePreview === "web" ? " active" : ""}`}
+        data-testid="preview-icon-web"
+        onClick={() => select("web")}
+        title="Web Preview"
+        aria-label="Web Preview"
+        aria-pressed={activePreview === "web"}
+      >
+        <img src={webSidebarIcon} alt="" width={32} height={32} />
+      </button>
+      <button
+        type="button"
+        className={`sidebar-icon-btn${activePreview === "mobile" ? " active" : ""}`}
+        data-testid="preview-icon-mobile"
+        onClick={() => select("mobile")}
+        title="Mobile Preview"
+        aria-label="Mobile Preview"
+        aria-pressed={activePreview === "mobile"}
+      >
+        <img src={mobileSidebarIcon} alt="" width={32} height={32} />
+      </button>
+    </div>
+  );
+}
+
+function PreviewFrame() {
+  const activePreview = usePreviewStore((s) => s.activePreview);
+  const previewUrl = usePreviewStore((s) => s.previewUrl);
+
+  if (!activePreview) {
+    return (
+      <div className="preview-empty" data-testid="preview-frame-empty">
+        <p>Select Web or Mobile preview</p>
+      </div>
+    );
+  }
+
+  if (!previewUrl) {
+    return (
+      <div className="preview-empty" data-testid="preview-frame-waiting">
+        <p>Starting {activePreview} preview…</p>
+      </div>
+    );
+  }
+
+  const refresh = () => {
+    void getPreviewApi()?.restart(activePreview);
+  };
+
+  return (
+    <div className={`preview-frame-host preview-${activePreview}`} data-testid="preview-frame-host">
+      <div className="preview-toolbar">
+        <span className="preview-type">{activePreview === "web" ? "Web" : "Mobile"}</span>
+        <span className="preview-url" title={previewUrl}>
+          {previewUrl}
+        </span>
+        <button type="button" className="preview-ghost-btn" onClick={refresh} title="Refresh">
+          ↻
+        </button>
+      </div>
+      <div className="preview-frame-container">
+        <iframe
+          src={previewUrl}
+          className={
+            activePreview === "mobile" ? "preview-frame-mobile" : "preview-frame-web"
+          }
+          title={`${activePreview} preview`}
+          data-testid="preview-iframe"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function PreviewPanel() {
   return (
     <div className="preview-panel" role="region" aria-label="Preview">
       <h3 className="preview-panel-title">Preview</h3>
+      <PreviewIconButtons />
       <TargetPanel target="web" label="Web" />
       <TargetPanel target="mobile" label="Mobile" />
+      <PreviewFrame />
     </div>
   );
 }

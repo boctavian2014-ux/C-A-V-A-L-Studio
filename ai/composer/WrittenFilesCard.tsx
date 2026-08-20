@@ -13,6 +13,7 @@ import {
 } from "./chat-apply-controller";
 import { formatWrittenFilesHeadline, joinWorkspaceRelativePath } from "./written-files";
 import { useAiHistoryStore } from "../../src/renderer/store/ai-history-store";
+import { usePreviewStore } from "../../src/renderer/store/preview-store";
 
 export function WrittenFilesCard({
   files,
@@ -74,6 +75,7 @@ export function WrittenFilesCard({
 
   const startPreview = (target: "web" | "mobile") => {
     dispatchOpenExplorerSidebar();
+    usePreviewStore.getState().activatePreview(target, null);
     void window.caval?.preview?.start(target);
   };
 

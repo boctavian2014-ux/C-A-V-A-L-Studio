@@ -19,4 +19,14 @@ describe("sidebar preview mount", () => {
     expect(source).not.toContain("PreviewLauncherPanel");
     expect(source).not.toContain("PreviewLauncher");
   });
+
+  it("PreviewPanel imports WEB/MOBILE SIDEBAR icons", () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, "../../../../src/renderer/components/sidebar/PreviewPanel.tsx"),
+      "utf8"
+    );
+    expect(source).toContain("WEB SIDEBAR.jpg");
+    expect(source).toContain("MOBILE SIDEBAR.jpg");
+    expect(source).toContain("usePreviewStore");
+  });
 });
