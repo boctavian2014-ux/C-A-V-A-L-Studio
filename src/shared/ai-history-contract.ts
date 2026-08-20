@@ -63,6 +63,28 @@ export interface AiHistoryApi {
   deleteConversation(id: string): Promise<{ ok: boolean; error?: string }>;
   revertWrittenFile(writtenFileId: string): Promise<{ ok: boolean; error?: string }>;
   exportConversation(req: ExportRequest): Promise<ExportResult>;
+  setFeedback(
+    messageId: string,
+    rating: "positive" | "negative",
+    comment?: string,
+    streamId?: string
+  ): Promise<{ ok: boolean; feedback?: MessageFeedback; error?: string }>;
+  getFeedback(
+    messageId: string,
+    streamId?: string
+  ): Promise<{ ok: boolean; feedback?: MessageFeedback | null; error?: string }>;
+  clearFeedback(
+    messageId: string,
+    streamId?: string
+  ): Promise<{ ok: boolean; error?: string }>;
+}
+
+export interface MessageFeedback {
+  id: string;
+  messageId: string;
+  rating: "positive" | "negative";
+  comment?: string;
+  createdAt: number;
 }
 
 export function formatHistoryTitle(title: string | null | undefined, fallback = "Chat"): string {

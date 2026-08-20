@@ -50,8 +50,11 @@ Toate sunt **low-risk** față de M5/M6: nicio suprafață nouă de scriere AI �
 
 ### 7e.2 — Feedback 👍/👎
 
-- Persistă pe message id (extindere 7a.1, fără snapshot-uri noi).
-- UI pe bubble assistant.
+- Tabel `message_feedback` (UNIQUE message_id, CASCADE).
+- IPC `caval:ai-history-*-feedback`; UI pe MessageBubble (assistant, după stream).
+- Aliniere id: `assistantMessageId` la persist + fallback pe `streamId`.
+- Smoke: `tests/main/db/ai-persistence-feedback.test.ts`, `tests/renderer/message-feedback.test.tsx`.
+- Commit: `feat(ai): add thumbs up/down feedback on assistant messages`
 
 ### 7e.3 — Setări granulare
 
@@ -74,4 +77,5 @@ Toate sunt **low-risk** față de M5/M6: nicio suprafață nouă de scriere AI �
 |---|---|
 | Audit | ✅ acest document |
 | 7e.1 Onboarding | ✅ empty state + tip-uri prim-use (localStorage) |
-| 7e.2–7e.4 | pending |
+| 7e.2 Feedback 👍/👎 | ✅ `message_feedback` + IPC + UI pe assistant bubbles |
+| 7e.3–7e.4 | pending |

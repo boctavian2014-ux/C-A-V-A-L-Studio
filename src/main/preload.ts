@@ -93,6 +93,8 @@ export interface CavalChatStreamRequest {
   refactor?: import("../shared/ai-refactor-contract").RefactorRequest;
   /** Pas 7a.2 — UI thread id; used as conversation_id when persisting the assistant message. */
   conversationId?: string;
+  /** Pas 7e.2 — UI assistant message id aligned with SQLite messages.id. */
+  assistantMessageId?: string;
   context?: {
     filePath?: string;
     fileContent?: string;
@@ -504,6 +506,33 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.invoke("caval:ai-history-export", req) as Promise<
         import("../shared/ai-history-contract").ExportResult
       >,
+    setFeedback: (
+      messageId: string,
+      rating: "positive" | "negative",
+      comment?: string,
+      streamId?: string
+    ) =>
+      ipcRenderer.invoke("caval:ai-history-set-feedback", {
+        messageId,
+        rating,
+        comment,
+        streamId,
+      }) as Promise<{
+        ok: boolean;
+        feedback?: import("../shared/ai-history-contract").MessageFeedback;
+        error?: string;
+      }>,
+    getFeedback: (messageId: string, streamId?: string) =>
+      ipcRenderer.invoke("caval:ai-history-get-feedback", { messageId, streamId }) as Promise<{
+        ok: boolean;
+        feedback?: import("../shared/ai-history-contract").MessageFeedback | null;
+        error?: string;
+      }>,
+    clearFeedback: (messageId: string, streamId?: string) =>
+      ipcRenderer.invoke("caval:ai-history-clear-feedback", { messageId, streamId }) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
   },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{

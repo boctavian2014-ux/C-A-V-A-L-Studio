@@ -188,6 +188,9 @@ export interface CavalChatStreamRequest {
   /** Pas 7a.2 — UI thread id used as conversation_id at assistant completion. */
   conversationId?: string;
 
+  /** Pas 7e.2 — UI assistant bubble id; reused as messages.id for feedback alignment. */
+  assistantMessageId?: string;
+
 }
 
 
@@ -1304,6 +1307,7 @@ async function streamToRenderer(
       persistAssistantMessageAndFlush({
         workspaceRoot,
         conversationId: request.conversationId,
+        messageId: request.assistantMessageId,
         streamId,
         content: result.composeText ?? result.text ?? "",
       });
@@ -1449,6 +1453,7 @@ async function streamToRenderer(
     persistAssistantMessageAndFlush({
       workspaceRoot,
       conversationId: request.conversationId,
+      messageId: request.assistantMessageId,
       streamId,
       content: result.text ?? "",
     });
@@ -1462,11 +1467,11 @@ async function streamToRenderer(
 
   markOperationTerminal(streamId, result.error?.includes("anulat") ? "aborted" : "failed");
   emitTimelineEvent(stream, streamId, {
-    type: "error",
-    label: "Stream failed",
-    success: false,
-    detail: summarizeToolDetail(result.error, false),
-  });
+      type: "error",
+      label: "Stream failed",
+      success: false,
+      detail: summarizeToolDetail(result.error, false),
+    });
     stream.send({
       type: "error",
       error: safeErrorMessageForUi(result.error ?? "Stream failed"),

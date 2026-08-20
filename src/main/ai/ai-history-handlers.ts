@@ -10,10 +10,13 @@ import { requireBoundWorkspaceRoot } from "../bound-workspace";
 import type { ExportFormat } from "../../shared/ai-history-contract";
 import { exportHistoryConversation } from "./ai-history-export";
 import {
+  clearHistoryFeedback,
   deleteHistoryConversation,
+  getHistoryFeedback,
   listHistoryConversations,
   loadHistoryConversation,
   revertHistoryWrittenFile,
+  setHistoryFeedback,
 } from "./ai-history-service";
 
 export function registerAiHistoryHandlers(
@@ -81,6 +84,51 @@ export function registerAiHistoryHandlers(
       return exportHistoryConversation(root, id, format, {
         acknowledgeLarge: Boolean(input?.acknowledgeLarge),
       });
+    }
+  );
+
+  ipcMain.handle(
+    "caval:ai-history-set-feedback",
+    async (
+      event,
+      input: {
+        messageId?: string;
+        rating?: "positive" | "negative";
+        comment?: string;
+        streamId?: string;
+      }
+    ) => {
+      assertTrustedSender(event);
+      const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+      const messageId = input?.messageId?.trim();
+      const rating = input?.rating;
+      if (!messageId) return { ok: false, error: "Missing messageId" };
+      if (rating !== "positive" && rating !== "negative") {
+        return { ok: false, error: "Invalid rating" };
+      }
+      return setHistoryFeedback(root, messageId, rating, input?.comment, input?.streamId);
+    }
+  );
+
+  ipcMain.handle(
+    "caval:ai-history-get-feedback",
+    async (event, input: { messageId?: string; streamId?: string }) => {
+      assertTrustedSender(event);
+      const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+      const messageId = input?.messageId?.trim();
+      if (!messageId) return { ok: false, error: "Missing messageId" };
+      return getHistoryFeedback(root, messageId, input?.streamId);
+    }
+  );
+
+  ipcMain.handle(
+    "caval:ai-history-clear-feedback",
+    async (event, input: { messageId?: string; streamId?: string }) => {
+      assertTrustedSender(event);
+      const root = requireBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+      const messageId = input?.messageId?.trim();
+      if (!messageId) return { ok: false, error: "Missing messageId" };
+      return clearHistoryFeedback(root, messageId, input?.streamId);
     }
   );
 }

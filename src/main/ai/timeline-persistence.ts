@@ -41,6 +41,7 @@ export function resetAiPersistenceCacheForTests(): void {
 export function persistAssistantMessageAndFlush(input: {
   workspaceRoot: string;
   conversationId?: string;
+  messageId?: string;
   streamId: string;
   content: string;
   persistence?: AiPersistence;
@@ -62,7 +63,8 @@ export function persistAssistantMessageAndFlush(input: {
       conversationId,
       "assistant",
       input.content ?? "",
-      input.streamId
+      input.streamId,
+      input.messageId?.trim() || undefined
     );
     flushTimeline(input.streamId, messageId, persistence);
     return { conversationId, messageId };

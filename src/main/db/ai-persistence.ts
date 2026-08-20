@@ -64,10 +64,13 @@ export interface AiPersistence {
     conversationId: string,
     role: "user" | "assistant",
     content: string,
-    streamId?: string
+    streamId?: string,
+    /** When set, reuse this id (UI ↔ DB alignment for feedback / written files). */
+    id?: string
   ): string;
   getMessages(conversationId: string): Message[];
   getMessage(id: string): Message | null;
+  getMessageByStreamId(streamId: string): Message | null;
 
   addTimelineEvents(messageId: string, events: TimelineEvent[]): void;
   getTimelineEvents(messageId: string): TimelineEvent[];
@@ -76,8 +79,26 @@ export interface AiPersistence {
   getWrittenFiles(messageId: string): WrittenFile[];
   getWrittenFile(id: string): WrittenFile | null;
 
+  setFeedback(
+    messageId: string,
+    rating: "positive" | "negative",
+    comment?: string | null
+  ): MessageFeedbackRow;
+  getFeedback(messageId: string): MessageFeedbackRow | null;
+  clearFeedback(messageId: string): void;
+
   close(): void;
 }
+
+export interface MessageFeedbackRow {
+  id: string;
+  messageId: string;
+  rating: "positive" | "negative";
+  comment: string | null;
+  createdAt: number;
+}
+
+export const AI_PERSIST_FEEDBACK_COMMENT_MAX_BYTES = 2 * 1024;
 
 function utf8ByteLength(text: string): number {
   return Buffer.byteLength(text, "utf8");
@@ -144,9 +165,18 @@ CREATE TABLE IF NOT EXISTS written_files (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS message_feedback (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+  rating TEXT NOT NULL CHECK (rating IN ('positive', 'negative')),
+  comment TEXT,
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_timeline_message ON timeline_events(message_id);
 CREATE INDEX IF NOT EXISTS idx_written_message ON written_files(message_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_message ON message_feedback(message_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_root, updated_at DESC);
 `;
 
@@ -230,7 +260,34 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     WHERE id = ?
   `);
 
+  const selectMessageByStreamId = db.prepare(`
+    SELECT id, conversation_id AS conversationId, role, content,
+           stream_id AS streamId, created_at AS createdAt
+    FROM messages
+    WHERE stream_id = ?
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT 1
+  `);
+
   const messageExists = db.prepare(`SELECT 1 AS ok FROM messages WHERE id = ?`);
+
+  const upsertFeedback = db.prepare(`
+    INSERT INTO message_feedback (id, message_id, rating, comment, created_at)
+    VALUES (@id, @message_id, @rating, @comment, @created_at)
+    ON CONFLICT(message_id) DO UPDATE SET
+      id = excluded.id,
+      rating = excluded.rating,
+      comment = excluded.comment,
+      created_at = excluded.created_at
+  `);
+
+  const selectFeedback = db.prepare(`
+    SELECT id, message_id AS messageId, rating, comment, created_at AS createdAt
+    FROM message_feedback
+    WHERE message_id = ?
+  `);
+
+  const deleteFeedback = db.prepare(`DELETE FROM message_feedback WHERE message_id = ?`);
 
   const insertTimeline = db.prepare(`
     INSERT INTO timeline_events
@@ -342,7 +399,8 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       conversationId: string,
       role: "user" | "assistant",
       content: string,
-      streamId?: string
+      streamId?: string,
+      id?: string
     ): string {
       if (role !== "user" && role !== "assistant") {
         throw new Error("Invalid message role");
@@ -350,11 +408,13 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       const conv = api.getConversation(conversationId);
       if (!conv) throw new Error("Conversation not found");
 
-      const id = randomUUID();
+      const requested = id?.trim();
+      const finalId =
+        requested && !api.getMessage(requested) ? requested : randomUUID();
       const now = Date.now();
       const gated = gatePersistedText(content, AI_PERSIST_MESSAGE_MAX_BYTES);
       insertMessage.run({
-        id,
+        id: finalId,
         conversation_id: conversationId,
         role,
         content: gated,
@@ -362,7 +422,7 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
         created_at: now,
       });
       touchConversation.run(now, conversationId);
-      return id;
+      return finalId;
     },
 
     getMessages(conversationId: string): Message[] {
@@ -379,6 +439,21 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
 
     getMessage(id: string): Message | null {
       const r = selectMessageById.get(id) as Record<string, unknown> | undefined;
+      if (!r) return null;
+      return {
+        id: String(r.id),
+        conversationId: String(r.conversationId),
+        role: r.role as "user" | "assistant",
+        content: String(r.content),
+        streamId: r.streamId == null ? null : String(r.streamId),
+        createdAt: Number(r.createdAt),
+      };
+    },
+
+    getMessageByStreamId(streamId: string): Message | null {
+      const sid = streamId.trim();
+      if (!sid) return null;
+      const r = selectMessageByStreamId.get(sid) as Record<string, unknown> | undefined;
       if (!r) return null;
       return {
         id: String(r.id),
@@ -477,6 +552,51 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
         snapshot: String(row.snapshot),
         createdAt: Number(row.createdAt),
       };
+    },
+
+    setFeedback(
+      messageId: string,
+      rating: "positive" | "negative",
+      comment?: string | null
+    ): MessageFeedbackRow {
+      if (rating !== "positive" && rating !== "negative") {
+        throw new Error("Invalid feedback rating");
+      }
+      if (!messageExists.get(messageId)) {
+        throw new Error("Message not found");
+      }
+      const now = Date.now();
+      const feedbackId = randomUUID();
+      const gatedComment =
+        comment == null || !String(comment).trim()
+          ? null
+          : gatePersistedText(String(comment).trim(), AI_PERSIST_FEEDBACK_COMMENT_MAX_BYTES);
+      upsertFeedback.run({
+        id: feedbackId,
+        message_id: messageId,
+        rating,
+        comment: gatedComment,
+        created_at: now,
+      });
+      const row = api.getFeedback(messageId);
+      if (!row) throw new Error("Failed to persist feedback");
+      return row;
+    },
+
+    getFeedback(messageId: string): MessageFeedbackRow | null {
+      const row = selectFeedback.get(messageId) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      return {
+        id: String(row.id),
+        messageId: String(row.messageId),
+        rating: row.rating as "positive" | "negative",
+        comment: row.comment == null ? null : String(row.comment),
+        createdAt: Number(row.createdAt),
+      };
+    },
+
+    clearFeedback(messageId: string): void {
+      deleteFeedback.run(messageId);
     },
 
     close(): void {

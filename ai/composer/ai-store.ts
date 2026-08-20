@@ -252,6 +252,7 @@ interface CavalWindow {
         skipMultiAgent?: boolean;
         strictReview?: boolean;
         conversationId?: string;
+        assistantMessageId?: string;
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
@@ -1882,6 +1883,7 @@ export const useAIStore = create<AIStore>()(
               streamId,
               workspaceRoot: boundWorkspace ?? undefined,
               conversationId: get().activeThreadId,
+              assistantMessageId: assistantMsgId,
               skipMultiAgent: !isAgenticPipelineMode(agentMode),
               messages: contextMessages.map((m) => ({
                 role: m.role,

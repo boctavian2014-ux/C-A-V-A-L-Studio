@@ -488,6 +488,7 @@ interface CavalBridge {
       explain?: import('../../src/shared/ai-explain-contract').ExplainRequest;
       refactor?: import('../../src/shared/ai-refactor-contract').RefactorRequest;
       conversationId?: string;
+      assistantMessageId?: string;
       context?: {
         filePath?: string;
         fileContent?: string;
@@ -582,6 +583,28 @@ interface CavalBridge {
     exportConversation: (
       req: import('../../src/shared/ai-history-contract').ExportRequest
     ) => Promise<import('../../src/shared/ai-history-contract').ExportResult>;
+    setFeedback: (
+      messageId: string,
+      rating: 'positive' | 'negative',
+      comment?: string,
+      streamId?: string
+    ) => Promise<{
+      ok: boolean;
+      feedback?: import('../../src/shared/ai-history-contract').MessageFeedback;
+      error?: string;
+    }>;
+    getFeedback: (
+      messageId: string,
+      streamId?: string
+    ) => Promise<{
+      ok: boolean;
+      feedback?: import('../../src/shared/ai-history-contract').MessageFeedback | null;
+      error?: string;
+    }>;
+    clearFeedback: (
+      messageId: string,
+      streamId?: string
+    ) => Promise<{ ok: boolean; error?: string }>;
   };
   pipelineResumeStream?: (
     input: {

@@ -25,6 +25,7 @@ import { RoleMapPanel } from './RoleMapPanel';
 import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
 import { WrittenFilesCard } from './WrittenFilesCard';
 import { AIOnboarding } from './AIOnboarding';
+import { MessageFeedbackButtons } from './MessageFeedback';
 import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
 import { formatHistoryWhen } from '../../src/shared/ai-history-contract';
 
@@ -478,6 +479,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             messageId={message.id}
             historicalWrittenFiles={message.historicalWrittenFiles}
           />
+        )}
+
+        {!isUser && !message.isStreaming && !message.error && (
+          <MessageFeedbackButtons messageId={message.id} streamId={message.streamId} />
         )}
 
         {/* Eroare */}

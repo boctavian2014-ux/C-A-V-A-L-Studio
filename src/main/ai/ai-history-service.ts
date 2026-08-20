@@ -12,6 +12,7 @@ import {
   type AiHistoryConversationPayload,
   type ConversationSummary,
   type HistoryWrittenFile,
+  type MessageFeedback,
 } from "../../shared/ai-history-contract";
 import { normalizeProposedPath } from "../../shared/ai-chat-apply-contract";
 
@@ -139,4 +140,105 @@ export function revertHistoryWrittenFile(
       error: err instanceof Error ? err.message : "Failed to write snapshot",
     };
   }
+}
+
+function resolveFeedbackMessageId(
+  workspaceRoot: string,
+  messageId: string,
+  streamId: string | undefined,
+  db: AiPersistence
+): string | null {
+  const root = workspaceRoot.trim();
+  const mid = messageId.trim();
+  if (!root || !mid) return null;
+
+  const byId = db.getMessage(mid);
+  if (byId) {
+    const conv = db.getConversation(byId.conversationId);
+    if (!conv || path.resolve(conv.workspaceRoot) !== path.resolve(root)) return null;
+    if (byId.role !== "assistant") return null;
+    return byId.id;
+  }
+
+  const sid = streamId?.trim();
+  if (!sid) return null;
+  const byStream = db.getMessageByStreamId(sid);
+  if (!byStream || byStream.role !== "assistant") return null;
+  const conv = db.getConversation(byStream.conversationId);
+  if (!conv || path.resolve(conv.workspaceRoot) !== path.resolve(root)) return null;
+  return byStream.id;
+}
+
+export function setHistoryFeedback(
+  workspaceRoot: string,
+  messageId: string,
+  rating: "positive" | "negative",
+  comment?: string | null,
+  streamId?: string,
+  persistence?: AiPersistence
+): { ok: boolean; feedback?: MessageFeedback; error?: string } {
+  const root = workspaceRoot.trim();
+  if (!root) return { ok: false, error: "Missing workspace" };
+  if (rating !== "positive" && rating !== "negative") {
+    return { ok: false, error: "Invalid rating" };
+  }
+  const db = persistence ?? getAiPersistence(root);
+  const resolved = resolveFeedbackMessageId(root, messageId, streamId, db);
+  if (!resolved) return { ok: false, error: "Message not found" };
+  try {
+    const row = db.setFeedback(resolved, rating, comment);
+    return {
+      ok: true,
+      feedback: {
+        id: row.id,
+        messageId: row.messageId,
+        rating: row.rating,
+        comment: row.comment ?? undefined,
+        createdAt: row.createdAt,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to set feedback" };
+  }
+}
+
+export function getHistoryFeedback(
+  workspaceRoot: string,
+  messageId: string,
+  streamId?: string,
+  persistence?: AiPersistence
+): { ok: boolean; feedback?: MessageFeedback | null; error?: string } {
+  const root = workspaceRoot.trim();
+  if (!root) return { ok: false, error: "Missing workspace" };
+  const db = persistence ?? getAiPersistence(root);
+  const resolved = resolveFeedbackMessageId(root, messageId, streamId, db);
+  if (!resolved) return { ok: true, feedback: null };
+  const row = db.getFeedback(resolved);
+  return {
+    ok: true,
+    feedback: row
+      ? {
+          id: row.id,
+          messageId: row.messageId,
+          rating: row.rating,
+          comment: row.comment ?? undefined,
+          createdAt: row.createdAt,
+        }
+      : null,
+  };
+}
+
+export function clearHistoryFeedback(
+  workspaceRoot: string,
+  messageId: string,
+  streamId?: string,
+  persistence?: AiPersistence
+): { ok: boolean; error?: string } {
+  const root = workspaceRoot.trim();
+  if (!root) return { ok: false, error: "Missing workspace" };
+  const db = persistence ?? getAiPersistence(root);
+  const resolved = resolveFeedbackMessageId(root, messageId, streamId, db);
+  if (!resolved) return { ok: false, error: "Message not found" };
+  db.clearFeedback(resolved);
+  return { ok: true };
 }
