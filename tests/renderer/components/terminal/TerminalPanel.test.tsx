@@ -198,6 +198,25 @@ describe("TerminalPanel", () => {
     expect(unsubscribeOutput).toHaveBeenCalled();
     expect(unsubscribeExit).toHaveBeenCalled();
   });
+
+  it("keeps only the last 1000 output lines per terminal", async () => {
+    const { api, outputListeners } = createTerminalMock([info({ id: "term-a", title: "Alpha" })]);
+    const { container } = await renderSessions(api);
+    act(() => {
+      for (const listener of outputListeners) {
+        for (let i = 0; i < 1005; i += 1) {
+          listener({ terminalId: "term-a", data: `line-${i}`, timestamp: i });
+        }
+      }
+    });
+    const lines = Array.from(container.querySelectorAll(".terminal-line")).map(
+      (node) => node.textContent
+    );
+    expect(lines).toHaveLength(1000);
+    expect(lines[0]).toBe("line-5");
+    expect(lines[999]).toBe("line-1004");
+    expect(lines).not.toContain("line-4");
+  });
 });
 
 describe("TerminalInput", () => {

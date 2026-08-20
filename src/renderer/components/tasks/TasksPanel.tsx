@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Task, TaskRun, TasksApi } from "../../../shared/tasks-contract";
+import { MAX_TASK_PANEL_LOG_LINES, takeLast } from "../../lib/panel-limits";
 import { useEditorStore } from "../../store/editor-store";
 import { useOutputStore } from "../../store/output-store";
 
@@ -75,7 +76,7 @@ export function TasksPanel() {
     const unsubscribeOutput = api.onOutput((chunk) => {
       if (cancelled) return;
       appendBlock(outputChannelName(chunk.taskName), chunk.data);
-      setLogLines((prev) => [...prev, ...chunk.data.split(/\r?\n/)].slice(-200));
+      setLogLines((prev) => takeLast([...prev, ...chunk.data.split(/\r?\n/)], MAX_TASK_PANEL_LOG_LINES));
     });
 
     return () => {
@@ -280,7 +281,11 @@ export function TasksPanel() {
               whiteSpace: "pre-wrap",
             }}
           >
-            {logLines.join("\n")}
+            {logLines.map((line, index) => (
+              <div key={`${index}-${line.slice(0, 24)}`} className="tasks-log-line">
+                {line || "\u00a0"}
+              </div>
+            ))}
           </div>
         )}
       </div>

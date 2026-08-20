@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DebugPanel } from '../debug/DebugPanel';
 import { ProblemsPanel } from '../problems/ProblemsPanel';
 import { TasksPanel } from '../tasks/TasksPanel';
+import { debounce } from '../../lib/debounce';
+import { MAX_TERMINAL_OUTPUT_LINES, TERMINAL_SCROLL_DEBOUNCE_MS, takeLast } from '../../lib/panel-limits';
 import { useOutputStore, formatOutputForChat } from '../../store/output-store';
 import {
   formatProblemForChat,
@@ -49,7 +51,7 @@ export function TerminalSessions() {
       setOutput((prev) => {
         const next = new Map(prev);
         const lines = next.get(line.terminalId) ?? [];
-        next.set(line.terminalId, [...lines.slice(-999), line]);
+        next.set(line.terminalId, takeLast([...lines, line], MAX_TERMINAL_OUTPUT_LINES));
         return next;
       });
     });
@@ -64,7 +66,11 @@ export function TerminalSessions() {
   }, []);
 
   useEffect(() => {
-    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const scrollToEnd = debounce(() => {
+      outputEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }, TERMINAL_SCROLL_DEBOUNCE_MS);
+    scrollToEnd();
+    return () => scrollToEnd.cancel();
   }, [output, activeTabId]);
 
   const handleCreateTab = useCallback(async () => {
@@ -425,7 +431,7 @@ export function TerminalPanel() {
               <span>Output gol — rulează build sau verify pentru a vedea loguri.</span>
             ) : (
               activeChannel?.lines.map((line, i) => (
-                <div key={`${i}-${line.slice(0, 24)}`}>{line || '\u00a0'}</div>
+                <div key={`${i}-${line.slice(0, 24)}`} className="output-line">{line || '\u00a0'}</div>
               ))
             )}
           </div>

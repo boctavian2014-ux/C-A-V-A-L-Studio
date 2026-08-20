@@ -7,6 +7,7 @@ import type {
   PreviewTarget,
 } from "../../../shared/preview-contract";
 import { idlePreviewState } from "../../../shared/preview-contract";
+import { MAX_PREVIEW_LOG_LINES, takeLast } from "../../lib/panel-limits";
 
 interface TargetPanelProps {
   target: PreviewTarget;
@@ -51,7 +52,7 @@ function TargetPanel({ target, label }: TargetPanelProps) {
     });
     const unsubscribeLog = api.onLog((line) => {
       if (line.target === target) {
-        setLogs((prev) => [...prev.slice(-199), line]);
+        setLogs((prev) => takeLast([...prev, line], MAX_PREVIEW_LOG_LINES));
       }
     });
     return () => {
@@ -77,7 +78,7 @@ function TargetPanel({ target, label }: TargetPanelProps) {
     const api = getPreviewApi();
     if (!showLogs && api) {
       const existing = await api.getLogs(target);
-      setLogs(existing);
+      setLogs(takeLast(existing, MAX_PREVIEW_LOG_LINES));
     }
     setShowLogs((open) => !open);
   }, [target, showLogs]);

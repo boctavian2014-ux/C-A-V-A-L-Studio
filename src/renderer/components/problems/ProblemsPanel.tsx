@@ -269,7 +269,7 @@ export function ProblemsPanel({
 
       <div role="list" data-testid="problems-list" style={{ flex: 1, overflow: "auto", padding: "4px 0" }}>
         {groupedByFile.map(({ file, items }) => (
-          <div key={file} data-testid="problems-file-group">
+          <div key={file} className="problems-file-group" data-testid="problems-file-group">
             <div
               style={{
                 padding: "4px 14px",

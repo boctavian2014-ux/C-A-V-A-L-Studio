@@ -1,5 +1,7 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import type { GitApi, GitOperationState, GitStatus } from '../../../shared/git-contract';
+import { debounce } from '../../lib/debounce';
+import { GIT_STATUS_DEBOUNCE_MS } from '../../lib/panel-limits';
 import { useGitStore, type GitFileStatus, type GitCommit } from '../../store/git-store';
 import { GitDiffPanel } from './GitDiffPanel';
 
@@ -114,6 +116,7 @@ function FileRow({
 
   return (
     <div
+      className="git-file-row"
       data-testid="git-file"
       data-path={file.path}
       data-staged={file.staged ? 'true' : 'false'}
@@ -485,8 +488,11 @@ export function GitPanel() {
     };
 
     void runRefresh();
-    const unsubscribeStatus = git?.onStatusChange((status: GitStatus) => {
+    const applyLatestStatus = debounce((status: GitStatus) => {
       if (!cancelled) applyStatus(status);
+    }, GIT_STATUS_DEBOUNCE_MS);
+    const unsubscribeStatus = git?.onStatusChange((status: GitStatus) => {
+      applyLatestStatus(status);
     }) ?? (() => undefined);
     const unsubscribeOperation = git?.onOperationChange((state: GitOperationState) => {
       if (!cancelled) setOperation(state);
@@ -494,17 +500,21 @@ export function GitPanel() {
 
     return () => {
       cancelled = true;
+      applyLatestStatus.cancel();
       unsubscribeStatus();
       unsubscribeOperation();
     };
   }, [applyStatus, setOperation]);
 
   useEffect(() => {
-    const handler = () => {
+    const handler = debounce(() => {
       void refresh();
-    };
+    }, GIT_STATUS_DEBOUNCE_MS);
     window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
+    return () => {
+      handler.cancel();
+      window.removeEventListener('focus', handler);
+    };
   }, [refresh]);
 
   useEffect(() => {

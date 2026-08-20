@@ -107,6 +107,7 @@ describe("GitPanel typed API", () => {
     mounted?.unmount();
     mounted = undefined;
     useGitStore.getState().resetForTests();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -297,5 +298,23 @@ describe("GitPanel typed API", () => {
     });
     expect(api.pull).toHaveBeenCalledTimes(1);
     expect(vi.mocked(api.pull).mock.calls[0]?.length).toBe(0);
+  });
+
+  it("coalesces rapid onStatusChange events before applying the latest status", async () => {
+    const { api, statusListeners } = createGitMock();
+    const { container } = await renderPanel(api);
+    expect(container.textContent).toContain("main");
+    vi.useFakeTimers();
+    act(() => {
+      statusListeners[0]?.(sampleStatus({ branch: "wip-a" }));
+      statusListeners[0]?.(sampleStatus({ branch: "wip-b" }));
+    });
+    expect(container.textContent).toContain("main");
+    expect(container.textContent).not.toContain("wip-b");
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(container.textContent).toContain("wip-b");
+    expect(container.textContent).not.toContain("wip-a");
   });
 });

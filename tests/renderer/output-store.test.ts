@@ -23,6 +23,15 @@ describe('output-store', () => {
     expect(useOutputStore.getState().channels[0]?.lines).toEqual(['a', 'b', 'c']);
   });
 
+  it('caps channel lines at 1000', () => {
+    const store = useOutputStore.getState();
+    store.appendBlock('CAVAL', Array.from({ length: 1005 }, (_, i) => `line-${i}`).join('\n'));
+    const lines = useOutputStore.getState().channels[0]?.lines ?? [];
+    expect(lines).toHaveLength(1000);
+    expect(lines[0]).toBe('line-5');
+    expect(lines[999]).toBe('line-1004');
+  });
+
   it('switches active channel', () => {
     useOutputStore.getState().setActiveChannel('TASKS');
     expect(useOutputStore.getState().activeChannel).toBe('TASKS');

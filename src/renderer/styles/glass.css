@@ -208,6 +208,11 @@
   margin: 0;
 }
 
+.log-line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.45em;
+}
+
 .log-line-stderr {
   color: var(--color-error, #f07178);
 }
@@ -332,6 +337,8 @@
 .terminal-line {
   white-space: pre-wrap;
   word-break: break-all;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.4em;
 }
 
 .terminal-input-row {
@@ -376,4 +383,25 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.problems-file-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 100px;
+}
+
+.problem-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.6em;
+}
+
+.git-file-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.2em;
+}
+
+.output-line,
+.tasks-log-line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.5em;
 }

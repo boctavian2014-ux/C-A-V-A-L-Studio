@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { MAX_OUTPUT_CHANNEL_LINES, takeLast } from '../lib/panel-limits';
+
 export interface OutputChannel {
   name: string;
   lines: string[];
@@ -37,7 +39,7 @@ function ensureChannel(channels: OutputChannel[], name: string): OutputChannel[]
   return [...channels, { name, lines: [] }];
 }
 
-export const useOutputStore = create<OutputStore>((set, get) => ({
+export const useOutputStore = create<OutputStore>((set) => ({
   channels: [{ name: 'CAVAL', lines: [] }],
   activeChannel: 'CAVAL',
 
@@ -46,17 +48,26 @@ export const useOutputStore = create<OutputStore>((set, get) => ({
       const channels = ensureChannel(state.channels, channel);
       return {
         channels: channels.map((c) =>
-          c.name === channel ? { ...c, lines: [...c.lines, line] } : c
+          c.name === channel
+            ? { ...c, lines: takeLast([...c.lines, line], MAX_OUTPUT_CHANNEL_LINES) }
+            : c
         ),
       };
     });
   },
 
   appendBlock: (channel, text) => {
-    const lines = text.split(/\r?\n/);
-    for (const line of lines) {
-      get().append(channel, line);
-    }
+    const incoming = text.split(/\r?\n/);
+    set((state) => {
+      const channels = ensureChannel(state.channels, channel);
+      return {
+        channels: channels.map((c) =>
+          c.name === channel
+            ? { ...c, lines: takeLast([...c.lines, ...incoming], MAX_OUTPUT_CHANNEL_LINES) }
+            : c
+        ),
+      };
+    });
   },
 
   clearChannel: (channel) => {

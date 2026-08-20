@@ -3,6 +3,8 @@ import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 
+import { MAX_TERMINAL_SCROLLBACK, TERMINAL_FIT_DEBOUNCE_MS } from '../../lib/panel-limits';
+
 const XTERM_THEME = {
   background: '#09090A',
   foreground: '#F5F7FA',
@@ -87,7 +89,7 @@ export function TerminalSession({
       cursorBlink: true,
       cursorStyle: 'bar',
       theme: XTERM_THEME,
-      scrollback: 5000,
+      scrollback: MAX_TERMINAL_SCROLLBACK,
       allowProposedApi: true,
     });
 
@@ -112,8 +114,14 @@ export function TerminalSession({
       container.addEventListener('contextmenu', onContextMenu);
     }
 
+    let fitTimer: number | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      if (isActiveRef.current) fitTerminal();
+      if (!isActiveRef.current) return;
+      if (fitTimer !== null) window.clearTimeout(fitTimer);
+      fitTimer = window.setTimeout(() => {
+        fitTimer = null;
+        fitTerminal();
+      }, TERMINAL_FIT_DEBOUNCE_MS);
     });
     if (container) resizeObserver.observe(container);
 
@@ -121,6 +129,7 @@ export function TerminalSession({
     if (!caval?.terminal) {
       term.writeln('\r\n\x1b[33mTerminal indisponibil — repornește aplicația.\x1b[0m');
       return () => {
+        if (fitTimer !== null) window.clearTimeout(fitTimer);
         resizeObserver.disconnect();
         if (container) container.removeEventListener('contextmenu', onContextMenu);
         cleanupRef.current?.();
@@ -165,6 +174,7 @@ export function TerminalSession({
       document.removeEventListener('caval:run-in-terminal', onTerminalWrite);
       sessionReadyRef.current = false;
       pendingWritesRef.current = [];
+      if (fitTimer !== null) window.clearTimeout(fitTimer);
       resizeObserver.disconnect();
       if (container) container.removeEventListener('contextmenu', onContextMenu);
       cleanupRef.current?.();
