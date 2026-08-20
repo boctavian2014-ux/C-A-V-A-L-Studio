@@ -27,6 +27,7 @@ import {
   resolvePreferredShell,
 } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
+import { registerProblemsHandlers } from "./problems-handlers";
 import { registerTerminalHandlers, stopAllInteractiveTerminals } from "./terminal-handlers";
 import { registerPreviewHandlers, stopAllPreviewProcesses } from "./preview/preview-handlers";
 import {
@@ -148,6 +149,7 @@ export function getBoundWorkspaceRoot(senderId: number): string | undefined {
 }
 
 registerGitHandlers(getBoundWorkspaceRoot);
+registerProblemsHandlers(getBoundWorkspaceRoot);
 registerTerminalHandlers(getBoundWorkspaceRoot);
 registerPreviewHandlers(getBoundWorkspaceRoot);
 registerEngineeringHandlers(getBoundWorkspaceRoot);
