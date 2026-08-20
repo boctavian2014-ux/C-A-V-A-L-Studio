@@ -157,7 +157,7 @@ export function emitQuickFixProposeTimeline(
 export function emitQuickFixAcceptTimeline(
   stream: TimelineChunkSender,
   streamId: string,
-  accept: QuickFixAcceptRequest
+  accept: QuickFixAcceptRequest & { detail?: string }
 ): QuickFixResult {
   const filePath = normalizeQuickFixRelPath(accept.filePath);
   if (!filePath) {
@@ -171,15 +171,18 @@ export function emitQuickFixAcceptTimeline(
     return { success: false, error };
   }
 
+  const detail =
+    accept.detail?.trim() ||
+    (typeof accept.editCount === "number" && accept.editCount > 0
+      ? `${accept.editCount} edit${accept.editCount === 1 ? "" : "s"} applied`
+      : undefined);
+
   emitTimelineEvent(stream, streamId, {
     type: "file_write",
     label: `Updated ${filePath}`,
     filePath,
     success: true,
-    detail:
-      typeof accept.editCount === "number" && accept.editCount > 0
-        ? `${accept.editCount} edit${accept.editCount === 1 ? "" : "s"} applied`
-        : undefined,
+    detail,
   });
 
   return { success: true };

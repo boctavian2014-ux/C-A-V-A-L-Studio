@@ -46,9 +46,11 @@ Implementat: canal stream existent (`quickFix` / `quickFixAccept`), validare zon
 
 Out of scope 6.1: multi-fișier, rename simbol, extract, free-form refactor.
 
-### 6.2 — Inline completion (harden stub)
+### 6.2 — Inline completion (harden stub) ✅
 
-Există deja ghost text via Monaco provider. Focus: acceptare explicită Tab, fără scriere înainte de accept, emit timeline la accept, aliniere la principii (fără edit silent). Nu reinventă providerul — îl gate-uiește.
+Implementat: debounce 300 ms + `CancellationToken`, context ±20 linii redactat/untrusted, cap 10 linii, accept doar Tab (`command` pe item) → `timelineFileWrite` / `file_write`. Main `caval:autocomplete` redactează + sanitizează sugestia. Smoke: `tests/ai/inline-completion-harden.test.ts`.
+
+Out of scope 6.2: multi-line agresive, FIM avansat, completion în terminal/diff.
 
 ### 6.3 — Explain / hover (read-only)
 

@@ -85,6 +85,8 @@ export interface CavalChatStreamRequest {
   quickFix?: import("../shared/ai-quick-fix-contract").QuickFixRequest;
   /** Pas 6.1 — after renderer accept: emit file_write on timeline only. */
   quickFixAccept?: import("../shared/ai-quick-fix-contract").QuickFixAcceptRequest;
+  /** Pas 6.2 — after inline completion Tab accept: emit file_write on timeline only. */
+  timelineFileWrite?: import("../shared/ai-inline-completion-contract").TimelineFileWriteRequest;
   context?: {
     filePath?: string;
     fileContent?: string;

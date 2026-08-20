@@ -21,6 +21,13 @@ import {
 } from "../../ai/mcp/mcp-trust";
 import { MCP_REMOTE_ENABLED } from "../../ai/mcp/mcp-capabilities";
 import { redactSensitiveText } from "../shared/command-output-redaction";
+import {
+  formatInlineCompletionPrompt,
+  sanitizeInlineSuggestion,
+  shouldBlockInlineCompletionPath,
+  INLINE_COMPLETION_MAX_PREFIX_CHARS,
+} from "../shared/ai-inline-completion-contract";
+import { sanitizeIdeText } from "../shared/ai-context-security";
 
 const autocompleteClient = new AIClient();
 
@@ -178,20 +185,38 @@ export function registerMcpHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
       if (!root) {
         return { ok: true, suggestion: "" };
       }
+      const filePath = typeof input.filePath === "string" ? input.filePath : "";
+      if (shouldBlockInlineCompletionPath(filePath)) {
+        return { ok: true, suggestion: "" };
+      }
       const config = await loadCavalConfig(root);
       const model = resolveAutocompleteModel(config);
       if (config.autocomplete?.enabled === false) {
         return { ok: true, suggestion: "" };
       }
+      const rawPrefix = typeof input.prefix === "string" ? input.prefix : "";
+      const prefix =
+        rawPrefix.length > INLINE_COMPLETION_MAX_PREFIX_CHARS
+          ? rawPrefix.slice(rawPrefix.length - INLINE_COMPLETION_MAX_PREFIX_CHARS)
+          : rawPrefix;
+      const language = typeof input.language === "string" && input.language.trim()
+        ? input.language.trim()
+        : "plaintext";
+      const prompt = formatInlineCompletionPrompt({
+        language,
+        filePath: filePath || "untitled",
+        prefix: sanitizeIdeText(prefix),
+      });
       try {
         const response = await autocompleteClient.complete({
-          prompt: `Complete the following ${input.language} code. Return ONLY the completion text, no explanation.\n\n${input.prefix}`,
+          prompt,
           capability: "autocomplete",
           intent: "autocomplete",
           maxTokens: 120,
           metadata: { preferredModel: model },
         });
-        return { ok: true, suggestion: response.content.trim() };
+        const suggestion = sanitizeInlineSuggestion(response.content) ?? "";
+        return { ok: true, suggestion };
       } catch {
         return { ok: true, suggestion: "" };
       }

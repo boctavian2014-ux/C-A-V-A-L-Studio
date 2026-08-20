@@ -472,6 +472,7 @@ interface CavalBridge {
       strictReview?: boolean;
       quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixRequest;
       quickFixAccept?: import('../../src/shared/ai-quick-fix-contract').QuickFixAcceptRequest;
+      timelineFileWrite?: import('../../src/shared/ai-inline-completion-contract').TimelineFileWriteRequest;
       context?: {
         filePath?: string;
         fileContent?: string;

@@ -80,6 +80,7 @@ import type {
   QuickFixRequest,
   QuickFixResult,
 } from "../shared/ai-quick-fix-contract";
+import type { TimelineFileWriteRequest } from "../shared/ai-inline-completion-contract";
 
 
 
@@ -153,6 +154,9 @@ export interface CavalChatStreamRequest {
 
   /** Pas 6.1 — after renderer accept: emit file_write on timeline only. */
   quickFixAccept?: QuickFixAcceptRequest;
+
+  /** Pas 6.2 — after inline completion Tab accept: emit file_write on timeline only. */
+  timelineFileWrite?: TimelineFileWriteRequest;
 
 }
 
@@ -802,28 +806,35 @@ async function streamQuickFixToRenderer(
 ): Promise<void> {
   const workspaceRoot = request.workspaceRoot?.trim() ?? "";
 
-  if (request.quickFixAccept) {
+  if (request.quickFixAccept || request.timelineFileWrite) {
+    const acceptPayload: QuickFixAcceptRequest & { detail?: string } = request.quickFixAccept
+      ? { ...request.quickFixAccept }
+      : {
+          filePath: request.timelineFileWrite!.filePath,
+          editCount: 1,
+          detail: request.timelineFileWrite!.detail,
+        };
     if (!workspaceRoot) {
       markOperationTerminal(streamId, "failed");
       emitTimelineEvent(stream, streamId, {
         type: "error",
-        label: "Quick fix accept failed",
+        label: "Editor accept failed",
         success: false,
         detail: "No bound workspace",
       });
       stream.send({
         type: "error",
-        error: "Deschide un folder în workspace înainte de quick fix.",
+        error: "Deschide un folder în workspace înainte de această acțiune AI.",
         quickFix: { success: false, error: "No bound workspace" } satisfies QuickFixResult,
       });
       return;
     }
-    const acceptResult = emitQuickFixAcceptTimeline(stream, streamId, request.quickFixAccept);
+    const acceptResult = emitQuickFixAcceptTimeline(stream, streamId, acceptPayload);
     if (!acceptResult.success) {
       markOperationTerminal(streamId, "failed");
       stream.send({
         type: "error",
-        error: acceptResult.error ?? "Quick fix accept failed",
+        error: acceptResult.error ?? "Accept failed",
         quickFix: acceptResult,
       });
       return;
@@ -832,7 +843,7 @@ async function streamQuickFixToRenderer(
     stream.send({
       type: "done",
       quickFix: acceptResult,
-      writtenFiles: [request.quickFixAccept.filePath.replace(/\\/g, "/")],
+      writtenFiles: [acceptPayload.filePath.replace(/\\/g, "/")],
     });
     return;
   }
@@ -941,8 +952,8 @@ async function streamToRenderer(
   }
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
 
-  // Pas 6.1 — quick fix propose / accept on the existing stream channel.
-  if (request.quickFixAccept || request.quickFix) {
+  // Pas 6.1 / 6.2 — editor write accepts + quick-fix propose on existing stream channel.
+  if (request.quickFixAccept || request.quickFix || request.timelineFileWrite) {
     if (!userBoundWorkspace) {
       markOperationTerminal(streamId, "failed");
       const result = {
@@ -960,14 +971,14 @@ async function streamToRenderer(
       } else {
         emitTimelineEvent(stream, streamId, {
           type: "error",
-          label: "Quick fix accept failed",
+          label: "Editor timeline emit failed",
           success: false,
           detail: "No bound workspace",
         });
       }
       stream.send({
         type: "error",
-        error: "Deschide un folder în workspace înainte de quick fix.",
+        error: "Deschide un folder în workspace înainte de această acțiune AI.",
         quickFix: result,
       });
       return;

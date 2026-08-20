@@ -10,6 +10,7 @@ import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { registerMonacoEditor } from '../../store/editor-command-store';
 import { useProblemsStore } from '../../store/problems-store';
+import { provideGatedInlineCompletion } from '../../ai/inline-completion-provider';
 import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
 
 // ──────────────────────────────────────────────
@@ -272,33 +273,71 @@ export function MonacoEditor() {
 
     const lang = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId)?.language ?? 'typescript';
     const provider = monacoApi.languages.registerInlineCompletionsProvider(lang, {
-      provideInlineCompletions: async (model, position) => {
-        const textUntil = model.getValueInRange({
-          startLineNumber: Math.max(1, position.lineNumber - 20),
-          startColumn: 1,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        });
-        const caval = (window as unknown as {
-          caval?: { autocomplete?: (i: { prefix: string; filePath: string; language: string }) => Promise<{ suggestion?: string }> };
-        }).caval;
+      provideInlineCompletions: async (model, position, _context, token) => {
+        if (token.isCancellationRequested) return { items: [] };
         const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId);
-        const result = await caval?.autocomplete?.({
-          prefix: textUntil,
-          filePath: tab?.path ?? 'untitled.ts',
-          language: tab?.language ?? 'typescript',
+        const filePath = tab?.path ?? 'untitled.ts';
+        const language = tab?.language ?? 'typescript';
+        const gated = await provideGatedInlineCompletion({
+          fullText: model.getValue(),
+          lineNumber: position.lineNumber,
+          column: position.column,
+          filePath,
+          language,
+          token,
+          fetch: async (input) => {
+            const caval = window.caval as {
+              autocomplete?: (i: {
+                prefix: string;
+                filePath: string;
+                language: string;
+              }) => Promise<{ ok?: boolean; suggestion?: string }>;
+            };
+            return caval.autocomplete?.(input);
+          },
         });
-        const suggestion = result?.suggestion?.trim();
-        if (!suggestion) return { items: [] };
+        if (!gated.suggestion || token.isCancellationRequested) {
+          return { items: [] };
+        }
         return {
-          items: [{
-            insertText: suggestion,
-            range: new monacoApi.Range(position.lineNumber, position.column, position.lineNumber, position.column),
-          }],
+          items: [
+            {
+              insertText: gated.suggestion,
+              range: new monacoApi.Range(
+                position.lineNumber,
+                position.column,
+                position.lineNumber,
+                position.column
+              ),
+              // Side-effect only on explicit Tab/accept — ghost text does not write.
+              command: {
+                id: 'caval.inlineCompletion.accept',
+                title: 'Inline completion accepted',
+                arguments: [filePath],
+              },
+            },
+          ],
         };
       },
       disposeInlineCompletions: () => undefined,
     });
+
+    const inlineAcceptCmd = monacoApi.editor.registerCommand(
+      'caval.inlineCompletion.accept',
+      (_accessor, filePathArg) => {
+        const filePath = typeof filePathArg === 'string' ? filePathArg : '';
+        if (!filePath) return;
+        void import('../../ai/inline-completion-timeline.js').then(async (m) => {
+          const { timelineEvents, success } = await m.emitEditorFileWriteTimeline({
+            filePath,
+            detail: 'inline completion accepted',
+          });
+          if (success && timelineEvents.length) {
+            m.publishInlineCompletionAcceptToChat({ filePath, timelineEvents });
+          }
+        });
+      }
+    );
 
     const codeActionProvider = monacoApi.languages.registerCodeActionProvider(
       ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
@@ -372,6 +411,7 @@ export function MonacoEditor() {
       provider.dispose();
       codeActionProvider.dispose();
       cmd.dispose();
+      inlineAcceptCmd.dispose();
       registerMonacoEditor(null);
     });
   }, [monaco, saveTab]);
