@@ -81,6 +81,10 @@ export interface CavalChatStreamRequest {
   strictReview?: boolean;
   /** Pas 5.2 — optional IDE snapshot; omit when per-thread toggle is OFF. */
   ideContext?: import("../shared/ai-context-contract").IdeContextPayload;
+  /** Pas 6.1 — propose localized diagnostic fix (no disk write). */
+  quickFix?: import("../shared/ai-quick-fix-contract").QuickFixRequest;
+  /** Pas 6.1 — after renderer accept: emit file_write on timeline only. */
+  quickFixAccept?: import("../shared/ai-quick-fix-contract").QuickFixAcceptRequest;
   context?: {
     filePath?: string;
     fileContent?: string;
@@ -141,6 +145,8 @@ export interface CavalStreamChunk {
   reasoningBrief?: { goal: string; approach: string; modules: string[] };
   /** Pas 5.4 — sanitized activity row for the assistant bubble timeline. */
   event?: import("../shared/ai-timeline-contract").TimelineEvent;
+  /** Pas 6.1 — proposed / accept result for quick fix. */
+  quickFix?: import("../shared/ai-quick-fix-contract").QuickFixResult;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;

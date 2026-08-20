@@ -69,7 +69,17 @@ import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
 import type { IdeContextPayload } from "../shared/ai-context-contract";
 import { applyIdeContextToChatRequest } from "./ai/ide-context-collector";
 import { emitTimelineEvent } from "./ai/timeline-emit";
+import {
+  emitQuickFixAcceptTimeline,
+  emitQuickFixProposeTimeline,
+  proposeQuickFix,
+} from "./ai/quick-fix-runner";
 import { summarizeToolDetail } from "../shared/ai-timeline-contract";
+import type {
+  QuickFixAcceptRequest,
+  QuickFixRequest,
+  QuickFixResult,
+} from "../shared/ai-quick-fix-contract";
 
 
 
@@ -137,6 +147,12 @@ export interface CavalChatStreamRequest {
    * Must not carry workspaceRoot as authority.
    */
   ideContext?: IdeContextPayload;
+
+  /** Pas 6.1 — propose localized diagnostic fix (no disk write). */
+  quickFix?: QuickFixRequest;
+
+  /** Pas 6.1 — after renderer accept: emit file_write on timeline only. */
+  quickFixAccept?: QuickFixAcceptRequest;
 
 }
 
@@ -778,6 +794,121 @@ export function abortAllStreamsForSender(senderId: number): void {
   streams.clear();
 }
 
+async function streamQuickFixToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+
+  if (request.quickFixAccept) {
+    if (!workspaceRoot) {
+      markOperationTerminal(streamId, "failed");
+      emitTimelineEvent(stream, streamId, {
+        type: "error",
+        label: "Quick fix accept failed",
+        success: false,
+        detail: "No bound workspace",
+      });
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de quick fix.",
+        quickFix: { success: false, error: "No bound workspace" } satisfies QuickFixResult,
+      });
+      return;
+    }
+    const acceptResult = emitQuickFixAcceptTimeline(stream, streamId, request.quickFixAccept);
+    if (!acceptResult.success) {
+      markOperationTerminal(streamId, "failed");
+      stream.send({
+        type: "error",
+        error: acceptResult.error ?? "Quick fix accept failed",
+        quickFix: acceptResult,
+      });
+      return;
+    }
+    markOperationTerminal(streamId, "completed");
+    stream.send({
+      type: "done",
+      quickFix: acceptResult,
+      writtenFiles: [request.quickFixAccept.filePath.replace(/\\/g, "/")],
+    });
+    return;
+  }
+
+  const quickFix = request.quickFix;
+  if (!quickFix) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: QuickFixResult = { success: false, error: "No bound workspace" };
+    emitQuickFixProposeTimeline(stream, streamId, quickFix.filePath, quickFix.diagnostic.startLine, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de quick fix.",
+      quickFix: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "quick fix");
+
+  const result = await proposeQuickFix({
+    workspaceRoot,
+    request: { ...quickFix, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens, jsonMode }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "debug",
+        capability: "code",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        jsonMode,
+        temperature: 0.1,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitQuickFixProposeTimeline(
+    stream,
+    streamId,
+    quickFix.filePath,
+    quickFix.diagnostic.startLine,
+    result
+  );
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Quick fix failed"),
+      quickFix: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    quickFix: result,
+  });
+}
+
 async function streamToRenderer(
   sender: WebContents,
   senderId: number,
@@ -809,6 +940,41 @@ async function streamToRenderer(
     request = applyIdeContextToChatRequest(request, request.ideContext);
   }
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
+
+  // Pas 6.1 — quick fix propose / accept on the existing stream channel.
+  if (request.quickFixAccept || request.quickFix) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result = {
+        success: false,
+        error: "No bound workspace",
+      } as const;
+      if (request.quickFix) {
+        emitQuickFixProposeTimeline(
+          stream,
+          streamId,
+          request.quickFix.filePath,
+          request.quickFix.diagnostic.startLine,
+          result
+        );
+      } else {
+        emitTimelineEvent(stream, streamId, {
+          type: "error",
+          label: "Quick fix accept failed",
+          success: false,
+          detail: "No bound workspace",
+        });
+      }
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de quick fix.",
+        quickFix: result,
+      });
+      return;
+    }
+    await streamQuickFixToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
 
   if (workspaceRoot?.trim()) {
     void ensureMcpServersReady(workspaceRoot).catch(() => undefined);

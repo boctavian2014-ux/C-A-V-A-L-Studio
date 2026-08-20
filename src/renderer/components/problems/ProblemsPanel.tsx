@@ -340,7 +340,7 @@ export function ProblemsPanel({
                   onClick={() => onSendToChat(problem)}
                   style={{
                     flexShrink: 0,
-                    marginRight: 8,
+                    marginRight: 4,
                     border: "1px solid var(--caval-border)",
                     borderRadius: 4,
                     background: "rgba(0,224,255,0.06)",
@@ -352,6 +352,33 @@ export function ProblemsPanel({
                   }}
                 >
                   Chat
+                </button>
+                )}
+                {(problem.severity === "error" || problem.severity === "warning") && (
+                <button
+                  type="button"
+                  title="Fix with AI"
+                  data-testid="problem-fix-with-ai"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void import("../../ai/quick-fix-controller.js").then((m) =>
+                      m.startQuickFixForProblem(problem)
+                    );
+                  }}
+                  style={{
+                    flexShrink: 0,
+                    marginRight: 8,
+                    border: "1px solid rgba(0,224,255,0.35)",
+                    borderRadius: 4,
+                    background: "rgba(0,224,255,0.1)",
+                    color: "var(--caval-accent)",
+                    cursor: "pointer",
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    padding: "2px 8px",
+                  }}
+                >
+                  Fix AI
                 </button>
                 )}
               </div>

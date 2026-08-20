@@ -18,14 +18,25 @@ interface CavalFsApi {
   reveal: (filePath: string) => Promise<{ ok: boolean }>;
 }
 
-interface CavalTerminalApi {
-  create: (
+interface CavalTerminalApi extends Omit<import("../shared/terminal-contract").TerminalApi, "create"> {
+  create: {
+    (options?: import("../shared/terminal-contract").TerminalCreateOptions): Promise<
+      import("../shared/terminal-contract").TerminalInfo
+    >;
+    (
+      id: string,
+      options?: { cwd?: string }
+    ): Promise<
+      | import("../shared/terminal-contract").TerminalInfo
+      | { ok: boolean; error?: string; shell?: string; kind?: string; cwd?: string }
+    >;
+  };
+  write: (
     id: string,
-    options?: { cwd?: string }
-  ) => Promise<{ ok: boolean; error?: string; shell?: string; kind?: string }>;
-  write: (id: string, data: string) => Promise<{ ok: boolean; error?: string }>;
-  resize: (id: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
-  destroy: (id: string) => Promise<{ ok: boolean }>;
+    data: string
+  ) => Promise<void | { ok: boolean; error?: string }>;
+  resize: (id: string, cols: number, rows: number) => Promise<void | { ok: boolean }>;
+  destroy: (id: string) => Promise<void | { ok: boolean }>;
   ensurePowerShell: () => Promise<{
     ok: boolean;
     already?: boolean;
@@ -137,7 +148,7 @@ type ChatActivityPhase =
 
 interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause" | "timeline";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -162,6 +173,8 @@ interface CavalStreamChunk {
   approach?: string;
   modules?: string[];
   reasoningBrief?: { goal: string; approach: string; modules: string[] };
+  event?: import('../../src/shared/ai-timeline-contract').TimelineEvent;
+  quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixResult;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;
@@ -457,6 +470,8 @@ interface CavalBridge {
       scaffoldMode?: boolean;
       skipMultiAgent?: boolean;
       strictReview?: boolean;
+      quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixRequest;
+      quickFixAccept?: import('../../src/shared/ai-quick-fix-contract').QuickFixAcceptRequest;
       context?: {
         filePath?: string;
         fileContent?: string;
@@ -573,6 +588,48 @@ interface CavalBridge {
   }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
+  localAiStatus?: () => Promise<{
+    ok: boolean;
+    status?: {
+      supported: boolean;
+      platform: string;
+      installed: boolean;
+      running: boolean;
+      configuredUrl: string;
+      runtimePath?: string;
+      models: string[];
+      defaultModel: string;
+      defaultModelReady: boolean;
+      managedByCaval: boolean;
+      inProgress: boolean;
+      policy: string;
+    };
+    error?: string;
+  }>;
+  localAiSetup?: (input?: {
+    installRuntime?: boolean;
+    pullModel?: boolean;
+    modelName?: string;
+  }) => Promise<{
+    ok: boolean;
+    changed?: boolean;
+    summary?: string;
+    error?: string;
+    status?: {
+      supported: boolean;
+      platform: string;
+      installed: boolean;
+      running: boolean;
+      configuredUrl: string;
+      runtimePath?: string;
+      models: string[];
+      defaultModel: string;
+      defaultModelReady: boolean;
+      managedByCaval: boolean;
+      inProgress: boolean;
+      policy: string;
+    };
+  }>;
   modelsHealth?: () => Promise<{
     ok: boolean;
     summary?: string;

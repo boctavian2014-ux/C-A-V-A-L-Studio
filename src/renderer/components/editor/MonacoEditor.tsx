@@ -9,6 +9,7 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { registerMonacoEditor } from '../../store/editor-command-store';
+import { useProblemsStore } from '../../store/problems-store';
 import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
 
 // ──────────────────────────────────────────────
@@ -299,8 +300,78 @@ export function MonacoEditor() {
       disposeInlineCompletions: () => undefined,
     });
 
+    const codeActionProvider = monacoApi.languages.registerCodeActionProvider(
+      ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
+      {
+        provideCodeActions: (
+          _model: MonacoType.editor.ITextModel,
+          range: MonacoType.Range
+        ) => {
+          const tab = useEditorStore.getState().tabs.find(
+            (t) => t.id === useEditorStore.getState().activeTabId
+          );
+          if (!tab) return { actions: [], dispose: () => undefined };
+
+          const problems = useProblemsStore.getState().problems;
+          const tabRel = tab.path.replace(/\\/g, '/');
+          const hit = problems.find((p) => {
+            const pf = p.file.replace(/\\/g, '/');
+            const sameFile =
+              tabRel.endsWith(pf) ||
+              pf.endsWith(tabRel.split('/').slice(-2).join('/')) ||
+              tabRel.includes(pf);
+            if (!sameFile) return false;
+            if (p.severity !== 'error' && p.severity !== 'warning') return false;
+            return p.line >= range.startLineNumber - 2 && p.line <= range.endLineNumber + 2;
+          });
+          if (!hit) return { actions: [], dispose: () => undefined };
+
+          return {
+            actions: [
+              {
+                title: 'Fix with AI',
+                kind: 'quickfix',
+                diagnostics: [],
+                isPreferred: true,
+                command: {
+                  id: 'caval.quickFixAi',
+                  title: 'Fix with AI',
+                  arguments: [hit],
+                },
+              },
+            ],
+            dispose: () => undefined,
+          };
+        },
+      }
+    );
+
+    const cmd = monacoApi.editor.registerCommand('caval.quickFixAi', (_accessor, problemEntry) => {
+      void import('../../ai/quick-fix-controller.js').then(async (m) => {
+        const entry = problemEntry as {
+          file: string;
+          line: number;
+          col: number;
+          message: string;
+          severity: string;
+          source?: string;
+        };
+        await m.startQuickFixForProblem({
+          id: `monaco-${entry.file}:${entry.line}`,
+          file: entry.file,
+          line: entry.line,
+          column: entry.col,
+          severity: entry.severity === 'warning' ? 'warning' : 'error',
+          source: (entry.source as 'typescript' | 'eslint' | 'caval') || 'caval',
+          message: entry.message.replace(/\s*\([^)]*\)\s*$/, ''),
+        });
+      });
+    });
+
     editor.onDidDispose(() => {
       provider.dispose();
+      codeActionProvider.dispose();
+      cmd.dispose();
       registerMonacoEditor(null);
     });
   }, [monaco, saveTab]);

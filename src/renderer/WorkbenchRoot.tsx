@@ -26,6 +26,7 @@ import { QuickOpen } from './components/navigation/QuickOpen';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
 import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
+import { QuickFixDiffPreview } from './components/editor/QuickFixDiffPreview';
 import { buildWorkbenchCommands } from './commands/command-registry';
 import { handleMenuCommand, type MenuCommandContext } from './commands/menu-command-router';
 import { showWorkbenchToast } from './commands/workbench-toast';
@@ -924,15 +925,20 @@ export function WorkbenchRoot() {
           50% { opacity: 1; }
         }
         .caval-stream-text {
-          font-family: inherit;
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          font-size: 10px;
+          line-height: 1.42;
+          letter-spacing: 0.055em;
+          font-weight: 400;
+          color: rgba(186, 230, 253, 0.58);
         }
         .caval-stream-cursor {
           display: inline-block;
-          width: 2px;
-          height: 0.9em;
+          width: 1px;
+          height: 0.85em;
           margin-left: 1px;
           vertical-align: -0.05em;
-          background: var(--caval-accent);
+          background: rgba(0, 224, 255, 0.55);
           animation: cursor-blink 0.9s step-end infinite;
           flex-shrink: 0;
         }
@@ -1128,6 +1134,7 @@ export function WorkbenchRoot() {
               setReferencesVisible(false);
             }}
           />
+          <QuickFixDiffPreview />
 
           {/* AI Panel — dreapta, 340px, ascundibil */}
           {aiPanelOpen && (
