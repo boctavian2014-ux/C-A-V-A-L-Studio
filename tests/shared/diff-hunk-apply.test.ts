@@ -39,8 +39,8 @@ describe("diff-utils hunk apply", () => {
     const patch = buildHunkPatch({
       header: "@@ -1,1 +1,1 @@",
       lines: [
-        { id: "1", type: "remove", content: "a", decision: "pending" },
-        { id: "2", type: "add", content: "b", decision: "pending" },
+        { type: "remove", content: "a" },
+        { type: "add", content: "b" },
       ],
     });
     expect(patch).toContain("-a");

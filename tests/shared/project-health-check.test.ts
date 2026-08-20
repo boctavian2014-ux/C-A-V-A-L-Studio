@@ -106,7 +106,7 @@ describe("project-health-check", () => {
 
   it("exports UI safety timeout separate from runner timeouts", async () => {
     const { PROJECT_HEALTH_UI_SAFETY_TIMEOUT_MS } = await import(
-      "../../src/shared/project-health-check"
+      "../../src/shared/project-health-check.js"
     );
     expect(PROJECT_HEALTH_UI_SAFETY_TIMEOUT_MS).toBeGreaterThan(15 * 60 * 1000);
   });
