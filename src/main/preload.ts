@@ -747,14 +747,6 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.invoke("caval:tool-execute", input),
   autocomplete: (input: { prefix: string; filePath: string; language: string }) =>
     ipcRenderer.invoke("caval:autocomplete", input) as Promise<{ ok: boolean; suggestion?: string }>,
-  startTerminal: () => ipcRenderer.invoke("caval:terminal-start"),
-  writeTerminal: (data: string) => ipcRenderer.invoke("caval:terminal-write", data),
-  stopTerminal: () => ipcRenderer.invoke("caval:terminal-stop"),
-  onTerminalData: (callback: (data: string) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, data: string) => callback(data);
-    ipcRenderer.on("caval:terminal-data", listener);
-    return () => ipcRenderer.removeListener("caval:terminal-data", listener);
-  },
 
   fs: {
     pickFiles: () => ipcRenderer.invoke("fs:pickFiles") as Promise<string[] | null>,

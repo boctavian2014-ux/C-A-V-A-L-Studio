@@ -1,5 +1,4 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } from "electron";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
@@ -22,10 +21,7 @@ import type { AgentExecuteStepRequest, AgentAuditReport, Goal } from "../../ai/a
 import { toolSandbox } from "../../ai/pipeline/tool-sandbox";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { assertShellCommandAllowed } from "./shell-security";
-import {
-  ensureLatestPowerShellInstalled,
-  resolvePreferredShell,
-} from "./powershell-shell";
+import { ensureLatestPowerShellInstalled } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
 import { registerProblemsHandlers } from "./problems-handlers";
 import { registerTasksHandlers, shutdownAllTasksSync } from "./tasks-handlers";
@@ -83,7 +79,6 @@ import {
   normalizeWorkspaceRoot,
   resolveSandboxedWorkspacePath,
 } from "./path-security";
-import { sanitizeEnvForTerminal } from "./subprocess-env";
 import { requireBoundWorkspaceRoot } from "./bound-workspace";
 import { workspaceCommandMutex } from "../../ai/tools/workspace-execute-lock";
 import { runAllowedWorkspaceCommand } from "../../ai/tools/workspace-command-runner";
@@ -130,7 +125,6 @@ const loadLocalEnvFile = (): void => {
 
 loadLocalEnvFile();
 
-const terminals = new Map<number, ChildProcessWithoutNullStreams>();
 const workspaceRoots = new Map<number, string>();
 const composer = new AIComposer();
 const debugAgent = new DebugAgent();
@@ -874,81 +868,6 @@ ipcMain.handle("caval:ai-chat", async (event, request: CavalChatRequest): Promis
     ].join("\n"),
     error: errors.join("\n")
   };
-});
-
-const shellCommand = (): { command: string; args: string[] } => {
-  if (process.platform === "win32") {
-    const shell = resolvePreferredShell();
-    return {
-      command: shell.command,
-      args: [...shell.interactiveArgs, "-NoExit"],
-    };
-  }
-  return { command: process.env.SHELL ?? "bash", args: ["-l"] };
-};
-
-ipcMain.handle("caval:terminal-start", async (event) => {
-  assertTrustedSender(event);
-  let cwd: string;
-  try {
-    cwd = requireBoundWorkspaceRoot(
-      getBoundWorkspaceRoot,
-      event.sender.id,
-      "Deschide un folder în workspace înainte de a deschide terminalul."
-    );
-  } catch (error) {
-    return {
-      started: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-  if (process.platform === "win32") {
-    await ensureLatestPowerShellInstalled();
-  }
-  const id = event.sender.id;
-  const existing = terminals.get(id);
-  if (existing && !existing.killed) {
-    return { started: true, reused: true, cwd };
-  }
-
-  // Zone A: explicit shell executable, shell:false — isolated from AI automated runners
-  const { command, args } = shellCommand();
-  const terminal = spawn(command, args, {
-    cwd,
-    env: sanitizeEnvForTerminal(),
-    shell: false,
-  });
-
-  terminals.set(id, terminal);
-  const send = (data: Buffer | string) => event.sender.send("caval:terminal-data", data.toString());
-  terminal.stdout.on("data", send);
-  terminal.stderr.on("data", send);
-  terminal.on("exit", (code) => {
-    event.sender.send("caval:terminal-data", `\r\n[process exited with code ${code ?? "unknown"}]\r\n`);
-    terminals.delete(id);
-  });
-  event.sender.send("caval:terminal-data", `Caval terminal started in ${cwd}\r\n`);
-  return { started: true, reused: false, cwd };
-});
-
-ipcMain.handle("caval:terminal-write", (event, data: string) => {
-  assertTrustedSender(event);
-  const terminal = terminals.get(event.sender.id);
-  if (!terminal || terminal.killed) {
-    return { ok: false, error: "Terminal is not running." };
-  }
-  terminal.stdin.write(data);
-  return { ok: true };
-});
-
-ipcMain.handle("caval:terminal-stop", (event) => {
-  assertTrustedSender(event);
-  const terminal = terminals.get(event.sender.id);
-  if (terminal && !terminal.killed) {
-    terminal.kill();
-  }
-  terminals.delete(event.sender.id);
-  return { ok: true };
 });
 
 ipcMain.handle("caval:composer-run", async (event, request: {
@@ -1756,14 +1675,11 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  for (const terminal of terminals.values()) {
-    if (!terminal.killed) {
-      terminal.kill();
-    }
-  }
   shutdownAllPreviewSync();
   stopAllInteractiveTerminalsSync();
   shutdownAllTasksSync();
+  // CAD: sync child.kill. Marketplace: Server.close() starts teardown;
+  // the listen socket is reaped when this process exits.
   stopCadLocalServer();
   stopMarketplaceServer();
   if (process.platform !== "darwin") {

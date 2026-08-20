@@ -92,6 +92,7 @@ export async function startMarketplaceServer(): Promise<boolean> {
 
 export function stopMarketplaceServer(): void {
   if (httpServer) {
+    httpServer.closeAllConnections?.();
     httpServer.close();
     httpServer = null;
   }
