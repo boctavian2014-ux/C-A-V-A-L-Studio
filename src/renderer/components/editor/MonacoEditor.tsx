@@ -384,6 +384,19 @@ export function MonacoEditor() {
       },
     });
 
+    const refactorSelectionAction = editor.addAction({
+      id: 'caval.refactorSelection',
+      label: 'Refactor with AI',
+      keybindings: [monacoApi.KeyMod.CtrlCmd | monacoApi.KeyMod.Shift | monacoApi.KeyCode.KeyR],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.65,
+      run: () => {
+        void import('../../ai/refactor-controller.js').then((m) =>
+          m.startRefactorFromSelection('custom')
+        );
+      },
+    });
+
     const codeActionProvider = monacoApi.languages.registerCodeActionProvider(
       ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
       {
@@ -459,6 +472,7 @@ export function MonacoEditor() {
       inlineAcceptCmd.dispose();
       hoverProvider.dispose();
       explainSelectionAction.dispose();
+      refactorSelectionAction.dispose();
       registerMonacoEditor(null);
     });
   }, [monaco, saveTab]);

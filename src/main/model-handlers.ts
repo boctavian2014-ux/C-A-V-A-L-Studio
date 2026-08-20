@@ -89,6 +89,14 @@ import {
   emitExplainTimeline,
   runExplain,
 } from "./ai/explain-runner";
+import type {
+  RefactorRequest,
+  RefactorResult,
+} from "../shared/ai-refactor-contract";
+import {
+  emitRefactorProposeTimeline,
+  runRefactorPropose,
+} from "./ai/refactor-runner";
 
 
 
@@ -168,6 +176,9 @@ export interface CavalChatStreamRequest {
 
   /** Pas 6.3 — read-only explain on hover / selection. */
   explain?: ExplainRequest;
+
+  /** Pas 6.5 — gated multi-file refactor propose (no disk write). */
+  refactor?: RefactorRequest;
 
 }
 
@@ -809,6 +820,79 @@ export function abortAllStreamsForSender(senderId: number): void {
   streams.clear();
 }
 
+async function streamRefactorToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const refactor = request.refactor;
+  if (!refactor) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: RefactorResult = { success: false, error: "No bound workspace" };
+    emitRefactorProposeTimeline(stream, streamId, refactor, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Refactor.",
+      refactor: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "refactor");
+
+  const result = await runRefactorPropose({
+    workspaceRoot,
+    request: { ...refactor, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens, jsonMode }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "multi_file",
+        capability: "code",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        jsonMode,
+        temperature: 0.1,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitRefactorProposeTimeline(stream, streamId, refactor, result);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Refactor failed"),
+      refactor: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    refactor: result,
+  });
+}
+
 async function streamExplainToRenderer(
   stream: StreamChunkSender,
   streamId: string,
@@ -1091,6 +1175,23 @@ async function streamToRenderer(
       return;
     }
     await streamExplainToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 6.5 — gated multi-file refactor (no disk write until Accept).
+  if (request.refactor) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: RefactorResult = { success: false, error: "No bound workspace" };
+      emitRefactorProposeTimeline(stream, streamId, request.refactor, result);
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Refactor.",
+        refactor: result,
+      });
+      return;
+    }
+    await streamRefactorToRenderer(stream, streamId, request, abortRoot.signal);
     return;
   }
 

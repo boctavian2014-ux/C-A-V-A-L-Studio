@@ -9,7 +9,7 @@ Audit de clasificare (fără feature code). Pattern: suprafețe după risc → g
 | Explain / hover | Nu | Safe direct, fără confirmare | Nu există ca flow AI dedicat |
 | Inline completion | Doar la Tab | Safe — user acceptă fiecare inserție | Stub `registerInlineCompletionsProvider` + `caval.autocomplete` în `MonacoEditor.tsx` (ghost text; fără timeline / gate explicit documentat) |
 | Quick fix pe diagnostics | Da, mic, localizat | Diff preview + undo nativ Monaco | Lipsă; Problems există (`problems-store`, `ProblemsPanel`, `revealProblem`) |
-| Refactor multi-fișier | Da, larg | Confirmare explicită + diff complet + undo | Lipsă ca surface editor AI |
+| Refactor multi-fișier | Da, larg | Confirmare explicită + diff complet + undo | ✅ 6.5 — stream `refactor`, diff multi-fișier, Accept all |
 | Apply din chat | Da | writtenFiles + timeline (M5) | Parțial acoperit (M5 / composer) |
 
 ## Clasificare de siguranță (rezumat)
@@ -60,13 +60,13 @@ Implementat: stream `explain` (fără IPC nou), context ±10 linii redactat/untr
 
 Implementat: scaffold chat → `proposedWrites` (fără disc), card Accept/Reject + Monaco diff, apply pe disc + undo Monaco pentru tab deschis, Revert pentru fișiere noi, `file_write` doar la Accept. Pipeline arena/verify pe disc e amânat până după Accept. Smoke: `tests/ai/chat-apply-parity.test.ts`.
 
-### 6.5 — Refactor multi-fișier (gated)
+### 6.5 — Refactor multi-fișier (gated) ✅
 
-Confirmare explicită + diff complet pe toate fișierele + undo. Doar după ce 6.1–6.2 au dovedit gate-ul pe scrieri mici.
+Implementat: stream `refactor` (fără IPC nou), max 5 fișiere / 10 edituri / 16 KB, path + redacție, prompt context mărginit, **fără** write pe disc în main. Diff unificat (taburi Monaco) Accept all / Reject all; apply cu undo Monaco pe tab deschis + write/delete pe disc; Revert pentru new/deleted; `file_write` per fișier la Accept. Entry: context menu / Ctrl+Shift+R „Refactor with AI”. Smoke: `tests/ai/refactor-gated.test.ts`.
 
 ### 6.x — Smoke / E2E editor AI
 
-Extinde smoke-ul M5 (sau fixture dedicat): Problems → quick fix → timeline `file_write` → undo; optional Tab-accept pe inline. Fără Playwright / LLM live, același stil in-process ca 5.5.
+Extinde smoke-ul M5 (sau fixture dedicat): Problems → quick fix → timeline `file_write` → undo; optional Tab-accept pe inline; optional refactor multi-fișier pe același workspace. Fără Playwright / LLM live, același stil in-process ca 5.5.
 
 ## Decizie 6.1
 
