@@ -582,6 +582,13 @@ contextBridge.exposeInMainWorld("caval", {
         error?: string;
       }>,
   },
+  workspaceSearch: {
+    query: (query: import("../shared/workspace-search-contract").WorkspaceSearchQuery) =>
+      ipcRenderer.invoke(
+        "caval:workspace-search-query",
+        query
+      ) as Promise<import("../shared/workspace-search-contract").WorkspaceSearchResponse>,
+  },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{
       ok: boolean;

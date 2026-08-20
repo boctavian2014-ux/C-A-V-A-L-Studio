@@ -23,6 +23,7 @@ import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPanel } from './components/search/SearchPanel';
 import { ExtensionsHub } from './components/extensions/ExtensionsHub';
 import { QuickOpen } from './components/navigation/QuickOpen';
+import { WorkspaceSearch } from './components/search/WorkspaceSearch';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
 import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
@@ -460,6 +461,7 @@ export function WorkbenchRoot() {
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);
   const [engineeringOpen, setEngineeringOpen] = React.useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = React.useState(false);
+  const [workspaceSearchVisible, setWorkspaceSearchVisible] = React.useState(false);
   const [paletteVisible, setPaletteVisible] = React.useState(false);
   const [shortcutsVisible, setShortcutsVisible] = React.useState(false);
   const [referencesVisible, setReferencesVisible] = React.useState(false);
@@ -575,7 +577,14 @@ export function WorkbenchRoot() {
     toggleSidebar,
     setActiveActivity: setActiveActivity,
     setSidebarOpen,
-    openQuickOpen: () => setQuickOpenVisible(true),
+    openQuickOpen: () => {
+      setWorkspaceSearchVisible(false);
+      setQuickOpenVisible(true);
+    },
+    openWorkspaceSearch: () => {
+      setQuickOpenVisible(false);
+      setWorkspaceSearchVisible(true);
+    },
     saveActiveTab: () => {
       const tabId = useEditorStore.getState().activeTabId;
       if (tabId) void saveTab(tabId);
@@ -614,7 +623,14 @@ export function WorkbenchRoot() {
         toggleSidebar,
         setActiveActivity: setActiveActivity,
         setSidebarOpen,
-        openQuickOpen: () => setQuickOpenVisible(true),
+        openQuickOpen: () => {
+          setWorkspaceSearchVisible(false);
+          setQuickOpenVisible(true);
+        },
+        openWorkspaceSearch: () => {
+          setQuickOpenVisible(false);
+          setWorkspaceSearchVisible(true);
+        },
         saveActiveTab: () => {
           const tabId = useEditorStore.getState().activeTabId;
           if (tabId) void saveTab(tabId);
@@ -763,7 +779,15 @@ export function WorkbenchRoot() {
       // Ctrl+P → Quick Open (not Ctrl+Shift+P)
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
+        setWorkspaceSearchVisible(false);
         setQuickOpenVisible(true);
+      }
+
+      // Ctrl+T → Search workspace symbols (index)
+      if (ctrl && !e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        setQuickOpenVisible(false);
+        setWorkspaceSearchVisible(true);
       }
 
       // Ctrl+Shift+P → Command Palette
@@ -1114,6 +1138,10 @@ export function WorkbenchRoot() {
           </div>
 
           <QuickOpen open={quickOpenVisible} onClose={() => setQuickOpenVisible(false)} />
+          <WorkspaceSearch
+            open={workspaceSearchVisible}
+            onClose={() => setWorkspaceSearchVisible(false)}
+          />
           <CommandPalette
             open={paletteVisible}
             commands={workbenchCommands}

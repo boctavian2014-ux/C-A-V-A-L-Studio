@@ -114,7 +114,7 @@ const handlers: Record<MenuCommandId, Handler> = {
   'switch-editor': comingSoon('Switch Editor'),
   'switch-group': comingSoon('Switch Group'),
   'go-to-file': (ctx) => ctx.openQuickOpen(),
-  'go-to-symbol-workspace': comingSoon('Go to Symbol in Workspace'),
+  'go-to-symbol-workspace': (ctx) => ctx.openWorkspaceSearch(),
   'go-to-symbol-editor': () => { triggerMonacoAction(MONACO_ACTIONS.goToSymbolEditor); },
   'go-to-definition': async (ctx) => { await ctx.openDefinition(); },
   'go-to-declaration': () => { triggerMonacoAction(MONACO_ACTIONS.goToDefinition); },

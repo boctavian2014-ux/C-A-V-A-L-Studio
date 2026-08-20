@@ -651,6 +651,11 @@ interface CavalBridge {
       error?: string;
     }>;
   };
+  workspaceSearch?: {
+    query: (
+      query: import('../../src/shared/workspace-search-contract').WorkspaceSearchQuery
+    ) => Promise<import('../../src/shared/workspace-search-contract').WorkspaceSearchResponse>;
+  };
   pipelineResumeStream?: (
     input: {
       runId: string;

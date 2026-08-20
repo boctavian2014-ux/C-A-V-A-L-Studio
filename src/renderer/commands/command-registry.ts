@@ -12,6 +12,7 @@ export interface WorkbenchCommandContext {
   setActiveActivity: (tab: WorkbenchActivity) => void;
   setSidebarOpen: (open: boolean) => void;
   openQuickOpen: () => void;
+  openWorkspaceSearch: () => void;
   saveActiveTab: () => void;
   openFolder: () => Promise<void>;
   runWorkspaceVerify: () => Promise<void>;
@@ -71,6 +72,14 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       shortcut: 'Ctrl+P',
       keywords: ['file', 'quick', 'open', 'goto'],
       run: () => ctx.openQuickOpen(),
+    },
+    {
+      id: 'nav:workspace-search',
+      label: 'Search Workspace Symbols',
+      category: 'Navigation',
+      shortcut: 'Ctrl+T',
+      keywords: ['symbol', 'search', 'goto', 'index', 'import', 'export'],
+      run: () => ctx.openWorkspaceSearch(),
     },
     {
       id: 'view:shortcuts',
