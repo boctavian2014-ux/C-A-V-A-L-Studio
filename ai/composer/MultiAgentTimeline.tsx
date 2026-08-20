@@ -11,6 +11,8 @@ import { getWaitGlowFilter, getWaitGlowBoxShadow, getCompletionGlowFilter, getCo
 interface MultiAgentTimelineProps {
   steps: MultiAgentStepRecord[];
   collapsed?: boolean;
+  /** When false, only wait/completion banners render (steps live in ChatUnifiedTimeline). */
+  showSteps?: boolean;
   waitMessage?: string;
   waitStatusLine?: string;
   waitVisible?: boolean;
@@ -138,6 +140,7 @@ function stepLabel(step: MultiAgentStepRecord): string {
 export function MultiAgentTimeline({
   steps,
   collapsed,
+  showSteps = true,
   waitMessage,
   waitStatusLine,
   waitVisible = true,
@@ -145,7 +148,7 @@ export function MultiAgentTimeline({
   showCompletionHorse = false,
   completionNeedsReview = false,
 }: MultiAgentTimelineProps) {
-  if (!steps.length) return null;
+  if (!steps.length && !waitMessage && !showCompletionHorse) return null;
 
   const activeIdx = steps.findIndex((s) => s.status === 'active');
   const displaySteps = collapsed
@@ -159,20 +162,25 @@ export function MultiAgentTimeline({
         ? steps.slice(0, activeIdx + 1)
         : steps.slice(-8);
 
+  const hasStepList = showSteps && steps.length > 0;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-      <div
-        style={{
-          fontSize: 9.5,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: 'var(--caval-text-muted)',
-        }}
-      >
-        Pipeline · multi-model
-      </div>
-      {visible.map((step) => (
+      {hasStepList ? (
+        <div
+          style={{
+            fontSize: 9.5,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--caval-text-muted)',
+          }}
+        >
+          Pipeline · multi-model
+        </div>
+      ) : null}
+      {hasStepList
+        ? visible.map((step) => (
         <div
           key={`${step.stepId ?? step.phase}-${step.at}`}
           style={{
@@ -199,7 +207,8 @@ export function MultiAgentTimeline({
             <span style={{ fontSize: 10.5, opacity: 0.85 }}>{step.detail}</span>
           ) : null}
         </div>
-      ))}
+      ))
+        : null}
       {waitMessage ? (
         <div
           style={{

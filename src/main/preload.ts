@@ -114,7 +114,7 @@ export type MultiAgentPhase =
 
 export interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause" | "timeline";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -139,6 +139,8 @@ export interface CavalStreamChunk {
   approach?: string;
   modules?: string[];
   reasoningBrief?: { goal: string; approach: string; modules: string[] };
+  /** Pas 5.4 — sanitized activity row for the assistant bubble timeline. */
+  event?: import("../shared/ai-timeline-contract").TimelineEvent;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;

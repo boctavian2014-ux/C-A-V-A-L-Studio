@@ -8,6 +8,7 @@ import { useEditorStore } from '../../src/renderer/store/editor-store';
 import { getAgentMode, isAgenticPipelineMode } from '../modes/agent-modes';
 import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
+import { ChatUnifiedTimeline } from './ChatUnifiedTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
@@ -263,9 +264,11 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ChatUnifiedTimeline message={message} />
       {cfg.showPipelineTimeline && (message.multiAgentSteps?.length ?? 0) > 0 && (
         <MultiAgentTimeline
           steps={message.multiAgentSteps!}
+          showSteps={false}
           collapsed={Boolean(message.recap)}
           waitMessage={showWait ? waitMessage : undefined}
           waitStatusLine={showWait ? waitStatusLine : undefined}
@@ -275,7 +278,9 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
           completionNeedsReview={needsReview}
         />
       )}
-      {isStreaming && (message.activitySteps?.length ?? 0) > 0 && (
+      {isStreaming &&
+        (message.activitySteps?.length ?? 0) > 0 &&
+        !(message.timelineEvents?.length) && (
         <ChatActivityTimeline
           steps={message.activitySteps!}
           collapsed={Boolean(message.recap || message.reasoningBrief)}
@@ -406,11 +411,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             defaultExpanded={message.reasoningExpanded ?? true}
           />
         )}
+        {!isUser && !arenaMode ? <ChatUnifiedTimeline message={message} /> : null}
         {!isUser && arenaMode ? (
           message.isStreaming ||
           message.reasoningBrief ||
           message.recap ||
           (message.multiAgentSteps?.length ?? 0) > 0 ||
+          (message.timelineEvents?.length ?? 0) > 0 ||
           Boolean(message.reasoning) ? (
             <ArenaWorkPanel message={message} />
           ) : (
@@ -430,7 +437,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               }
             />
           </>
-        ) : message.isStreaming && message.activitySteps?.length ? (
+        ) : message.isStreaming && message.activitySteps?.length && !(message.timelineEvents?.length) ? (
           <>
             <ChatActivityTimeline
               steps={message.activitySteps}

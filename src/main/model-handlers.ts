@@ -68,6 +68,8 @@ import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
 import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
 import type { IdeContextPayload } from "../shared/ai-context-contract";
 import { applyIdeContextToChatRequest } from "./ai/ide-context-collector";
+import { emitTimelineEvent } from "./ai/timeline-emit";
+import { summarizeToolDetail } from "../shared/ai-timeline-contract";
 
 
 
@@ -553,8 +555,56 @@ function sendStatusChunk(
   return stream.send({ type: "status", phase, status, detail });
 }
 
+function sendToolTimeline(
+  stream: StreamChunkSender,
+  streamId: string,
+  toolName: string,
+  status: "start" | "done" | "error",
+  detail?: string,
+  writtenPath?: string
+): void {
+  const shortName = toolName.replace(/^mcp:[^:]+:/, "");
+  if (status === "start") {
+    emitTimelineEvent(stream, streamId, {
+      type: "tool_call",
+      label: `Running ${shortName}`,
+      toolName: shortName,
+    });
+    return;
+  }
+
+  const success = status === "done";
+  emitTimelineEvent(stream, streamId, {
+    type: "tool_result",
+    label: success ? `${shortName} succeeded` : `${shortName} failed`,
+    toolName: shortName,
+    success,
+    detail: summarizeToolDetail(detail, success),
+  });
+
+  if (success && writtenPath?.trim()) {
+    emitTimelineEvent(stream, streamId, {
+      type: "file_write",
+      label: `Updated ${writtenPath.trim().replace(/\\/g, "/")}`,
+      filePath: writtenPath.trim().replace(/\\/g, "/"),
+      success: true,
+    });
+  }
+
+  if (!success) {
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: `${shortName} error`,
+      toolName: shortName,
+      success: false,
+      detail: summarizeToolDetail(detail, false),
+    });
+  }
+}
+
 function sendMultiAgentStatusChunk(
   stream: StreamChunkSender,
+  streamId: string,
   phase: import("../../ai/composer/chat-activity-types").MultiAgentPhase,
   status: "active" | "done",
   detail?: string,
@@ -563,6 +613,16 @@ function sendMultiAgentStatusChunk(
   auditBadge?: string,
   parallelGroup?: string
 ): boolean {
+  if (status === "active") {
+    const label =
+      detail?.trim() ||
+      phase;
+    emitTimelineEvent(stream, streamId, {
+      type: "reasoning",
+      label: `Pipeline · ${label}`.slice(0, 160),
+      detail: modelId ? `model ${modelId}` : undefined,
+    });
+  }
   return stream.send({
     type: "multiagent",
     multiAgentPhase: phase,
@@ -773,7 +833,7 @@ async function streamToRenderer(
     if (!stream.isAlive()) return;
     sendStatusChunk(stream, "prepare", "done");
     sendStatusChunk(stream, "route", "active");
-    sendMultiAgentStatusChunk(stream, "context", "active", "pipeline start");
+    sendMultiAgentStatusChunk(stream, streamId, "context", "active", "pipeline start");
 
     const result = await runCavalloMultiAgentPipeline(
       sender,
@@ -782,7 +842,7 @@ async function streamToRenderer(
       {
       onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
+        sendMultiAgentStatusChunk(stream, streamId, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
       },
       onReasoningBrief: (brief) => {
         if (!stream.isAlive()) return;
@@ -824,6 +884,15 @@ async function streamToRenderer(
       if (result.text?.includes('```')) {
         if (!stream.send({ type: "delta", delta: result.text })) return;
       }
+      for (const filePath of result.writtenFiles ?? []) {
+        if (!filePath?.trim()) continue;
+        emitTimelineEvent(stream, streamId, {
+          type: "file_write",
+          label: `Updated ${filePath.replace(/\\/g, "/")}`,
+          filePath: filePath.replace(/\\/g, "/"),
+          success: true,
+        });
+      }
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -840,6 +909,12 @@ async function streamToRenderer(
       return;
     }
 
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Pipeline failed",
+      success: false,
+      detail: summarizeToolDetail(result.error, false),
+    });
     stream.send({
       type: "error",
       error: safeErrorMessageForUi(result.error ?? "Multi-agent pipeline failed"),
@@ -876,6 +951,8 @@ async function streamToRenderer(
   sendStatusChunk(stream, "prepare", "done");
   sendStatusChunk(stream, "route", "active");
 
+  let emittedReasoningTimeline = false;
+
   const result = await executeModelCompletion(completionInput, {
     onMeta: (resolvedModel, reason) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
@@ -887,10 +964,24 @@ async function streamToRenderer(
     },
     onReasoning: (reasoningDelta) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
+      if (!emittedReasoningTimeline && reasoningDelta.trim()) {
+        emittedReasoningTimeline = true;
+        emitTimelineEvent(stream, streamId, {
+          type: "reasoning",
+          label: "Analyzing…",
+        });
+      }
       stream.send({ type: "reasoning", reasoningDelta });
     },
     onStatus: (phase, status, detail) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
+      if (phase === "think" && status === "active" && !emittedReasoningTimeline) {
+        emittedReasoningTimeline = true;
+        emitTimelineEvent(stream, streamId, {
+          type: "reasoning",
+          label: detail?.trim() ? detail : "Thinking…",
+        });
+      }
       sendStatusChunk(stream, phase, status, detail);
     },
     onToolCall: (toolName, status, detail, writtenPath) => {
@@ -910,6 +1001,7 @@ async function streamToRenderer(
       } else if (status === "done" && toolName === "write_file" && writtenPath) {
         sendStatusChunk(stream, "write", "active", writtenPath);
       }
+      sendToolTimeline(stream, streamId, toolName, status, detail, writtenPath);
       stream.send({
         type: "tool",
         toolName,
@@ -924,6 +1016,11 @@ async function streamToRenderer(
 
   if (getStreamAbortSignal(streamId)?.aborted) {
     markOperationTerminal(streamId, "aborted");
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Generation cancelled",
+      success: false,
+    });
     stream.send({
       type: "error",
       error: "Generare anulată.",
@@ -942,6 +1039,12 @@ async function streamToRenderer(
   }
 
   markOperationTerminal(streamId, result.error?.includes("anulat") ? "aborted" : "failed");
+  emitTimelineEvent(stream, streamId, {
+    type: "error",
+    label: "Stream failed",
+    success: false,
+    detail: summarizeToolDetail(result.error, false),
+  });
   stream.send({
     type: "error",
     error: safeErrorMessageForUi(result.error ?? "Stream failed"),
@@ -977,12 +1080,12 @@ async function streamResumeToRenderer(
     const abortRoot = startAbortableStream(streamId);
     if (!stream.isAlive()) return;
     sendStatusChunk(stream, "prepare", "done");
-    sendMultiAgentStatusChunk(stream, "subagent", "active", "UI delivery resume");
+    sendMultiAgentStatusChunk(stream, streamId, "subagent", "active", "UI delivery resume");
 
     const result = await resumeCavalloMultiAgentPipeline(sender, streamId, input, {
       onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
+        sendMultiAgentStatusChunk(stream, streamId, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
       },
       onMeta: (resolvedModel, reason) => {
         if (!stream.isAlive()) return;
@@ -1014,6 +1117,15 @@ async function streamResumeToRenderer(
       if (result.text?.includes("```")) {
         if (!stream.send({ type: "delta", delta: result.text })) return;
       }
+      for (const filePath of result.writtenFiles ?? []) {
+        if (!filePath?.trim()) continue;
+        emitTimelineEvent(stream, streamId, {
+          type: "file_write",
+          label: `Updated ${filePath.replace(/\\/g, "/")}`,
+          filePath: filePath.replace(/\\/g, "/"),
+          success: true,
+        });
+      }
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -1030,6 +1142,12 @@ async function streamResumeToRenderer(
       return;
     }
 
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Pipeline resume failed",
+      success: false,
+      detail: summarizeToolDetail(result.error, false),
+    });
     stream.send({
       type: "error",
       error: safeErrorMessageForUi(result.error ?? "Pipeline resume failed"),

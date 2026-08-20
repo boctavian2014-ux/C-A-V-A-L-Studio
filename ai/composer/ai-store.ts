@@ -95,6 +95,8 @@ import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import type { PipelineRecapMeta } from './multi-agent/types';
 import { showWorkbenchToast } from '../../src/renderer/commands/workbench-toast';
 import type { IdeContextMode, IdeContextPayload } from '../../src/shared/ai-context-contract';
+import type { TimelineEvent } from '../../src/shared/ai-timeline-contract';
+import { sanitizeTimelineEvent } from '../../src/shared/ai-timeline-contract';
 import { collectRendererIdeContext } from './ide-context-collect';
 
 export interface ChatAttachment {
@@ -118,6 +120,9 @@ export interface ChatMessage {
   reasoning?: string;
   reasoningExpanded?: boolean;
   writtenFiles?: string[];
+  /** Pas 5.4 — unified activity timeline for this assistant message. */
+  timelineEvents?: TimelineEvent[];
+  timelineExpanded?: boolean;
   multiAgentStatus?: string;
   multiAgentSteps?: MultiAgentStepRecord[];
   reasoningBrief?: ReasoningBrief;
@@ -1650,6 +1655,27 @@ export const useAIStore = create<AIStore>()(
               streamCleanup?.();
               streamCleanup = null;
             }
+            return;
+          }
+          if (chunk.type === 'timeline' && chunk.event) {
+            const event = sanitizeTimelineEvent(chunk.event);
+            const prev = get().messages.find((m) => m.id === assistantMsgId);
+            if (!prev) return;
+            if (chunk.streamId && prev.streamId && chunk.streamId !== prev.streamId) return;
+            const existing = prev.timelineEvents ?? [];
+            if (existing.some((e) => e.id === event.id)) return;
+            const patch: Partial<ChatMessage> = {
+              timelineEvents: [...existing, event],
+              timelineExpanded: true,
+            };
+            if (event.type === 'file_write' && event.filePath) {
+              const files = [...(prev.writtenFiles ?? [])];
+              if (!files.includes(event.filePath)) {
+                files.push(event.filePath);
+                patch.writtenFiles = files;
+              }
+            }
+            updateAssistant(patch);
             return;
           }
           if (chunk.type === 'reasoning' && chunk.reasoningDelta) {
