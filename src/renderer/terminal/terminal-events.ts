@@ -29,3 +29,12 @@ export function dispatchRunInTerminal(cmd: string): void {
     new CustomEvent('caval:run-in-terminal', { detail: { cmd, data: cmd } })
   );
 }
+
+/** 7c.3 — command palette → terminal AI actions (handled by TerminalSessions). */
+export type TerminalAiPaletteAction = 'explain' | 'suggest-fix';
+
+export function dispatchTerminalAiPalette(action: TerminalAiPaletteAction): void {
+  document.dispatchEvent(
+    new CustomEvent('caval:terminal-ai-palette', { detail: { action } })
+  );
+}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DebugPanel } from '../debug/DebugPanel';
 import { ProblemsPanel } from '../problems/ProblemsPanel';
 import { TasksPanel } from '../tasks/TasksPanel';
@@ -15,12 +15,17 @@ import { useAIStore } from '../../../../ai/composer/ai-store';
 import type { TerminalPanelTab } from '../../terminal/terminal-events';
 import { dispatchTerminalNew } from '../../terminal/terminal-events';
 import type { TerminalInfo, TerminalOutputLine } from '../../../shared/terminal-contract';
+import {
+  detectRecentTerminalError,
+  TERMINAL_AI_PALETTE,
+  type TerminalAiCommand,
+} from '../../../shared/ai-terminal-contract';
 import { TerminalInput } from './TerminalInput';
 import { TerminalExplainPopover } from './TerminalExplainPopover';
 import { SuggestedCommandsCard } from './SuggestedCommandsCard';
+import { TerminalAiMenu } from './TerminalAiMenu';
 import { buildScrollbackContext } from '../../ai/terminal-explain-client';
-import { useTerminalExplainStore } from '../../store/terminal-explain-store';
-import { useTerminalSuggestStore } from '../../store/terminal-suggest-store';
+import { dispatchTerminalAiCommand } from '../../ai/terminal-ai-dispatch';
 import { showWorkbenchToast } from '../../commands/workbench-toast';
 
 const TERMINAL_HEIGHT_KEY = 'caval-terminal-height';
@@ -39,11 +44,10 @@ export function TerminalSessions() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(
     null
   );
+  const [hasSelection, setHasSelection] = useState(false);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
-  const explain = useTerminalExplainStore((s) => s.explain);
-  const suggest = useTerminalSuggestStore((s) => s.suggest);
 
   useEffect(() => {
     const api = window.caval?.terminal;
@@ -142,6 +146,25 @@ export function TerminalSessions() {
     return sel.toString();
   }, []);
 
+  useEffect(() => {
+    const syncSelection = () => setHasSelection(Boolean(getSelectionInOutput().trim()));
+    document.addEventListener('selectionchange', syncSelection);
+    return () => document.removeEventListener('selectionchange', syncSelection);
+  }, [getSelectionInOutput]);
+
+  const recentOutputText = useMemo(() => {
+    if (!activeTabId) return '';
+    return (output.get(activeTabId) ?? [])
+      .slice(-40)
+      .map((l) => l.data)
+      .join('\n');
+  }, [activeTabId, output]);
+
+  const hasRecentError = useMemo(
+    () => detectRecentTerminalError(recentOutputText),
+    [recentOutputText]
+  );
+
   const runExplainSelection = useCallback(
     (selectedText: string) => {
       if (!activeTabId) {
@@ -155,54 +178,92 @@ export function TerminalSessions() {
       }
       const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
       const scrollbackContext = buildScrollbackContext(lines.slice(-40));
-      void explain({
+      dispatchTerminalAiCommand('explain', {
         terminalId: activeTabId,
         selectedText: text,
         scrollbackContext,
       });
       setContextMenu(null);
     },
-    [activeTabId, explain, output]
+    [activeTabId, output]
   );
 
-  const runSuggestFix = useCallback(() => {
-    if (!activeTabId) {
-      showWorkbenchToast('Niciun terminal activ');
-      return;
-    }
-    const selected = getSelectionInOutput().trim();
-    const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
-    const errorOutput = (selected || lines.slice(-30).join('\n')).trim();
-    if (!errorOutput) {
-      showWorkbenchToast('Nu există output pentru Suggest fix');
-      return;
-    }
-    void suggest({
-      context: 'error',
-      terminalId: activeTabId,
-      errorOutput,
-    });
-    setContextMenu(null);
-  }, [activeTabId, getSelectionInOutput, output, suggest]);
+  const runSuggestFix = useCallback(
+    (errorText?: string) => {
+      if (!activeTabId) {
+        showWorkbenchToast('Niciun terminal activ');
+        return;
+      }
+      const selected = getSelectionInOutput().trim();
+      const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
+      const errorOutput = (errorText ?? (selected || lines.slice(-30).join('\n'))).trim();
+      if (!errorOutput) {
+        showWorkbenchToast('Nu există output pentru Suggest fix');
+        return;
+      }
+      dispatchTerminalAiCommand('suggest-fix', {
+        terminalId: activeTabId,
+        errorOutput,
+        selectedText: selected,
+      });
+      setContextMenu(null);
+    },
+    [activeTabId, getSelectionInOutput, output]
+  );
+
+  const onPaletteCommand = useCallback(
+    (command: TerminalAiCommand) => {
+      if (command === 'explain') {
+        runExplainSelection(getSelectionInOutput() || contextMenu?.text || '');
+        return;
+      }
+      runSuggestFix(contextMenu?.text);
+    },
+    [contextMenu?.text, getSelectionInOutput, runExplainSelection, runSuggestFix]
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
-      if (!(ctrl && e.shiftKey && e.key.toLowerCase() === 'e')) return;
+      if (!(ctrl && e.shiftKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'e' && key !== 'f') return;
+
       const root = panelRef.current;
       if (!root) return;
       const active = document.activeElement;
       const focusedInTerminal = Boolean(active && root.contains(active));
       const selection = getSelectionInOutput();
-      if (!focusedInTerminal && !selection) return;
-      if (!selection) return;
+
+      if (key === 'e') {
+        if (!focusedInTerminal && !selection) return;
+        if (!selection) return;
+        e.preventDefault();
+        e.stopPropagation();
+        runExplainSelection(selection);
+        return;
+      }
+
+      // Ctrl+Shift+F — Suggest when terminal focused + recent error; else leave Search alone.
+      if (!focusedInTerminal) return;
+      if (!hasRecentError && !selection.trim()) return;
       e.preventDefault();
       e.stopPropagation();
-      runExplainSelection(selection);
+      runSuggestFix(selection.trim() || undefined);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [getSelectionInOutput, runExplainSelection]);
+  }, [getSelectionInOutput, hasRecentError, runExplainSelection, runSuggestFix]);
+
+  useEffect(() => {
+    const onPalette = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: TerminalAiCommand }>).detail?.action;
+      if (!action) return;
+      onPaletteCommand(action);
+    };
+    document.addEventListener('caval:terminal-ai-palette', onPalette);
+    return () => document.removeEventListener('caval:terminal-ai-palette', onPalette);
+  }, [onPaletteCommand]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -216,6 +277,9 @@ export function TerminalSessions() {
   const filteredOutput = searchQuery
     ? activeOutput.filter((line) => line.data.toLowerCase().includes(searchQuery.toLowerCase()))
     : activeOutput;
+  const aiAvailable = hasSelection || hasRecentError;
+  const explainShortcut = TERMINAL_AI_PALETTE.find((e) => e.id === 'explain')?.shortcut;
+  const suggestShortcut = TERMINAL_AI_PALETTE.find((e) => e.id === 'suggest-fix')?.shortcut;
 
   return (
     <div
@@ -286,6 +350,7 @@ export function TerminalSessions() {
         <button
           type="button"
           data-testid="terminal-explain-btn"
+          disabled={!hasSelection}
           onClick={() => runExplainSelection(getSelectionInOutput())}
           style={{
             marginLeft: 8,
@@ -295,15 +360,17 @@ export function TerminalSessions() {
             border: '1px solid var(--caval-border)',
             background: 'transparent',
             color: 'var(--caval-text-muted)',
-            cursor: 'pointer',
+            cursor: hasSelection ? 'pointer' : 'not-allowed',
+            opacity: hasSelection ? 1 : 0.45,
           }}
-          title="Explain selected output (Ctrl+Shift+E)"
+          title={`${TERMINAL_AI_PALETTE[0]?.label ?? 'Explain'} (${explainShortcut ?? 'Ctrl+Shift+E'})`}
         >
           Explain
         </button>
         <button
           type="button"
           data-testid="terminal-suggest-btn"
+          disabled={!hasRecentError && !hasSelection}
           onClick={() => runSuggestFix()}
           style={{
             marginLeft: 6,
@@ -313,9 +380,10 @@ export function TerminalSessions() {
             border: '1px solid var(--caval-border)',
             background: 'transparent',
             color: 'var(--caval-text-muted)',
-            cursor: 'pointer',
+            cursor: hasRecentError || hasSelection ? 'pointer' : 'not-allowed',
+            opacity: hasRecentError || hasSelection ? 1 : 0.45,
           }}
-          title="Suggest fix commands from selection or recent output"
+          title={`${TERMINAL_AI_PALETTE[1]?.label ?? 'Suggest fix'} (${suggestShortcut ?? 'Ctrl+Shift+F'})`}
         >
           Suggest fix
         </button>
@@ -330,9 +398,13 @@ export function TerminalSessions() {
         style={{ userSelect: 'text', cursor: 'text' }}
         onContextMenu={(event) => {
           const text = getSelectionInOutput();
-          if (!text.trim()) return;
+          if (!text.trim() && !hasRecentError) return;
           event.preventDefault();
-          setContextMenu({ x: event.clientX, y: event.clientY, text });
+          setContextMenu({
+            x: event.clientX,
+            y: event.clientY,
+            text: text.trim() || recentOutputText.slice(-2000),
+          });
         }}
       >
         {filteredOutput.map((line, index) => (
@@ -344,68 +416,13 @@ export function TerminalSessions() {
       </div>
 
       {contextMenu && (
-        <div
-          role="menu"
-          data-testid="terminal-explain-context-menu"
-          style={{
-            position: 'fixed',
-            left: contextMenu.x,
-            top: contextMenu.y,
-            zIndex: 50,
-            background: 'var(--caval-surface)',
-            border: '1px solid var(--caval-border)',
-            borderRadius: 6,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-            padding: 4,
-            minWidth: 160,
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => runExplainSelection(contextMenu.text)}
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--caval-text)',
-              padding: '6px 10px',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Explain with AI
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              if (!activeTabId) return;
-              void suggest({
-                context: 'error',
-                terminalId: activeTabId,
-                errorOutput: contextMenu.text,
-              });
-              setContextMenu(null);
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--caval-text)',
-              padding: '6px 10px',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Suggest fix
-          </button>
-        </div>
+        <TerminalAiMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          hasSelection={Boolean(getSelectionInOutput().trim())}
+          hasRecentError={hasRecentError || detectRecentTerminalError(contextMenu.text)}
+          onSelect={onPaletteCommand}
+          onClose={() => setContextMenu(null)}
+        />
       )}
 
       <SuggestedCommandsCard />
@@ -417,6 +434,7 @@ export function TerminalSessions() {
           terminalId={activeTab.id}
           onInput={handleInput}
           disabled={activeTab.info.status !== 'active'}
+          aiAvailable={aiAvailable}
         />
       )}
 

@@ -2,6 +2,7 @@ import React from "react";
 
 import type { SuggestedCommand } from "../../../shared/ai-terminal-contract";
 import { useTerminalSuggestStore } from "../../store/terminal-suggest-store";
+import { TerminalAiCard } from "./TerminalAiCard";
 
 export function SuggestedCommandsCard({
   commands: overrideCommands,
@@ -21,69 +22,17 @@ export function SuggestedCommandsCard({
   if (phase === "done" && commands.length === 0) return null;
 
   return (
-    <div
+    <TerminalAiCard
+      variant="suggest"
+      state={phase}
+      title="Suggested commands"
+      onStop={() => stop()}
+      onClose={overrideCommands ? undefined : () => clear()}
       className="suggested-commands-card"
-      role="region"
-      aria-label="Suggested commands"
-      data-testid="suggested-commands-card"
-      style={{
-        margin: "6px 8px",
-        border: "1px solid var(--caval-border)",
-        borderRadius: 8,
-        background: "var(--caval-surface-raised, #161b22)",
-        padding: "8px 10px",
-        fontSize: 12,
-      }}
+      testId="suggested-commands-card"
+      stopTestId="terminal-suggest-stop"
+      style={{ margin: "6px 8px", boxShadow: "none" }}
     >
-      <div
-        className="card-header"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 8,
-          color: "var(--caval-text)",
-          fontWeight: 600,
-        }}
-      >
-        <span>Suggested commands</span>
-        {phase === "loading" && (
-          <button
-            type="button"
-            data-testid="terminal-suggest-stop"
-            onClick={() => stop()}
-            style={{
-              marginLeft: "auto",
-              border: "1px solid var(--caval-border)",
-              background: "transparent",
-              color: "var(--caval-text-muted)",
-              cursor: "pointer",
-              fontSize: 11,
-              borderRadius: 4,
-              padding: "2px 8px",
-            }}
-          >
-            ■ Stop
-          </button>
-        )}
-        {phase !== "loading" && !overrideCommands && (
-          <button
-            type="button"
-            onClick={() => clear()}
-            aria-label="Dismiss suggestions"
-            style={{
-              marginLeft: "auto",
-              border: "none",
-              background: "transparent",
-              color: "var(--caval-text-muted)",
-              cursor: "pointer",
-            }}
-          >
-            ×
-          </button>
-        )}
-      </div>
-
       {phase === "loading" && (
         <div role="status" style={{ color: "var(--caval-text-muted)" }}>
           Suggesting commands…
@@ -173,6 +122,6 @@ export function SuggestedCommandsCard({
           ))}
         </div>
       )}
-    </div>
+    </TerminalAiCard>
   );
 }

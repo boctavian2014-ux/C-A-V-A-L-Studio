@@ -8,8 +8,8 @@ Continuă din M7d (workspace intelligence). Pattern: inventar → prioritate →
 
 | Capacitate | Descriere | Scrie? | Gate | Stare |
 |---|---|---|---|---|
-| Explain output | Explică selecție / ultimele linii din PTY | Nu | Read-only; redacție + caps; untrusted delimiters; abort | ❌ absent |
-| Suggest commands | Propune comenzi din erori / output | Nu (până la confirmare) | Propose-only; allowlist înainte de insert/run; confirm | ❌ absent (precedent: debug/mobile) |
+| Explain output | Explică selecție / ultimele linii din PTY | Nu | Read-only; redacție + caps; untrusted delimiters; abort | ✅ 7c.1 |
+| Suggest commands | Propune comenzi din erori / output | Nu (până la confirmare) | Propose-only; allowlist înainte de insert/run; confirm | ✅ 7c.2 |
 | Output / Problems → Chat | Draft în chat din panou | Nu | Truncate; path prin chat main | ✅ parțial |
 | Interactive PTY | create / write / output | Process spawn | Trusted sender; cwd = workspace bound; shell din main | ✅ M3 |
 | One-shot AI shell | `run_terminal` / tools | Allowlisted cmds | `assertShellCommandAllowed` + redacție | ✅ M5 |
@@ -71,10 +71,12 @@ Continuă din M7d (workspace intelligence). Pattern: inventar → prioritate →
 
 ### 7c.3 — Polish + harden
 
-- Menu / Command Palette: Explain Terminal Output, Suggest Command
-- Formatter comun Output/Problems/Terminal → Chat cu redacție
-- Decizie UI: selection pe `TerminalSessions` vs remount xterm (`TerminalSession.tsx` orphan)
-- Commit: `feat(ui): wire terminal AI actions into menu and harden redaction`
+- Menu / Command Palette: Explain + Suggest fix via `TERMINAL_AI_PALETTE` + `TerminalAiMenu`
+- Shared redaction: `src/main/ai/terminal-redaction.ts` (selection/command reject; scrollback/response truncate)
+- Shared UI: `TerminalAiCard` + Stop identical; AI cue on prompt when selection/error
+- Smoke: `tests/main/ai/terminal-redaction.test.ts`, `tests/renderer/terminal-ai-menu.test.tsx`
+- Commit: `refactor(ai): unify terminal AI menu, redaction, and card UI`
+- Stare: ✅
 
 ## Non-goals (M7c)
 
@@ -102,4 +104,6 @@ Continuă din M7d (workspace intelligence). Pattern: inventar → prioritate →
 | Audit | ✅ acest document |
 | 7c.1 Explain output | ✅ |
 | 7c.2 Suggest commands | ✅ |
-| 7c.3 Polish | ⏳ |
+| 7c.3 Polish | ✅ |
+
+**M7c complete** — explain, suggest, palette unificat, redacție consolidată. M7b rămâne opțional.

@@ -6,9 +6,11 @@ interface TerminalInputProps {
   terminalId: string;
   onInput: (data: string) => Promise<void>;
   disabled: boolean;
+  /** Subtle cue that Explain / Suggest are available (7c.3). */
+  aiAvailable?: boolean;
 }
 
-export function TerminalInput({ terminalId, onInput, disabled }: TerminalInputProps) {
+export function TerminalInput({ terminalId, onInput, disabled, aiAvailable }: TerminalInputProps) {
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -75,8 +77,23 @@ export function TerminalInput({ terminalId, onInput, disabled }: TerminalInputPr
   );
 
   return (
-    <div className="terminal-input-row">
+    <div className="terminal-input-row" style={{ display: "flex", alignItems: "center", gap: 6 }}>
       <span className="terminal-prompt">$</span>
+      {aiAvailable ? (
+        <span
+          data-testid="terminal-ai-available"
+          title="AI available — Explain (Ctrl+Shift+E) or Suggest fix (Ctrl+Shift+F)"
+          aria-label="Terminal AI available"
+          style={{
+            fontSize: 10,
+            color: "var(--caval-accent, #00e0ff)",
+            opacity: 0.75,
+            userSelect: "none",
+          }}
+        >
+          ✦
+        </span>
+      ) : null}
       <input
         ref={inputRef}
         type="text"

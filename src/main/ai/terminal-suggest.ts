@@ -1,17 +1,23 @@
 /**
  * Pas 7c.2 — terminal command suggestions (propose-only; never executes).
+ * Redaction via terminal-redaction.ts only (7c.3).
  */
 
-import { redactSensitiveCommandOutput } from "../../shared/command-output-redaction";
 import {
   buildTerminalSuggestPrompt,
   gateSuggestedCommands,
   parseSuggestedCommands,
+  TERMINAL_EXPLAIN_MAX_SCROLLBACK_BYTES,
+  TERMINAL_SUGGEST_MAX_QUERY_BYTES,
   TERMINAL_SUGGEST_TOOL_NAME,
   validateTerminalSuggestRequestShape,
   type TerminalSuggestRequest,
   type TerminalSuggestResult,
 } from "../../shared/ai-terminal-contract";
+import {
+  redactTerminalContent,
+  TerminalContentTooLargeError,
+} from "./terminal-redaction";
 import { emitTimelineEvent, type TimelineChunkSender } from "./timeline-emit";
 
 export type TerminalSuggestCompleteFn = (input: {
@@ -64,14 +70,37 @@ export async function runTerminalSuggest(input: {
     return { success: false, error: "aborted" };
   }
 
+  let errorOutput: string | undefined;
+  let userQuery: string | undefined;
+  try {
+    if (request.errorOutput) {
+      // Error blobs behave like scrollback: redact + truncate (not silent drop).
+      errorOutput = redactTerminalContent(request.errorOutput, {
+        context: "scrollback",
+        maxBytes: TERMINAL_EXPLAIN_MAX_SCROLLBACK_BYTES,
+      });
+    }
+    if (request.userQuery) {
+      userQuery = redactTerminalContent(request.userQuery, {
+        context: "selection",
+        maxBytes: TERMINAL_SUGGEST_MAX_QUERY_BYTES,
+      });
+    }
+  } catch (err) {
+    if (err instanceof TerminalContentTooLargeError) {
+      return {
+        success: false,
+        error:
+          err.context === "selection" ? "User query too large" : "Error output too large",
+      };
+    }
+    throw err;
+  }
+
   const prompt = buildTerminalSuggestPrompt({
     context: request.context,
-    errorOutput: request.errorOutput
-      ? redactSensitiveCommandOutput(request.errorOutput)
-      : undefined,
-    userQuery: request.userQuery
-      ? redactSensitiveCommandOutput(request.userQuery)
-      : undefined,
+    errorOutput,
+    userQuery,
   });
 
   const completed = await input.complete({

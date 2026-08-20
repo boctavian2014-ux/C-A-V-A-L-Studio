@@ -1,6 +1,7 @@
 /**
  * Pas 7c.1 — AI explain on terminal output (read-only).
  * Pas 7c.2 — Suggest shell commands (propose-only; insert ≠ execute).
+ * Pas 7c.3 — Unified palette entries + shared enable predicates.
  * Main never auto-runs suggestions; never file_write from these flows.
  */
 
@@ -17,12 +18,58 @@ export const TERMINAL_SUGGEST_MAX_QUERY_BYTES = 2 * 1024;
 export const TERMINAL_SUGGEST_MAX_COMMANDS = 3;
 export const TERMINAL_SUGGEST_TOOL_NAME = "suggest_terminal_commands";
 
+/** Unified terminal AI command ids (7c.3). */
+export type TerminalAiCommand = "explain" | "suggest-fix";
+
+export type TerminalAiEnabledWhen = "has-selection" | "has-recent-error" | "always";
+
+export interface TerminalAiPaletteEntry {
+  id: TerminalAiCommand;
+  label: string;
+  shortcut?: string;
+  enabledWhen: TerminalAiEnabledWhen;
+}
+
+export const TERMINAL_AI_PALETTE: TerminalAiPaletteEntry[] = [
+  {
+    id: "explain",
+    label: "Explain with AI",
+    shortcut: "Ctrl+Shift+E",
+    enabledWhen: "has-selection",
+  },
+  {
+    id: "suggest-fix",
+    label: "Suggest fix with AI",
+    shortcut: "Ctrl+Shift+F",
+    enabledWhen: "has-recent-error",
+  },
+];
+
+export function isTerminalAiPaletteEnabled(
+  entry: TerminalAiPaletteEntry,
+  state: { hasSelection: boolean; hasRecentError: boolean }
+): boolean {
+  if (entry.enabledWhen === "always") return true;
+  if (entry.enabledWhen === "has-selection") return state.hasSelection;
+  if (entry.enabledWhen === "has-recent-error") return state.hasRecentError;
+  return false;
+}
+
+/** Heuristic: recent terminal/task output looks like a failure. */
+export function detectRecentTerminalError(text: string): boolean {
+  const sample = text.trim();
+  if (!sample) return false;
+  return /\b(error|err!|failed|failure|exception|elifecycle|enoent|eacces|typeerror|referenceerror|syntaxerror|fatal:|panic:)\b/i.test(
+    sample
+  );
+}
+
 export interface TerminalExplainRequest {
   streamId: string;
   terminalId: string;
   /** Selected terminal output — hard-capped at 4 KB (reject if larger). */
   selectedText: string;
-  /** Optional surrounding scrollback — hard-capped at 2 KB (reject if larger). */
+  /** Optional surrounding scrollback — capped at 2 KB (truncate in redaction). */
   scrollbackContext?: string;
 }
 
@@ -128,9 +175,7 @@ export function validateTerminalExplainRequestShape(
     if (typeof o.scrollbackContext !== "string") {
       return { ok: false, error: "Invalid scrollbackContext" };
     }
-    if (utf8ByteLength(o.scrollbackContext) > TERMINAL_EXPLAIN_MAX_SCROLLBACK_BYTES) {
-      return { ok: false, error: "Scrollback too large" };
-    }
+    // Oversize scrollback is accepted here and truncated in terminal-redaction.ts.
     if (o.scrollbackContext.trim()) {
       scrollbackContext = o.scrollbackContext;
     }
@@ -197,17 +242,19 @@ export function validateTerminalSuggestRequestShape(
   };
 }
 
-/** Redact + size-cap model output; reject edit-like payloads. */
+/** Redact + size-cap model output; reject edit-like payloads. Truncate with [TRUNCATED]. */
 export function sanitizeTerminalExplainText(raw: string | undefined | null): string | null {
   if (typeof raw !== "string") return null;
   let text = redactSensitiveCommandOutput(raw.replace(/\r\n/g, "\n").trim());
   if (!text) return null;
   if (utf8ByteLength(text) > TERMINAL_EXPLAIN_MAX_RESPONSE_BYTES) {
-    let end = TERMINAL_EXPLAIN_MAX_RESPONSE_BYTES;
-    while (end > 0 && utf8ByteLength(text.slice(0, end)) > TERMINAL_EXPLAIN_MAX_RESPONSE_BYTES) {
+    const marker = "\n[TRUNCATED]";
+    const budget = Math.max(0, TERMINAL_EXPLAIN_MAX_RESPONSE_BYTES - utf8ByteLength(marker));
+    let end = Math.min(text.length, budget);
+    while (end > 0 && utf8ByteLength(text.slice(0, end)) > budget) {
       end = Math.floor(end * 0.9);
     }
-    text = `${text.slice(0, Math.max(0, end - 1))}…`;
+    text = `${text.slice(0, Math.max(0, end))}${marker}`;
   }
   if (/^(diff --git|--- a\/|\+\+\+ b\/)/m.test(text)) return null;
   if (/```[\s\S]*```/.test(text) && /"edits"\s*:/.test(text)) return null;

@@ -8,12 +8,15 @@ export interface ShortcutEntry {
 
 const DEFAULT_SHORTCUTS: ShortcutEntry[] = [
   { category: 'Navigation', keys: 'Ctrl+P', label: 'Go to File (Quick Open)' },
+  { category: 'Navigation', keys: 'Ctrl+T', label: 'Search Workspace Symbols' },
   { category: 'Navigation', keys: 'Ctrl+Shift+P', label: 'Command Palette' },
   { category: 'Navigation', keys: 'F12', label: 'Go to Definition' },
   { category: 'Navigation', keys: 'Shift+F12', label: 'Find References' },
   { category: 'View', keys: 'Ctrl+B', label: 'Toggle Sidebar' },
-  { category: 'View', keys: 'Ctrl+Shift+E', label: 'Explorer' },
-  { category: 'View', keys: 'Ctrl+Shift+F', label: 'Search' },
+  { category: 'Navigation', keys: 'Ctrl+Shift+E', label: 'Explorer (or Explain terminal selection)' },
+  { category: 'View', keys: 'Ctrl+Shift+F', label: 'Search (or Suggest fix when terminal has recent error)' },
+  { category: 'AI', keys: 'Ctrl+Shift+E', label: 'Terminal: Explain with AI (when selection)' },
+  { category: 'AI', keys: 'Ctrl+Shift+F', label: 'Terminal: Suggest fix with AI (when recent error)' },
   { category: 'View', keys: 'Ctrl+Shift+G', label: 'Source Control' },
   { category: 'View', keys: 'Ctrl+Shift+X', label: 'Extensions' },
   { category: 'View', keys: 'Ctrl+Shift+/', label: 'Keyboard Shortcuts' },

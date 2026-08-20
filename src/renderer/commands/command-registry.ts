@@ -1,4 +1,5 @@
 import {
+  dispatchTerminalAiPalette,
   dispatchTerminalNew,
   dispatchTerminalPanelTab,
   dispatchTerminalToggle,
@@ -108,6 +109,28 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       category: 'Terminal',
       keywords: ['terminal', 'panel', 'bottom'],
       run: () => dispatchTerminalToggle(),
+    },
+    {
+      id: 'terminal:ai-explain',
+      label: 'Terminal: Explain with AI',
+      category: 'Terminal',
+      shortcut: 'Ctrl+Shift+E',
+      keywords: ['explain', 'ai', 'terminal', 'output'],
+      run: () => {
+        dispatchTerminalPanelTab('terminal');
+        dispatchTerminalAiPalette('explain');
+      },
+    },
+    {
+      id: 'terminal:ai-suggest-fix',
+      label: 'Terminal: Suggest fix with AI',
+      category: 'Terminal',
+      shortcut: 'Ctrl+Shift+F',
+      keywords: ['suggest', 'fix', 'ai', 'terminal', 'error'],
+      run: () => {
+        dispatchTerminalPanelTab('terminal');
+        dispatchTerminalAiPalette('suggest-fix');
+      },
     },
     {
       id: 'view:output',

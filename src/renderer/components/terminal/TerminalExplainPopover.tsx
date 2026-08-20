@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef } from "react";
 
 import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
 import { useTerminalExplainStore } from "../../store/terminal-explain-store";
+import { TerminalAiCard } from "./TerminalAiCard";
 
 /** Ephemeral popover for terminal output explain — does not persist into history.db. */
 export function TerminalExplainPopover(): React.ReactElement | null {
@@ -43,9 +44,6 @@ export function TerminalExplainPopover(): React.ReactElement | null {
     <div
       ref={rootRef}
       className="terminal-explain-popover"
-      role="dialog"
-      aria-label="Terminal output explanation"
-      data-testid="terminal-explain-popover"
       style={{
         position: "absolute",
         right: 12,
@@ -54,84 +52,43 @@ export function TerminalExplainPopover(): React.ReactElement | null {
         width: "min(420px, 92%)",
         maxHeight: "36vh",
         overflow: "auto",
-        background: "var(--caval-surface, #0D1117)",
-        border: "1px solid var(--caval-border, #30363d)",
-        borderRadius: 8,
-        boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
-        padding: "10px 12px",
-        fontFamily: "JetBrains Mono, Consolas, monospace",
-        fontSize: 12,
-        color: "var(--caval-text, #e6edf3)",
       }}
-      onMouseDown={(e) => e.stopPropagation()}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <strong style={{ fontSize: 12 }}>Explain output</strong>
-        <span style={{ color: "var(--caval-text-muted, #8b949e)", fontSize: 10 }}>
-          {panel.terminalId}
-        </span>
+      <TerminalAiCard
+        variant="explain"
+        state={panel.phase}
+        title="Explain output"
+        subtitle={panel.terminalId}
+        onStop={onStop}
+        onClose={() => clear()}
+        testId="terminal-explain-popover"
+        stopTestId="terminal-explain-stop"
+        closeTestId="terminal-explain-close"
+      >
         {panel.phase === "loading" && (
-          <button
-            type="button"
-            data-testid="terminal-explain-stop"
-            onClick={onStop}
-            aria-label="Stop"
-            style={{
-              marginLeft: "auto",
-              border: "1px solid var(--caval-border)",
-              background: "transparent",
-              color: "var(--caval-text-muted)",
-              cursor: "pointer",
-              fontSize: 11,
-              padding: "2px 8px",
-              borderRadius: 4,
-            }}
-          >
-            ■ Stop
-          </button>
+          <div role="status" style={{ color: "var(--caval-text-muted)" }}>
+            Explaining…
+          </div>
         )}
-        {panel.phase !== "loading" && (
-          <button
-            type="button"
-            data-testid="terminal-explain-close"
-            onClick={() => clear()}
-            aria-label="Close"
-            style={{
-              marginLeft: "auto",
-              border: "none",
-              background: "transparent",
-              color: "var(--caval-text-muted)",
-              cursor: "pointer",
-              fontSize: 14,
-            }}
-          >
-            ×
-          </button>
+        {panel.phase === "error" && (
+          <div role="alert" style={{ color: "#EF4444" }}>
+            {panel.error ?? "Explain failed"}
+          </div>
         )}
-      </div>
-      {panel.phase === "loading" && (
-        <div role="status" style={{ color: "var(--caval-text-muted)" }}>
-          Explaining…
-        </div>
-      )}
-      {panel.phase === "error" && (
-        <div role="alert" style={{ color: "#EF4444" }}>
-          {panel.error ?? "Explain failed"}
-        </div>
-      )}
-      {panel.phase === "done" && panel.explanation && (
-        <div
-          className="explanation-content"
-          data-testid="terminal-explain-text"
-          style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}
-        >
-          {panel.explanation}
-        </div>
-      )}
-      <FeatureFirstUseTip
-        feature="explain"
-        active={panel.phase === "loading" || panel.phase === "done"}
-      />
+        {panel.phase === "done" && panel.explanation && (
+          <div
+            className="explanation-content"
+            data-testid="terminal-explain-text"
+            style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}
+          >
+            {panel.explanation}
+          </div>
+        )}
+        <FeatureFirstUseTip
+          feature="explain"
+          active={panel.phase === "loading" || panel.phase === "done"}
+        />
+      </TerminalAiCard>
     </div>
   );
 }

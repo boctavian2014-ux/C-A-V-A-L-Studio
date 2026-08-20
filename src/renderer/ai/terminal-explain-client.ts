@@ -117,11 +117,8 @@ export function assertTerminalSelectionWithinCap(text: string): string | null {
   return null;
 }
 
-export function assertTerminalScrollbackWithinCap(text: string | undefined): string | null {
-  if (!text) return null;
-  if (utf8ByteLength(text) > TERMINAL_EXPLAIN_MAX_SCROLLBACK_BYTES) {
-    return "Scrollback too large for explain";
-  }
+export function assertTerminalScrollbackWithinCap(_text: string | undefined): string | null {
+  // Scrollback oversize is truncated in main terminal-redaction (7c.3) — never hard-reject here.
   return null;
 }
 

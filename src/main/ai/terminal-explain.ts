@@ -1,16 +1,22 @@
 /**
  * Pas 7c.1 — terminal output explain runner (read-only; never writes PTY/disk).
+ * Redaction via terminal-redaction.ts only (7c.3).
  */
 
-import { redactSensitiveCommandOutput } from "../../shared/command-output-redaction";
 import {
   buildTerminalExplainPrompt,
-  sanitizeTerminalExplainText,
+  TERMINAL_EXPLAIN_MAX_SCROLLBACK_BYTES,
+  TERMINAL_EXPLAIN_MAX_SELECTION_BYTES,
   TERMINAL_EXPLAIN_TOOL_NAME,
   validateTerminalExplainRequestShape,
   type TerminalExplainRequest,
   type TerminalExplainResult,
 } from "../../shared/ai-terminal-contract";
+import {
+  redactTerminalContent,
+  redactTerminalResponse,
+  TerminalContentTooLargeError,
+} from "./terminal-redaction";
 import { emitTimelineEvent, type TimelineChunkSender } from "./timeline-emit";
 
 export type TerminalExplainCompleteFn = (input: {
@@ -64,11 +70,28 @@ export async function runTerminalExplain(input: {
     return { success: false, error: "aborted" };
   }
 
-  // Double redaction on ingress (selection + optional scrollback).
-  const safeSelection = redactSensitiveCommandOutput(request.selectedText);
-  const safeScrollback = request.scrollbackContext
-    ? redactSensitiveCommandOutput(request.scrollbackContext)
-    : undefined;
+  let safeSelection: string;
+  let safeScrollback: string | undefined;
+  try {
+    safeSelection = redactTerminalContent(request.selectedText, {
+      context: "selection",
+      maxBytes: TERMINAL_EXPLAIN_MAX_SELECTION_BYTES,
+    });
+    if (request.scrollbackContext) {
+      safeScrollback = redactTerminalContent(request.scrollbackContext, {
+        context: "scrollback",
+        maxBytes: TERMINAL_EXPLAIN_MAX_SCROLLBACK_BYTES,
+      });
+    }
+  } catch (err) {
+    if (err instanceof TerminalContentTooLargeError) {
+      return {
+        success: false,
+        error: err.context === "selection" ? "Selection too large" : err.message,
+      };
+    }
+    throw err;
+  }
 
   const prompt = buildTerminalExplainPrompt({
     selection: safeSelection,
@@ -96,8 +119,7 @@ export async function runTerminalExplain(input: {
     return { success: false, error: completed.error || "Model call failed" };
   }
 
-  // Redact again on the model response before UI.
-  const explanation = sanitizeTerminalExplainText(completed.text);
+  const explanation = redactTerminalResponse(completed.text);
   if (!explanation) {
     return { success: false, error: "Empty or invalid explanation" };
   }
