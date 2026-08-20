@@ -8,8 +8,10 @@ import type { GitCommitInput, GitCommitResult, GitDiffResult } from "../shared/g
 import { GIT_CHANNELS } from "../shared/git-ipc-channels";
 import {
   isValidBranchName,
+  isValidCloneUrl,
   isValidCommitMessage,
   isValidFilePathArray,
+  isValidStashMessage,
 } from "../shared/git-security";
 import { normalizeGithubRepoUrl, repoTargetPath } from "./github-clone";
 import { assertTrustedSender } from "./ipc-trust";
@@ -377,7 +379,21 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.push, async (event, _projectPath?: string, setUpstream?: boolean) => {
+  handle(GIT_CHANNELS.push, async (event, a?: unknown, b?: unknown) => {
+    const typed = a === undefined || (typeof a === "object" && a !== null && !Array.isArray(a));
+    const setUpstream = typed
+      ? (a as { setUpstream?: unknown } | undefined)?.setUpstream === true
+      : b === true;
+    if (typed) {
+      const root = boundRoot(event);
+      const confirmed = await confirmGitAction(
+        event,
+        "Push către remote?",
+        "Această operație contactează remote-ul Git (rețea)."
+      );
+      if (!confirmed) throw new Error("Anulat de utilizator.");
+      return withGitLock(root, () => gitService.push(root, setUpstream));
+    }
     try {
       const root = boundRoot(event);
       const confirmed = await confirmGitAction(
@@ -396,7 +412,21 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.pull, async (event) => {
+  handle(GIT_CHANNELS.pull, async (event, a?: unknown) => {
+    const typed = a === undefined || (typeof a === "object" && a !== null && !Array.isArray(a));
+    const rebase = typed ? (a as { rebase?: unknown } | undefined)?.rebase === true : false;
+    if (typed) {
+      const root = boundRoot(event);
+      const confirmed = await confirmGitAction(
+        event,
+        "Pull de pe remote?",
+        rebase
+          ? "Această operație contactează remote-ul Git (rețea), rulează git pull --rebase și poate modifica working tree."
+          : "Această operație contactează remote-ul Git (rețea) și poate modifica working tree."
+      );
+      if (!confirmed) throw new Error("Anulat de utilizator.");
+      return withGitLock(root, () => gitService.pull(root, rebase));
+    }
     try {
       const root = boundRoot(event);
       const confirmed = await confirmGitAction(
@@ -407,7 +437,7 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
       if (!confirmed) return { ok: false, error: "Anulat de utilizator." };
 
       return await withGitLock(root, async () => {
-        await gitService.pull(root);
+        await gitService.pull(root, false);
         return { ok: true };
       });
     } catch (err: unknown) {
@@ -483,7 +513,12 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.init, async (event) => {
+  handle(GIT_CHANNELS.init, async (event, a?: unknown) => {
+    const typed = a === undefined;
+    if (typed) {
+      const root = boundRoot(event);
+      return withGitLock(root, () => gitService.init(root));
+    }
     try {
       const root = boundRoot(event);
       return await withGitLock(root, async () => {
@@ -495,9 +530,21 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.stash, async (event, _projectPath: string, message?: string) => {
+  handle(GIT_CHANNELS.stash, async (event, a?: unknown, b?: unknown) => {
+    const typed = a === undefined || (typeof a === "object" && a !== null && !Array.isArray(a));
+    if (typed) {
+      const message = (a as { message?: unknown } | undefined)?.message;
+      if (message !== undefined && !isValidStashMessage(message)) {
+        throw new TypeError("Invalid stash message");
+      }
+      const root = boundRoot(event);
+      return withGitLock(root, () =>
+        gitService.stash(root, isValidStashMessage(message) ? message : undefined)
+      );
+    }
     try {
       const root = boundRoot(event);
+      const message = typeof b === "string" ? b : undefined;
       return await withGitLock(root, async () => {
         await gitService.stash(root, message);
         return { ok: true };
@@ -507,7 +554,18 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(GIT_CHANNELS.stashPop, async (event) => {
+  handle(GIT_CHANNELS.stashPop, async (event, a?: unknown) => {
+    const typed = a === undefined;
+    if (typed) {
+      const root = boundRoot(event);
+      const confirmed = await confirmGitAction(
+        event,
+        "Aplică stash (stash pop)?",
+        "Poate produce conflicte sau modifica fișierele din working tree."
+      );
+      if (!confirmed) throw new Error("Anulat de utilizator.");
+      return withGitLock(root, () => gitService.stashPop(root));
+    }
     try {
       const root = boundRoot(event);
       const confirmed = await confirmGitAction(
@@ -526,88 +584,76 @@ export function registerGitHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     }
   });
 
-  handle(
-    GIT_CHANNELS.clone,
-    async (
-      event,
-      input: { url: string; parentDir?: string }
-    ): Promise<{ ok: boolean; path?: string; error?: string }> => {
-      try {
-        const bound = getBoundWorkspaceRoot(event.sender.id)?.trim();
-
-        const normalized = normalizeGithubRepoUrl(input.url);
-        if (!normalized) {
-          return {
-            ok: false,
-            error: "URL GitHub invalid. Folosește owner/repo sau https://github.com/owner/repo",
-          };
-        }
-
-        const confirmed = await confirmGitAction(
-          event,
-          "Clone repo de pe GitHub?",
-          `Remote: ${normalized.cloneUrl}`
-        );
-        if (!confirmed) return { ok: false, error: "Anulat de utilizator." };
-
-        let parentDir = input.parentDir?.trim();
-        if (parentDir) {
-          if (!bound) {
-            return { ok: false, error: "Deschide un folder înainte de clone cu parentDir din renderer." };
-          }
-          try {
-            parentDir = resolveSandboxedWorkspacePath(bound, parentDir);
-          } catch {
-            return { ok: false, error: "parentDir trebuie să fie în workspace-ul legat." };
-          }
-        } else {
-          const win = BrowserWindow.fromWebContents(event.sender);
-          const picked = win
-            ? await dialog.showOpenDialog(win, {
-                title: "Alege folderul unde se clonează repo-ul",
-                properties: ["openDirectory", "createDirectory"],
-              })
-            : await dialog.showOpenDialog({
-                title: "Alege folderul unde se clonează repo-ul",
-                properties: ["openDirectory", "createDirectory"],
-              });
-          if (picked.canceled || !picked.filePaths[0]) {
-            return { ok: false, error: "Clone anulat" };
-          }
-          parentDir = picked.filePaths[0];
-        }
-
-        const target = repoTargetPath(parentDir, normalized.repo);
-        const resolvedParent = path.resolve(parentDir);
-        const resolvedTarget = path.resolve(target);
-        if (
-          !resolvedTarget.startsWith(resolvedParent + path.sep) &&
-          resolvedTarget !== resolvedParent
-        ) {
-          return { ok: false, error: "Cale destinație invalidă" };
-        }
-        if (fsSync.existsSync(resolvedTarget)) {
-          return { ok: false, error: `Folderul există deja: ${resolvedTarget}` };
-        }
-
-        try {
-          await gitExecFile(resolvedParent, ["--version"], { timeoutMs: 15_000 });
-        } catch {
-          return { ok: false, error: "Git nu este instalat sau nu e în PATH" };
-        }
-
-        const lockKey = bound ?? resolvedParent;
-        return await withGitLock(lockKey, async () => {
-          await gitExecFile(
-            resolvedParent,
-            ["clone", "--depth", "1", normalized.cloneUrl, resolvedTarget],
-            { timeoutMs: 300_000, maxBuffer: 20 * 1024 * 1024 }
-          );
-          return { ok: true, path: resolvedTarget };
-        });
-      } catch (err: unknown) {
-        return { ok: false, error: gitService.formatError(err) };
-      }
+  const cloneToPickedDirectory = async (event: IpcMainInvokeEvent, url: string): Promise<string> => {
+    if (!isValidCloneUrl(url)) {
+      throw new TypeError("Invalid clone URL");
     }
-  );
+    const normalized = normalizeGithubRepoUrl(url);
+    if (!normalized) {
+      throw new Error("URL GitHub invalid. Folosește owner/repo sau https://github.com/owner/repo");
+    }
+
+    const confirmed = await confirmGitAction(
+      event,
+      "Clone repo de pe GitHub?",
+      `Remote: ${normalized.cloneUrl}`
+    );
+    if (!confirmed) throw new Error("Anulat de utilizator.");
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const picked = win
+      ? await dialog.showOpenDialog(win, {
+          title: "Alege folderul unde se clonează repo-ul",
+          properties: ["openDirectory", "createDirectory"],
+        })
+      : await dialog.showOpenDialog({
+          title: "Alege folderul unde se clonează repo-ul",
+          properties: ["openDirectory", "createDirectory"],
+        });
+    if (picked.canceled || !picked.filePaths[0]) {
+      throw new Error("Clone anulat");
+    }
+
+    const parentDir = picked.filePaths[0];
+    const target = repoTargetPath(parentDir, normalized.repo);
+    const resolvedParent = path.resolve(parentDir);
+    const resolvedTarget = path.resolve(target);
+    if (!resolvedTarget.startsWith(resolvedParent + path.sep) && resolvedTarget !== resolvedParent) {
+      throw new Error("Cale destinație invalidă");
+    }
+    if (fsSync.existsSync(resolvedTarget)) {
+      throw new Error(`Folderul există deja: ${resolvedTarget}`);
+    }
+
+    const bound = getBoundWorkspaceRoot(event.sender.id)?.trim();
+    await withGitLock(bound ?? resolvedParent, () =>
+      gitService.clone(resolvedParent, normalized.cloneUrl, resolvedTarget)
+    );
+    return resolvedTarget;
+  };
+
+  handle(GIT_CHANNELS.clone, async (event, input: unknown) => {
+    const typed = typeof input === "string";
+    const url =
+      typeof input === "string"
+        ? input
+        : input &&
+            typeof input === "object" &&
+            "url" in input &&
+            typeof (input as { url: unknown }).url === "string"
+          ? (input as { url: string }).url
+          : "";
+
+    if (typed) {
+      const clonedPath = await cloneToPickedDirectory(event, url);
+      return { path: clonedPath };
+    }
+
+    try {
+      const clonedPath = await cloneToPickedDirectory(event, url);
+      return { ok: true, path: clonedPath };
+    } catch (err: unknown) {
+      return { ok: false, error: gitService.formatError(err) };
+    }
+  });
 }

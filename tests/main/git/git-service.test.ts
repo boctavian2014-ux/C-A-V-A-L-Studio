@@ -219,6 +219,46 @@ describe("GitService", () => {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
   });
+
+  it("push/pull/stash/init/clone use hardcoded argv and a -- separator on clone", async () => {
+    const runGit = vi.fn(async () => ok());
+    const service = new GitService({ runGit });
+    const cwd = "/repo";
+
+    await service.push(cwd, true);
+    expect(runGit).toHaveBeenCalledWith(["push", "--set-upstream", "origin", "HEAD"], cwd);
+
+    await service.pull(cwd, true);
+    expect(runGit).toHaveBeenCalledWith(["pull", "--rebase"], cwd);
+
+    await service.stash(cwd, "wip");
+    expect(runGit).toHaveBeenCalledWith(["stash", "push", "-m", "wip"], cwd);
+
+    await service.init(cwd);
+    expect(runGit).toHaveBeenCalledWith(["init"], cwd);
+
+    await service.clone("/parent", "https://github.com/octocat/Hello-World.git", "/parent/Hello-World");
+    const cloneArgs = runGit.mock.calls.find((call) => call[0].includes("clone"))?.[0];
+    expect(cloneArgs).toEqual([
+      "-c",
+      expect.stringMatching(/^core\.hooksPath=/),
+      "clone",
+      "--depth",
+      "1",
+      "--",
+      "https://github.com/octocat/Hello-World.git",
+      "/parent/Hello-World",
+    ]);
+  });
+
+  it("clone rejects non-GitHub URLs before spawn", async () => {
+    const runGit = vi.fn(async () => ok());
+    const service = new GitService({ runGit });
+    await expect(service.clone("/parent", "https://evil.com/repo.git", "/parent/repo")).rejects.toThrow(
+      /invalid clone url/i
+    );
+    expect(runGit).not.toHaveBeenCalled();
+  });
 });
 
 describe("isValidBranchName CLI injection", () => {

@@ -122,4 +122,53 @@ describe("preload-git", () => {
       expect(mockRemoveListener).toHaveBeenCalledWith(GIT_CHANNELS.operationChanged, expect.any(Function));
     });
   });
+
+  describe("push/pull/stash/init", () => {
+    it("invokes typed push without a projectPath", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await gitApi.push({ setUpstream: true });
+      expect(mockInvoke).toHaveBeenCalledWith(GIT_CHANNELS.push, { setUpstream: true });
+    });
+
+    it("rejects non-boolean setUpstream", async () => {
+      await expect(gitApi.push({ setUpstream: "yes" as unknown as boolean })).rejects.toThrow(TypeError);
+      expect(mockInvoke).not.toHaveBeenCalled();
+    });
+
+    it("invokes pull with hardcoded rebase flag only", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await gitApi.pull({ rebase: true });
+      expect(mockInvoke).toHaveBeenCalledWith(GIT_CHANNELS.pull, { rebase: true });
+    });
+
+    it("invokes stash with a message object, not a cwd", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await gitApi.stash("wip");
+      expect(mockInvoke).toHaveBeenCalledWith(GIT_CHANNELS.stash, { message: "wip" });
+    });
+
+    it("invokes init with no arguments", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await gitApi.init();
+      expect(mockInvoke).toHaveBeenCalledWith(GIT_CHANNELS.init);
+    });
+  });
+
+  describe("clone", () => {
+    it("invokes git:clone with a GitHub HTTPS URL", async () => {
+      mockInvoke.mockResolvedValue({ path: "/tmp/Hello-World" });
+      await gitApi.clone("https://github.com/octocat/Hello-World.git");
+      expect(mockInvoke).toHaveBeenCalledWith(
+        GIT_CHANNELS.clone,
+        "https://github.com/octocat/Hello-World.git"
+      );
+    });
+
+    it("rejects file:, localhost, and other blocked clone URLs", async () => {
+      await expect(gitApi.clone("file:///tmp/evil")).rejects.toThrow(TypeError);
+      await expect(gitApi.clone("https://localhost/repo.git")).rejects.toThrow(TypeError);
+      await expect(gitApi.clone("https://127.0.0.1/repo.git")).rejects.toThrow(TypeError);
+      expect(mockInvoke).not.toHaveBeenCalled();
+    });
+  });
 });

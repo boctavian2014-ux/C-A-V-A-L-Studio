@@ -22,11 +22,18 @@ export function normalizeGithubRepoUrl(input: string): NormalizedGithubRepo | nu
     repo = short[2]!.replace(/\.git$/i, '');
   } else {
     const https = raw.match(
-      /^https?:\/\/(?:www\.)?github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+?)(?:\.git)?(?:\/.*)?$/i
+      /^https:\/\/(?:www\.)?github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+?)(?:\.git)?(?:\/.*)?$/i
     );
-    if (https) {
-      owner = https[1]!;
-      repo = https[2]!;
+    const sshScp = raw.match(
+      /^git@github\.com:([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+?)(?:\.git)?$/i
+    );
+    const sshUrl = raw.match(
+      /^ssh:\/\/(?:git@)?github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+?)(?:\.git)?$/i
+    );
+    const match = https ?? sshScp ?? sshUrl;
+    if (match) {
+      owner = match[1]!;
+      repo = match[2]!;
     }
   }
 

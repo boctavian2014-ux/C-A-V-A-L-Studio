@@ -6,6 +6,7 @@ import {
   isValidBranchName,
   isValidCommitMessage,
   isGitFileStatus,
+  isValidCloneUrl,
 } from "../../src/shared/git-security";
 
 describe("isValidFilePath", () => {
@@ -96,5 +97,32 @@ describe("isGitFileStatus", () => {
 
   it("rejects invalid statuses", () => {
     expect(isGitFileStatus("unknown-status")).toBe(false);
+  });
+});
+
+describe("isValidCloneUrl", () => {
+  it("accepts GitHub HTTPS, SSH, and owner/repo shorthand", () => {
+    expect(isValidCloneUrl("https://github.com/octocat/Hello-World.git")).toBe(true);
+    expect(isValidCloneUrl("git@github.com:octocat/Hello-World.git")).toBe(true);
+    expect(isValidCloneUrl("ssh://git@github.com/octocat/Hello-World.git")).toBe(true);
+    expect(isValidCloneUrl("octocat/Hello-World")).toBe(true);
+  });
+
+  it("rejects dangerous protocols and local targets", () => {
+    expect(isValidCloneUrl("file:///etc/passwd")).toBe(false);
+    expect(isValidCloneUrl("ftp://github.com/octocat/Hello-World.git")).toBe(false);
+    expect(isValidCloneUrl("data:text/plain,evil")).toBe(false);
+    expect(isValidCloneUrl("javascript:alert(1)")).toBe(false);
+    expect(isValidCloneUrl("https://localhost/repo.git")).toBe(false);
+    expect(isValidCloneUrl("https://127.0.0.1/repo.git")).toBe(false);
+    expect(isValidCloneUrl("https://192.168.1.10/repo.git")).toBe(false);
+    expect(isValidCloneUrl("https://10.0.0.5/repo.git")).toBe(false);
+    expect(isValidCloneUrl("https://172.16.0.4/repo.git")).toBe(false);
+  });
+
+  it("rejects empty, non-string, and oversized input", () => {
+    expect(isValidCloneUrl("")).toBe(false);
+    expect(isValidCloneUrl(null)).toBe(false);
+    expect(isValidCloneUrl("https://" + "a".repeat(2048))).toBe(false);
   });
 });

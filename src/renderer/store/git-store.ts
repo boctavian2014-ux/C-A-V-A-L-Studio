@@ -323,17 +323,28 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   push: async () => {
-    set({
-      opLoading: false,
-      error: "Push rămâne pe canalul confirmat din main — Pas 4.5.",
-    });
+    set({ opLoading: true, error: null });
+    try {
+      const { upstream } = get();
+      await getGitApi().push(upstream ? undefined : { setUpstream: true });
+      setOpResult(set, { ok: true, message: "Push reușit" });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Push failed") });
+      set({ error: errorMessage(err, "Push failed") });
+    }
   },
 
   pull: async () => {
-    set({
-      opLoading: false,
-      error: "Pull rămâne pe canalul confirmat din main — Pas 4.5.",
-    });
+    set({ opLoading: true, error: null });
+    try {
+      await getGitApi().pull();
+      setOpResult(set, { ok: true, message: "Pull reușit" });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Pull failed") });
+      set({ error: errorMessage(err, "Pull failed") });
+    }
   },
 
   loadLog: async () => {
@@ -383,17 +394,39 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   initRepo: async () => {
-    set({
-      error: "git init rămâne pe canalul legacy — Pas 4.5.",
-    });
+    set({ opLoading: true, error: null });
+    try {
+      await getGitApi().init();
+      setOpResult(set, { ok: true, message: "Repository Git inițializat" });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "git init failed") });
+      set({ error: errorMessage(err, "git init failed") });
+    }
   },
 
   stash: async () => {
-    set({ error: "Stash rămâne pe canalul legacy — Pas 4.5." });
+    set({ opLoading: true, error: null });
+    try {
+      await getGitApi().stash();
+      setOpResult(set, { ok: true, message: "Modificările au fost puse în stash" });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Stash failed") });
+      set({ error: errorMessage(err, "Stash failed") });
+    }
   },
 
   stashPop: async () => {
-    set({ error: "Stash pop rămâne pe canalul legacy — Pas 4.5." });
+    set({ opLoading: true, error: null });
+    try {
+      await getGitApi().stashPop();
+      setOpResult(set, { ok: true, message: "Stash aplicat" });
+      await get().refresh();
+    } catch (err: unknown) {
+      setOpResult(set, { ok: false, message: errorMessage(err, "Stash pop failed") });
+      set({ error: errorMessage(err, "Stash pop failed") });
+    }
   },
 
   setActiveTab: (tab) => set({ activeTab: tab }),

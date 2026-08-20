@@ -4,6 +4,7 @@ import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 import { GitHubMark } from '../brand/GitHubMark';
 import { useOpenWorkspace } from '../../hooks/useOpenWorkspace';
 import { useCavalTheme } from '../../../../themes/theme-provider';
+import type { GitApi } from '../../../shared/git-contract';
 import {
   handleWelcomeCloneKeyDown,
   toggleWelcomeRecentList,
@@ -80,9 +81,10 @@ export function WelcomeWorkspacePanel() {
     setCloning(true);
     setError(null);
     try {
-      const result = await window.caval.git.clone({ url });
-      if (!result.ok || !result.path) {
-        setError(result.error ?? 'Clone eșuat');
+      const git = window.caval.git as GitApi;
+      const result = await git.clone(url);
+      if (!result.path) {
+        setError('Clone eșuat');
         return;
       }
       await openWorkspace(result.path, 'clone');

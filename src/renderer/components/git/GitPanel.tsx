@@ -74,6 +74,12 @@ function operationFeedback(operation: { operation: string; status: string } | nu
       return 'Pushing…';
     case 'pull':
       return 'Pulling…';
+    case 'stash':
+      return 'Stashing…';
+    case 'init':
+      return 'Initializing…';
+    case 'clone':
+      return 'Cloning…';
     default:
       return 'Working…';
   }

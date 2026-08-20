@@ -421,17 +421,44 @@ export class GitService extends EventEmitter {
   }
 
   async init(cwd: string): Promise<void> {
-    await this.runChecked(["init"], cwd);
+    this.emitOperation("init", "running");
+    try {
+      await this.runChecked(["init"], cwd);
+      this.emitOperation("init", "success");
+    } catch (err) {
+      this.emitOperation("init", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async stash(cwd: string, message?: string): Promise<void> {
-    const args =
-      message && message.trim() ? (["stash", "push", "-m", message.trim()] as string[]) : ["stash"];
-    await this.runChecked(args, cwd);
+    this.emitOperation("stash", "running");
+    try {
+      const args =
+        message && message.trim() ? (["stash", "push", "-m", message.trim()] as string[]) : ["stash"];
+      await this.runChecked(args, cwd);
+      this.emitOperation("stash", "success");
+    } catch (err) {
+      this.emitOperation("stash", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async stashPop(cwd: string): Promise<void> {
-    await this.runChecked(["stash", "pop"], cwd);
+    this.emitOperation("stash", "running");
+    try {
+      await this.runChecked(["stash", "pop"], cwd);
+      this.emitOperation("stash", "success");
+    } catch (err) {
+      this.emitOperation("stash", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      await this.emitStatusChanged(cwd);
+    }
   }
 
   async push(cwd: string, setUpstream?: boolean): Promise<void> {
@@ -448,16 +475,35 @@ export class GitService extends EventEmitter {
     }
   }
 
-  async pull(cwd: string): Promise<void> {
+  async pull(cwd: string, rebase = false): Promise<void> {
     this.emitOperation("pull", "running");
     try {
-      await this.runChecked(["pull"], cwd);
+      const args = rebase ? ["pull", "--rebase"] : ["pull"];
+      await this.runChecked(args, cwd);
       this.emitOperation("pull", "success");
     } catch (err) {
       this.emitOperation("pull", "failed", err instanceof Error ? err.message : String(err));
       throw err;
     } finally {
       await this.emitStatusChanged(cwd);
+    }
+  }
+
+  async clone(parentDir: string, cloneUrl: string, targetDir: string): Promise<void> {
+    if (!cloneUrl.startsWith("https://github.com/") || cloneUrl.includes("..") || cloneUrl.startsWith("-")) {
+      throw new Error("Invalid clone URL");
+    }
+    this.emitOperation("clone", "running");
+    try {
+      const hooksPath = process.platform === "win32" ? "NUL" : "/dev/null";
+      await this.runChecked(
+        ["-c", `core.hooksPath=${hooksPath}`, "clone", "--depth", "1", "--", cloneUrl, targetDir],
+        parentDir
+      );
+      this.emitOperation("clone", "success");
+    } catch (err) {
+      this.emitOperation("clone", "failed", err instanceof Error ? err.message : String(err));
+      throw err;
     }
   }
 

@@ -68,8 +68,30 @@ export interface GitDiffResult {
 
 export type GitOperationStatus = "idle" | "running" | "success" | "failed";
 
+export interface GitPushOptions {
+  setUpstream?: boolean;
+}
+
+export interface GitPullOptions {
+  rebase?: boolean;
+}
+
+export interface GitCloneResult {
+  path: string;
+}
+
 export interface GitOperationState {
-  operation: "stage" | "unstage" | "commit" | "checkout" | "fetch" | "pull" | "push";
+  operation:
+    | "stage"
+    | "unstage"
+    | "commit"
+    | "checkout"
+    | "fetch"
+    | "pull"
+    | "push"
+    | "stash"
+    | "init"
+    | "clone";
   status: GitOperationStatus;
   error: string | null;
   timestamp: number;
@@ -86,6 +108,13 @@ export interface GitApi {
   createBranch(name: string, from?: string): Promise<void>;
   diff(file?: string, staged?: boolean): Promise<GitDiffResult>;
   log(limit?: number): Promise<GitLogEntry[]>;
+  push(options?: GitPushOptions): Promise<void>;
+  pull(options?: GitPullOptions): Promise<void>;
+  stash(message?: string): Promise<void>;
+  stashPop(): Promise<void>;
+  init(): Promise<void>;
+  /** Destination directory is chosen in main (dialog), never by the renderer. */
+  clone(url: string): Promise<GitCloneResult>;
   onStatusChange(cb: (status: GitStatus) => void): () => void;
   onOperationChange(cb: (state: GitOperationState) => void): () => void;
 }

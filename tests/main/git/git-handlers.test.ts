@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createIpcHarness } from "../ipc-harness";
@@ -10,6 +11,7 @@ import { gitService } from "../../../src/main/git/git-service";
 const harness = createIpcHarness();
 const boundRoots = new Map<number, string>();
 const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+const showOpenDialog = vi.fn().mockResolvedValue({ canceled: true, filePaths: [] });
 const sendA = vi.fn();
 const sendB = vi.fn();
 const sendDestroyed = vi.fn();
@@ -30,7 +32,7 @@ vi.mock("electron", () => ({
   },
   dialog: {
     showMessageBox,
-    showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
+    showOpenDialog,
   },
 }));
 
@@ -65,6 +67,8 @@ describe("git handlers — typed contract", () => {
     mockAssertTrustedSender.mockImplementation(() => undefined);
     showMessageBox.mockClear();
     showMessageBox.mockResolvedValue({ response: 0 });
+    showOpenDialog.mockClear();
+    showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
     const { registerGitHandlers } = await import("../../../src/main/git-handlers");
     registerGitHandlers((id) => boundRoots.get(id));
   });
@@ -146,5 +150,70 @@ describe("git handlers — typed contract", () => {
     expect(sendB).toHaveBeenCalledWith(GIT_CHANNELS.operationChanged, operationPayload);
     expect(sendDestroyed).not.toHaveBeenCalled();
     expect(harness.sender.send).not.toHaveBeenCalled();
+  });
+
+  it("typed push/pull ignore renderer projectPath and pass only boolean flags", async () => {
+    const push = vi.spyOn(gitService, "push").mockResolvedValue(undefined);
+    const pull = vi.spyOn(gitService, "pull").mockResolvedValue(undefined);
+
+    await harness.invoke(GIT_CHANNELS.push, { setUpstream: true });
+    expect(push).toHaveBeenCalledWith(boundRoot, true);
+
+    await harness.invoke(GIT_CHANNELS.pull, { rebase: true });
+    expect(pull).toHaveBeenCalledWith(boundRoot, true);
+  });
+
+  it("typed push throws when the user cancels confirmation", async () => {
+    const push = vi.spyOn(gitService, "push").mockResolvedValue(undefined);
+    showMessageBox.mockResolvedValueOnce({ response: 1 });
+    await expect(harness.invoke(GIT_CHANNELS.push, {})).rejects.toThrow(/anulat/i);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("clone rejects blocked URLs and non-GitHub hosts before spawn", async () => {
+    const clone = vi.spyOn(gitService, "clone").mockResolvedValue(undefined);
+
+    await expect(harness.invoke(GIT_CHANNELS.clone, "file:///tmp/evil")).rejects.toThrow(TypeError);
+    await expect(harness.invoke(GIT_CHANNELS.clone, "https://localhost/repo.git")).rejects.toThrow(
+      TypeError
+    );
+    await expect(harness.invoke(GIT_CHANNELS.clone, "https://gitlab.com/a/b.git")).rejects.toThrow(
+      /GitHub invalid/i
+    );
+    expect(clone).not.toHaveBeenCalled();
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it("clone destination comes from the dialog, not from renderer parentDir", async () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "caval-clone-parent-"));
+    try {
+      const clone = vi.spyOn(gitService, "clone").mockResolvedValue(undefined);
+      showOpenDialog.mockResolvedValue({
+        canceled: false,
+        filePaths: [parent],
+      });
+
+      const result = await harness.invoke<{ path: string }>(
+        GIT_CHANNELS.clone,
+        "https://github.com/octocat/Hello-World.git"
+      );
+
+      expect(showMessageBox).toHaveBeenCalled();
+      expect(showOpenDialog).toHaveBeenCalled();
+      expect(clone).toHaveBeenCalledTimes(1);
+      expect(clone.mock.calls[0]?.[0]).toBe(path.resolve(parent));
+      expect(clone.mock.calls[0]?.[1]).toBe("https://github.com/octocat/Hello-World.git");
+      expect(clone.mock.calls[0]?.[2]).toBe(path.resolve(parent, "Hello-World"));
+      expect(result.path).toBe(path.resolve(parent, "Hello-World"));
+
+      await harness.invoke(GIT_CHANNELS.clone, {
+        url: "https://github.com/octocat/Hello-World.git",
+        parentDir: "C:\\Windows\\System32",
+      });
+      expect(clone.mock.calls[1]?.[0]).toBe(path.resolve(parent));
+      expect(clone.mock.calls[1]?.[0]).not.toMatch(/Windows\\System32/i);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
   });
 });

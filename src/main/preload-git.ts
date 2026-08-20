@@ -5,17 +5,22 @@ import { GIT_CHANNELS } from "../shared/git-ipc-channels";
 import type {
   GitApi,
   GitBranch,
+  GitCloneResult,
   GitCommitInput,
   GitCommitResult,
   GitDiffResult,
   GitLogEntry,
   GitOperationState,
+  GitPullOptions,
+  GitPushOptions,
   GitStatus,
 } from "../shared/git-contract";
 import {
   isValidBranchName,
+  isValidCloneUrl,
   isValidCommitMessage,
   isValidFilePathArray,
+  isValidStashMessage,
 } from "../shared/git-security";
 
 function assertFiles(files: unknown): asserts files is string[] {
@@ -101,6 +106,65 @@ export const gitApi: GitApi = {
       }
     }
     return ipcRenderer.invoke(GIT_CHANNELS.log, limit) as Promise<GitLogEntry[]>;
+  },
+
+  async push(options) {
+    if (options !== undefined) {
+      if (typeof options !== "object" || options === null || Array.isArray(options)) {
+        throw new TypeError("Push options must be an object");
+      }
+      if (options.setUpstream !== undefined && typeof options.setUpstream !== "boolean") {
+        throw new TypeError("setUpstream must be a boolean");
+      }
+    }
+    const payload: GitPushOptions | undefined = options?.setUpstream
+      ? { setUpstream: true }
+      : options === undefined
+        ? undefined
+        : {};
+    return ipcRenderer.invoke(GIT_CHANNELS.push, payload) as Promise<void>;
+  },
+
+  async pull(options) {
+    if (options !== undefined) {
+      if (typeof options !== "object" || options === null || Array.isArray(options)) {
+        throw new TypeError("Pull options must be an object");
+      }
+      if (options.rebase !== undefined && typeof options.rebase !== "boolean") {
+        throw new TypeError("rebase must be a boolean");
+      }
+    }
+    const payload: GitPullOptions | undefined = options?.rebase
+      ? { rebase: true }
+      : options === undefined
+        ? undefined
+        : {};
+    return ipcRenderer.invoke(GIT_CHANNELS.pull, payload) as Promise<void>;
+  },
+
+  async stash(message) {
+    if (message !== undefined && !isValidStashMessage(message)) {
+      throw new TypeError("Invalid stash message");
+    }
+    return ipcRenderer.invoke(
+      GIT_CHANNELS.stash,
+      message === undefined ? {} : { message }
+    ) as Promise<void>;
+  },
+
+  async stashPop() {
+    return ipcRenderer.invoke(GIT_CHANNELS.stashPop) as Promise<void>;
+  },
+
+  async init() {
+    return ipcRenderer.invoke(GIT_CHANNELS.init) as Promise<void>;
+  },
+
+  async clone(url) {
+    if (!isValidCloneUrl(url)) {
+      throw new TypeError("Invalid clone URL");
+    }
+    return ipcRenderer.invoke(GIT_CHANNELS.clone, url) as Promise<GitCloneResult>;
   },
 
   onStatusChange(cb) {

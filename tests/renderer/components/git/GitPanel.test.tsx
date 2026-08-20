@@ -48,6 +48,12 @@ function createGitMock(status: GitStatus = sampleStatus()) {
       binary: false,
     } satisfies GitDiffResult)),
     log: vi.fn(async () => []),
+    push: vi.fn(async () => undefined),
+    pull: vi.fn(async () => undefined),
+    stash: vi.fn(async () => undefined),
+    stashPop: vi.fn(async () => undefined),
+    init: vi.fn(async () => undefined),
+    clone: vi.fn(async () => ({ path: "/tmp/cloned" })),
     onStatusChange: vi.fn((cb) => {
       statusListeners.push(cb);
       return unsubscribeStatus;
@@ -262,5 +268,34 @@ describe("GitPanel typed API", () => {
     expect(alert).toBeTruthy();
     expect(alert?.getAttribute("role")).toBe("alert");
     expect(alert?.textContent).toMatch(/Deschide un folder/i);
+  });
+
+  it("push and pull call the typed API without a projectPath", async () => {
+    const { api } = createGitMock();
+    const { container } = await renderPanel(api);
+
+    const pushBtn = container.querySelector('button[title="Push"]') as HTMLButtonElement | null;
+    const pullBtn = container.querySelector('button[title="Pull"]') as HTMLButtonElement | null;
+    expect(pushBtn).toBeTruthy();
+    expect(pullBtn).toBeTruthy();
+
+    act(() => {
+      pushBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.push).toHaveBeenCalledTimes(1);
+    expect(api.push).toHaveBeenCalledWith({ setUpstream: true });
+    expect(api.push.mock.calls[0]?.length).toBe(1);
+
+    act(() => {
+      pullBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.pull).toHaveBeenCalledTimes(1);
+    expect(api.pull.mock.calls[0]?.length).toBe(0);
   });
 });
