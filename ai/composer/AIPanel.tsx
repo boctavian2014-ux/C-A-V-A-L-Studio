@@ -24,6 +24,7 @@ import { formatProjectCompletionWaitMessage } from './project-completion-announc
 import { RoleMapPanel } from './RoleMapPanel';
 import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
 import { WrittenFilesCard } from './WrittenFilesCard';
+import { AIOnboarding } from './AIOnboarding';
 import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
 import { formatHistoryWhen } from '../../src/shared/ai-history-contract';
 
@@ -1166,8 +1167,18 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         flex: 1, overflowY: 'auto', padding: messages.length === 0 ? 0 : '10px',
         display: 'flex', flexDirection: 'column', gap: 10,
       }}>
-        {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
-        {messages.length > 0 && <div ref={messagesEndRef} />}
+        {messages.length === 0 ? (
+          <AIOnboarding
+            onStartChat={(prompt) => {
+              if (prompt?.trim()) void sendMessage(prompt.trim());
+            }}
+          />
+        ) : (
+          <>
+            {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
+            <div ref={messagesEndRef} />
+          </>
+        )}
       </div>
 
       {/* ── Input ──────────────────────────── */}

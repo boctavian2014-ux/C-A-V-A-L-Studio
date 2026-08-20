@@ -4,6 +4,7 @@ import type * as MonacoType from "monaco-editor";
 
 import { acceptQuickFixPreview, rejectQuickFixPreview } from "../../ai/quick-fix-controller";
 import { useQuickFixStore } from "../../store/quick-fix-store";
+import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
 
 export function QuickFixDiffPreview(): React.ReactElement | null {
   const session = useQuickFixStore((s) => s.session);
@@ -130,6 +131,13 @@ export function QuickFixDiffPreview(): React.ReactElement | null {
             }}
           >
             {session.explanation}
+            <FeatureFirstUseTip feature="quick-fix" active={session.phase === "preview"} />
+          </div>
+        )}
+
+        {session.phase === "preview" && !session.explanation && (
+          <div style={{ padding: "0 14px 8px" }}>
+            <FeatureFirstUseTip feature="quick-fix" active />
           </div>
         )}
 

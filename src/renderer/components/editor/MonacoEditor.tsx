@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '../../monaco-setup';
 import Editor, { useMonaco, type OnMount, type OnChange } from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
@@ -12,6 +12,8 @@ import { registerMonacoEditor } from '../../store/editor-command-store';
 import { useProblemsStore } from '../../store/problems-store';
 import { provideGatedInlineCompletion } from '../../ai/inline-completion-provider';
 import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
+import { FeatureFirstUseTip } from '../ai/FeatureFirstUseTip';
+import { hasSeenFeature, markFeatureSeen } from '../../store/onboarding-store';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -115,6 +117,16 @@ const EDITOR_OPTIONS: MonacoType.editor.IStandaloneEditorConstructionOptions = {
 // ──────────────────────────────────────────────
 
 export function MonacoEditor() {
+  const [inlineTipActive, setInlineTipActive] = useState(false);
+
+  useEffect(() => {
+    const onShown = () => {
+      if (!hasSeenFeature('inline')) setInlineTipActive(true);
+    };
+    window.addEventListener('caval:inline-suggestion-shown', onShown);
+    return () => window.removeEventListener('caval:inline-suggestion-shown', onShown);
+  }, []);
+
   const monaco = useMonaco();
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
   const { theme } = useCavalTheme();
@@ -301,6 +313,13 @@ export function MonacoEditor() {
         if (!gated.suggestion || token.isCancellationRequested) {
           return { items: [] };
         }
+        if (!hasSeenFeature('inline')) {
+          try {
+            window.dispatchEvent(new CustomEvent('caval:inline-suggestion-shown'));
+          } catch {
+            /* ignore */
+          }
+        }
         return {
           items: [
             {
@@ -329,6 +348,7 @@ export function MonacoEditor() {
       (_accessor, filePathArg) => {
         const filePath = typeof filePathArg === 'string' ? filePathArg : '';
         if (!filePath) return;
+        markFeatureSeen('inline');
         void import('../../ai/inline-completion-timeline.js').then(async (m) => {
           const { timelineEvents, success } = await m.emitEditorFileWriteTimeline({
             filePath,
@@ -546,6 +566,15 @@ export function MonacoEditor() {
           <span style={{ color: 'var(--caval-text-muted)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5 }}>
             {activeTab.path.replace(/^preview:\/\//, '')}
           </span>
+        </div>
+      )}
+      {inlineTipActive && (
+        <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--caval-border)' }}>
+          <FeatureFirstUseTip
+            feature="inline"
+            active={inlineTipActive}
+            onDismiss={() => setInlineTipActive(false)}
+          />
         </div>
       )}
       {/* Breadcrumb */}

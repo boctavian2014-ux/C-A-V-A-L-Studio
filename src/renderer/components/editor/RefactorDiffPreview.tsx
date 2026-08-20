@@ -8,6 +8,7 @@ import {
   revertLastRefactorApply,
 } from "../../ai/refactor-controller";
 import { useRefactorStore } from "../../store/refactor-store";
+import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
 
 export function RefactorDiffPreview(): React.ReactElement | null {
   const session = useRefactorStore((s) => s.session);
@@ -193,6 +194,13 @@ export function RefactorDiffPreview(): React.ReactElement | null {
             }}
           >
             {session.explanation}
+            <FeatureFirstUseTip feature="refactor" active />
+          </div>
+        )}
+
+        {session.phase === "preview" && !session.explanation && (
+          <div style={{ padding: "0 14px 8px" }}>
+            <FeatureFirstUseTip feature="refactor" active />
           </div>
         )}
 

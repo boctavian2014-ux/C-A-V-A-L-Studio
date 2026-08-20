@@ -1,6 +1,7 @@
 import React from "react";
 
 import { useExplainPanelStore } from "../../store/explain-panel-store";
+import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
 
 /** Ephemeral inline panel for selection explain — does not persist into the model. */
 export function ExplainSelectionPanel(): React.ReactElement | null {
@@ -68,6 +69,10 @@ export function ExplainSelectionPanel(): React.ReactElement | null {
           {panel.explanation}
         </div>
       )}
+      <FeatureFirstUseTip
+        feature="explain"
+        active={panel.phase === "loading" || panel.phase === "ready"}
+      />
     </div>
   );
 }
