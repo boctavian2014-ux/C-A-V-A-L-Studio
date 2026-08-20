@@ -14,6 +14,7 @@ import {
   type TimelineEvent,
   type TimelineEventInput,
 } from "../../shared/ai-timeline-contract";
+import { loadAiSettingsSync } from "../ai/ai-settings";
 
 export const AI_PERSIST_MESSAGE_MAX_BYTES = 32 * 1024;
 export const AI_PERSIST_SNAPSHOT_MAX_BYTES = 64 * 1024;
@@ -105,8 +106,12 @@ function utf8ByteLength(text: string): number {
 }
 
 /** Redact + truncate to max UTF-8 bytes, appending a truncation marker when clipped. */
-export function gatePersistedText(raw: string, maxBytes: number): string {
-  const redacted = redactSensitiveCommandOutput(raw ?? "");
+export function gatePersistedText(
+  raw: string,
+  maxBytes: number,
+  redactionLevel: import("../../shared/ai-settings-contract").AiRedactionLevel = "standard"
+): string {
+  const redacted = redactSensitiveCommandOutput(raw ?? "", redactionLevel);
   if (utf8ByteLength(redacted) <= maxBytes) return redacted;
 
   const marker = AI_PERSIST_TRUNCATION_MARKER;
@@ -197,6 +202,15 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_SQL);
+
+  function persistPolicy() {
+    const settings = loadAiSettingsSync(boundRoot);
+    return {
+      messageBytes: Math.max(8 * 1024, settings.messageCapKB * 1024),
+      snapshotBytes: Math.max(16 * 1024, settings.snapshotCapKB * 1024),
+      redactionLevel: settings.redactionLevel,
+    };
+  }
 
   const touchConversation = db.prepare(
     `UPDATE conversations SET updated_at = ? WHERE id = ?`
@@ -350,9 +364,10 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       }
       const convId = requested || randomUUID();
       const now = Date.now();
+      const policy = persistPolicy();
       const safeTitle =
         typeof title === "string" && title.trim()
-          ? gatePersistedText(title.trim(), 500)
+          ? gatePersistedText(title.trim(), 500, policy.redactionLevel)
           : null;
       insertConversation.run({
         id: convId,
@@ -387,7 +402,8 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     },
 
     updateConversationTitle(id: string, title: string): void {
-      const safe = gatePersistedText(title.trim(), 500);
+      const policy = persistPolicy();
+      const safe = gatePersistedText(title.trim(), 500, policy.redactionLevel);
       updateTitle.run(safe, Date.now(), id);
     },
 
@@ -412,7 +428,12 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       const finalId =
         requested && !api.getMessage(requested) ? requested : randomUUID();
       const now = Date.now();
-      const gated = gatePersistedText(content, AI_PERSIST_MESSAGE_MAX_BYTES);
+      const policy = persistPolicy();
+      const gated = gatePersistedText(
+        content,
+        policy.messageBytes || AI_PERSIST_MESSAGE_MAX_BYTES,
+        policy.redactionLevel
+      );
       insertMessage.run({
         id: finalId,
         conversation_id: conversationId,
@@ -469,19 +490,24 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       if (!messageExists.get(messageId)) {
         throw new Error("Message not found");
       }
+      const policy = persistPolicy();
       const insertMany = db.transaction((list: TimelineEvent[]) => {
         for (const raw of list) {
           const sanitized = sanitizeTimelineEvent(raw as TimelineEventInput);
           const detail =
             typeof sanitized.detail === "string"
-              ? gatePersistedText(sanitized.detail, AI_PERSIST_MESSAGE_MAX_BYTES)
+              ? gatePersistedText(
+                  sanitized.detail,
+                  policy.messageBytes || AI_PERSIST_MESSAGE_MAX_BYTES,
+                  policy.redactionLevel
+                )
               : null;
           insertTimeline.run({
             id: sanitized.id,
             message_id: messageId,
             type: sanitized.type,
             timestamp: sanitized.timestamp,
-            label: gatePersistedText(sanitized.label, 500),
+            label: gatePersistedText(sanitized.label, 500, policy.redactionLevel),
             detail,
             tool_name: sanitized.toolName ?? null,
             file_path: sanitized.filePath ? normalizeRelPath(sanitized.filePath) : null,
@@ -511,13 +537,15 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       if (!messageExists.get(messageId)) {
         throw new Error("Message not found");
       }
+      const policy = persistPolicy();
       const insertMany = db.transaction((list: WrittenFile[]) => {
         for (const file of list) {
           const filePath = normalizeRelPath(file.filePath);
           if (!filePath || filePath.includes("..")) continue;
           const snapshot = gatePersistedText(
             file.snapshot ?? "",
-            AI_PERSIST_SNAPSHOT_MAX_BYTES
+            policy.snapshotBytes || AI_PERSIST_SNAPSHOT_MAX_BYTES,
+            policy.redactionLevel
           );
           insertWritten.run({
             id: file.id?.trim() || randomUUID(),
@@ -567,10 +595,15 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       }
       const now = Date.now();
       const feedbackId = randomUUID();
+      const policy = persistPolicy();
       const gatedComment =
         comment == null || !String(comment).trim()
           ? null
-          : gatePersistedText(String(comment).trim(), AI_PERSIST_FEEDBACK_COMMENT_MAX_BYTES);
+          : gatePersistedText(
+              String(comment).trim(),
+              AI_PERSIST_FEEDBACK_COMMENT_MAX_BYTES,
+              policy.redactionLevel
+            );
       upsertFeedback.run({
         id: feedbackId,
         message_id: messageId,

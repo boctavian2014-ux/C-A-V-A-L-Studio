@@ -534,6 +534,26 @@ contextBridge.exposeInMainWorld("caval", {
         error?: string;
       }>,
   },
+  aiSettings: {
+    getSettings: () =>
+      ipcRenderer.invoke("caval:ai-settings-get") as Promise<{
+        ok: boolean;
+        settings?: import("../shared/ai-settings-contract").AiSettings;
+        error?: string;
+      }>,
+    updateSettings: (partial: Partial<import("../shared/ai-settings-contract").AiSettings>) =>
+      ipcRenderer.invoke("caval:ai-settings-update", { partial }) as Promise<{
+        ok: boolean;
+        settings?: import("../shared/ai-settings-contract").AiSettings;
+        error?: string;
+      }>,
+    resetSettings: () =>
+      ipcRenderer.invoke("caval:ai-settings-reset") as Promise<{
+        ok: boolean;
+        settings?: import("../shared/ai-settings-contract").AiSettings;
+        error?: string;
+      }>,
+  },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{
       ok: boolean;

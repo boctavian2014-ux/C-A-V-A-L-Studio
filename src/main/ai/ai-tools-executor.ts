@@ -1,5 +1,6 @@
 import type { AiToolCall, AiToolName, AiToolResult } from "../../shared/ai-tools-contract";
 import { isAiToolName } from "../../shared/ai-tools-contract";
+import type { AiRedactionLevel } from "../../shared/ai-settings-contract";
 import { redactSensitiveCommandOutput } from "../../shared/command-output-redaction";
 import { isPreviewTarget, type PreviewState, type PreviewTarget } from "../../shared/preview-contract";
 import type { Problem } from "../../shared/problems-contract";
@@ -8,6 +9,7 @@ import { gitService } from "../git/git-service";
 import { previewLauncher } from "../preview/preview-launcher";
 import { problemsService } from "../problems/problems-service";
 import { tasksService } from "../tasks/tasks-service";
+import { loadAiSettingsSync } from "./ai-settings";
 
 export interface AiToolsExecutorDeps {
   getProblems: (file?: string) => Problem[];
@@ -15,6 +17,9 @@ export interface AiToolsExecutorDeps {
   listTasks: (workspaceRoot: string) => Array<{ name: string }>;
   runTask: (workspaceRoot: string, taskName: string) => Promise<{ status: string; id?: string }>;
   startPreview: (target: PreviewTarget, workspaceRoot: string) => Promise<PreviewState>;
+  /** Test override — skip disk settings read. */
+  isToolEnabled?: (tool: AiToolName) => boolean;
+  redactionLevel?: AiRedactionLevel;
 }
 
 const defaultDeps: AiToolsExecutorDeps = {
@@ -29,11 +34,11 @@ function fail(id: string, error: string): AiToolResult {
   return { id, success: false, output: "", error };
 }
 
-function ok(id: string, output: string): AiToolResult {
+function ok(id: string, output: string, level: AiRedactionLevel): AiToolResult {
   return {
     id,
     success: true,
-    output: redactSensitiveCommandOutput(output),
+    output: redactSensitiveCommandOutput(output, level),
   };
 }
 
@@ -42,14 +47,33 @@ function requireWorkspaceRoot(workspaceRoot: string): string | null {
   return root.length > 0 ? root : null;
 }
 
+function resolveToolGate(
+  root: string,
+  tool: AiToolName,
+  deps: AiToolsExecutorDeps
+): { enabled: boolean; redactionLevel: AiRedactionLevel } {
+  if (deps.isToolEnabled) {
+    return {
+      enabled: deps.isToolEnabled(tool),
+      redactionLevel: deps.redactionLevel ?? "standard",
+    };
+  }
+  const settings = loadAiSettingsSync(root);
+  return {
+    enabled: settings.toolsEnabled[tool] !== false,
+    redactionLevel: deps.redactionLevel ?? settings.redactionLevel,
+  };
+}
+
 async function executeGetProblems(
   call: AiToolCall,
   _workspaceRoot: string,
-  deps: AiToolsExecutorDeps
+  deps: AiToolsExecutorDeps,
+  redactionLevel: AiRedactionLevel
 ): Promise<AiToolResult> {
   try {
     const problems = deps.getProblems().slice(0, 25);
-    return ok(call.id, JSON.stringify(problems, null, 2));
+    return ok(call.id, JSON.stringify(problems, null, 2), redactionLevel);
   } catch (error) {
     return fail(call.id, error instanceof Error ? error.message : String(error));
   }
@@ -58,11 +82,12 @@ async function executeGetProblems(
 async function executeGitStatus(
   call: AiToolCall,
   workspaceRoot: string,
-  deps: AiToolsExecutorDeps
+  deps: AiToolsExecutorDeps,
+  redactionLevel: AiRedactionLevel
 ): Promise<AiToolResult> {
   try {
     const status = await deps.gitStatus(workspaceRoot);
-    return ok(call.id, JSON.stringify(status, null, 2));
+    return ok(call.id, JSON.stringify(status, null, 2), redactionLevel);
   } catch (error) {
     return fail(call.id, error instanceof Error ? error.message : String(error));
   }
@@ -71,7 +96,8 @@ async function executeGitStatus(
 async function executeRunTask(
   call: AiToolCall,
   workspaceRoot: string,
-  deps: AiToolsExecutorDeps
+  deps: AiToolsExecutorDeps,
+  redactionLevel: AiRedactionLevel
 ): Promise<AiToolResult> {
   const taskName = call.args.taskName;
   if (!isValidTaskName(taskName)) {
@@ -86,7 +112,10 @@ async function executeRunTask(
   try {
     const run = await deps.runTask(workspaceRoot, taskName);
     const success = run.status === "success";
-    const body = redactSensitiveCommandOutput(`Task ${taskName}: ${run.status}`);
+    const body = redactSensitiveCommandOutput(
+      `Task ${taskName}: ${run.status}`,
+      redactionLevel
+    );
     return {
       id: call.id,
       success,
@@ -101,7 +130,8 @@ async function executeRunTask(
 async function executeOpenPreview(
   call: AiToolCall,
   workspaceRoot: string,
-  deps: AiToolsExecutorDeps
+  deps: AiToolsExecutorDeps,
+  redactionLevel: AiRedactionLevel
 ): Promise<AiToolResult> {
   if (!isPreviewTarget(call.args.target)) {
     return fail(call.id, "Invalid target (expected web or mobile)");
@@ -118,7 +148,8 @@ async function executeOpenPreview(
     }
     return ok(
       call.id,
-      `Preview ${target} ${state.status}${state.url ? ` url=${state.url}` : ""}`
+      `Preview ${target} ${state.status}${state.url ? ` url=${state.url}` : ""}`,
+      redactionLevel
     );
   } catch (error) {
     return fail(call.id, error instanceof Error ? error.message : String(error));
@@ -128,6 +159,7 @@ async function executeOpenPreview(
 /**
  * Execute a safe IDE tool against the bound workspace root.
  * Never trusts cwd / paths from the model — only `workspaceRoot` from the caller.
+ * Pas 7e.3 — disabled tools return an explicit error (not silent).
  */
 export async function executeAiTool(
   call: AiToolCall,
@@ -150,16 +182,20 @@ export async function executeAiTool(
   }
 
   const resolved: AiToolsExecutorDeps = { ...defaultDeps, ...deps };
+  const gate = resolveToolGate(root, call.name as AiToolName, resolved);
+  if (!gate.enabled) {
+    return fail(call.id, `Tool ${call.name} is disabled in settings`);
+  }
 
   switch (call.name as AiToolName) {
     case "get_problems":
-      return executeGetProblems(call, root, resolved);
+      return executeGetProblems(call, root, resolved, gate.redactionLevel);
     case "git_status":
-      return executeGitStatus(call, root, resolved);
+      return executeGitStatus(call, root, resolved, gate.redactionLevel);
     case "run_task":
-      return executeRunTask(call, root, resolved);
+      return executeRunTask(call, root, resolved, gate.redactionLevel);
     case "open_preview":
-      return executeOpenPreview(call, root, resolved);
+      return executeOpenPreview(call, root, resolved, gate.redactionLevel);
     default:
       return fail(call.id, `Unknown tool: ${call.name}`);
   }

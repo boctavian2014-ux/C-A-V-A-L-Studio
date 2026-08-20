@@ -4,6 +4,7 @@ import {
   MULTI_AGENT_LABELS,
   type MultiAgentStepRecord,
 } from './chat-activity-types';
+import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
 
 export interface ChatMessageTimelineSource {
   timelineEvents?: TimelineEvent[];
@@ -74,7 +75,8 @@ export function ChatUnifiedTimeline({
 }) {
   const rows = useMemo(() => mergeUnifiedTimelineRows(message), [message]);
   const streaming = Boolean(message.isStreaming);
-  const [localExpanded, setLocalExpanded] = useState(true);
+  const timelineDetail = useAiSettingsStore((s) => s.settings.timelineDetail);
+  const [localExpanded, setLocalExpanded] = useState(timelineDetail === 'verbose');
   const expanded = streaming
     ? true
     : message.timelineExpanded ?? localExpanded;
@@ -87,6 +89,7 @@ export function ChatUnifiedTimeline({
   };
 
   const visible = expanded ? rows : rows.slice(-2);
+  const showDetail = timelineDetail === 'verbose';
 
   return (
     <div
@@ -163,7 +166,7 @@ export function ChatUnifiedTimeline({
           />
           <span style={{ minWidth: 0 }}>
             <span>{event.label}</span>
-            {event.detail ? (
+            {showDetail && event.detail ? (
               <span style={{ display: 'block', fontSize: 10.5, color: 'var(--caval-text-muted)' }}>
                 {event.detail}
               </span>

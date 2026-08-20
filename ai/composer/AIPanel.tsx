@@ -26,7 +26,9 @@ import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
 import { WrittenFilesCard } from './WrittenFilesCard';
 import { AIOnboarding } from './AIOnboarding';
 import { MessageFeedbackButtons } from './MessageFeedback';
+import { AiSettingsPanel } from './AiSettingsPanel';
 import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
+import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
 import { formatHistoryWhen } from '../../src/shared/ai-history-contract';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
@@ -732,10 +734,16 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const exportHistoryConversation = useAiHistoryStore((s) => s.exportConversation);
   const activeThreadId = useAIStore((s) => s.activeThreadId);
   const exportConversationId = activeHistoryId ?? activeThreadId;
+  const [showAiSettings, setShowAiSettings] = useState(false);
+  const refreshAiSettings = useAiSettingsStore((s) => s.refresh);
 
   useEffect(() => {
     void refreshHistory();
   }, [projectPath, refreshHistory]);
+
+  useEffect(() => {
+    void refreshAiSettings();
+  }, [projectPath, refreshAiSettings]);
 
   const inputDraftHash = useMemo(
     () => (input.trim() ? hashChatDraft(input, selectedModel, projectPath) : null),
@@ -935,6 +943,22 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button
+          type="button"
+          data-testid="ai-settings-open"
+          onClick={() => setShowAiSettings((v) => !v)}
+          title="AI settings"
+          style={{
+            width: 24, height: 24, borderRadius: 4, border: 'none',
+            background: showAiSettings ? 'var(--caval-accent-glow)' : 'none',
+            color: showAiSettings ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13,
+          }}
+        >
+          ⚙
+        </button>
         {messages.length > 0 && (
           <button
             onClick={clearChat}
@@ -970,6 +994,10 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </div>
       </div>
 
+      {showAiSettings ? (
+        <AiSettingsPanel onClose={() => setShowAiSettings(false)} />
+      ) : (
+      <>
       {/* Workspace bar — folder deschis + Chat nou (fără tab-uri vechi) */}
       <div
         style={{
@@ -1508,6 +1536,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

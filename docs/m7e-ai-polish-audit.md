@@ -58,7 +58,12 @@ Toate sunt **low-risk** față de M5/M6: nicio suprafață nouă de scriere AI �
 
 ### 7e.3 — Setări granulare
 
-- Toggle per tool / nivel redacție / caps (config, nu date conversație).
+- `{workspace}/.cavalo/ai/settings.json` (nu history.db).
+- Toggle tools / redaction level / caps / timeline detail.
+- Gate în `executeAiTool`; caps + redaction în persistență.
+- UI: `AiSettingsPanel` din AIPanel (⚙).
+- Smoke: `tests/main/ai/ai-settings.test.ts`, `tests/main/ai/tool-registry-settings-gate.test.ts`.
+- Commit: `feat(ai): add granular settings for tools, redaction, and caps`
 
 ### 7e.4 — Performanță + A11y
 
@@ -78,4 +83,5 @@ Toate sunt **low-risk** față de M5/M6: nicio suprafață nouă de scriere AI �
 | Audit | ✅ acest document |
 | 7e.1 Onboarding | ✅ empty state + tip-uri prim-use (localStorage) |
 | 7e.2 Feedback 👍/👎 | ✅ `message_feedback` + IPC + UI pe assistant bubbles |
-| 7e.3–7e.4 | pending |
+| 7e.3 Setări granulare | ✅ settings.json + tool gate + caps/redaction/timeline |
+| 7e.4 | pending |

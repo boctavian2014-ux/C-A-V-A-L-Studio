@@ -606,6 +606,25 @@ interface CavalBridge {
       streamId?: string
     ) => Promise<{ ok: boolean; error?: string }>;
   };
+  aiSettings?: {
+    getSettings: () => Promise<{
+      ok: boolean;
+      settings?: import('../../src/shared/ai-settings-contract').AiSettings;
+      error?: string;
+    }>;
+    updateSettings: (
+      partial: Partial<import('../../src/shared/ai-settings-contract').AiSettings>
+    ) => Promise<{
+      ok: boolean;
+      settings?: import('../../src/shared/ai-settings-contract').AiSettings;
+      error?: string;
+    }>;
+    resetSettings: () => Promise<{
+      ok: boolean;
+      settings?: import('../../src/shared/ai-settings-contract').AiSettings;
+      error?: string;
+    }>;
+  };
   pipelineResumeStream?: (
     input: {
       runId: string;
