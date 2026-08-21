@@ -5,7 +5,6 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
 import { IconFolder } from '../brand/CavaloIcons';
-import { PreviewPanel } from './PreviewPanel';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -234,7 +233,10 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
   const projectName = projectPath?.split(/[/\\]/).pop() ?? 'Fără proiect';
 
   return (
-    <div style={{
+    <div
+      className="explorer-panel"
+      data-testid="explorer-root"
+      style={{
       width: 240,
       background: theme.colors.surface,
       borderRight: `1px solid ${theme.colors.border}`,
@@ -269,24 +271,21 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
         </div>
       </div>
 
-      <div style={{ flexShrink: 0 }}>
-        <PreviewPanel />
-      </div>
-
       {/* Tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}
         onClick={() => contextMenu && setContextMenu(null)}
+        className="explorer-panel"
+        data-testid="explorer-panel"
       >
         {fileTree.length === 0 ? (
           <div style={{
             padding: '24px 16px', textAlign: 'center',
             color: theme.colors.textMuted, fontSize: 12, lineHeight: 1.6,
-          }}>
+          }} data-testid="explorer-empty-state">
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
               <Cavalo3DIcon name="home" size={44} />
             </div>
-            <div>Deschide un folder</div>
-            <div>pentru a începe</div>
+            <p style={{ margin: 0 }}>Deschide un folder pentru a începe</p>
             <button
               onClick={handleOpenFolder}
               style={{

@@ -39,11 +39,13 @@ import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
 import {
-  IconExplorer, IconSearch, IconGit, IconMarketplace,
-  IconSparkle, IconSettings,
+  IconGit,
+  IconSparkle,
 } from './components/brand/CavaloIcons';
-
-type ActivityTab = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
+import { ActivityBar, ACTIVITY_BAR_WIDTH, type ActivityTab } from './components/sidebar/ActivityBar';
+import { PreviewContentPanel } from './components/preview/PreviewContentPanel';
+import { PreviewStatusSync } from './components/preview/PreviewStatusSync';
+import { usePreviewStore } from './store/preview-store';
 
 // ──────────────────────────────────────────────
 //  Layout squeeze helpers
@@ -97,226 +99,6 @@ function EditorSqueezeBanner({ onCollapseSidebar, onCloseAi }: { onCollapseSideb
       <span>Editor îngust — închide un panou lateral pentru mai mult spațiu.</span>
       <button type="button" onClick={onCollapseSidebar} style={squeezeBtnStyle}>Închide sidebar</button>
       <button type="button" onClick={onCloseAi} style={squeezeBtnStyle}>Închide AI</button>
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────
-//  Activity Bar
-// ──────────────────────────────────────────────
-
-/** 3D PNG icons include a rounded black tile — render larger than line SVG icons. */
-const ACTIVITY_BAR_WIDTH = 48;
-const ACTIVITY_BTN = 36;
-const ACTIVITY_ICON = 26;
-
-function ActivityBar({
-  active,
-  onChange,
-  aiPanelOpen,
-  onToggleAI,
-  gitChangesCount,
-  onOpenAccount,
-}: {
-  active: ActivityTab;
-  onChange: (tab: ActivityTab) => void;
-  aiPanelOpen: boolean;
-  onToggleAI: () => void;
-  gitChangesCount: number;
-  onOpenAccount: () => void;
-}) {
-  const ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
-    {
-      id: 'explorer', title: 'Explorer (Ctrl+Shift+E)',
-      icon: <IconExplorer size={ACTIVITY_ICON} />,
-    },
-    {
-      id: 'search', title: 'Căutare (Ctrl+Shift+F)',
-      icon: <IconSearch size={ACTIVITY_ICON} />,
-    },
-    {
-      id: 'git', title: 'Source Control (Ctrl+Shift+G)',
-      icon: (
-        <div style={{ position: 'relative' }}>
-          <IconGit size={ACTIVITY_ICON} />
-          {/* Badge număr fișiere modificate */}
-          {gitChangesCount > 0 && (
-            <span style={{
-              position: 'absolute', top: -4, right: -5,
-              background: '#E2C08D', color: '#0E0E0F',
-              fontSize: 8, fontWeight: 700, lineHeight: 1,
-              padding: '1px 3px', borderRadius: 99,
-              minWidth: 12, textAlign: 'center',
-            }}>
-              {gitChangesCount > 99 ? '99+' : gitChangesCount}
-            </span>
-          )}
-        </div>
-      ),
-    },
-    {
-      id: 'extensions', title: 'Extensions (Ctrl+Shift+X)',
-      icon: <IconMarketplace size={ACTIVITY_ICON} />,
-    },
-  ];
-
-  // Butonul Settings e separat (jos), tracked separat
-  const isSettingsActive = active === 'settings';
-
-  return (
-    <div
-      className="glass-panel"
-      style={{
-      width: ACTIVITY_BAR_WIDTH,
-      borderRight: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
-      borderTop: 'none',
-      borderBottom: 'none',
-      borderLeft: 'none',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', padding: '10px 0', gap: 4,
-      flexShrink: 0,
-      zIndex: 20,
-    }}>
-      {ITEMS.map((item) => (
-        <button
-          key={item.id}
-          title={item.title}
-          onClick={() => onChange(item.id)}
-          style={{
-            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-            border: active === item.id ? '1px solid rgba(0,224,255,0.3)' : 'none',
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: active === item.id ? 'rgba(255,255,255,0.1)' : 'transparent',
-            color: active === item.id ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-            boxShadow: active === item.id ? '0 0 12px rgba(0,224,255,0.15)' : 'none',
-            transition: 'all 0.15s',
-            position: 'relative',
-          }}
-          onMouseEnter={(e) => {
-            if (active !== item.id) {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-              e.currentTarget.style.color = 'var(--caval-text)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (active !== item.id) {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--caval-text-muted)';
-            }
-          }}
-        >
-          {item.icon}
-          {/* Indicator stânga pentru tab activ */}
-          {active === item.id && (
-            <span style={{
-              position: 'absolute', left: 0, top: 6, bottom: 6,
-              width: 3, borderRadius: '0 2px 2px 0',
-              background: 'var(--caval-accent)',
-              boxShadow: '0 0 8px var(--caval-accent)',
-            }} />
-          )}
-        </button>
-      ))}
-
-      {/* Separator */}
-      <div style={{ width: 20, height: 1, background: 'var(--caval-glass-border, rgba(255,255,255,0.08))', margin: '4px 0' }} />
-
-      {/* Buton AI Panel — special, cu glow cyan când activ */}
-      <button
-        title="AI Panel Caval (Ctrl+Shift+A)"
-        onClick={onToggleAI}
-        style={{
-          width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-          border: aiPanelOpen ? '1px solid var(--caval-accent)' : 'none',
-          cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: aiPanelOpen
-            ? 'rgba(255,255,255,0.1)'
-            : 'transparent',
-          color: aiPanelOpen ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-          boxShadow: aiPanelOpen ? '0 0 12px rgba(0,224,255,0.2)' : 'none',
-          transition: 'all 0.15s',
-          position: 'relative',
-        }}
-        onMouseEnter={(e) => {
-          if (!aiPanelOpen) {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-            e.currentTarget.style.color = 'var(--caval-text)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!aiPanelOpen) {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = 'var(--caval-text-muted)';
-          }
-        }}
-      >
-        <IconSparkle size={ACTIVITY_ICON} />
-        {/* Punct indicator glow când AI e activ */}
-        {aiPanelOpen && (
-          <span className="glow-accent" style={{
-            position: 'absolute', top: 3, right: 3,
-            width: 5, height: 5, borderRadius: '50%',
-            background: 'var(--caval-accent)',
-          }} />
-        )}
-      </button>
-
-      {/* Bottom icons */}
-      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-        <button
-          title="Setări Caval (Ctrl+,)"
-          onClick={() => onChange('settings')}
-          style={{
-            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-            border: isSettingsActive ? '1px solid var(--caval-accent)' : 'none',
-            background: isSettingsActive ? 'rgba(255,255,255,0.1)' : 'transparent',
-            color: isSettingsActive ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.15s', position: 'relative',
-          }}
-          onMouseEnter={(e) => {
-            if (!isSettingsActive) {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-              e.currentTarget.style.color = 'var(--caval-text)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isSettingsActive) {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--caval-text-muted)';
-            }
-          }}
-        >
-          <IconSettings size={ACTIVITY_ICON} />
-          {/* Indicator activ stânga */}
-          {isSettingsActive && (
-            <span style={{
-              position: 'absolute', left: 0, top: 6, bottom: 6,
-              width: 3, borderRadius: '0 2px 2px 0',
-              background: 'var(--caval-accent)',
-            }} />
-          )}
-        </button>
-        <button
-          title="Cont & credite"
-          onClick={onOpenAccount}
-          style={{
-            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: '50%', border: 'none',
-            background: 'rgba(212,168,87,0.15)', color: '#D4A857',
-            cursor: 'pointer', fontSize: 13, fontWeight: 700,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          OB
-        </button>
-        <div
-          className="glass-status-dot glow-emerald"
-          title="Railway & MCP"
-          aria-label="Status conexiune"
-        />
-      </div>
     </div>
   );
 }
@@ -459,6 +241,7 @@ export function WorkbenchRoot() {
   const [activeActivity, setActiveActivity] = React.useState<ActivityTab>('explorer');
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);
+  const previewPanelOpen = usePreviewStore((s) => s.previewPanelOpen);
   const [engineeringOpen, setEngineeringOpen] = React.useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = React.useState(false);
   const [workspaceSearchVisible, setWorkspaceSearchVisible] = React.useState(false);
@@ -866,6 +649,7 @@ export function WorkbenchRoot() {
 
   return (
     <CavalThemeProvider defaultMode="dark">
+      <PreviewStatusSync />
       {/* CSS global pentru markdown + code blocks din AIPanel */}
       <style>{`
         /* ── Markdown renderer stiluri ── */
@@ -1108,7 +892,7 @@ export function WorkbenchRoot() {
             </SidebarShell>
           )}
 
-          {/* Editor + Terminal */}
+          {/* Editor + Terminal (+ Preview content from activity bar) */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, position: 'relative' }}>
             {editorSqueezed && (
               <EditorSqueezeBanner
@@ -1116,24 +900,44 @@ export function WorkbenchRoot() {
                 onCloseAi={() => setAiPanelOpen(false)}
               />
             )}
-            <Suspense
-              fallback={
+            <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--caval-text-muted, #8a95a6)',
+                        fontSize: 13,
+                      }}
+                    >
+                      Loading editor…
+                    </div>
+                  }
+                >
+                  <MonacoEditor />
+                </Suspense>
+              </div>
+              {previewPanelOpen && (
                 <div
+                  className="content-area preview-content-host"
+                  data-testid="preview-content-host"
                   style={{
-                    flex: 1,
+                    width: 'min(480px, 42%)',
+                    flexShrink: 0,
+                    minWidth: 280,
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--caval-text-muted, #8a95a6)',
-                    fontSize: 13,
+                    flexDirection: 'column',
+                    overflow: 'hidden',
                   }}
                 >
-                  Loading editor…
+                  <PreviewContentPanel />
                 </div>
-              }
-            >
-              <MonacoEditor />
-            </Suspense>
+              )}
+            </div>
             <TerminalPanel />
           </div>
 
