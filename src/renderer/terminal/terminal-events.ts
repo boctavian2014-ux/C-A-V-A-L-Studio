@@ -10,6 +10,11 @@ export function dispatchTerminalNew(): void {
   document.dispatchEvent(new CustomEvent('caval:terminal-new'));
 }
 
+/** Create a terminal only when none are open (e.g. opening the TERMINAL tab). */
+export function dispatchTerminalEnsure(): void {
+  document.dispatchEvent(new CustomEvent('caval:terminal-ensure'));
+}
+
 export function dispatchTerminalSplit(): void {
   document.dispatchEvent(new CustomEvent('caval:terminal-split'));
 }

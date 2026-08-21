@@ -13,7 +13,7 @@ import {
 } from '../../store/problems-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
 import type { TerminalPanelTab } from '../../terminal/terminal-events';
-import { dispatchTerminalNew } from '../../terminal/terminal-events';
+import { dispatchTerminalEnsure, dispatchTerminalNew } from '../../terminal/terminal-events';
 import type { TerminalInfo, TerminalOutputLine } from '../../../shared/terminal-contract';
 import {
   detectRecentTerminalError,
@@ -74,7 +74,12 @@ function pickNextActiveId(tabs: TerminalTab[], closedId: string): string | null 
   return remaining[Math.min(index, remaining.length - 1)]?.id ?? remaining[0]?.id ?? null;
 }
 
-export function TerminalSessions() {
+export function TerminalSessions({
+  isPanelActive = false,
+}: {
+  /** When the bottom TERMINAL tab is selected — used to open a session by default. */
+  isPanelActive?: boolean;
+} = {}) {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,26 +88,43 @@ export function TerminalSessions() {
     null
   );
   const [hasSelection, setHasSelection] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<TerminalTab[]>([]);
+  const creatingRef = useRef(false);
+  const wasPanelActiveRef = useRef(false);
+  const hydratedRef = useRef(false);
   tabsRef.current = tabs;
+  hydratedRef.current = hydrated;
 
   useEffect(() => {
     const api = window.caval?.terminal;
-    if (!api?.list) return;
-    void api.list().then((terminals) => {
-      const loadedTabs = terminals.map((info) => ({
-        id: info.id,
-        title: shortTerminalTitle(info),
-        info,
-      }));
-      setTabs(loadedTabs);
-      setActiveTabId((current) => current ?? loadedTabs[0]?.id ?? null);
-    }).catch(() => undefined);
+    if (!api?.list) {
+      setHydrated(true);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .list()
+      .then((terminals) => {
+        if (cancelled) return;
+        const loadedTabs = terminals.map((info) => ({
+          id: info.id,
+          title: shortTerminalTitle(info),
+          info,
+        }));
+        setTabs(loadedTabs);
+        setActiveTabId((current) => current ?? loadedTabs[0]?.id ?? null);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -140,34 +162,76 @@ export function TerminalSessions() {
 
   const handleCreateTab = useCallback(async () => {
     const api = window.caval?.terminal;
-    if (!api?.create) return;
-    setMenuOpen(false);
-    // Let main assign shell.label as title when omitted — avoids blank / numbered placeholders.
-    const info = await api.create({});
-    if (!info || typeof info !== 'object' || !('id' in info) || typeof info.id !== 'string') {
+    if (!api?.create) {
+      showWorkbenchToast('Terminal API unavailable');
       return;
     }
-    const title = shortTerminalTitle(info);
-    const newTab: TerminalTab = {
-      id: info.id,
-      title,
-      info: { ...info, title },
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(info.id);
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    try {
+      // Let main assign shell.label as title when omitted — avoids blank / numbered placeholders.
+      const raw = (await api.create({})) as TerminalInfo & { ok?: boolean; error?: string };
+      if (
+        !raw ||
+        typeof raw !== 'object' ||
+        raw.ok === false ||
+        typeof raw.id !== 'string' ||
+        !raw.id
+      ) {
+        const message =
+          typeof raw?.error === 'string' && raw.error.trim()
+            ? raw.error
+            : 'Nu s-a putut deschide terminalul. Deschide un folder în workspace.';
+        showWorkbenchToast(message);
+        return;
+      }
+      const title = shortTerminalTitle(raw);
+      const newTab: TerminalTab = {
+        id: raw.id,
+        title,
+        info: { ...raw, title },
+      };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(raw.id);
+    } catch (err) {
+      showWorkbenchToast(err instanceof Error ? err.message : 'Failed to create terminal');
+    } finally {
+      creatingRef.current = false;
+    }
   }, []);
+
+  const ensureTerminal = useCallback(() => {
+    if (!hydratedRef.current) return;
+    if (tabsRef.current.length > 0 || creatingRef.current) return;
+    void handleCreateTab();
+  }, [handleCreateTab]);
 
   useEffect(() => {
     const onNew = () => {
       void handleCreateTab();
     };
+    const onEnsure = () => {
+      ensureTerminal();
+    };
     document.addEventListener('caval:terminal-new', onNew);
     document.addEventListener('caval:terminal-split', onNew);
+    document.addEventListener('caval:terminal-ensure', onEnsure);
     return () => {
       document.removeEventListener('caval:terminal-new', onNew);
       document.removeEventListener('caval:terminal-split', onNew);
+      document.removeEventListener('caval:terminal-ensure', onEnsure);
     };
-  }, [handleCreateTab]);
+  }, [ensureTerminal, handleCreateTab]);
+
+  // Opening the TERMINAL tab with no sessions creates one. Closing the last tab does not.
+  useEffect(() => {
+    if (!hydrated) return;
+    const justActivated = isPanelActive && !wasPanelActiveRef.current;
+    wasPanelActiveRef.current = isPanelActive;
+    if (justActivated) {
+      ensureTerminal();
+    }
+  }, [ensureTerminal, hydrated, isPanelActive]);
 
   const removeTabFromUi = useCallback((id: string) => {
     setOutput((prev) => {
@@ -208,23 +272,6 @@ export function TerminalSessions() {
     },
     [removeTabFromUi]
   );
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onPointer = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false);
-    };
-    window.addEventListener('mousedown', onPointer);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onPointer);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen]);
 
   const handleInput = useCallback(
     async (data: string) => {
@@ -446,7 +493,7 @@ export function TerminalSessions() {
             </div>
           );
         })}
-        <div className="terminal-tabs-actions" ref={menuRef}>
+        <div className="terminal-tabs-actions">
           <button
             type="button"
             className="terminal-tab-add"
@@ -456,31 +503,8 @@ export function TerminalSessions() {
           >
             +
           </button>
-          <button
-            type="button"
-            className="terminal-tab-menu"
-            aria-label="Terminal menu"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            data-testid="terminal-tab-menu"
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            ▾
-          </button>
-          {menuOpen && (
-            <div className="terminal-tab-dropdown" role="menu" data-testid="terminal-tab-dropdown">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => void handleCreateTab()}
-              >
-                New Terminal
-              </button>
-            </div>
-          )}
         </div>
       </div>
-
       {hasTabs ? (
         <>
           <div className="terminal-toolbar">
@@ -584,21 +608,12 @@ export function TerminalSessions() {
         </>
       ) : (
         <div className="terminal-empty" data-testid="terminal-empty">
-          <p>No terminals open.</p>
-          <button
-            type="button"
-            className="btn-primary"
-            data-testid="terminal-empty-new"
-            onClick={() => void handleCreateTab()}
-          >
-            New Terminal
-          </button>
+          <p>No terminals open. Press + to start one.</p>
         </div>
       )}
     </div>
   );
 }
-
 function readStoredTerminalHeight(): number {
   try {
     const raw = localStorage.getItem(TERMINAL_HEIGHT_KEY);
@@ -647,15 +662,29 @@ export function TerminalPanel() {
     dispatchTerminalNew();
   }, []);
 
+  const selectPanelTab = useCallback((tab: TerminalPanelTab) => {
+    setIsVisible(true);
+    setActiveTab(tab);
+    if (tab === 'terminal') {
+      dispatchTerminalEnsure();
+    }
+  }, []);
+
   useEffect(() => {
     const showPanel = (e: Event) => {
       const detail = (e as CustomEvent<{ tab?: TerminalPanelTab }>).detail;
       setIsVisible(true);
-      if (detail?.tab) setActiveTab(detail.tab);
+      if (detail?.tab) {
+        setActiveTab(detail.tab);
+        if (detail.tab === 'terminal') {
+          dispatchTerminalEnsure();
+        }
+      }
     };
     const onRunInTerminal = () => {
       setIsVisible(true);
       setActiveTab('terminal');
+      dispatchTerminalEnsure();
     };
     const onToggle = () => setIsVisible((v) => !v);
 
@@ -716,7 +745,7 @@ export function TerminalPanel() {
         {TABS.map((t) => (
           <span
             key={t.id}
-            onClick={() => { setActiveTab(t.id); setIsVisible(true); }}
+            onClick={() => selectPanelTab(t.id)}
             style={{
               fontSize: 10.5, color: 'var(--caval-text-muted)',
               cursor: 'pointer', padding: '2px 8px',
@@ -756,7 +785,7 @@ export function TerminalPanel() {
         {TABS.map((t) => (
           <span
             key={t.id}
-            onClick={() => setActiveTab(t.id)}
+            onClick={() => selectPanelTab(t.id)}
             style={{
               padding: '0 12px', height: '100%',
               display: 'flex', alignItems: 'center',
@@ -800,7 +829,7 @@ export function TerminalPanel() {
             flexDirection: 'column',
           }}
         >
-          <TerminalSessions />
+          <TerminalSessions isPanelActive={activeTab === 'terminal'} />
         </div>
 
         {activeTab === 'output' && (

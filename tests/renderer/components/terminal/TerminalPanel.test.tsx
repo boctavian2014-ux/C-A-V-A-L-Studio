@@ -123,23 +123,50 @@ describe("TerminalPanel", () => {
     vi.restoreAllMocks();
   });
 
-  async function renderSessions(api: TerminalApi) {
+  async function renderSessions(api: TerminalApi, isPanelActive = false) {
     window.caval = { terminal: api } as Window["caval"];
-    const result = mount(<TerminalSessions />);
+    const result = mount(<TerminalSessions isPanelActive={isPanelActive} />);
     mounted = result;
     await act(async () => {
+      await Promise.resolve();
       await Promise.resolve();
     });
     return result;
   }
 
-  it("renders the empty state and New Terminal", async () => {
+  it("renders empty state without a New Terminal button when inactive", async () => {
     const { api } = createTerminalMock();
-    const { container } = await renderSessions(api);
+    const { container } = await renderSessions(api, false);
     expect(container.textContent).toContain("No terminals open.");
     expect(container.querySelector('[data-testid="terminal-empty"]')).toBeTruthy();
-    const open = container.querySelector('[data-testid="terminal-empty-new"]');
-    expect(open?.textContent).toBe("New Terminal");
+    expect(container.querySelector('[data-testid="terminal-empty-new"]')).toBeNull();
+    expect(container.textContent).not.toContain("New Terminal");
+    expect(container.querySelector('[data-testid="terminal-tab-add"]')).toBeTruthy();
+    expect(api.create).not.toHaveBeenCalled();
+  });
+
+  it("opens a terminal by default when the TERMINAL panel becomes active", async () => {
+    const { api } = createTerminalMock();
+    window.caval = { terminal: api } as Window["caval"];
+    const result = mount(<TerminalSessions isPanelActive={false} />);
+    mounted = result;
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.create).not.toHaveBeenCalled();
+
+    act(() => {
+      result.unmount();
+    });
+    const active = mount(<TerminalSessions isPanelActive />);
+    mounted = active;
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.create).toHaveBeenCalledWith({});
+    expect(active.container.querySelector('[data-testid="terminal-tab-term-1"]')).toBeTruthy();
   });
 
   it("creates a named terminal with + and selects it", async () => {
@@ -157,6 +184,20 @@ describe("TerminalPanel", () => {
     expect(tab?.textContent).toContain("PowerShell");
     expect(tab?.getAttribute("aria-label")).toBe("Switch to PowerShell");
     expect(container.querySelector('[data-active-terminal-id="term-1"]')).toBeTruthy();
+  });
+
+  it("shows a toast and keeps empty when create fails", async () => {
+    const { api } = createTerminalMock();
+    api.create = vi.fn(async () => ({ ok: false, error: "Deschide un folder" }) as never);
+    const { container } = await renderSessions(api);
+    await act(async () => {
+      container
+        .querySelector('[data-testid="terminal-tab-add"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="terminal-empty"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="terminal-tab-term-1"]')).toBeNull();
   });
 
   it("shows tabs from list() and switches the active tab on click", async () => {
