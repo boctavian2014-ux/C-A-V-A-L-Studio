@@ -77,7 +77,10 @@ import {
   applyFallbackScaffold,
   buildFallbackScaffoldTimelineEvent,
   FALLBACK_SCAFFOLD_TOAST,
+  FALLBACK_RUNNABLE_TOAST,
+  workspaceHasRunnableWebProject,
 } from './fallback-scaffold';
+import { useLiveAiEditsStore } from './live-ai-edits-store';
 import { parseStreamingScaffold } from './scaffold-parser';
 import {
   buildFashionMatchingAssistantReply,
@@ -1048,17 +1051,51 @@ export const useAIStore = create<AIStore>()(
         ) {
           deliveryWaveIndex = 0;
           agenticRepairWave = 0;
+          useLiveAiEditsStore.getState().clearAll();
         }
 
         let editorState = useEditorStore.getState();
         let boundWorkspace = editorState.projectPath;
 
         // Code / Agentic / Debug / fashion scaffolds: auto-create Desktop (fallback Downloads).
+        // Never invent a folder from SCAFFOLD_CONTINUE / repair system messages.
+        const isSystemContinue =
+          isScaffoldContinueRequest(userText) ||
+          isDeliveryContinueRequest(userText) ||
+          isAgenticRepairRequest(userText) ||
+          isArenaContinueRequest(userText);
+
         if (
           (modeSupportsFileApply(get().agentMode) ||
             isFashionMatchingEngineRequest(userText)) &&
           !boundWorkspace?.trim()
         ) {
+          if (isSystemContinue) {
+            const userMsg: ChatMessage = {
+              id: generateId(),
+              role: 'user',
+              content: userText,
+              timestamp: Date.now(),
+            };
+            const assistantMsg: ChatMessage = {
+              id: generateId(),
+              role: 'assistant',
+              content: '',
+              error:
+                'Workspace lipsă — redeschide folderul de proiect înainte de continuare (SCAFFOLD_CONTINUE).',
+              timestamp: Date.now(),
+            };
+            const nextMessages = [...get().messages, userMsg, assistantMsg];
+            set((s) => ({
+              messages: nextMessages,
+              threads: s.threads.map((t) =>
+                t.id === s.activeThreadId
+                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
+                  : t
+              ),
+            }));
+            return;
+          }
           const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
           if (!ensured.ok || !ensured.path) {
             const userMsg: ChatMessage = {
@@ -1364,6 +1401,8 @@ export const useAIStore = create<AIStore>()(
           if (!modeSupportsFileApply(agentMode)) return;
           const live = parseStreamingScaffold(buffer);
           if (!live?.content.trim()) return;
+          useLiveAiEditsStore.getState().beginEdit(live.path);
+          useLiveAiEditsStore.getState().progressEdit(live.path, live.content);
           useEditorStore.getState().updateAiPreview(live.path, live.content);
         };
 
@@ -1446,10 +1485,20 @@ export const useAIStore = create<AIStore>()(
               const parsed = parseScaffoldFiles(parseSource);
               scaffoldParsed = parsed.length;
               if (parsed.length > 0) {
+                for (const f of parsed) {
+                  useLiveAiEditsStore.getState().beginEdit(f.path);
+                }
                 const applied = await applyScaffoldToWorkspace(projectPath, parsed);
                 writtenFiles = [...writtenFiles, ...applied.written];
                 scaffoldErrors = applied.errors;
                 scaffoldSkipped = applied.skipped;
+                for (const w of applied.written) {
+                  useLiveAiEditsStore.getState().completeEdit(w);
+                }
+                for (const err of applied.errors) {
+                  const path = err.split(':')[0]?.trim();
+                  if (path) useLiveAiEditsStore.getState().failEdit(path);
+                }
               }
             }
             writtenFiles = [...new Set(writtenFiles)];
@@ -1582,7 +1631,25 @@ export const useAIStore = create<AIStore>()(
                 return;
               }
             }
+
+            // AI wrote sources but forgot package.json / scripts.dev → make Preview runnable.
+            if (
+              writtenFiles.length > 0 &&
+              !(await workspaceHasRunnableWebProject(projectPath))
+            ) {
+              const filled = await applyFallbackScaffold(projectPath, {
+                projectName: workspaceFolderTitle(projectPath),
+              });
+              if (filled.written.length > 0) {
+                writtenFiles = [...new Set([...writtenFiles, ...filled.written])];
+                showWorkbenchToast(FALLBACK_RUNNABLE_TOAST);
+              }
+            }
+
             const lastFile = writtenFiles[writtenFiles.length - 1]!;
+            for (const f of writtenFiles) {
+              useLiveAiEditsStore.getState().completeEdit(f);
+            }
             const opened = await openWrittenFile(lastFile);
             if (opened) {
               useEditorStore.getState().closeAiPreview();
@@ -1761,6 +1828,8 @@ export const useAIStore = create<AIStore>()(
                 files.push(event.filePath);
                 patch.writtenFiles = files;
               }
+              useLiveAiEditsStore.getState().beginEdit(event.filePath);
+              useLiveAiEditsStore.getState().completeEdit(event.filePath);
             }
             updateAssistant(patch);
             return;
@@ -1890,6 +1959,14 @@ export const useAIStore = create<AIStore>()(
             }
             const proposedWrites = chunk.proposedWrites ?? [];
             const proposeStageKey = chunk.proposeStageKey;
+            if (proposedWrites.length) {
+              useLiveAiEditsStore.getState().setProposed(proposedWrites);
+            }
+            if (pipelineWrittenFiles.length) {
+              for (const f of pipelineWrittenFiles) {
+                useLiveAiEditsStore.getState().completeEdit(f);
+              }
+            }
             updateAssistant({
               isStreaming: false,
               ...(pipelineWrittenFiles.length ? { writtenFiles: pipelineWrittenFiles } : {}),
@@ -2159,6 +2236,7 @@ export const useAIStore = create<AIStore>()(
         activeStreamId = null;
         pendingStreamId = null;
         useEditorStore.getState().closeAiPreview();
+        useLiveAiEditsStore.getState().clearAll();
         set((s) => {
           const messages = s.messages.map((m) =>
             m.isStreaming ? finalizeStoppedAssistantMessage(m) : m
@@ -2171,6 +2249,7 @@ export const useAIStore = create<AIStore>()(
       },
 
       clearChat: () => {
+        useLiveAiEditsStore.getState().clearAll();
         set((s) => {
           const updatedThreads = s.threads.map((t) =>
             t.id === s.activeThreadId ? { ...t, messages: [], title: 'Chat nou' } : t

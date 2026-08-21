@@ -14,6 +14,12 @@ import { provideGatedInlineCompletion } from '../../ai/inline-completion-provide
 import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
 import { FeatureFirstUseTip } from '../ai/FeatureFirstUseTip';
 import { hasSeenFeature, markFeatureSeen } from '../../store/onboarding-store';
+import {
+  computeLiveDiffLines,
+  tabPathMatchesLiveEdit,
+  useLiveAiEditsStore,
+} from '../../../../ai/composer/live-ai-edits-store';
+import { ensureLiveAiEditStyles } from '../../../../ai/composer/live-ai-edit-styles';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -134,6 +140,7 @@ export function MonacoEditor() {
   const {
     tabs,
     activeTabId,
+    projectPath,
     updateTabContent,
     saveTab,
     saveViewState,
@@ -144,6 +151,12 @@ export function MonacoEditor() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const isStreaming = useAIStore((s) => s.isStreaming);
   const isAiLive = Boolean(activeTab?.isAiPreview);
+  const liveEdits = useLiveAiEditsStore((s) => s.edits);
+  const liveDecoIds = useRef<string[]>([]);
+
+  useEffect(() => {
+    ensureLiveAiEditStyles();
+  }, []);
 
   // Scroll la final când AI scrie live în preview
   useEffect(() => {
@@ -153,6 +166,55 @@ export function MonacoEditor() {
     const lastLine = model.getLineCount();
     editorRef.current.revealLine(lastLine);
   }, [activeTab?.content, isAiLive]);
+
+  // Live inline diff decorations (green/red/yellow) while AI edits this file
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !activeTab || !monaco) return;
+
+    const match = Object.values(liveEdits).find((e) =>
+      tabPathMatchesLiveEdit(activeTab.path, e.path, projectPath)
+    );
+
+    const clear = () => {
+      liveDecoIds.current = editor.deltaDecorations(liveDecoIds.current, []);
+    };
+
+    if (!match || match.status !== 'writing') {
+      clear();
+      return;
+    }
+
+    const previous = match.previousContent ?? '';
+    const next = match.content ?? activeTab.content;
+    const lines = computeLiveDiffLines(previous, next);
+    const nextDecos: MonacoType.editor.IModelDeltaDecoration[] = lines.map((row) => {
+      const className =
+        row.kind === 'added'
+          ? 'caval-ai-line-added'
+          : row.kind === 'removed'
+            ? 'caval-ai-line-removed'
+            : 'caval-ai-line-modified';
+      const gutter =
+        row.kind === 'added'
+          ? 'caval-ai-gutter-added'
+          : row.kind === 'removed'
+            ? 'caval-ai-gutter-removed'
+            : 'caval-ai-gutter-modified';
+      return {
+        range: new monaco.Range(row.lineNumber, 1, row.lineNumber, 1),
+        options: {
+          isWholeLine: true,
+          className,
+          linesDecorationsClassName: gutter,
+        },
+      };
+    });
+    liveDecoIds.current = editor.deltaDecorations(liveDecoIds.current, nextDecos);
+    return () => {
+      clear();
+    };
+  }, [activeTab, liveEdits, projectPath, isAiLive, monaco]);
 
   useEffect(() => {
     const editor = editorRef.current;

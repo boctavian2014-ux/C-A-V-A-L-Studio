@@ -14,17 +14,141 @@ import {
 import { formatWrittenFilesHeadline, joinWorkspaceRelativePath } from "./written-files";
 import { useAiHistoryStore } from "../../src/renderer/store/ai-history-store";
 import { usePreviewStore } from "../../src/renderer/store/preview-store";
+import { useLiveAiEdits } from "./use-live-ai-edits";
+import type { LiveAiEdit, LiveAiEditStatus } from "./live-ai-edits-store";
+
+function fileExtIcon(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "tsx" || ext === "ts") return "TS";
+  if (ext === "jsx" || ext === "js") return "JS";
+  if (ext === "json") return "{}";
+  if (ext === "css" || ext === "scss") return "#";
+  if (ext === "html") return "<>";
+  if (ext === "md") return "MD";
+  return "·";
+}
+
+function statusLabel(status: LiveAiEditStatus): string {
+  if (status === "writing") return "writing";
+  if (status === "error") return "error";
+  return "done";
+}
+
+function statusColor(status: LiveAiEditStatus): string {
+  if (status === "writing") return "#00E0FF";
+  if (status === "error") return "#EF4444";
+  return "#2FBF71";
+}
+
+/** Compact live file timeline under chat (Cursor-style). */
+export function LiveAiFilesStrip({
+  edits,
+  onOpen,
+}: {
+  edits: LiveAiEdit[];
+  onOpen: (rel: string) => void;
+}) {
+  if (!edits.length) return null;
+  return (
+    <div
+      role="region"
+      aria-label="AI files live"
+      data-testid="live-ai-files-strip"
+      style={{
+        marginTop: 10,
+        padding: "8px 12px",
+        borderRadius: 6,
+        background: "rgba(0,224,255,0.05)",
+        border: "1px solid rgba(0,224,255,0.22)",
+        fontSize: 11.5,
+      }}
+    >
+      <div style={{ fontWeight: 600, color: "var(--caval-accent)", marginBottom: 6 }}>
+        {edits.filter((e) => e.status === "writing").length
+          ? `AI scrie ${edits.filter((e) => e.status === "writing").length} fișier(e)…`
+          : `${edits.length} fișier(e) afectate`}
+      </div>
+      <ul
+        style={{
+          margin: 0,
+          padding: 0,
+          listStyle: "none",
+          maxHeight: 120,
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        {edits.map((e) => (
+          <li key={e.path}>
+            <button
+              type="button"
+              data-testid="live-ai-file-open"
+              data-status={e.status}
+              title={`Deschide ${e.path}`}
+              onClick={() => onOpen(e.path)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                textAlign: "left",
+                background: "none",
+                border: "none",
+                padding: "3px 0",
+                color: "var(--caval-text)",
+                fontSize: 11.5,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  width: 18,
+                  height: 14,
+                  borderRadius: 3,
+                  fontSize: 8,
+                  fontWeight: 700,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "var(--caval-text-muted)",
+                  flexShrink: 0,
+                }}
+              >
+                {fileExtIcon(e.path)}
+              </span>
+              <span style={{ flex: 1, wordBreak: "break-all" }}>{e.path}</span>
+              <span style={{ color: statusColor(e.status), fontSize: 10, flexShrink: 0 }}>
+                {e.status === "writing" ? (
+                  <span className="caval-ai-tab-spinner" style={{ display: "inline-block" }} />
+                ) : (
+                  statusLabel(e.status)
+                )}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function WrittenFilesCard({
   files,
   proposedWrites,
   messageId,
   historicalWrittenFiles,
+  showLive = false,
 }: {
   files?: string[];
   proposedWrites?: ProposedWrite[];
   messageId?: string;
   historicalWrittenFiles?: Array<{ id: string; filePath: string }>;
+  /** When true (streaming message), also show live AI edit strip. */
+  showLive?: boolean;
 }) {
   const projectPath = useEditorStore((s) => s.projectPath);
   const openFile = useEditorStore((s) => s.openFile);
@@ -34,6 +158,13 @@ export function WrittenFilesCard({
   const [busy, setBusy] = useState(false);
   const [appliedNew, setAppliedNew] = useState<ProposedWrite[] | null>(null);
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  const liveEdits = useLiveAiEdits();
+
+  useEffect(() => {
+    if (showLive) {
+      void import("./live-ai-edit-styles.js").then((m) => m.ensureLiveAiEditStyles());
+    }
+  }, [showLive]);
 
   const proposed = proposedWrites ?? [];
   const isProposed = proposed.length > 0;
@@ -78,6 +209,10 @@ export function WrittenFilesCard({
     usePreviewStore.getState().activatePreview(target, null);
     void window.caval?.preview?.start(target);
   };
+
+  if (showLive && liveEdits.length > 0 && !isProposed) {
+    return <LiveAiFilesStrip edits={liveEdits} onOpen={openRel} />;
+  }
 
   if (isProposed && messageId) {
     return (
@@ -190,7 +325,12 @@ export function WrittenFilesCard({
 
   const list = files ?? [];
   const historical = historicalWrittenFiles ?? [];
-  if (!list.length && !historical.length) return null;
+  if (!list.length && !historical.length) {
+    if (showLive && liveEdits.length > 0) {
+      return <LiveAiFilesStrip edits={liveEdits} onOpen={openRel} />;
+    }
+    return null;
+  }
 
   const rows =
     historical.length > 0

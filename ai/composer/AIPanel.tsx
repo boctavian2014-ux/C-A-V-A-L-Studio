@@ -479,13 +479,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {!isUser &&
           ((message.proposedWrites && message.proposedWrites.length > 0) ||
             (message.writtenFiles && message.writtenFiles.length > 0) ||
-            (message.historicalWrittenFiles && message.historicalWrittenFiles.length > 0)) &&
-          !message.isStreaming && (
+            (message.historicalWrittenFiles && message.historicalWrittenFiles.length > 0) ||
+            message.isStreaming) && (
           <WrittenFilesCard
             files={message.writtenFiles}
             proposedWrites={message.proposedWrites}
             messageId={message.id}
             historicalWrittenFiles={message.historicalWrittenFiles}
+            showLive={Boolean(message.isStreaming)}
           />
         )}
 

@@ -1,5 +1,10 @@
 import React, { useRef, useEffect } from 'react';
 import { useEditorStore, type EditorTab } from '../../store/editor-store';
+import {
+  tabPathMatchesLiveEdit,
+} from '../../../../ai/composer/live-ai-edits-store';
+import { ensureLiveAiEditStyles } from '../../../../ai/composer/live-ai-edit-styles';
+import { useActiveAiEditPaths } from '../../../../ai/composer/use-live-ai-edits';
 
 // ──────────────────────────────────────────────
 //  Iconuri după extensie (mici, 10px)
@@ -30,15 +35,18 @@ function LangBadge({ language }: { language: string }) {
   );
 }
 
-// ──────────────────────────────────────────────
-//  Singur tab
-// ──────────────────────────────────────────────
-
-function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
+function Tab({
+  tab,
+  isActive,
+  isAiEditing,
+}: {
+  tab: EditorTab;
+  isActive: boolean;
+  isAiEditing: boolean;
+}) {
   const { setActiveTab, closeTab, saveTab } = useEditorStore();
   const tabRef = useRef<HTMLDivElement>(null);
 
-  // Scroll în view când devine activ
   useEffect(() => {
     if (isActive && tabRef.current) {
       tabRef.current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -58,13 +66,16 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
     if (tab.isDirty) await saveTab(tab.id);
   };
 
+  const accent = isAiEditing || (tab.isAiPreview && isActive);
+
   return (
     <div
       ref={tabRef}
+      data-testid={isAiEditing ? 'editor-tab-ai-editing' : 'editor-tab'}
       onClick={() => setActiveTab(tab.id)}
       onMouseDown={handleMiddleClick}
       onDoubleClick={handleDoubleClick}
-      title={`${tab.isAiPreview ? 'Generare AI live · ' : ''}${tab.path}${tab.isDirty ? ' · Nesalvat' : ''}`}
+      title={`${isAiEditing ? 'AI editează · ' : ''}${tab.isAiPreview ? 'Generare AI live · ' : ''}${tab.path}${tab.isDirty ? ' · Nesalvat' : ''}`}
       style={{
         display: 'flex', alignItems: 'center', gap: 6,
         padding: '0 12px', height: '100%',
@@ -73,12 +84,14 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
         position: 'relative', flexShrink: 0,
         background: isActive ? '#0D1117' : 'transparent',
         color: isActive ? 'var(--caval-text)' : 'var(--caval-text-muted)',
-        transition: 'background 0.12s, color 0.12s',
+        transition: 'background 0.12s, color 0.12s, box-shadow 0.12s',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 12,
-        ...(tab.isAiPreview && isActive ? {
+        ...(accent ? {
           boxShadow: 'inset 0 -2px 0 #00E0FF',
           color: '#00E0FF',
+          outline: isAiEditing ? '1px solid rgba(0,224,255,0.45)' : undefined,
+          outlineOffset: isAiEditing ? -1 : undefined,
         } : {}),
       }}
       onMouseEnter={(e) => {
@@ -88,7 +101,6 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
         if (!isActive) e.currentTarget.style.background = 'transparent';
       }}
     >
-      {/* Linie cyan sus — tab activ */}
       {isActive && (
         <span style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 1,
@@ -96,13 +108,12 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
         }} />
       )}
 
-      <LangBadge language={tab.language} />
+      {isAiEditing ? <span className="caval-ai-tab-spinner" aria-hidden /> : <LangBadge language={tab.language} />}
 
       <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {tab.name}
       </span>
 
-      {/* Indicator modificat / buton close */}
       <span
         style={{
           width: 14, height: 14, borderRadius: '50%',
@@ -133,12 +144,13 @@ function Tab({ tab, isActive }: { tab: EditorTab; isActive: boolean }) {
   );
 }
 
-// ──────────────────────────────────────────────
-//  TabBar
-// ──────────────────────────────────────────────
-
 export function TabBar() {
-  const { tabs, activeTabId } = useEditorStore();
+  const { tabs, activeTabId, projectPath } = useEditorStore();
+  const activePaths = useActiveAiEditPaths();
+
+  useEffect(() => {
+    ensureLiveAiEditStyles();
+  }, []);
 
   if (tabs.length === 0) {
     return (
@@ -159,14 +171,23 @@ export function TabBar() {
       overflowX: 'auto',
       overflowY: 'hidden',
     }}
-    // Scroll cu mouse wheel orizontal
     onWheel={(e) => {
       e.currentTarget.scrollLeft += e.deltaY;
     }}
     >
-      {tabs.map((tab) => (
-        <Tab key={tab.id} tab={tab} isActive={activeTabId === tab.id} />
-      ))}
+      {tabs.map((tab) => {
+        const isAiEditing =
+          Boolean(tab.isAiPreview) ||
+          [...activePaths].some((p) => tabPathMatchesLiveEdit(tab.path, p, projectPath));
+        return (
+          <Tab
+            key={tab.id}
+            tab={tab}
+            isActive={activeTabId === tab.id}
+            isAiEditing={isAiEditing}
+          />
+        );
+      })}
     </div>
   );
 }

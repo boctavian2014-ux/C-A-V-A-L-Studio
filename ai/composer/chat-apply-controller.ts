@@ -7,6 +7,7 @@ import { getMonacoEditor } from "../../src/renderer/store/editor-command-store";
 import { useEditorStore } from "../../src/renderer/store/editor-store";
 import { useAIStore } from "./ai-store";
 import { emitEditorFileWriteTimeline } from "../../src/renderer/ai/inline-completion-timeline";
+import { useLiveAiEditsStore } from "./live-ai-edits-store";
 
 /** Apply full-file content via Monaco undo stops when the tab is open. */
 export function applyProposedWriteInOpenEditor(
@@ -89,6 +90,7 @@ export async function acceptProposedWritesForMessage(messageId: string): Promise
   });
 
   await useEditorStore.getState().refreshTree();
+  useLiveAiEditsStore.getState().clearAll();
 }
 
 export async function rejectProposedWritesForMessage(messageId: string): Promise<void> {
@@ -106,6 +108,7 @@ export async function rejectProposedWritesForMessage(messageId: string): Promise
     );
     return { messages, threads };
   });
+  useLiveAiEditsStore.getState().clearAll();
 }
 
 export async function revertAppliedNewWrites(writes: ProposedWrite[]): Promise<void> {
