@@ -2159,6 +2159,16 @@ export const useAIStore = create<AIStore>()(
         assertSendNotAborted(sendSignal);
         projectContext = mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
 
+        // Silent universal software context (category + platform + 2026 trends). No UI.
+        try {
+          const webCtx = buildUniversalWebContext(apiPrompt || userText, {
+            force: modeSupportsFileApply(agentMode),
+          });
+          projectContext = mergeProjectContextWithWebContext(projectContext, webCtx);
+        } catch {
+          /* ignore detection failures */
+        }
+
         const mentionFiles =
           uniqueMentions.length > 0 && caval?.fs?.readFile
             ? await resolveMentionFiles(
