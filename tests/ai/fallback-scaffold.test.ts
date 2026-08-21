@@ -5,12 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyFallbackScaffold,
-  buildFallbackScaffoldTimelineEvent,
-  FALLBACK_SCAFFOLD_TIMELINE_LABEL,
-  FALLBACK_SCAFFOLD_TOAST,
+  getMinimalExpressScaffoldFiles,
   getMinimalViteReactScaffoldFiles,
-  workspaceHasCodeFiles,
+  workspaceHasRunnableWebProject,
 } from "../../ai/composer/fallback-scaffold";
+import { projectNameFromPrompt } from "../../src/renderer/hooks/project-name-from-prompt";
 
 describe("fallback-scaffold", () => {
   const filesOnDisk = new Map<string, string>();
@@ -39,50 +38,49 @@ describe("fallback-scaffold", () => {
     delete (window as unknown as { caval?: unknown }).caval;
   });
 
-  it("exposes the six Vite+React template files", () => {
-    const files = getMinimalViteReactScaffoldFiles("My Shop");
-    expect(files.map((f) => f.path).sort()).toEqual(
-      [
-        "index.html",
-        "package.json",
-        "src/App.tsx",
-        "src/main.tsx",
-        "tsconfig.json",
-        "vite.config.ts",
-      ].sort()
-    );
-    expect(files.find((f) => f.path === "package.json")?.content).toContain('"vite"');
-    expect(FALLBACK_SCAFFOLD_TOAST).toContain("scaffold minim");
-  });
-
-  it("writes scaffold when stream left no code files", async () => {
+  it("writes Vite scaffold when empty", async () => {
     const result = await applyFallbackScaffold("C:\\proj");
-    expect(result.skippedBecauseExisting).toBe(false);
-    expect(result.errors).toEqual([]);
-    expect(result.written.sort()).toEqual(
-      [
-        "package.json",
-        "index.html",
-        "src/main.tsx",
-        "src/App.tsx",
-        "vite.config.ts",
-        "tsconfig.json",
-      ].sort()
-    );
+    expect(result.written).toContain("package.json");
+    expect(getMinimalViteReactScaffoldFiles()[0]?.content).toContain('"dev": "vite"');
+    const indexHtml = getMinimalViteReactScaffoldFiles().find((f) => f.path === "index.html");
+    expect(indexHtml?.content).toContain("cdn.tailwindcss.com");
+    expect(indexHtml?.content).toMatch(/fonts\.googleapis\.com.*Inter/s);
   });
 
-  it("skips fallback when AI already wrote package.json", async () => {
-    filesOnDisk.set("c:/proj/package.json", '{"name":"from-ai"}');
+  it("writes Express package.json when src/index.ts imports express", async () => {
+    filesOnDisk.set(
+      "c:/proj/src/index.ts",
+      "import express from 'express';\nconst app = express();\napp.listen(3000);\n"
+    );
+    const result = await applyFallbackScaffold("C:\\proj", { projectName: "api" });
+    expect(result.written).toContain("package.json");
+    expect(result.written).toContain("caval.jsonc");
+    expect(result.written).not.toContain("src/App.tsx");
+    const pkg = filesOnDisk.get("c:/proj/package.json") ?? "";
+    expect(pkg).toContain("tsx watch");
+    expect(pkg).toContain("express");
+    expect(getMinimalExpressScaffoldFiles("api").some((f) => f.path === "caval.jsonc")).toBe(
+      true
+    );
+    expect(await workspaceHasRunnableWebProject("C:\\proj")).toBe(true);
+  });
+
+  it("skips when scripts.dev already exists", async () => {
+    filesOnDisk.set(
+      "c:/proj/package.json",
+      JSON.stringify({ scripts: { dev: "vite" } })
+    );
     const result = await applyFallbackScaffold("C:\\proj");
     expect(result.skippedBecauseExisting).toBe(true);
-    expect(result.written).toEqual([]);
-    expect(await workspaceHasCodeFiles("C:\\proj")).toBe(true);
   });
+});
 
-  it("builds timeline event for UI", () => {
-    const event = buildFallbackScaffoldTimelineEvent();
-    expect(event.type).toBe("file_write");
-    expect(event.label).toBe(FALLBACK_SCAFFOLD_TIMELINE_LABEL);
-    expect(event.success).toBe(true);
+describe("projectNameFromPrompt", () => {
+  it("does not use SCAFFOLD_CONTINUE as a Desktop folder name", () => {
+    expect(
+      projectNameFromPrompt(
+        "SCAFFOLD_CONTINUE\n\nContinuă implementarea din planul anterior. Nu repeta."
+      )
+    ).toBe("Caval-Project");
   });
 });

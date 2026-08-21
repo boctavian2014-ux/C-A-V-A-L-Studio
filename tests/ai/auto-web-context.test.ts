@@ -119,4 +119,34 @@ describe("buildUniversalWebContext", () => {
     const ctx = buildUniversalWebContext("explain react hooks briefly");
     expect(ctx.contextBlock).toBe("");
   });
+
+  it("injects DESIGN CONTRACT + snippets for landing page premium", () => {
+    const ctx = buildUniversalWebContext("landing page premium");
+    expect(ctx.primary).toBe("web");
+    expect(ctx.designContractApplied).toBe(true);
+    expect(ctx.contextBlock).toMatch(/DESIGN CONTRACT \(MANDATORY/);
+    expect(ctx.designSnippets.length).toBeGreaterThanOrEqual(1);
+    expect(ctx.contextBlock).toMatch(/hero-modern|pricing-cards|navbar-glass/);
+  });
+
+  it("does not inject design contract for REST API prompts", () => {
+    const ctx = buildUniversalWebContext("creează un REST API", { force: true });
+    expect(ctx.primary).toBe("api");
+    expect(ctx.designContractApplied).toBe(false);
+    expect(ctx.contextBlock).not.toMatch(/DESIGN CONTRACT \(MANDATORY/);
+    expect(ctx.designSnippets).toEqual([]);
+  });
+});
+
+describe("design snippets corpus", () => {
+  it("exports valid Tailwind HTML fragments", async () => {
+    const { DESIGN_SNIPPETS_2026 } = await import("../../ai/data/design-snippets-2026");
+    for (const snip of Object.values(DESIGN_SNIPPETS_2026)) {
+      expect(snip.html).toMatch(/class=/);
+      expect(snip.html).toMatch(
+        /\b(flex|grid|rounded|px-|py-|bg-|text-|max-w-|gap-|border)\b/
+      );
+      expect(snip.html).not.toMatch(/<script(?![^>]*tailwind)/i);
+    }
+  });
 });

@@ -1,8 +1,15 @@
 /**
  * Universal software project detection + offline "web context" injection for Caval AI.
  * Automatic — no UI. Uses curated 2026 trends + platform packs (no network dependency).
+ * Pas 7h: when category is web/UI, also inject mandatory design contract + code snippets.
  */
 
+import { formatDesignContractBlock } from "../data/design-contract";
+import {
+  formatDesignSnippetsBlock,
+  selectDesignSnippets,
+  type DesignSnippet,
+} from "../data/design-snippets-2026";
 import {
   SOFTWARE_TRENDS_2026,
   trendSearchDocuments,
@@ -36,6 +43,10 @@ export interface UniversalWebContext {
   primary: SoftwareCategory | null;
   platforms: DetectedPlatform[];
   searchHits: CategorySearchHit[];
+  /** Design snippets injected for web UI (empty otherwise). */
+  designSnippets: DesignSnippet[];
+  /** True when the mandatory design contract was appended. */
+  designContractApplied: boolean;
   /** Ready to append into projectContext. Empty if nothing useful. */
   contextBlock: string;
 }
@@ -54,6 +65,7 @@ const CATEGORY_SIGNALS: Record<
     { re: /\b(blog|cms)\b/i, weight: 2, facet: "blog" },
     { re: /\b(saas|frontend|next\.?js|vite\s*\+\s*react)\b/i, weight: 2 },
     { re: /\b(html|css|tailwind|react)\b/i, weight: 1 },
+    { re: /\b(ui|ux|pagină|pagina)\b/i, weight: 1.5, facet: "ui" },
   ],
   mobile: [
     { re: /\b(ios|iphone|ipad|swiftui)\b/i, weight: 3, facet: "ios" },
@@ -115,6 +127,16 @@ const CATEGORY_SIGNALS: Record<
 
 const CREATE_INTENT =
   /\b(create|build|make|generate|implement|scaffold|develop|creează|creaza|construiește|fa\s+un|fă\s+un|aplicatie|aplicație|project|proiect)\b/i;
+
+const UI_WEB_FACETS = new Set([
+  "landing",
+  "website",
+  "web-app",
+  "dashboard",
+  "ecommerce",
+  "blog",
+  "ui",
+]);
 
 /**
  * Detect software project categories from free-text (EN/RO keywords).
@@ -187,7 +209,35 @@ function formatCategoryPack(
   return lines.join("\n");
 }
 
-const MAX_CONTEXT_CHARS = 4500;
+/** Whether this detection warrants the mandatory design contract (UI / landing / web app). */
+export function shouldApplyDesignContract(
+  primary: SoftwareCategory | null,
+  detections: DetectedSoftwareProject[]
+): boolean {
+  if (primary !== "web") return false;
+  const web = detections.find((d) => d.category === "web");
+  if (!web) return false;
+  if (web.facets.some((f) => UI_WEB_FACETS.has(f))) return true;
+  // High-confidence web create even without a named facet (e.g. "saas frontend")
+  return web.score >= 2;
+}
+
+const MAX_CONTEXT_CHARS = 9000;
+
+function emptyContext(
+  detections: DetectedSoftwareProject[],
+  platforms: DetectedPlatform[]
+): UniversalWebContext {
+  return {
+    detections,
+    primary: null,
+    platforms,
+    searchHits: [],
+    designSnippets: [],
+    designContractApplied: false,
+    contextBlock: "",
+  };
+}
 
 /**
  * Build automatic universal software context for a user prompt.
@@ -203,17 +253,16 @@ export function buildUniversalWebContext(
 
   const createLike = CREATE_INTENT.test(userText) || opts?.force === true;
   const primary = detections[0]?.category ?? null;
+  const uiWebIntent = detections.some(
+    (d) => d.category === "web" && d.facets.some((f) => UI_WEB_FACETS.has(f))
+  );
+  // Landing / website facets count as product intent even without "create/build".
   const confident =
-    detections.length > 0 && detections[0]!.score >= (createLike ? 2 : 3.5);
+    detections.length > 0 &&
+    detections[0]!.score >= (createLike || uiWebIntent ? 2 : 3.5);
 
   if (!confident || !primary) {
-    return {
-      detections,
-      primary: null,
-      platforms,
-      searchHits: [],
-      contextBlock: "",
-    };
+    return emptyContext(detections, platforms);
   }
 
   const chosen = detections.slice(0, maxCategories);
@@ -233,7 +282,15 @@ export function buildUniversalWebContext(
   const platformBlock = formatPlatformContextBlock(platforms, 2);
   if (platformBlock) sections.push(platformBlock);
 
-  let contextBlock = sections.join("\n\n");
+  const designContractApplied = shouldApplyDesignContract(primary, chosen);
+  let designSnippets: DesignSnippet[] = [];
+  if (designContractApplied) {
+    designSnippets = selectDesignSnippets(userText, 3);
+    // Contract + snippets first so truncation keeps enforcement rules.
+    sections.unshift(formatDesignContractBlock(), formatDesignSnippetsBlock(designSnippets));
+  }
+
+  let contextBlock = sections.filter(Boolean).join("\n\n");
   if (contextBlock.length > MAX_CONTEXT_CHARS) {
     contextBlock = `${contextBlock.slice(0, MAX_CONTEXT_CHARS)}\n…[truncated]`;
   }
@@ -243,6 +300,8 @@ export function buildUniversalWebContext(
     primary,
     platforms,
     searchHits,
+    designSnippets,
+    designContractApplied,
     contextBlock,
   };
 }
