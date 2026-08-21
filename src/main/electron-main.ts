@@ -110,6 +110,8 @@ import {
   resolvePreferredProviderId,
 } from "./ai/provider-registry";
 import { getOllamaLoopbackUrl, OLLAMA_CHAT_URL } from "../shared/local-ai-contract";
+import { isAllowedCustomUrl } from "../shared/ai-provider-contract";
+import { probeCustomProviderConnection } from "../../ai/providers/custom-openai-compatible";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -1315,6 +1317,10 @@ const SECRET_ENV_KEYS = [
   "SEMGREP_APP_TOKEN",
   "SUPABASE_SERVICE_ROLE_KEY",
   "BILLING_API_KEY",
+  "CUSTOM_PROVIDER_BASE_URL",
+  "CUSTOM_PROVIDER_API_KEY",
+  "CUSTOM_PROVIDER_MODEL_ID",
+  "CUSTOM_PROVIDER_LABEL",
 ] as const;
 
 /** Never returned to the renderer as plaintext (main/env only). */
@@ -1755,9 +1761,6 @@ ipcMain.handle(
         error: error instanceof Error ? error.message : String(error),
       };
     }
-    if (input?.providerId === "custom") {
-      return { ok: false, error: "Custom provider is not available yet" };
-    }
     const preferred = resolvePreferredProviderId(input?.providerId);
     const merged = {
       ...persistedAppSettings,
@@ -1792,12 +1795,41 @@ ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => 
  */
 ipcMain.handle(
   "caval:test-provider-key",
-  async (event, input: { providerId: string; secretKey: string }) => {
+  async (
+    event,
+    input: {
+      providerId: string;
+      secretKey?: string;
+      draft?: { baseUrl?: string; apiKey?: string; modelId?: string };
+    }
+  ) => {
     assertTrustedSender(event);
     const limit = consumeAiRateLimit("complete", event.sender.id, "secrets-test");
     if (!limit.ok) {
       return { ok: false, result: "unreachable" as const, error: "rate_limited" };
     }
+
+    if (input?.providerId === "custom") {
+      const secrets = normalizeSecretsMap(readApiSecrets());
+      const baseUrl = (input.draft?.baseUrl ?? secrets.CUSTOM_PROVIDER_BASE_URL ?? "").trim();
+      const apiKey = (input.draft?.apiKey ?? secrets.CUSTOM_PROVIDER_API_KEY ?? "").trim();
+      if (!baseUrl || !isAllowedCustomUrl(baseUrl)) {
+        return {
+          ok: false,
+          result: "invalid" as const,
+          error: "Custom endpoint must be localhost/loopback or https",
+        };
+      }
+      const probe = await probeCustomProviderConnection({
+        baseUrl,
+        apiKey: apiKey || undefined,
+      });
+      if (!probe.ok) {
+        return { ok: false, result: probe.result };
+      }
+      return { ok: true, result: "valid" as const };
+    }
+
     const secrets = normalizeSecretsMap(readApiSecrets());
     const keyName = String(input?.secretKey ?? "").trim();
     const value = secrets[keyName]?.trim();

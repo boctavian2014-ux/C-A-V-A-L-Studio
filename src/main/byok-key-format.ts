@@ -13,7 +13,11 @@ export type ByokSecretKey =
   | "MESHY_API_KEY"
   | "PIAPI_API_KEY"
   | "OLLAMA_BASE_URL"
-  | "OLLAMA_MODEL";
+  | "OLLAMA_MODEL"
+  | "CUSTOM_PROVIDER_BASE_URL"
+  | "CUSTOM_PROVIDER_API_KEY"
+  | "CUSTOM_PROVIDER_MODEL_ID"
+  | "CUSTOM_PROVIDER_LABEL";
 
 const FORMATTERS: Partial<Record<ByokSecretKey, RegExp>> = {
   OPENROUTER_API_KEY: /^sk-or-v1-[A-Za-z0-9_-]{16,}$/,
@@ -29,6 +33,7 @@ const FORMATTERS: Partial<Record<ByokSecretKey, RegExp>> = {
 };
 
 import { assertOllamaBaseUrl } from "./cloud-provider-registry";
+import { isAllowedCustomUrl } from "../shared/ai-provider-contract";
 
 export function validateSecretFormat(
   key: string,
@@ -40,6 +45,38 @@ export function validateSecretFormat(
   if (key === "OLLAMA_BASE_URL") {
     const ollama = assertOllamaBaseUrl(trimmed);
     return ollama.ok ? { ok: true } : { ok: false, error: ollama.error };
+  }
+
+  if (key === "CUSTOM_PROVIDER_BASE_URL") {
+    if (!isAllowedCustomUrl(trimmed)) {
+      return {
+        ok: false,
+        error: "Custom endpoint must be localhost/loopback or https",
+      };
+    }
+    return { ok: true };
+  }
+
+  if (key === "CUSTOM_PROVIDER_MODEL_ID") {
+    if (trimmed.length < 1 || trimmed.length > 256 || /\s/.test(trimmed)) {
+      return { ok: false, error: "Invalid model id" };
+    }
+    return { ok: true };
+  }
+
+  if (key === "CUSTOM_PROVIDER_LABEL") {
+    if (trimmed.length > 128) {
+      return { ok: false, error: "Label too long" };
+    }
+    return { ok: true };
+  }
+
+  if (key === "CUSTOM_PROVIDER_API_KEY") {
+    // Optional key for local servers — allow short tokens.
+    if (trimmed.length > 4096) {
+      return { ok: false, error: "API key too long" };
+    }
+    return { ok: true };
   }
 
   const pattern = FORMATTERS[key as ByokSecretKey];

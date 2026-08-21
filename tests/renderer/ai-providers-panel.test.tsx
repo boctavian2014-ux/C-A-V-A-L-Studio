@@ -67,11 +67,11 @@ const PROVIDERS: AiProviderEntry[] = [
   },
   {
     id: "custom",
-    label: "Custom OpenAI-compatible",
-    description: "soon",
+    label: "Custom (OpenAI-compatible)",
+    description: "custom endpoint",
     status: "not-configured",
-    selectable: false,
-    comingSoon: true,
+    selectable: true,
+    requiresBaseUrl: true,
   },
 ];
 
@@ -89,7 +89,7 @@ describe("7f.1 AiProvidersPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders Ollama first as Local & Free and disables custom without network", async () => {
+  it("renders Ollama first as Local & Free and shows custom form", async () => {
     const list = vi.fn(async () => ({
       ok: true as const,
       providers: PROVIDERS,
@@ -100,6 +100,7 @@ describe("7f.1 AiProvidersPanel", () => {
     window.caval = {
       aiProvidersList: list,
       aiProvidersSetPreferred: vi.fn(),
+      localAiStatus: vi.fn(async () => ({ ok: true, status: undefined })),
       secretsSet,
       secretsGet: vi.fn(async () => ({
         ok: true,
@@ -123,8 +124,9 @@ describe("7f.1 AiProvidersPanel", () => {
     const customRadio = container.querySelector(
       '[data-testid="ai-provider-radio-custom"]'
     ) as HTMLInputElement | null;
-    expect(customRadio?.disabled).toBe(true);
-    expect(container.textContent).toContain("Coming soon");
+    expect(customRadio?.disabled).toBe(false);
+    expect(container.querySelector('[data-testid="custom-provider-form"]')).toBeTruthy();
+    expect(container.textContent).not.toContain("Coming soon");
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(secretsSet).not.toHaveBeenCalled();
   });

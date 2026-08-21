@@ -1,6 +1,5 @@
 /**
- * Pas 7f.1 — Build unified AI provider registry snapshot (main-process).
- * Reuses secrets configured map + getLocalAiStatus — does not alter Ollama lifecycle.
+ * Pas 7f.1 / 7f.4 — Build unified AI provider registry snapshot (main-process).
  */
 
 import { safeStorage } from "electron";
@@ -10,6 +9,7 @@ import { toProviderStatus, type LocalAiStatus } from "../../shared/local-ai-cont
 import {
   AI_PREFERRED_PROVIDER_SETTING,
   AI_PROVIDER_IDS,
+  getCustomProviderStatus,
   type AiProviderEntry,
   type AiProviderId,
   type AiProvidersSnapshot,
@@ -61,7 +61,7 @@ const CLOUD_PROVIDERS: Array<{
 export function resolvePreferredProviderId(
   raw: string | null | undefined
 ): AiProviderId {
-  if (isAiProviderId(raw) && raw !== "custom") return raw;
+  if (isAiProviderId(raw)) return raw;
   return "ollama";
 }
 
@@ -98,19 +98,26 @@ export async function buildAiProvidersSnapshot(
     secretKey: p.secretKey,
   }));
 
+  const customStatus = getCustomProviderStatus({
+    CUSTOM_PROVIDER_BASE_URL: Boolean(input.configured.CUSTOM_PROVIDER_BASE_URL),
+    CUSTOM_PROVIDER_MODEL_ID: Boolean(input.configured.CUSTOM_PROVIDER_MODEL_ID),
+  });
+
   const custom: AiProviderEntry = {
     id: "custom",
-    label: "Custom OpenAI-compatible",
-    description: "Base URL + API key — coming in a later release",
-    status: "not-configured",
-    selectable: false,
-    comingSoon: true,
+    label: "Custom (OpenAI-compatible)",
+    description: "LM Studio, vLLM, LocalAI, Azure OpenAI proxy, and other OpenAI-compatible servers",
+    status: customStatus,
+    selectable: true,
+    requiresBaseUrl: true,
+    detail:
+      customStatus === "configured"
+        ? "Base URL and model configured"
+        : undefined,
   };
 
-  // Order: Ollama first, then cloud, then custom.
   const providers: AiProviderEntry[] = [ollama, ...cloud, custom];
 
-  // Sanity: all six ids present.
   for (const id of AI_PROVIDER_IDS) {
     if (!providers.some((p) => p.id === id)) {
       throw new Error(`Provider registry missing id: ${id}`);

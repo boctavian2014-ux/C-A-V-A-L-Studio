@@ -101,7 +101,7 @@ describe("7f.1 provider status mapping", () => {
 });
 
 describe("7f.1 provider registry", () => {
-  it("returns all six providers with Ollama first and custom coming soon", async () => {
+  it("returns all six providers with Ollama first; custom is selectable", async () => {
     const snapshot = await buildAiProvidersSnapshot({
       configured: {
         OPENAI_API_KEY: true,
@@ -126,8 +126,9 @@ describe("7f.1 provider registry", () => {
     expect(snapshot.providers.find((p) => p.id === "openai")?.status).toBe("configured");
     expect(snapshot.providers.find((p) => p.id === "openrouter")?.status).toBe("not-configured");
     const custom = snapshot.providers.find((p) => p.id === "custom");
-    expect(custom?.comingSoon).toBe(true);
-    expect(custom?.selectable).toBe(false);
+    expect(custom?.comingSoon).toBeFalsy();
+    expect(custom?.selectable).toBe(true);
+    expect(custom?.status).toBe("not-configured");
     expect(snapshot.preferredProviderId).toBe("openai");
     expect(snapshot.encryptionAvailable).toBe(true);
   });
@@ -158,8 +159,8 @@ describe("7f.1 provider registry", () => {
     expect(missingModel.providers[0]?.status).toBe("model-missing");
   });
 
-  it("rejects custom as preferred", () => {
-    expect(resolvePreferredProviderId("custom")).toBe("ollama");
+  it("allows custom as preferred", () => {
+    expect(resolvePreferredProviderId("custom")).toBe("custom");
     expect(resolvePreferredProviderId("anthropic")).toBe("anthropic");
   });
 });

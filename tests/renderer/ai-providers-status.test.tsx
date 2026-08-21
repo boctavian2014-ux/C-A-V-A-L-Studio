@@ -70,10 +70,10 @@ const PROVIDERS: AiProviderEntry[] = [
   {
     id: "custom",
     label: "Custom",
-    description: "soon",
+    description: "endpoint",
     status: "not-configured",
-    selectable: false,
-    comingSoon: true,
+    selectable: true,
+    requiresBaseUrl: true,
   },
 ];
 

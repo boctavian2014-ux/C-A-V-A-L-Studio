@@ -14,6 +14,7 @@ import {
   type LocalAiStatus,
   type OllamaModelPullProgress,
 } from "../../src/shared/local-ai-contract";
+import { CustomProviderForm } from "./CustomProviderForm";
 import { filterNonEmptySecretsPatch } from "../models/api-secrets";
 
 function statusTone(status: ProviderStatus): string {
@@ -386,6 +387,10 @@ export function AiProvidersPanel(): React.ReactElement {
                   providerStatus={entry.status}
                   onStatusMaybeChanged={() => void refresh()}
                 />
+              )}
+
+              {entry.id === "custom" && (
+                <CustomProviderForm onSaved={() => void refresh()} />
               )}
 
               {entry.secretKey && !entry.comingSoon && (

@@ -33,13 +33,15 @@ export interface AiProviderEntry {
   label: string;
   description: string;
   status: ProviderStatus;
-  /** False for custom stub (coming soon). */
+  /** False when provider cannot be selected (legacy; custom is selectable in 7f.4). */
   selectable: boolean;
   comingSoon?: boolean;
   /** Secret env key for Add API key (cloud only). */
   secretKey?: string;
   /** Extra status detail for UI (e.g. model name). */
   detail?: string;
+  /** Custom provider needs base URL + model id. */
+  requiresBaseUrl?: boolean;
 }
 
 export interface AiProvidersSnapshot {
@@ -111,4 +113,61 @@ export function statusLabel(status: ProviderStatus): string {
     default:
       return status;
   }
+}
+
+/** Pas 7f.4 — Custom OpenAI-compatible endpoint. */
+
+export const CUSTOM_PROVIDER_SECRET_KEYS = [
+  "CUSTOM_PROVIDER_BASE_URL",
+  "CUSTOM_PROVIDER_API_KEY",
+  "CUSTOM_PROVIDER_MODEL_ID",
+  "CUSTOM_PROVIDER_LABEL",
+] as const;
+
+export type CustomProviderSecretKey = (typeof CUSTOM_PROVIDER_SECRET_KEYS)[number];
+
+export interface CustomProviderConfig {
+  baseUrl: string;
+  apiKey?: string;
+  modelId: string;
+  label: string;
+}
+
+/** Documented allowlist patterns (loopback). Validation uses URL parsing. */
+export const CUSTOM_PROVIDER_URL_ALLOWLIST_PATTERNS = [
+  /^https?:\/\/localhost(:\d+)?(\/|$)/i,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?(\/|$)/i,
+  /^https?:\/\/\[::1\](:\d+)?(\/|$)/i,
+];
+
+export function isAllowedCustomUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url.trim());
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    if (parsed.username || parsed.password) return false;
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const isLoopback =
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "0:0:0:0:0:0:0:1";
+    if (isLoopback) return true;
+    // Non-loopback must use https (no plaintext API keys on the wire).
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function getCustomProviderStatus(configured: {
+  CUSTOM_PROVIDER_BASE_URL?: boolean;
+  CUSTOM_PROVIDER_MODEL_ID?: boolean;
+}): ProviderStatus {
+  return configured.CUSTOM_PROVIDER_BASE_URL && configured.CUSTOM_PROVIDER_MODEL_ID
+    ? "configured"
+    : "not-configured";
+}
+
+export function normalizeCustomBaseUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "");
 }

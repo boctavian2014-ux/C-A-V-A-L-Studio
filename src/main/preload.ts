@@ -943,8 +943,12 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.removeListener(channel, wrapped);
     };
   },
-  /** Lot C5.5 — user-initiated key test; returns only valid|invalid|unreachable (no bodies/keys). */
-  testProviderKey: (input: { providerId: string; secretKey: string }) =>
+  /** Lot C5.5 / 7f.4 — user-initiated key or custom endpoint test. */
+  testProviderKey: (input: {
+    providerId: string;
+    secretKey?: string;
+    draft?: { baseUrl?: string; apiKey?: string; modelId?: string };
+  }) =>
     ipcRenderer.invoke("caval:test-provider-key", input) as Promise<{
       ok: boolean;
       result: "valid" | "invalid" | "unreachable";

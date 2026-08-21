@@ -725,10 +725,11 @@ interface CavalBridge {
   localAiOnStatusChanged?: (
     listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void
   ) => () => void;
-  /** Lot C5.5 — user-initiated key test; no bodies/keys in the response. */
+  /** Lot C5.5 / 7f.4 — user-initiated key test; no bodies/keys in the response. */
   testProviderKey?: (input: {
     providerId: string;
-    secretKey: string;
+    secretKey?: string;
+    draft?: { baseUrl?: string; apiKey?: string; modelId?: string };
   }) => Promise<{
     ok: boolean;
     result: "valid" | "invalid" | "unreachable";
