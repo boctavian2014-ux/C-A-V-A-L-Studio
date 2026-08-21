@@ -289,6 +289,24 @@ describe("TerminalPanel", () => {
     expect(api.create).not.toHaveBeenCalled();
   });
 
+  it("removes the tab from UI even when destroy rejects", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { api } = createTerminalMock([info({ id: "term-a", title: "Solo", status: "active" })]);
+    api.destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container } = await renderSessions(api);
+    await act(async () => {
+      container
+        .querySelector('[data-testid="terminal-tab-close-term-a"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(api.destroy).toHaveBeenCalledWith("term-a");
+    expect(container.querySelector('[data-testid="terminal-tab-term-a"]')).toBeNull();
+    expect(container.querySelector('[data-testid="terminal-empty"]')).toBeTruthy();
+  });
+
   it("keeps Explain/Suggest wired to the active terminal id", async () => {
     const { api } = createTerminalMock([
       info({ id: "term-a", title: "Alpha" }),

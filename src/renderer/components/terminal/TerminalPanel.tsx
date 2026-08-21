@@ -144,6 +144,9 @@ export function TerminalSessions() {
     setMenuOpen(false);
     // Let main assign shell.label as title when omitted — avoids blank / numbered placeholders.
     const info = await api.create({});
+    if (!info || typeof info !== 'object' || !('id' in info) || typeof info.id !== 'string') {
+      return;
+    }
     const title = shortTerminalTitle(info);
     const newTab: TerminalTab = {
       id: info.id,
@@ -166,27 +169,15 @@ export function TerminalSessions() {
     };
   }, [handleCreateTab]);
 
-  const handleCloseTab = useCallback(async (id: string) => {
-    const tab = tabsRef.current.find((entry) => entry.id === id);
-    if (!tab) return;
-
-    if (isTerminalRunning(tab.info)) {
-      const confirmed = window.confirm(
-        `Close "${tab.title}"?\n\nThe running process will be terminated.`
-      );
-      if (!confirmed) return;
-    }
-
-    await window.caval?.terminal?.destroy?.(id);
-
+  const removeTabFromUi = useCallback((id: string) => {
     setOutput((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Map(prev);
       next.delete(id);
       return next;
     });
-
     setTabs((prev) => {
+      if (!prev.some((entry) => entry.id === id)) return prev;
       const nextActive = pickNextActiveId(prev, id);
       const next = prev.filter((entry) => entry.id !== id);
       setActiveTabId((current) => (current === id ? nextActive : current));
@@ -194,6 +185,29 @@ export function TerminalSessions() {
     });
   }, []);
 
+  const handleCloseTab = useCallback(
+    async (id: string) => {
+      const tab = tabsRef.current.find((entry) => entry.id === id);
+      if (!tab) return;
+
+      if (isTerminalRunning(tab.info)) {
+        const confirmed = window.confirm(
+          `Close "${tab.title}"?\n\nThe running process will be terminated.`
+        );
+        if (!confirmed) return;
+      }
+
+      // Drop the tab immediately so × always closes even if PTY destroy is slow/fails.
+      removeTabFromUi(id);
+
+      try {
+        await window.caval?.terminal?.destroy?.(id);
+      } catch {
+        // Session may already be gone; UI is already cleaned up.
+      }
+    },
+    [removeTabFromUi]
+  );
   useEffect(() => {
     if (!menuOpen) return;
     const onPointer = (event: MouseEvent) => {
@@ -408,13 +422,21 @@ export function TerminalSessions() {
                 type="button"
                 className="terminal-tab-close"
                 data-testid={`terminal-tab-close-${tab.id}`}
+                onMouseDown={(event) => {
+                  // Prevent tab activation from stealing the close gesture.
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
                 onClick={(event) => {
+                  event.preventDefault();
                   event.stopPropagation();
                   void handleCloseTab(tab.id);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
                     event.stopPropagation();
+                    void handleCloseTab(tab.id);
                   }
                 }}
                 aria-label={`Close ${tab.title}`}
