@@ -15,11 +15,26 @@ import {
   sanitizeLocalAiReason,
   type LocalAiPhase,
   type LocalAiStatus,
+  type OllamaInstallRequest,
+  type OllamaInstallResult,
+  type OllamaModelPullProgress,
+  type OllamaModelPullRequest,
+  type OllamaModelPullResult,
+  isConfirmedTrue,
 } from "../shared/local-ai-contract";
 
-export type { LocalAiStatus, LocalAiPhase } from "../shared/local-ai-contract";
+export type {
+  LocalAiStatus,
+  LocalAiPhase,
+  OllamaInstallRequest,
+  OllamaInstallResult,
+  OllamaModelPullProgress,
+  OllamaModelPullRequest,
+  OllamaModelPullResult,
+} from "../shared/local-ai-contract";
 
 export const LOCAL_AI_STATUS_CHANGED_CHANNEL = "caval:local-ai-status-changed";
+export const LOCAL_AI_PULL_PROGRESS_CHANNEL = "caval:local-ai-pull-progress";
 
 const DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:7b";
 const LOCAL_AI_MANAGED_SETTING = "localAi.manageRuntime";
@@ -27,6 +42,7 @@ const SETTINGS_FILE = "caval-app-settings.json";
 
 export interface EnsureLocalAiOptions {
   installRuntime?: boolean;
+  /** @deprecated 7f.3 — pull is a separate confirmed action; ignored when true with install. */
   pullModel?: boolean;
   modelName?: string;
 }
@@ -40,6 +56,7 @@ export interface EnsureLocalAiResult {
 }
 
 let setupInFlight: Promise<EnsureLocalAiResult> | null = null;
+let installInFlight = false;
 /** Child we spawned with `ollama serve` — kill only this on quit. */
 let managedOllamaChild: ChildProcess | null = null;
 let weStartedOllama = false;
@@ -48,6 +65,9 @@ let lastOllamaError: string | undefined;
 let lastEmittedFingerprint: string | null = null;
 /** Internal only — never sent to renderer. */
 let lastRuntimePath: string | undefined;
+/** Active `ollama pull` child — kill on cancel. */
+let activePullChild: ChildProcess | null = null;
+let activePullModelId: string | null = null;
 
 function settingsPath(): string {
   return path.join(app.getPath("userData"), SETTINGS_FILE);
@@ -227,7 +247,11 @@ export function buildLocalAiStatusSnapshot(partial?: {
   const defaultModelReady = models.some(
     (name) => name === DEFAULT_OLLAMA_MODEL || name.startsWith("qwen2.5-coder:")
   );
-  const inProgress = Boolean(setupInFlight) || bootPhase === "starting";
+  const inProgress =
+    Boolean(setupInFlight) ||
+    installInFlight ||
+    Boolean(activePullChild) ||
+    bootPhase === "starting";
   const phase = resolvePhase({
     installed,
     reachable,
@@ -453,9 +477,19 @@ export function __resetOllamaProcessTrackingForTests(): void {
   bootPhase = "unavailable";
   lastOllamaError = undefined;
   setupInFlight = null;
+  installInFlight = false;
   detectBinaryOverrideForTests = undefined;
   lastEmittedFingerprint = null;
   lastRuntimePath = undefined;
+  if (activePullChild && !activePullChild.killed) {
+    try {
+      activePullChild.kill();
+    } catch {
+      /* ignore */
+    }
+  }
+  activePullChild = null;
+  activePullModelId = null;
 }
 
 export function __getOllamaProcessTrackingForTests(): {
@@ -484,27 +518,251 @@ async function installOllamaRuntime(): Promise<string> {
     const detected = detectOllamaBinary();
     if (detected) return detected;
   }
-  throw new Error("Ollama pare instalat incomplet. Repornește aplicația și încearcă din nou.");
+  throw new Error("Installer completed but Ollama was not detected");
 }
 
-async function pullDefaultModel(runtimePath: string, modelName: string): Promise<void> {
-  await runProcess(runtimePath, ["pull", modelName], {
-    env: {
-      ...process.env,
-      OLLAMA_HOST: getOllamaHost(),
-    },
+/**
+ * Parse Ollama CLI pull progress lines, e.g.:
+ * "pulling 4f2c... 45% ▕████    ▏ 2.1 GB/4.7 GB"
+ */
+export function parseOllamaPullProgress(
+  line: string
+): Pick<OllamaModelPullProgress, "status" | "percent" | "completedBytes" | "totalBytes"> | null {
+  const verifying = /verif/i.test(line);
+  const match = line.match(/(\d+)%.*?([\d.]+)\s*([KMGT]?B)\s*\/\s*([\d.]+)\s*([KMGT]?B)/i);
+  if (!match) {
+    if (verifying) {
+      return {
+        status: "verifying",
+        percent: 100,
+        completedBytes: 0,
+        totalBytes: 0,
+      };
+    }
+    return null;
+  }
+  const unitToBytes = (n: number, unit: string): number => {
+    const u = unit.toUpperCase();
+    if (u === "GB" || u === "GIB") return n * 1_000_000_000;
+    if (u === "MB" || u === "MIB") return n * 1_000_000;
+    if (u === "KB" || u === "KIB") return n * 1_000;
+    return n;
+  };
+  return {
+    status: verifying ? "verifying" : "downloading",
+    percent: Number(match[1]),
+    completedBytes: unitToBytes(Number(match[2]), match[3] ?? "B"),
+    totalBytes: unitToBytes(Number(match[4]), match[5] ?? "B"),
+  };
+}
+
+/**
+ * Install Ollama runtime only — never pulls a model (7f.3).
+ * Requires `confirmed: true` at the call site / IPC gate.
+ */
+export async function installOllamaRuntimeOnly(
+  req: OllamaInstallRequest
+): Promise<OllamaInstallResult> {
+  if (!isConfirmedTrue(req?.confirmed)) {
+    return { success: false, error: "Install requires explicit confirmation" };
+  }
+  if (installInFlight) {
+    return { success: false, error: "Installation already in progress" };
+  }
+  installInFlight = true;
+  lastOllamaError = undefined;
+  bootPhase = "starting";
+  emitLocalAiStatusChanged(
+    buildLocalAiStatusSnapshot({
+      installed: Boolean(detectOllamaBinary()),
+      reachable: false,
+      models: [],
+    })
+  );
+
+  try {
+    let runtimePath = detectOllamaBinary();
+    if (!runtimePath) {
+      runtimePath = await installOllamaRuntime();
+    }
+    lastRuntimePath = runtimePath;
+    await startOllamaService(runtimePath);
+    setManagedByCaval(true);
+    installInFlight = false;
+    const status = await refreshAndEmit(true);
+    // No auto-pull — leave model-missing if weights absent.
+    return { success: true, status };
+  } catch (error) {
+    const sanitized =
+      sanitizeLocalAiReason(error instanceof Error ? error.message : String(error)) ??
+      "Installation failed";
+    lastOllamaError = sanitized;
+    bootPhase = "not-installed";
+    installInFlight = false;
+    const status = await refreshAndEmit(true);
+    return { success: false, error: sanitized, status };
+  } finally {
+    installInFlight = false;
+  }
+}
+
+/**
+ * Pull a model with progress callbacks and AbortSignal cancel (kills the child).
+ */
+export async function pullModelWithProgress(
+  req: OllamaModelPullRequest,
+  onProgress: (p: OllamaModelPullProgress) => void,
+  abortSignal: AbortSignal
+): Promise<OllamaModelPullResult> {
+  if (!isConfirmedTrue(req?.confirmed)) {
+    return { success: false, error: "Model download requires explicit confirmation" };
+  }
+  const modelId = req.modelId?.trim();
+  if (!modelId) {
+    return { success: false, error: "Model id is required" };
+  }
+  if (activePullChild) {
+    return { success: false, error: "A model download is already in progress" };
+  }
+
+  const runtimePath = detectOllamaBinary();
+  if (!runtimePath) {
+    bootPhase = "not-installed";
+    lastOllamaError = "Ollama was not found";
+    const status = await refreshAndEmit(true);
+    return { success: false, error: "Ollama was not found", status };
+  }
+
+  try {
+    if (!(await isOllamaReachable({ force: true }))) {
+      await startOllamaService(runtimePath);
+    }
+  } catch (error) {
+    const sanitized =
+      sanitizeLocalAiReason(error instanceof Error ? error.message : String(error)) ??
+      "Ollama failed to start";
+    return {
+      success: false,
+      error: sanitized,
+      status: await getLocalAiStatus().catch(() => undefined),
+    };
+  }
+
+  return new Promise<OllamaModelPullResult>((resolve) => {
+    let settled = false;
+    let cancelled = false;
+    const finish = async (result: OllamaModelPullResult) => {
+      if (settled) return;
+      settled = true;
+      if (activePullChild) {
+        activePullChild = null;
+        activePullModelId = null;
+      }
+      abortSignal.removeEventListener("abort", onAbort);
+      const status = await refreshAndEmit(true).catch(() => undefined);
+      resolve({ ...result, status });
+    };
+
+    const child = spawn(runtimePath, ["pull", modelId], {
+      env: {
+        ...process.env,
+        OLLAMA_HOST: getOllamaHost(),
+      },
+      detached: false,
+      windowsHide: true,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    activePullChild = child;
+    activePullModelId = modelId;
+
+    const emitProgress = (
+      partial: Partial<OllamaModelPullProgress> & { status: OllamaModelPullProgress["status"] }
+    ) => {
+      onProgress({
+        modelId,
+        completedBytes: 0,
+        totalBytes: 0,
+        percent: 0,
+        ...partial,
+      });
+    };
+
+    emitProgress({ status: "downloading", percent: 0 });
+
+    const consume = (chunk: Buffer | string) => {
+      const text = String(chunk);
+      for (const line of text.split(/\r?\n/)) {
+        const parsed = parseOllamaPullProgress(line);
+        if (parsed) {
+          emitProgress({ modelId, ...parsed });
+        }
+      }
+    };
+    child.stdout?.on("data", consume);
+    child.stderr?.on("data", consume);
+
+    const onAbort = () => {
+      cancelled = true;
+      try {
+        if (!child.killed) child.kill();
+      } catch {
+        /* ignore */
+      }
+      emitProgress({ status: "cancelled", percent: 0, completedBytes: 0, totalBytes: 0 });
+    };
+    if (abortSignal.aborted) {
+      onAbort();
+    } else {
+      abortSignal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    child.on("error", (err) => {
+      const sanitized = sanitizeLocalAiReason(err.message) ?? "Model download failed";
+      emitProgress({ status: "error", error: sanitized });
+      void finish({ success: false, error: sanitized });
+    });
+
+    child.on("close", (code) => {
+      if (cancelled || abortSignal.aborted) {
+        void finish({ success: false, cancelled: true, error: "Download cancelled" });
+        return;
+      }
+      if (code === 0) {
+        emitProgress({ status: "done", percent: 100 });
+        void finish({ success: true });
+        return;
+      }
+      const sanitized = "Model download failed";
+      emitProgress({ status: "error", error: sanitized });
+      void finish({ success: false, error: sanitized });
+    });
   });
 }
 
+export function cancelActiveModelPull(modelId?: string): boolean {
+  if (!activePullChild) return false;
+  if (modelId && activePullModelId && modelId !== activePullModelId) return false;
+  try {
+    if (!activePullChild.killed) activePullChild.kill();
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+export function __getActivePullForTests(): { modelId: string | null; hasChild: boolean } {
+  return { modelId: activePullModelId, hasChild: Boolean(activePullChild) };
+}
+
+/** @deprecated Prefer installOllamaRuntimeOnly + pullModelWithProgress (7f.3). Never auto-pulls. */
 export async function ensureLocalAiRuntime(options?: EnsureLocalAiOptions): Promise<EnsureLocalAiResult> {
   if (setupInFlight) return setupInFlight;
   setupInFlight = (async () => {
+    // 7f.3: never auto-chain install+pull. pullModel is ignored.
     const installRuntime = options?.installRuntime !== false;
-    const pullModel = options?.pullModel !== false;
-    const modelName = options?.modelName?.trim() || DEFAULT_OLLAMA_MODEL;
-    let changed = false;
     try {
-      let runtimePath = detectOllamaBinary();
+      const runtimePath = detectOllamaBinary();
       if (!runtimePath) {
         if (!installRuntime) {
           const error = "Ollama was not found";
@@ -514,26 +772,28 @@ export async function ensureLocalAiRuntime(options?: EnsureLocalAiOptions): Prom
           const status = await refreshAndEmit(true);
           return { ok: false, error, status };
         }
-        runtimePath = await installOllamaRuntime();
-        changed = true;
+        const installed = await installOllamaRuntimeOnly({ confirmed: true });
+        if (!installed.success) {
+          return { ok: false, error: installed.error, status: installed.status };
+        }
+        return {
+          ok: true,
+          status: installed.status,
+          changed: true,
+          summary:
+            "Runtime local instalat și pornit. Descarcă modelul separat din AI Providers.",
+        };
       }
       await startOllamaService(runtimePath);
-      if (pullModel) {
-        const statusBefore = await getLocalAiStatus();
-        if (!statusBefore.defaultModelReady) {
-          await pullDefaultModel(runtimePath, modelName);
-          changed = true;
-        }
-      }
       setManagedByCaval(true);
       const status = await getLocalAiStatus();
       return {
         ok: true,
         status,
-        changed,
+        changed: false,
         summary: status.defaultModelReady
           ? `Local AI este gata pe ${status.endpoint} cu modelul ${status.defaultModel}.`
-          : "Runtime local instalat și pornit. Modelul implicit poate fi descărcat ulterior.",
+          : "Runtime local pornit. Descarcă modelul separat din AI Providers.",
       };
     } catch (error) {
       return {

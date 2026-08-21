@@ -750,23 +750,24 @@ interface CavalBridge {
     changed?: boolean;
     summary?: string;
     error?: string;
-    status?: {
-      supported: boolean;
-      platform: string;
-      installed: boolean;
-      running: boolean;
-      configuredUrl: string;
-      runtimePath?: string;
-      models: string[];
-      defaultModel: string;
-      defaultModelReady: boolean;
-      managedByCaval: boolean;
-      inProgress: boolean;
-      phase: "running" | "starting" | "unavailable";
-      lastError?: string;
-      policy: string;
-    };
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
   }>;
+  /** Pas 7f.3 — separate install / pull. */
+  localAiInstall?: (req: { confirmed: true }) => Promise<{
+    success: boolean;
+    error?: string;
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
+  }>;
+  localAiPullModel?: (req: { modelId: string; confirmed: true }) => Promise<{
+    success: boolean;
+    cancelled?: boolean;
+    error?: string;
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
+  }>;
+  localAiPullCancel?: (modelId: string) => Promise<{ ok: boolean; error?: string }>;
+  onLocalAiPullProgress?: (
+    listener: (progress: import("../shared/local-ai-contract").OllamaModelPullProgress) => void
+  ) => () => void;
   modelsHealth?: () => Promise<{
     ok: boolean;
     summary?: string;

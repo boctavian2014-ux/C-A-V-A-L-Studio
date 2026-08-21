@@ -7,7 +7,8 @@ import {
   filterNonEmptySecretsPatch,
 } from '../models/api-secrets';
 import { formatCadDualHealthOneLine } from '../engineering/cad-dual-health';
-import { OLLAMA_LOOPBACK_URL } from '../../src/shared/local-ai-contract';
+import { OLLAMA_LOOPBACK_URL, toProviderStatus, type LocalAiStatus } from '../../src/shared/local-ai-contract';
+import { OllamaProviderRow } from './AiProvidersPanel';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -106,21 +107,6 @@ type PersistResult = {
   message?: string;
 };
 
-type LocalAiStatus = {
-  supported: boolean;
-  platform: string;
-  installed: boolean;
-  running: boolean;
-  configuredUrl: string;
-  runtimePath?: string;
-  models: string[];
-  defaultModel: string;
-  defaultModelReady: boolean;
-  managedByCaval: boolean;
-  inProgress: boolean;
-  policy: string;
-};
-
 export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProps) {
   const { apiKeys, setApiKey } = useAIStore();
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -140,15 +126,16 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     null
   );
   const [localAiStatus, setLocalAiStatus] = useState<LocalAiStatus | null>(null);
-  const [localAiBusy, setLocalAiBusy] = useState(false);
-  const [localAiMessage, setLocalAiMessage] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(
-    null
-  );
 
   const refreshLocalAiStatus = async () => {
-    const res = await window.caval.localAiStatus?.();
-    if (res?.ok && res.status) {
-      setLocalAiStatus(res.status);
+    try {
+      const res = await window.caval.localAiStatus?.();
+      if (res?.ok && res.status) {
+        setLocalAiStatus(res.status);
+        if (res.status.configuredUrl) setOllamaUrlDraft(res.status.configuredUrl);
+      }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -341,43 +328,6 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     }
   };
 
-  const enableLocalAi = async () => {
-    setLocalAiBusy(true);
-    setLocalAiMessage({ kind: 'warn', text: 'Se configurează runtime-ul local și modelul gratuit…' });
-    try {
-      const result = await window.caval.localAiSetup?.({
-        installRuntime: true,
-        pullModel: true,
-        modelName: 'qwen2.5-coder:7b',
-      });
-      if (!result?.ok) {
-        setLocalAiMessage({
-          kind: 'err',
-          text: result?.error ?? 'Nu am putut configura Local AI pe acest sistem.',
-        });
-        return;
-      }
-      if (result.status?.configuredUrl) {
-        setOllamaUrlDraft(result.status.configuredUrl);
-      }
-      setLocalAiStatus(result.status ?? null);
-      // Switch active model to the local-first free route.
-      useAIStore.getState().setModel('caval-auto/free');
-      setLocalAiMessage({
-        kind: 'ok',
-        text: result.summary ?? 'Local AI este gata. Modelul activ a fost setat pe Auto Free (local).',
-      });
-    } catch (error) {
-      setLocalAiMessage({
-        kind: 'err',
-        text: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setLocalAiBusy(false);
-      await refreshLocalAiStatus();
-    }
-  };
-
   const handleSaveAll = async () => {
     setSaving(true);
     setSaveMessage(null);
@@ -509,32 +459,17 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
           gap: 8,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--caval-text)' }}>Local AI gratuit</div>
-            <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2, lineHeight: 1.45 }}>
-              Instalăm doar runtime-ul local. Modelul gratuit se descarcă la cerere după confirmare.
-            </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--caval-text)' }}>Local AI gratuit</div>
+          <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2, lineHeight: 1.45 }}>
+            Instalăm doar runtime-ul local. Modelul se descarcă separat, după confirmare explicită.
           </div>
-          <button
-            type="button"
-            onClick={() => void enableLocalAi()}
-            disabled={localAiBusy || localAiStatus?.inProgress}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: 'none',
-              background: 'var(--caval-accent)',
-              color: '#0E0E0F',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: localAiBusy ? 'wait' : 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {localAiBusy ? 'Configurare…' : 'Activează Local AI'}
-          </button>
         </div>
+        <OllamaProviderRow
+          status={localAiStatus}
+          providerStatus={localAiStatus ? toProviderStatus(localAiStatus) : 'not-installed'}
+          onStatusMaybeChanged={() => void refreshLocalAiStatus()}
+        />
         {localAiStatus && (
           <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', lineHeight: 1.5 }}>
             Runtime: {localAiStatus.installed ? 'instalat' : 'lipsește'}
@@ -550,22 +485,6 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
             ) : null}
             <br />
             {localAiStatus.policy}
-          </div>
-        )}
-        {localAiMessage && (
-          <div
-            style={{
-              fontSize: 10.5,
-              lineHeight: 1.5,
-              color:
-                localAiMessage.kind === 'ok'
-                  ? 'var(--caval-success)'
-                  : localAiMessage.kind === 'warn'
-                    ? '#E6A817'
-                    : 'var(--caval-error, #f87171)',
-            }}
-          >
-            {localAiMessage.text}
           </div>
         )}
       </div>

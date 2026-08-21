@@ -99,6 +99,10 @@ import {
   ensureOllamaOnBoot,
   getLocalAiStatus,
   stopManagedOllamaIfStarted,
+  installOllamaRuntimeOnly,
+  pullModelWithProgress,
+  cancelActiveModelPull,
+  LOCAL_AI_PULL_PROGRESS_CHANNEL,
 } from "./local-ai-setup";
 import {
   AI_PREFERRED_PROVIDER_SETTING,
@@ -1520,6 +1524,75 @@ ipcMain.handle("caval:local-ai-status", async (event) => {
   }
 });
 
+/** Pas 7f.3 — install runtime only (confirmed: true required). */
+ipcMain.handle("caval:local-ai-install", async (event, req: { confirmed?: boolean }) => {
+  try {
+    assertTrustedSender(event);
+    if (req?.confirmed !== true) {
+      return { success: false, error: "Install requires explicit confirmation" };
+    }
+    return await installOllamaRuntimeOnly({ confirmed: true });
+  } catch {
+    return {
+      success: false,
+      error: "Installation failed",
+    };
+  }
+});
+
+const activePullControllers = new Map<string, AbortController>();
+
+/** Pas 7f.3 — pull model with progress events (confirmed: true required). */
+ipcMain.handle(
+  "caval:local-ai-pull-model",
+  async (event, req: { modelId?: string; confirmed?: boolean }) => {
+    try {
+      assertTrustedSender(event);
+      if (req?.confirmed !== true) {
+        return { success: false, error: "Model download requires explicit confirmation" };
+      }
+      const modelId = typeof req.modelId === "string" ? req.modelId.trim() : "";
+      if (!modelId) {
+        return { success: false, error: "Model id is required" };
+      }
+      const controller = new AbortController();
+      activePullControllers.set(modelId, controller);
+      try {
+        return await pullModelWithProgress(
+          { modelId, confirmed: true },
+          (progress) => {
+            try {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send(LOCAL_AI_PULL_PROGRESS_CHANNEL, progress);
+              }
+            } catch {
+              /* sender gone */
+            }
+          },
+          controller.signal
+        );
+      } finally {
+        activePullControllers.delete(modelId);
+      }
+    } catch {
+      return { success: false, error: "Model download failed" };
+    }
+  }
+);
+
+ipcMain.handle("caval:local-ai-pull-cancel", async (event, modelId: string) => {
+  try {
+    assertTrustedSender(event);
+    const id = typeof modelId === "string" ? modelId.trim() : "";
+    const controller = id ? activePullControllers.get(id) : undefined;
+    controller?.abort();
+    cancelActiveModelPull(id || undefined);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 ipcMain.handle(
   "caval:local-ai-setup",
   async (
@@ -1528,7 +1601,11 @@ ipcMain.handle(
   ) => {
     try {
       assertTrustedSender(event);
-      return await ensureLocalAiRuntime(input);
+      // 7f.3: legacy channel no longer auto-pulls even if pullModel: true.
+      return await ensureLocalAiRuntime({
+        ...input,
+        pullModel: false,
+      });
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }

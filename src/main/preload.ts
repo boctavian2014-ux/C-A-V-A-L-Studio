@@ -848,23 +848,43 @@ contextBridge.exposeInMainWorld("caval", {
       changed?: boolean;
       summary?: string;
       error?: string;
-      status?: {
-        supported: boolean;
-        platform: string;
-        installed: boolean;
-        running: boolean;
-        configuredUrl: string;
-        runtimePath?: string;
-        models: string[];
-        defaultModel: string;
-        defaultModelReady: boolean;
-        managedByCaval: boolean;
-        inProgress: boolean;
-        phase: "running" | "starting" | "unavailable";
-        lastError?: string;
-        policy: string;
-      };
+      status?: import("../shared/local-ai-contract").LocalAiStatus;
     }>,
+  /** Pas 7f.3 — install Ollama only (requires confirmed: true). */
+  localAiInstall: (req: { confirmed: true }) =>
+    ipcRenderer.invoke("caval:local-ai-install", req) as Promise<{
+      success: boolean;
+      error?: string;
+      status?: import("../shared/local-ai-contract").LocalAiStatus;
+    }>,
+  /** Pas 7f.3 — pull model with progress events. */
+  localAiPullModel: (req: { modelId: string; confirmed: true }) =>
+    ipcRenderer.invoke("caval:local-ai-pull-model", req) as Promise<{
+      success: boolean;
+      cancelled?: boolean;
+      error?: string;
+      status?: import("../shared/local-ai-contract").LocalAiStatus;
+    }>,
+  localAiPullCancel: (modelId: string) =>
+    ipcRenderer.invoke("caval:local-ai-pull-cancel", modelId) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>,
+  onLocalAiPullProgress: (
+    listener: (progress: import("../shared/local-ai-contract").OllamaModelPullProgress) => void
+  ): (() => void) => {
+    const channel = "caval:local-ai-pull-progress";
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      progress: import("../shared/local-ai-contract").OllamaModelPullProgress
+    ) => {
+      listener(progress);
+    };
+    ipcRenderer.on(channel, wrapped);
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped);
+    };
+  },
   billingUserId: () =>
     ipcRenderer.invoke("caval:billing-user-id") as Promise<{ ok: boolean; userId?: string }>,
   billingEntitlements: () =>

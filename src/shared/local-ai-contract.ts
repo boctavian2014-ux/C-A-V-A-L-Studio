@@ -114,6 +114,9 @@ export function sanitizeLocalAiReason(raw: string | undefined): string | undefin
   if (/did not become ready|did not respond|timeout|timed out/i.test(text)) {
     return "Ollama did not respond in time";
   }
+  if (/install.*fail|installation failed|installer/i.test(text)) {
+    return "Installation failed";
+  }
   if (/exited|spawn|EACCES|ENOENT/i.test(text)) {
     return "Ollama failed to start";
   }
@@ -122,4 +125,68 @@ export function sanitizeLocalAiReason(raw: string | undefined): string | undefin
     return "Ollama is unavailable";
   }
   return text;
+}
+
+/** Pas 7f.3 — explicit install / pull contracts (no combined auto-chain). */
+
+export const DEFAULT_OLLAMA_MODEL_ID = "qwen2.5-coder:7b" as const;
+
+/** Approx installer footprint shown before Install Ollama (~4 GB). */
+export const OLLAMA_INSTALL_APPROX_BYTES = 4_000_000_000;
+
+export const OLLAMA_MODEL_SIZES: Record<string, { label: string; approxBytes: number }> = {
+  "qwen2.5-coder:7b": { label: "Qwen 2.5 Coder 7B", approxBytes: 4_700_000_000 },
+};
+
+export interface OllamaInstallRequest {
+  confirmed: true;
+}
+
+export interface OllamaInstallResult {
+  success: boolean;
+  error?: string;
+  status?: LocalAiStatus;
+}
+
+export interface OllamaModelPullRequest {
+  modelId: string;
+  confirmed: true;
+}
+
+export type OllamaModelPullStatus =
+  | "downloading"
+  | "verifying"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export interface OllamaModelPullProgress {
+  modelId: string;
+  status: OllamaModelPullStatus;
+  completedBytes: number;
+  totalBytes: number;
+  percent: number;
+  error?: string;
+}
+
+export interface OllamaModelPullResult {
+  success: boolean;
+  cancelled?: boolean;
+  error?: string;
+  status?: LocalAiStatus;
+}
+
+export function formatApproxBytes(bytes: number): string {
+  if (bytes >= 1_000_000_000) {
+    const gb = bytes / 1_000_000_000;
+    return `~${gb % 1 === 0 ? gb.toFixed(0) : gb.toFixed(1)} GB`;
+  }
+  if (bytes >= 1_000_000) {
+    return `~${Math.round(bytes / 1_000_000)} MB`;
+  }
+  return `${bytes} B`;
+}
+
+export function isConfirmedTrue(value: unknown): value is true {
+  return value === true;
 }
