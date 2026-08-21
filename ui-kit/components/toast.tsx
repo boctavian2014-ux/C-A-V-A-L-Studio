@@ -7,9 +7,17 @@ export interface ToastProps {
   children?: ReactNode;
   action?: ReactNode;
   onDismiss?: () => void;
+  dismissLabel?: string;
 }
 
-export const Toast = ({ tone = "info", title, children, action, onDismiss }: ToastProps) => (
+export const Toast = ({
+  tone = "info",
+  title,
+  children,
+  action,
+  onDismiss,
+  dismissLabel = "Dismiss notification",
+}: ToastProps) => (
   <aside className={`caval-toast caval-toast--${tone}`} role="status" aria-live="polite">
     <div className="caval-toast__content">
       <Badge tone={tone}>{tone}</Badge>
@@ -17,6 +25,15 @@ export const Toast = ({ tone = "info", title, children, action, onDismiss }: Toa
       {children && <p>{children}</p>}
     </div>
     {action && <div className="caval-toast__action">{action}</div>}
-    {onDismiss && <button type="button" className="caval-toast__dismiss" aria-label="Dismiss notification" onClick={onDismiss}>x</button>}
+    {onDismiss && (
+      <button
+        type="button"
+        className="caval-toast__dismiss"
+        aria-label={dismissLabel}
+        onClick={onDismiss}
+      >
+        x
+      </button>
+    )}
   </aside>
 );

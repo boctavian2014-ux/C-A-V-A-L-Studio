@@ -737,6 +737,19 @@ interface CavalBridge {
   }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
+  locale?: {
+    get: () => Promise<{
+      ok: boolean;
+      locale?: string;
+      source?: "saved" | "system" | "default";
+      error?: string;
+    }>;
+    set: (locale: string) => Promise<{
+      ok: boolean;
+      locale?: string;
+      error?: string;
+    }>;
+  };
   localAiStatus?: () => Promise<{
     ok: boolean;
     status?: import("../shared/local-ai-contract").LocalAiStatus;

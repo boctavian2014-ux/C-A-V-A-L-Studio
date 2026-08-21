@@ -822,6 +822,21 @@ contextBridge.exposeInMainWorld("caval", {
   settingsSave: (settings: Record<string, string>) =>
     ipcRenderer.invoke("caval:settings-save", settings) as Promise<{ ok: boolean }>,
   settingsLoad: () => ipcRenderer.invoke("caval:settings-load") as Promise<{ ok: boolean; settings?: Record<string, string> }>,
+  locale: {
+    get: () =>
+      ipcRenderer.invoke("caval:locale-get") as Promise<{
+        ok: boolean;
+        locale?: string;
+        source?: "saved" | "system" | "default";
+        error?: string;
+      }>,
+    set: (locale: string) =>
+      ipcRenderer.invoke("caval:locale-set", locale) as Promise<{
+        ok: boolean;
+        locale?: string;
+        error?: string;
+      }>,
+  },
   localAiStatus: () =>
     ipcRenderer.invoke("caval:local-ai-status") as Promise<{
       ok: boolean;

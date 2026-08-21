@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FileTree } from "../../src/renderer/components/sidebar/FileTree";
 import { useEditorStore } from "../../src/renderer/store/editor-store";
+import { I18nProvider } from "../../ai/i18n/I18nProvider";
 
 vi.mock("../../src/renderer/hooks/useOpenWorkspace", () => ({
   useOpenWorkspace: () => ({
@@ -89,9 +90,13 @@ describe("ExplorerPanel — no preview section", () => {
   });
 
   it("still renders empty-state open project flow when no folder is open", () => {
-    const result = mount(<FileTree />);
+    const result = mount(
+      <I18nProvider initialLocale="ro">
+        <FileTree />
+      </I18nProvider>
+    );
     mounted = result;
     expect(result.container.textContent).toMatch(/Deschide un folder pentru a începe/i);
-    expect(result.container.textContent).toMatch(/Deschide proiect/i);
+    expect(result.container.textContent).toMatch(/Deschide folder/i);
   });
 });

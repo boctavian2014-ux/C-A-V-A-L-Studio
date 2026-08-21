@@ -18,6 +18,14 @@ import {
 } from '../../../shared/publisher-legal';
 import { formatCadDualHealth } from '../../../../ai/engineering/cad-dual-health';
 import { ProjectHealthPanel } from '../health/ProjectHealthPanel';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import {
+  createTranslator,
+  LOCALE_NATIVE_LABELS,
+  SUPPORTED_LOCALES,
+  type AppLocale,
+} from '../../../../ai/i18n/index';
+import { showWorkbenchToast } from '../../commands/workbench-toast';
 
 const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
   {
@@ -254,6 +262,7 @@ function InfoBox({ children }: { children: React.ReactNode }) {
 function SectionGeneral() {
   const { app, updateApp } = useSettingsStore();
   const { mode, setMode } = useCavalTheme();
+  const { t, locale, setLocale } = useTranslation();
 
   const setTheme = (theme: 'dark' | 'light') => {
     updateApp({ theme });
@@ -266,8 +275,8 @@ function SectionGeneral() {
 
   return (
     <>
-      <Section title="Aspect">
-        <Row label="Temă" desc="Dark sau light pentru întreaga aplicație">
+      <Section title={t('settings.appearance')}>
+        <Row label={t('settings.theme')} desc={t('settings.themeDesc')}>
           <Select
             value={app.theme}
             onChange={setTheme}
@@ -277,14 +286,19 @@ function SectionGeneral() {
             ]}
           />
         </Row>
-        <Row label="Limbă" desc="Interfață (i18n în curs)">
+        <Row label={t('settings.displayLanguage')} desc={t('settings.displayLanguageHint')}>
           <Select
-            value={app.language}
-            onChange={(v) => updateApp({ language: v })}
-            options={[
-              { value: 'ro', label: 'Română' },
-              { value: 'en', label: 'English' },
-            ]}
+            value={locale}
+            onChange={(v) => {
+              const next = v as AppLocale;
+              void setLocale(next).then(() => {
+                showWorkbenchToast(createTranslator(next)('settings.localeChanged'));
+              });
+            }}
+            options={SUPPORTED_LOCALES.map((id) => ({
+              value: id,
+              label: LOCALE_NATIVE_LABELS[id],
+            }))}
           />
         </Row>
       </Section>
@@ -661,6 +675,11 @@ function SectionAbout() {
 
 export function SettingsPanel({ onClose }: { onClose?: () => void }) {
   const { activeSection, setActiveSection } = useSettingsStore();
+  const { t } = useTranslation();
+
+  const navItems = NAV_ITEMS.map((item) =>
+    item.id === 'general' ? { ...item, label: t('settings.nav.general') } : item
+  );
 
   const renderContent = () => {
     switch (activeSection) {
@@ -676,7 +695,7 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const currentNav = NAV_ITEMS.find((n) => n.id === activeSection);
+  const currentNav = navItems.find((n) => n.id === activeSection);
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--caval-bg)' }}>
@@ -691,9 +710,9 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
           borderBottom: '1px solid var(--caval-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--caval-text)' }}>Setări</span>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--caval-text)' }}>{t('nav.settings')}</span>
           {onClose && (
-            <button type="button" onClick={onClose} style={{
+            <button type="button" onClick={onClose} title={t('common.close')} aria-label={t('common.close')} style={{
               width: 20, height: 20, border: 'none', background: 'none',
               color: 'var(--caval-text-muted)', cursor: 'pointer', fontSize: 15,
             }}>×</button>
@@ -701,7 +720,7 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, padding: '6px 6px' }}>
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <button
               key={item.id}
               type="button"

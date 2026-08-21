@@ -48,6 +48,11 @@ import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
 import { registerRoboticsLibraryHandlers } from "./robotics-library-handlers";
 import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
+import {
+  applyLocaleToSettings,
+  resolveLocalePreference,
+} from "./locale-settings";
+import { LOCALE_SETTING_KEY } from "../shared/i18n-contract";
 import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
 import { setMcpSecretsProvider } from "../../ai/tools/tool-runtime";
 import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
@@ -1379,6 +1384,7 @@ const SETTINGS_KEYS_ON_DISK = new Set([
   "cad.apiUrl",
   "caval.userId",
   "ai.preferredProvider",
+  "ui.locale",
 ]);
 const SETTINGS_SENSITIVE_KEYS = new Set([
   "openrouter.apiKey",
@@ -1479,6 +1485,13 @@ ipcMain.handle("caval:settings-save", async (event, settings: Record<string, str
   if (incoming["ollama.url"] !== undefined) {
     incoming["ollama.url"] = getOllamaLoopbackUrl();
   }
+  if (incoming[LOCALE_SETTING_KEY] !== undefined) {
+    const localeResult = applyLocaleToSettings({}, incoming[LOCALE_SETTING_KEY]);
+    if (!localeResult.ok) {
+      return { ok: false, error: localeResult.error };
+    }
+    incoming[LOCALE_SETTING_KEY] = localeResult.locale;
+  }
   const merged = { ...persistedAppSettings, ...incoming };
   writePersistedAppSettings(merged);
   const forRenderer = { ...merged };
@@ -1518,6 +1531,46 @@ ipcMain.handle("caval:settings-load", (event) => {
   const withUser = getRendererSettings(event.sender.id, settings);
   appSettings.set(event.sender.id, withUser);
   return { ok: true, settings: withUser };
+});
+
+ipcMain.handle("caval:locale-get", (event) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  persistedAppSettings = readPersistedAppSettings();
+  const { locale, source } = resolveLocalePreference(
+    persistedAppSettings,
+    app.getLocale()
+  );
+  return { ok: true, locale, source };
+});
+
+ipcMain.handle("caval:locale-set", (event, localeInput: unknown) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  persistedAppSettings = readPersistedAppSettings();
+  const result = applyLocaleToSettings(persistedAppSettings, localeInput);
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+  writePersistedAppSettings(result.settings);
+  const forRenderer = { ...result.settings };
+  for (const key of SETTINGS_SENSITIVE_KEYS) {
+    delete forRenderer[key];
+  }
+  appSettings.set(event.sender.id, forRenderer);
+  return { ok: true, locale: result.locale };
 });
 
 ipcMain.handle("caval:local-ai-status", async (event) => {

@@ -5,6 +5,7 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
 import { IconFolder } from '../brand/CavaloIcons';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -53,13 +54,14 @@ interface ContextMenuState {
 
 function ContextMenu({ state, onClose }: { state: ContextMenuState; onClose: () => void }) {
   const { refreshTree } = useEditorStore();
+  const { t } = useTranslation();
 
   const handle = async (action: string) => {
     onClose();
     if (action === 'reveal') {
       await window.caval.fs.reveal(state.node.path);
     } else if (action === 'delete') {
-      if (confirm(`Ștergi "${state.node.name}"?`)) {
+      if (confirm(t('confirm.deleteFile', { name: state.node.name }))) {
         await window.caval.fs.delete(state.node.path);
         await refreshTree();
       }
@@ -217,6 +219,7 @@ function TreeNode({
 export function FileTree({ onClose }: { onClose?: () => void }) {
   const { fileTree, projectPath, refreshTree } = useEditorStore();
   const { theme } = useCavalTheme();
+  const { t } = useTranslation();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const { pickAndOpenFolder } = useOpenWorkspace();
@@ -258,7 +261,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
           {projectName}
         </span>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <IconBtn title="Deschide folder" onClick={handleOpenFolder}>
+          <IconBtn title={t('common.openFolder')} onClick={handleOpenFolder}>
             <Cavalo3DIcon name="home" size={18} />
           </IconBtn>
           <IconBtn title="Reîmprospătează" onClick={refreshTree}>
@@ -267,7 +270,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
               <path d="M3 5l2-3-2-0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
           </IconBtn>
-          {onClose && <SidebarCloseButton onClick={onClose} />}
+          {onClose && <SidebarCloseButton onClick={onClose} title={t('common.close')} />}
         </div>
       </div>
 
@@ -285,7 +288,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
               <Cavalo3DIcon name="home" size={44} />
             </div>
-            <p style={{ margin: 0 }}>Deschide un folder pentru a începe</p>
+            <p style={{ margin: 0 }}>{t('explorer.openFolderHint')}</p>
             <button
               onClick={handleOpenFolder}
               style={{
@@ -295,7 +298,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
                 cursor: 'pointer', fontWeight: 600,
               }}
             >
-              Deschide proiect
+              {t('common.openFolder')}
             </button>
           </div>
         ) : (
