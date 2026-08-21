@@ -156,6 +156,7 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
       const messages = historyPayloadToChatMessages(res.conversation);
       const title =
         get().conversations.find((c) => c.id === id)?.title ?? "Chat";
+      const restoredModelId = res.conversation.modelId?.trim() || null;
       useAIStore.setState((s) => {
         const existing = s.threads.find((t) => t.id === id);
         const threads = existing
@@ -180,6 +181,9 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
           threads,
           activeThreadId: id,
           messages,
+          ...(restoredModelId
+            ? { selectedModel: restoredModelId as typeof s.selectedModel, activeResolvedModel: null }
+            : {}),
         };
       });
       set({ loading: false, activeHistoryId: id, error: null });

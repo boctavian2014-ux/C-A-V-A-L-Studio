@@ -100,6 +100,11 @@ import {
   getLocalAiStatus,
   stopManagedOllamaIfStarted,
 } from "./local-ai-setup";
+import {
+  AI_PREFERRED_PROVIDER_SETTING,
+  buildAiProvidersSnapshot,
+  resolvePreferredProviderId,
+} from "./ai/provider-registry";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -1364,8 +1369,8 @@ const SETTINGS_KEYS_ON_DISK = new Set([
   "ollama.url",
   "cad.apiUrl",
   "caval.userId",
+  "ai.preferredProvider",
 ]);
-
 const SETTINGS_SENSITIVE_KEYS = new Set([
   "openrouter.apiKey",
   "caval.cloud.apiKey",
@@ -1627,6 +1632,57 @@ ipcMain.handle("caval:secrets-get", (event) => {
     configured: configuredMapFromProviders(providers),
   };
 });
+
+/** Pas 7f.1 — unified provider registry + status (no secret values). */
+ipcMain.handle("caval:ai-providers-list", async (event) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  try {
+    const stored = normalizeSecretsMap(readApiSecrets());
+    const configured = buildSecretsConfiguredMap(stored);
+    const snapshot = await buildAiProvidersSnapshot({
+      configured,
+      preferredProviderId: persistedAppSettings[AI_PREFERRED_PROVIDER_SETTING],
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    });
+    return { ok: true, ...snapshot };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle(
+  "caval:ai-providers-set-preferred",
+  async (event, input: { providerId?: string }) => {
+    try {
+      assertTrustedSender(event);
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (input?.providerId === "custom") {
+      return { ok: false, error: "Custom provider is not available yet" };
+    }
+    const preferred = resolvePreferredProviderId(input?.providerId);
+    const merged = {
+      ...persistedAppSettings,
+      [AI_PREFERRED_PROVIDER_SETTING]: preferred,
+    };
+    writePersistedAppSettings(merged);
+    return { ok: true, preferredProviderId: preferred };
+  }
+);
 
 ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => {
   assertTrustedSender(event);

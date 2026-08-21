@@ -892,6 +892,21 @@ contextBridge.exposeInMainWorld("caval", {
     }>,
   secretsSet: (secrets: Record<string, string>) =>
     ipcRenderer.invoke("caval:secrets-set", secrets) as Promise<{ ok: boolean }>,
+  /** Pas 7f.1 — unified AI provider registry (status only; no secret values). */
+  aiProvidersList: () =>
+    ipcRenderer.invoke("caval:ai-providers-list") as Promise<{
+      ok: boolean;
+      providers?: import("../shared/ai-provider-contract").AiProviderEntry[];
+      preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+      encryptionAvailable?: boolean;
+      error?: string;
+    }>,
+  aiProvidersSetPreferred: (input: { providerId: string }) =>
+    ipcRenderer.invoke("caval:ai-providers-set-preferred", input) as Promise<{
+      ok: boolean;
+      preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+      error?: string;
+    }>,
   /** Lot C5.5 — user-initiated key test; returns only valid|invalid|unreachable (no bodies/keys). */
   testProviderKey: (input: { providerId: string; secretKey: string }) =>
     ipcRenderer.invoke("caval:test-provider-key", input) as Promise<{

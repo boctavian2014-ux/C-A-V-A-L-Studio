@@ -84,7 +84,12 @@ export function loadHistoryConversation(
     if (written.length) writtenFilesByMessage[msg.id] = written;
   }
 
-  return { messages, timelineByMessage, writtenFilesByMessage };
+  return {
+    messages,
+    timelineByMessage,
+    writtenFilesByMessage,
+    modelId: conv.modelId ?? null,
+  };
 }
 
 /** Pas 7e.4 — lazy details for a single message (timeline + written files paths). */

@@ -707,7 +707,20 @@ interface CavalBridge {
     configured?: Record<string, boolean>;
     error?: string;
   }>;
-  secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
+  secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean; error?: string; key?: string }>;
+  /** Pas 7f.1 — unified AI provider registry (no secret values). */
+  aiProvidersList?: () => Promise<{
+    ok: boolean;
+    providers?: import("../shared/ai-provider-contract").AiProviderEntry[];
+    preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+    encryptionAvailable?: boolean;
+    error?: string;
+  }>;
+  aiProvidersSetPreferred?: (input: { providerId: string }) => Promise<{
+    ok: boolean;
+    preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+    error?: string;
+  }>;
   /** Lot C5.5 — user-initiated key test; no bodies/keys in the response. */
   testProviderKey?: (input: {
     providerId: string;

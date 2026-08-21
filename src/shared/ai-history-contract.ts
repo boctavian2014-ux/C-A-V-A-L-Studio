@@ -61,6 +61,8 @@ export interface AiHistoryConversationPayload {
   messages: HistoryMessage[];
   timelineByMessage: Record<string, TimelineEvent[]>;
   writtenFilesByMessage: Record<string, HistoryWrittenFile[]>;
+  /** Pas 7f.1 — model used for this conversation when known. */
+  modelId?: string | null;
 }
 
 export type ExportFormat = "json" | "markdown";

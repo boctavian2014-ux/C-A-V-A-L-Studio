@@ -1525,6 +1525,7 @@ async function streamToRenderer(
         messageId: request.assistantMessageId,
         streamId,
         content: result.composeText ?? result.text ?? "",
+        modelId: result.resolvedModel || request.model,
       });
       stream.send({
         type: "done",
@@ -1671,6 +1672,7 @@ async function streamToRenderer(
       messageId: request.assistantMessageId,
       streamId,
       content: result.text ?? "",
+      modelId: result.resolvedModel || request.model,
     });
     stream.send({
       type: "done",
@@ -1779,6 +1781,7 @@ async function streamResumeToRenderer(
         conversationId: undefined,
         streamId,
         content: result.composeText ?? result.text ?? "",
+        modelId: result.resolvedModel || input.model,
       });
       stream.send({
         type: "done",

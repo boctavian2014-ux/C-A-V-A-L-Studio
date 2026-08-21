@@ -48,6 +48,7 @@ describe("7a.1 AI SQLite persistence", () => {
     const got = db.getConversation(id);
     expect(got?.id).toBe(id);
     expect(got?.title).toBe("First chat");
+    expect(got?.modelId).toBeNull();
     expect(got?.workspaceRoot).toBe(path.resolve(root));
 
     expect(db.listConversations(root)).toHaveLength(1);
@@ -58,6 +59,30 @@ describe("7a.1 AI SQLite persistence", () => {
     db.deleteConversation(id);
     expect(db.getConversation(id)).toBeNull();
     expect(db.listConversations(root)).toHaveLength(0);
+  });
+
+  it("7f.1 persists and restores conversation model_id; legacy null is safe", () => {
+    const root = tempWorkspace("caval-7f1-model-");
+    const db = createAiPersistence(root);
+    dbs.push(db);
+
+    const id = db.createConversation(root, "With model");
+    expect(db.getConversation(id)?.modelId).toBeNull();
+
+    db.updateConversationModelId(id, "openai/gpt-4o");
+    expect(db.getConversation(id)?.modelId).toBe("openai/gpt-4o");
+
+    db.updateConversationModelId(id, null);
+    expect(db.getConversation(id)?.modelId).toBeNull();
+
+    // Re-open DB (additive migration path).
+    db.close();
+    dbs.pop();
+    const db2 = createAiPersistence(root);
+    dbs.push(db2);
+    const again = db2.createConversation(root, "legacy", id);
+    expect(again).toBe(id);
+    expect(db2.getConversation(id)?.modelId).toBeNull();
   });
 
   it("CRUD messages: add and get by conversation", () => {

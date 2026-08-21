@@ -24,6 +24,8 @@ export interface Conversation {
   id: string;
   workspaceRoot: string;
   title: string | null;
+  /** Pas 7f.1 — last selected model for this conversation (nullable for legacy rows). */
+  modelId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -62,6 +64,8 @@ export interface AiPersistence {
     params?: { limit?: number; offset?: number }
   ): ConversationSummary[];
   updateConversationTitle(id: string, title: string): void;
+  /** Pas 7f.1 — set or clear per-conversation model selection. */
+  updateConversationModelId(id: string, modelId: string | null): void;
   deleteConversation(id: string): void;
 
   addMessage(
@@ -193,6 +197,15 @@ CREATE INDEX IF NOT EXISTS idx_written_message ON written_files(message_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_message ON message_feedback(message_id);
 `;
 
+/** Additive migrations for existing DBs (never destructive). */
+function migrateAiSchema(db: InstanceType<typeof Database>): void {
+  const cols = db.prepare(`PRAGMA table_info(conversations)`).all() as Array<{ name: string }>;
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("model_id")) {
+    db.exec(`ALTER TABLE conversations ADD COLUMN model_id TEXT`);
+  }
+}
+
 export function aiHistoryDbPath(workspaceRoot: string): string {
   return path.join(normalizeWorkspaceRoot(workspaceRoot), ".cavalo", "ai", "history.db");
 }
@@ -210,6 +223,7 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_SQL);
+  migrateAiSchema(db);
 
   function persistPolicy() {
     const settings = loadAiSettingsSync(boundRoot);
@@ -231,12 +245,14 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
 
   const selectConversation = db.prepare(`
     SELECT id, workspace_root AS workspaceRoot, title,
+           model_id AS modelId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM conversations WHERE id = ?
   `);
 
   const listByWorkspace = db.prepare(`
     SELECT id, workspace_root AS workspaceRoot, title,
+           model_id AS modelId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM conversations
     WHERE workspace_root = ?
@@ -259,6 +275,10 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
 
   const updateTitle = db.prepare(`
     UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?
+  `);
+
+  const updateModelId = db.prepare(`
+    UPDATE conversations SET model_id = ?, updated_at = ? WHERE id = ?
   `);
 
   const deleteConversationStmt = db.prepare(`DELETE FROM conversations WHERE id = ?`);
@@ -351,6 +371,10 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       id: String(row.id),
       workspaceRoot: String(row.workspaceRoot),
       title: row.title == null ? null : String(row.title),
+      modelId:
+        row.modelId == null || row.modelId === ""
+          ? null
+          : String(row.modelId).slice(0, 256),
       createdAt: Number(row.createdAt),
       updatedAt: Number(row.updatedAt),
     };
@@ -429,6 +453,13 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       const policy = persistPolicy();
       const safe = gatePersistedText(title.trim(), 500, policy.redactionLevel);
       updateTitle.run(safe, Date.now(), id);
+    },
+
+    updateConversationModelId(id: string, modelId: string | null): void {
+      const trimmed = modelId?.trim() || null;
+      const safe =
+        trimmed && trimmed.length > 0 ? trimmed.slice(0, 256) : null;
+      updateModelId.run(safe, Date.now(), id);
     },
 
     deleteConversation(id: string): void {

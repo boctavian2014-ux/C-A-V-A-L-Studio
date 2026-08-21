@@ -4,6 +4,7 @@ import { useSettingsStore, type SettingsSection } from '../../store/settings-sto
 import { useEditorStore } from '../../store/editor-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
 import { ApiKeysForm } from '../../../../ai/composer/ApiKeysForm';
+import { AiProvidersPanel } from '../../../../ai/composer/AiProvidersPanel';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 import {
   PUBLISHER_ADDRESS_LINES,
@@ -41,7 +42,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'ai',
-    label: 'AI & Chei API',
+    label: 'AI',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z" strokeLinejoin="round" />
@@ -324,9 +325,14 @@ function SectionEditor() {
 
 function SectionAi() {
   return (
-    <Section title="Provideri & chei API">
-      <ApiKeysForm showSaveButton />
-    </Section>
+    <>
+      <Section title="AI Providers">
+        <AiProvidersPanel />
+      </Section>
+      <Section title="Legacy keys & Local AI tools">
+        <ApiKeysForm showSaveButton />
+      </Section>
+    </>
   );
 }
 
@@ -533,6 +539,7 @@ const SHORTCUTS = [
   { action: 'Toggle panou AI', keys: ['Ctrl', 'Shift', 'A'] },
   { action: 'Command Palette', keys: ['Ctrl', 'Shift', 'P'] },
   { action: 'Quick Open fișier', keys: ['Ctrl', 'P'] },
+  { action: 'Căutare simboluri workspace', keys: ['Ctrl', 'T'] },
   { action: 'Toggle Explorer', keys: ['Ctrl', 'Shift', 'E'] },
   { action: 'Toggle Git', keys: ['Ctrl', 'Shift', 'G'] },
   { action: 'Setări', keys: ['Ctrl', ','] },

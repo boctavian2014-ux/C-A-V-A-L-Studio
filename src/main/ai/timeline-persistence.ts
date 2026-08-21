@@ -44,6 +44,8 @@ export function persistAssistantMessageAndFlush(input: {
   messageId?: string;
   streamId: string;
   content: string;
+  /** Pas 7f.1 — persist selected model on the conversation row. */
+  modelId?: string;
   persistence?: AiPersistence;
 }): { conversationId: string; messageId: string } | null {
   const root = input.workspaceRoot?.trim();
@@ -66,6 +68,10 @@ export function persistAssistantMessageAndFlush(input: {
       input.streamId,
       input.messageId?.trim() || undefined
     );
+    const modelId = input.modelId?.trim();
+    if (modelId) {
+      persistence.updateConversationModelId(conversationId, modelId);
+    }
     flushTimeline(input.streamId, messageId, persistence);
     return { conversationId, messageId };
   } catch {
