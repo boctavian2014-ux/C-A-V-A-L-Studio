@@ -83,6 +83,10 @@ import {
 import { useLiveAiEditsStore } from './live-ai-edits-store';
 import { parseStreamingScaffold } from './scaffold-parser';
 import {
+  buildUniversalWebContext,
+  mergeProjectContextWithWebContext,
+} from '../tools/auto-web-context';
+import {
   buildFashionMatchingAssistantReply,
   detectFashionArchetype,
   fashionMatchingSeedPrompt,
