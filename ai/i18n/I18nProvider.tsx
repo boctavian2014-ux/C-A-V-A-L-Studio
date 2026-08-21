@@ -12,9 +12,7 @@ import {
   DEFAULT_LOCALE,
   resolveLocale,
   type AppLocale,
-  type MessageKey,
   type TranslateFn,
-  type TranslateValues,
 } from "./index";
 
 export interface I18nContextValue {
@@ -92,14 +90,17 @@ export function I18nProvider({
 
 export function useI18n(): I18nContextValue {
   const ctx = useContext(I18nContext);
+  const fallbackT = useMemo(
+    () => createTranslator(DEFAULT_LOCALE),
+    []
+  );
+  const fallbackSetLocale = useCallback(async () => undefined, []);
   if (!ctx) {
-    const t: TranslateFn = (key, values) =>
-      createTranslator(DEFAULT_LOCALE)(key as MessageKey, values as TranslateValues);
     return {
       locale: DEFAULT_LOCALE,
       ready: true,
-      t,
-      setLocale: async () => undefined,
+      t: fallbackT,
+      setLocale: fallbackSetLocale,
     };
   }
   return ctx;

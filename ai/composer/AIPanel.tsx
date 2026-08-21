@@ -32,6 +32,7 @@ import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
 import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
 import { extractShellCommandsFromAssistantText } from '../../src/shared/ai-terminal-contract';
 import { SuggestedCommandsCard } from '../../src/renderer/components/terminal/SuggestedCommandsCard';
+import { useTranslation } from '../i18n/useTranslation';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -637,6 +638,7 @@ function MandatoryReviewBadge() {
 
 export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onOpenComposer?: () => void }) {
   const { theme } = useCavalTheme();
+  const { t } = useTranslation();
   const {
     messages, isStreaming,
     sendMessage, stopStreaming, clearChat, loadModelLabels,
@@ -655,17 +657,17 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const modeDef = getAgentMode(agentMode);
   const isAgentic = isAgenticPipelineMode(agentMode);
   const inputPlaceholder = isStreaming
-    ? 'Scrie stop / oprește pentru a opri (contextul rămâne în chat)'
+    ? t('ai.panel.placeholder.stop')
     : isAgentic
-    ? 'Descrie proiectul — Agentic livrează end-to-end (Enter = trimite)'
+    ? t('ai.panel.placeholder.agentic')
     : agentMode === 'plan'
-      ? 'Planificare enterprise — arhitectură, roadmap, KPIs (Enter = trimite)'
+      ? t('ai.panel.placeholder.plan')
       : agentMode === 'code'
-        ? 'Implementare cod — descrie ce să construiești (Enter = trimite)'
+        ? t('ai.panel.placeholder.code')
         : agentMode === 'debug'
-          ? 'Lipește eroarea sau codul de analizat (Enter = trimite)'
+          ? t('ai.panel.placeholder.debug')
           : agentMode === 'ask'
-            ? 'Întrebare sau explicație (Enter = trimite)'
+            ? t('ai.panel.placeholder.ask')
             : `${modeDef.label} — ${modeDef.description.slice(0, 60)}…`;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -945,13 +947,13 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               fontSize: 11.5, fontWeight: 600, color: 'var(--caval-text)',
               letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>
-              {isAgentic ? 'Coding Arena' : modeDef.label}
+              {isAgentic ? t('ai.panel.codingArena') : modeDef.label}
             </span>
             <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', lineHeight: 1.2 }}>
               {isAgentic
-                ? 'Full SDE · livrare proiect'
+                ? t('ai.panel.arenaSubtitle')
                 : agentMode === 'code'
-                  ? 'Model direct · patch în editor'
+                  ? t('ai.panel.codeSubtitle')
                   : modeDef.description}
             </div>
           </div>
@@ -961,7 +963,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           type="button"
           data-testid="ai-settings-open"
           onClick={() => setShowAiSettings((v) => !v)}
-          title="AI settings"
+          title={t('ai.panel.settings')}
           style={{
             width: 24, height: 24, borderRadius: 4, border: 'none',
             background: showAiSettings ? 'var(--caval-accent-glow)' : 'none',
@@ -976,7 +978,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            title="Șterge conversația"
+            title={t('ai.panel.clearChat')}
             style={{
               width: 24, height: 24, borderRadius: 4, border: 'none',
               background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
@@ -992,7 +994,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         {onClose && (
           <button
             onClick={onClose}
-            title="Închide AI Panel (Ctrl+Shift+A)"
+            title={t('ai.panel.close')}
             style={{
               width: 24, height: 24, borderRadius: 4, border: 'none',
               background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
@@ -1044,7 +1046,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             useAiHistoryStore.setState({ activeHistoryId: null });
             void refreshHistory();
           }}
-          title="Chat nou"
+          title={t('ai.panel.newChat')}
           style={{
             padding: '2px 10px',
             fontSize: 10,
@@ -1057,7 +1059,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             flexShrink: 0,
           }}
         >
-          Chat nou
+          {t('ai.panel.newChat')}
         </button>
       </div>
 
@@ -1484,7 +1486,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                       flexShrink: 0,
                     }}
                   >
-                    {isStreaming ? '■ Stop' : 'Trimite ↵'}
+                    {isStreaming ? `■ ${t('ai.panel.stop')}` : t('ai.panel.send')}
                   </button>
                 );
               })()}

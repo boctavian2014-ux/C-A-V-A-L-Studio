@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 
-import {
-  statusLabel,
-  type AiProviderEntry,
-  type AiProviderId,
-  type ProviderStatus,
+import type {
+  AiProviderEntry,
+  AiProviderId,
+  ProviderStatus,
 } from "../../src/shared/ai-provider-contract";
 import {
   DEFAULT_OLLAMA_MODEL_ID,
@@ -14,6 +13,12 @@ import {
   type LocalAiStatus,
   type OllamaModelPullProgress,
 } from "../../src/shared/local-ai-contract";
+import { useTranslation } from "../i18n/useTranslation";
+import {
+  providerDisplayDescription,
+  providerDisplayLabel,
+  providerStatusDisplay,
+} from "../i18n/provider-display";
 import { CustomProviderForm } from "./CustomProviderForm";
 import { filterNonEmptySecretsPatch } from "../models/api-secrets";
 
@@ -60,6 +65,7 @@ export function OllamaProviderRow({
   providerStatus,
   onStatusMaybeChanged,
 }: OllamaProviderRowProps): React.ReactElement {
+  const { t } = useTranslation();
   const [installing, setInstalling] = useState(false);
   const [pullProgress, setPullProgress] = useState<OllamaModelPullProgress | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -70,16 +76,17 @@ export function OllamaProviderRow({
 
   const handleInstall = async () => {
     setActionError(null);
+    const size = formatApproxBytes(OLLAMA_INSTALL_APPROX_BYTES);
     const confirmed = confirmAction(
-      "Install Ollama?",
-      `This downloads and runs the official Ollama installer (${formatApproxBytes(OLLAMA_INSTALL_APPROX_BYTES)} disk space). Continue?`
+      t("ai.ollama.installConfirmTitle"),
+      t("ai.ollama.installConfirmBody", { size })
     );
     if (!confirmed) return;
     setInstalling(true);
     try {
       const result = await window.caval?.localAiInstall?.({ confirmed: true });
       if (!result?.success) {
-        setActionError(result?.error ?? "Install failed");
+        setActionError(result?.error ?? t("ai.ollama.installFailed"));
       }
       onStatusMaybeChanged?.();
     } finally {
@@ -92,8 +99,8 @@ export function OllamaProviderRow({
     const label = modelMeta?.label ?? DEFAULT_OLLAMA_MODEL_ID;
     const size = formatApproxBytes(modelMeta?.approxBytes ?? 4_700_000_000);
     const confirmed = confirmAction(
-      `Download ${label}?`,
-      `This downloads approximately ${size}. Continue?`
+      t("ai.ollama.downloadConfirmTitle", { label }),
+      t("ai.ollama.downloadConfirmBody", { size })
     );
     if (!confirmed) return;
 
@@ -114,7 +121,7 @@ export function OllamaProviderRow({
           percent: 0,
         });
       } else if (!result?.success) {
-        setActionError(result?.error ?? "Download failed");
+        setActionError(result?.error ?? t("ai.ollama.downloadFailed"));
       } else {
         setPullProgress({
           modelId: DEFAULT_OLLAMA_MODEL_ID,
@@ -142,7 +149,9 @@ export function OllamaProviderRow({
       {phase === "not-installed" && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: "var(--caval-text-muted)" }}>
-            Ollama is not installed ({formatApproxBytes(OLLAMA_INSTALL_APPROX_BYTES)})
+            {t("ai.ollama.notInstalled", {
+              size: formatApproxBytes(OLLAMA_INSTALL_APPROX_BYTES),
+            })}
           </span>
           <button
             type="button"
@@ -151,7 +160,7 @@ export function OllamaProviderRow({
             disabled={installing}
             style={{ ...btnStyle, cursor: installing ? "wait" : "pointer", opacity: installing ? 0.7 : 1 }}
           >
-            {installing ? "Installing…" : "Install Ollama"}
+            {installing ? t("ai.ollama.installing") : t("ai.ollama.install")}
           </button>
         </div>
       )}
@@ -159,7 +168,9 @@ export function OllamaProviderRow({
       {phase === "model-missing" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span style={{ fontSize: 11, color: "var(--caval-text-muted)" }}>
-            Model not downloaded: {status?.defaultModel ?? DEFAULT_OLLAMA_MODEL_ID}
+            {t("ai.ollama.modelMissing", {
+              model: status?.defaultModel ?? DEFAULT_OLLAMA_MODEL_ID,
+            })}
           </span>
           {downloading ? (
             <div data-testid="ollama-pull-progress" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -176,7 +187,7 @@ export function OllamaProviderRow({
                 onClick={handleCancel}
                 style={{ ...btnStyle, background: "transparent", color: "var(--caval-text)" }}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           ) : (
@@ -186,7 +197,10 @@ export function OllamaProviderRow({
               onClick={() => void handleDownloadModel()}
               style={btnStyle}
             >
-              Download {modelMeta?.label ?? "model"} ({formatApproxBytes(modelMeta?.approxBytes ?? 0)})
+              {t("ai.ollama.download", {
+                label: modelMeta?.label ?? "model",
+                size: formatApproxBytes(modelMeta?.approxBytes ?? 0),
+              })}
             </button>
           )}
         </div>
@@ -194,7 +208,7 @@ export function OllamaProviderRow({
 
       {phase !== "not-installed" && phase !== "model-missing" && status && (
         <span style={{ fontSize: 11, color: "var(--caval-text-muted)" }}>
-          Ollama — {status.phase}
+          {t("ai.ollama.statusLine", { phase: status.phase })}
           {status.defaultModelReady ? ` · ${status.defaultModel}` : ""}
         </span>
       )}
@@ -209,6 +223,7 @@ export function OllamaProviderRow({
 }
 
 export function AiProvidersPanel(): React.ReactElement {
+  const { t } = useTranslation();
   const [providers, setProviders] = useState<AiProviderEntry[]>([]);
   const [preferred, setPreferred] = useState<AiProviderId>("ollama");
   const [encryptionAvailable, setEncryptionAvailable] = useState(true);
@@ -228,7 +243,7 @@ export function AiProvidersPanel(): React.ReactElement {
         window.caval?.localAiStatus?.(),
       ]);
       if (!res?.ok || !res.providers) {
-        setError(res?.error ?? "Failed to load providers");
+        setError(res?.error ?? t("ai.providers.loadFailed"));
         return;
       }
       setProviders(res.providers);
@@ -242,7 +257,7 @@ export function AiProvidersPanel(): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -263,7 +278,7 @@ export function AiProvidersPanel(): React.ReactElement {
     setMessage(null);
     const res = await window.caval?.aiProvidersSetPreferred?.({ providerId: id });
     if (!res?.ok) {
-      setMessage(res?.error ?? "Could not set preferred provider");
+      setMessage(res?.error ?? t("ai.providers.setPreferredFailed"));
       return;
     }
     setPreferred(res.preferredProviderId ?? id);
@@ -274,7 +289,7 @@ export function AiProvidersPanel(): React.ReactElement {
     const raw = keyDrafts[entry.secretKey] ?? "";
     const { filtered } = filterNonEmptySecretsPatch({ [entry.secretKey]: raw });
     if (!filtered[entry.secretKey]) {
-      setMessage("Enter an API key before saving.");
+      setMessage(t("ai.providers.enterKey"));
       return;
     }
     setBusyKey(entry.secretKey);
@@ -282,11 +297,13 @@ export function AiProvidersPanel(): React.ReactElement {
     try {
       const res = await window.caval?.secretsSet?.(filtered);
       if (!res?.ok) {
-        setMessage("Failed to save API key.");
+        setMessage(t("ai.providers.keySaveFailed"));
         return;
       }
       setKeyDrafts((prev) => ({ ...prev, [entry.secretKey!]: "" }));
-      setMessage(`${entry.label} key saved.`);
+      setMessage(
+        t("ai.providers.keySaved", { label: providerDisplayLabel(entry.id, t) })
+      );
       await refresh();
     } finally {
       setBusyKey(null);
@@ -309,12 +326,14 @@ export function AiProvidersPanel(): React.ReactElement {
             lineHeight: 1.45,
           }}
         >
-          Key storage is not encrypted on this system.
+          {t("ai.providers.encryptionWarning")}
         </div>
       )}
 
       {loading && (
-        <p style={{ margin: 0, fontSize: 12, color: "var(--caval-text-muted)" }}>Loading providers…</p>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--caval-text-muted)" }}>
+          {t("ai.providers.loading")}
+        </p>
       )}
       {error && (
         <p style={{ margin: 0, fontSize: 12, color: "var(--caval-danger)" }}>{error}</p>
@@ -325,10 +344,11 @@ export function AiProvidersPanel(): React.ReactElement {
         </p>
       )}
 
-      <div role="radiogroup" aria-label="AI Providers" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div role="radiogroup" aria-label={t("ai.providers.title")} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {providers.map((entry) => {
           const selected = preferred === entry.id;
           const disabled = !entry.selectable || Boolean(entry.comingSoon);
+          const displayLabel = providerDisplayLabel(entry.id, t);
           return (
             <div
               key={entry.id}
@@ -355,25 +375,25 @@ export function AiProvidersPanel(): React.ReactElement {
                   value={entry.id}
                   checked={selected}
                   disabled={disabled}
-                  aria-label={entry.label}
+                  aria-label={displayLabel}
                   data-testid={`ai-provider-radio-${entry.id}`}
                   onChange={() => void selectProvider(entry.id, entry.selectable)}
                   style={{ marginTop: 3 }}
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                    <strong style={{ fontSize: 13 }}>
-                      {entry.id === "ollama" ? "Ollama Local & Free" : entry.label}
-                    </strong>
+                    <strong style={{ fontSize: 13 }}>{displayLabel}</strong>
                     <span
                       data-testid={`ai-provider-status-${entry.id}`}
                       style={{ fontSize: 11, color: statusTone(entry.status), fontWeight: 600 }}
                     >
-                      {entry.comingSoon ? "Coming soon" : statusLabel(entry.status)}
+                      {entry.comingSoon
+                        ? t("ai.providers.comingSoon")
+                        : providerStatusDisplay(entry.status, t)}
                     </span>
                   </div>
                   <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--caval-text-muted)", lineHeight: 1.4 }}>
-                    {entry.description}
+                    {providerDisplayDescription(entry.id, t)}
                   </p>
                   {entry.detail && (
                     <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--caval-text)" }}>{entry.detail}</p>
@@ -406,8 +426,8 @@ export function AiProvidersPanel(): React.ReactElement {
                   <input
                     type="password"
                     autoComplete="off"
-                    placeholder={entry.status === "configured" ? "••••••••••••••••" : "Add API key"}
-                    aria-label={`API key for ${entry.label}`}
+                    placeholder={entry.status === "configured" ? "••••••••••••••••" : t("ai.providers.addApiKey")}
+                    aria-label={t("ai.providers.apiKeyFor", { label: displayLabel })}
                     data-testid={`ai-provider-key-${entry.id}`}
                     value={keyDrafts[entry.secretKey] ?? ""}
                     onChange={(e) =>
@@ -440,7 +460,9 @@ export function AiProvidersPanel(): React.ReactElement {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {entry.status === "configured" ? "Update key" : "Add API key"}
+                    {entry.status === "configured"
+                      ? t("ai.providers.updateKey")
+                      : t("ai.providers.addApiKey")}
                   </button>
                 </div>
               )}
@@ -450,8 +472,7 @@ export function AiProvidersPanel(): React.ReactElement {
       </div>
 
       <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--caval-text-muted)", lineHeight: 1.45 }}>
-        Per-conversation model stays in the composer selector. Preferred provider is remembered for
-        Settings; History restore uses the conversation&apos;s saved model when present.
+        {t("ai.providers.footer")}
       </p>
     </div>
   );

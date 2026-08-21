@@ -4,6 +4,7 @@ import {
   isAllowedCustomUrl,
   normalizeCustomBaseUrl,
 } from "../../src/shared/ai-provider-contract";
+import { useTranslation } from "../i18n/useTranslation";
 
 const fieldStyle: React.CSSProperties = {
   width: "100%",
@@ -55,6 +56,7 @@ export function CustomProviderForm({
   onSaved,
   initialDraft,
 }: CustomProviderFormProps): React.ReactElement {
+  const { t } = useTranslation();
   const [baseUrl, setBaseUrl] = useState(initialDraft?.baseUrl ?? "");
   const [apiKey, setApiKey] = useState(initialDraft?.apiKey ?? "");
   const [modelId, setModelId] = useState(initialDraft?.modelId ?? "");
@@ -96,14 +98,13 @@ export function CustomProviderForm({
       const res = await window.caval?.secretsSet?.(patch);
       if (!res?.ok) {
         setError(
-          (res as { error?: string } | undefined)?.error ??
-            "Failed to save custom provider"
+          (res as { error?: string } | undefined)?.error ?? t("ai.custom.saveFailed")
         );
         return;
       }
       setApiKey("");
       setConfigured(true);
-      setMessage("Custom provider saved");
+      setMessage(t("ai.custom.saved"));
       onSaved?.();
     } finally {
       setBusy(false);
@@ -129,9 +130,12 @@ export function CustomProviderForm({
         },
       });
       if (result?.ok && result.result === "valid") {
-        setMessage("Connection successful");
+        setMessage(t("ai.custom.connectionOk"));
       } else {
-        setError(result?.error ?? `Connection failed (${result?.result ?? "unknown"})`);
+        setError(
+          result?.error ??
+            t("ai.custom.connectionFailed", { result: result?.result ?? "unknown" })
+        );
       }
     } finally {
       setBusy(false);
@@ -151,11 +155,11 @@ export function CustomProviderForm({
     >
       {configured && (
         <span style={{ fontSize: 11, color: "var(--caval-success, #3dd68c)" }}>
-          Custom endpoint configured (values stay in secure storage)
+          {t("ai.custom.configured")}
         </span>
       )}
       <label style={labelStyle}>
-        Display name
+        {t("ai.custom.displayName")}
         <input
           data-testid="custom-provider-label"
           value={label}
@@ -165,7 +169,7 @@ export function CustomProviderForm({
         />
       </label>
       <label style={labelStyle}>
-        Base URL
+        {t("ai.custom.baseUrl")}
         <input
           data-testid="custom-provider-base-url"
           value={baseUrl}
@@ -175,7 +179,7 @@ export function CustomProviderForm({
         />
       </label>
       <label style={labelStyle}>
-        Model ID
+        {t("ai.custom.modelId")}
         <input
           data-testid="custom-provider-model-id"
           value={modelId}
@@ -185,14 +189,16 @@ export function CustomProviderForm({
         />
       </label>
       <label style={labelStyle}>
-        API Key (optional)
+        {t("ai.custom.apiKeyOptional")}
         <input
           data-testid="custom-provider-api-key"
           type="password"
           autoComplete="off"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder={configured ? "•••••••• (leave blank to keep)" : "optional"}
+          placeholder={
+            configured ? t("ai.custom.keepKeyPlaceholder") : t("ai.custom.optionalPlaceholder")
+          }
           style={fieldStyle}
         />
       </label>
@@ -230,7 +236,7 @@ export function CustomProviderForm({
             cursor: busy ? "wait" : "pointer",
           }}
         >
-          Test connection
+          {t("ai.custom.testConnection")}
         </button>
         <button
           type="button"
@@ -248,7 +254,7 @@ export function CustomProviderForm({
             cursor: busy ? "wait" : "pointer",
           }}
         >
-          Save
+          {t("common.save")}
         </button>
       </div>
     </div>

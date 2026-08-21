@@ -8,15 +8,18 @@ import {
   AI_SETTINGS_SNAPSHOT_CAP_MIN_KB,
 } from "../../src/shared/ai-settings-contract";
 import { useAiSettingsStore } from "../../src/renderer/store/ai-settings-store";
+import { useTranslation } from "../i18n/useTranslation";
+import type { MessageKey } from "../i18n/index";
 
-const TOOL_LABELS: Record<AiConfigurableToolName, string> = {
-  get_problems: "Read diagnostics (no edits)",
-  git_status: "Read git status (no commits)",
-  run_task: "Run package.json scripts only",
-  open_preview: "Open web/mobile preview",
+const TOOL_KEYS: Record<AiConfigurableToolName, MessageKey> = {
+  get_problems: "ai.settings.tool.get_problems",
+  git_status: "ai.settings.tool.git_status",
+  run_task: "ai.settings.tool.run_task",
+  open_preview: "ai.settings.tool.open_preview",
 };
 
 export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.ReactElement {
+  const { t } = useTranslation();
   const settings = useAiSettingsStore((s) => s.settings);
   const loading = useAiSettingsStore((s) => s.loading);
   const error = useAiSettingsStore((s) => s.error);
@@ -59,7 +62,7 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>AI settings</h3>
+        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{t("ai.settings.title")}</h3>
         {onClose && (
           <button
             type="button"
@@ -73,21 +76,22 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
               fontSize: 14,
             }}
           >
-            ← Back
+            ← {t("common.back")}
           </button>
         )}
       </div>
       <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--caval-text-muted)", lineHeight: 1.45 }}>
-        Preferences only. Diff preview, native undo, and multi-file refactor confirmation stay
-        mandatory.
+        {t("ai.settings.intro")}
       </p>
 
-      <h4 style={sectionTitle}>AI Tools</h4>
+      <h4 style={sectionTitle}>{t("ai.settings.tools")}</h4>
       {(Object.keys(settings.toolsEnabled) as AiConfigurableToolName[]).map((tool) => (
         <label key={tool} className="settings-row" style={rowStyle}>
           <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
             <code style={{ fontSize: 11 }}>{tool}</code>
-            <span style={{ fontSize: 10, color: "var(--caval-text-muted)" }}>{TOOL_LABELS[tool]}</span>
+            <span style={{ fontSize: 10, color: "var(--caval-text-muted)" }}>
+              {t(TOOL_KEYS[tool])}
+            </span>
           </span>
           <input
             type="checkbox"
@@ -103,7 +107,7 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
         </label>
       ))}
 
-      <h4 style={sectionTitle}>Redaction Level</h4>
+      <h4 style={sectionTitle}>{t("ai.settings.redaction")}</h4>
       <select
         data-testid="ai-settings-redaction"
         value={settings.redactionLevel}
@@ -123,14 +127,14 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
           color: "var(--caval-text)",
         }}
       >
-        <option value="strict">Strict (redact more)</option>
-        <option value="standard">Standard</option>
-        <option value="minimal">Minimal (critical secrets only)</option>
+        <option value="strict">{t("ai.settings.redaction.strict")}</option>
+        <option value="standard">{t("ai.settings.redaction.standard")}</option>
+        <option value="minimal">{t("ai.settings.redaction.minimal")}</option>
       </select>
 
-      <h4 style={sectionTitle}>Storage Caps</h4>
+      <h4 style={sectionTitle}>{t("ai.settings.storage")}</h4>
       <label className="settings-row" style={rowStyle}>
-        Message cap (KB)
+        {t("ai.settings.messageCap")}
         <input
           type="number"
           data-testid="ai-settings-message-cap"
@@ -143,7 +147,7 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
         />
       </label>
       <label className="settings-row" style={rowStyle}>
-        Snapshot cap (KB)
+        {t("ai.settings.snapshotCap")}
         <input
           type="number"
           data-testid="ai-settings-snapshot-cap"
@@ -156,7 +160,7 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
         />
       </label>
 
-      <h4 style={sectionTitle}>Timeline Detail</h4>
+      <h4 style={sectionTitle}>{t("ai.settings.timeline")}</h4>
       <select
         data-testid="ai-settings-timeline-detail"
         value={settings.timelineDetail}
@@ -176,8 +180,8 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
           color: "var(--caval-text)",
         }}
       >
-        <option value="compact">Compact</option>
-        <option value="verbose">Verbose</option>
+        <option value="compact">{t("ai.settings.timeline.compact")}</option>
+        <option value="verbose">{t("ai.settings.timeline.verbose")}</option>
       </select>
 
       <button
@@ -197,7 +201,7 @@ export function AiSettingsPanel({ onClose }: { onClose?: () => void }): React.Re
           fontSize: 12,
         }}
       >
-        Reset to defaults
+        {t("ai.settings.reset")}
       </button>
 
       {error && (

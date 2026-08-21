@@ -338,12 +338,13 @@ function SectionEditor() {
 }
 
 function SectionAi() {
+  const { t } = useTranslation();
   return (
     <>
-      <Section title="AI Providers">
+      <Section title={t('settings.ai.providersSection')}>
         <AiProvidersPanel />
       </Section>
-      <Section title="Legacy keys & Local AI tools">
+      <Section title={t('settings.ai.legacySection')}>
         <ApiKeysForm showSaveButton />
       </Section>
     </>
@@ -677,9 +678,11 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
   const { activeSection, setActiveSection } = useSettingsStore();
   const { t } = useTranslation();
 
-  const navItems = NAV_ITEMS.map((item) =>
-    item.id === 'general' ? { ...item, label: t('settings.nav.general') } : item
-  );
+  const navItems = NAV_ITEMS.map((item) => {
+    if (item.id === 'general') return { ...item, label: t('settings.nav.general') };
+    if (item.id === 'ai') return { ...item, label: t('settings.nav.ai') };
+    return item;
+  });
 
   const renderContent = () => {
     switch (activeSection) {
