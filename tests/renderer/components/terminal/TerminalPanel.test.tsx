@@ -4,14 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalInput } from "../../../../src/renderer/components/terminal/TerminalInput";
-import { TerminalSessions } from "../../../../src/renderer/components/terminal/TerminalPanel";
+import {
+  mapTerminalUiStatus,
+  shortTerminalTitle,
+  TerminalSessions,
+} from "../../../../src/renderer/components/terminal/TerminalPanel";
 import type { TerminalApi, TerminalInfo, TerminalOutputLine } from "../../../../src/shared/terminal-contract";
 
 function info(partial: Partial<TerminalInfo> & Pick<TerminalInfo, "id">): TerminalInfo {
   return {
     title: partial.title ?? partial.id,
     cwd: "/ws",
-    shell: "pwsh",
+    shell: partial.shell ?? "PowerShell",
     status: "active",
     pid: 1,
     createdAt: 1,
@@ -27,20 +31,26 @@ function createTerminalMock(initial: TerminalInfo[] = []) {
   const unsubscribeOutput = vi.fn();
   const unsubscribeExit = vi.fn();
   let created = 0;
+  const sessions = new Map(initial.map((entry) => [entry.id, entry]));
 
   const api: TerminalApi = {
-    list: vi.fn(async () => initial),
+    list: vi.fn(async () => [...sessions.values()]),
     create: vi.fn(async (options) => {
       created += 1;
-      return info({
+      const next = info({
         id: `term-${created}`,
-        title: options?.title ?? `term-${created}`,
+        title: options?.title?.trim() || "PowerShell",
+        shell: "PowerShell",
       });
+      sessions.set(next.id, next);
+      return next;
     }),
     write: vi.fn(async () => undefined),
     resize: vi.fn(async () => undefined),
-    destroy: vi.fn(async () => undefined),
-    getInfo: vi.fn(async (id) => info({ id })),
+    destroy: vi.fn(async (id) => {
+      sessions.delete(id);
+    }),
+    getInfo: vi.fn(async (id) => sessions.get(id) ?? info({ id })),
     onOutput: vi.fn((cb) => {
       outputListeners.push(cb);
       return unsubscribeOutput;
@@ -51,7 +61,7 @@ function createTerminalMock(initial: TerminalInfo[] = []) {
     }),
   };
 
-  return { api, outputListeners, exitListeners, unsubscribeOutput, unsubscribeExit };
+  return { api, outputListeners, exitListeners, unsubscribeOutput, unsubscribeExit, sessions };
 }
 
 function mount(ui: ReactElement) {
@@ -81,6 +91,22 @@ function setInputValue(element: HTMLInputElement, value: string) {
   });
 }
 
+describe("terminal tab helpers", () => {
+  it("maps short titles for common shells", () => {
+    expect(shortTerminalTitle({ title: "", shell: "PowerShell" })).toBe("PowerShell");
+    expect(shortTerminalTitle({ title: "Terminal 1", shell: "pwsh.exe" })).toBe("PowerShell");
+    expect(shortTerminalTitle({ title: "cmd.exe", shell: "cmd.exe" })).toBe("Command Prompt");
+    expect(shortTerminalTitle({ title: "Task: dev", shell: "pwsh" })).toBe("Task: dev");
+  });
+
+  it("maps status to running/idle/error", () => {
+    expect(mapTerminalUiStatus("active")).toBe("running");
+    expect(mapTerminalUiStatus("exited")).toBe("idle");
+    expect(mapTerminalUiStatus("failed")).toBe("error");
+    expect(mapTerminalUiStatus("creating")).toBe("starting");
+  });
+});
+
 describe("TerminalPanel", () => {
   let mounted: { unmount: () => void } | undefined;
 
@@ -88,6 +114,7 @@ describe("TerminalPanel", () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     document.body.innerHTML = "";
     HTMLElement.prototype.scrollIntoView = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -106,18 +133,16 @@ describe("TerminalPanel", () => {
     return result;
   }
 
-  it("renders the empty state and Open Terminal", async () => {
+  it("renders the empty state and New Terminal", async () => {
     const { api } = createTerminalMock();
     const { container } = await renderSessions(api);
     expect(container.textContent).toContain("No terminals open.");
     expect(container.querySelector('[data-testid="terminal-empty"]')).toBeTruthy();
-    const open = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent === "Open Terminal"
-    );
-    expect(open).toBeTruthy();
+    const open = container.querySelector('[data-testid="terminal-empty-new"]');
+    expect(open?.textContent).toBe("New Terminal");
   });
 
-  it("calls window.caval.terminal.create when + is clicked", async () => {
+  it("creates a named terminal with + and selects it", async () => {
     const { api } = createTerminalMock();
     const { container } = await renderSessions(api);
     const add = container.querySelector('[data-testid="terminal-tab-add"]');
@@ -126,7 +151,12 @@ describe("TerminalPanel", () => {
       add?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
-    expect(api.create).toHaveBeenCalledWith({ title: "Terminal 1" });
+    expect(api.create).toHaveBeenCalledWith({});
+    const tab = container.querySelector('[data-testid="terminal-tab-term-1"]');
+    expect(tab?.className).toContain("active");
+    expect(tab?.textContent).toContain("PowerShell");
+    expect(tab?.getAttribute("aria-label")).toBe("Switch to PowerShell");
+    expect(container.querySelector('[data-active-terminal-id="term-1"]')).toBeTruthy();
   });
 
   it("shows tabs from list() and switches the active tab on click", async () => {
@@ -148,6 +178,132 @@ describe("TerminalPanel", () => {
     expect(container.querySelector('[data-testid="terminal-tab-term-a"]')?.className).not.toContain(
       "active"
     );
+    expect(container.querySelector('[data-active-terminal-id="term-b"]')).toBeTruthy();
+  });
+
+  it("activates a tab with Enter/Space", async () => {
+    const { api } = createTerminalMock([
+      info({ id: "term-a", title: "Alpha" }),
+      info({ id: "term-b", title: "Beta" }),
+    ]);
+    const { container } = await renderSessions(api);
+    const beta = container.querySelector('[data-testid="terminal-tab-term-b"]') as HTMLElement;
+    act(() => {
+      beta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(beta.className).toContain("active");
+    act(() => {
+      const alpha = container.querySelector('[data-testid="terminal-tab-term-a"]') as HTMLElement;
+      alpha.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="terminal-tab-term-a"]')?.className).toContain(
+      "active"
+    );
+  });
+
+  it("closes an idle terminal without confirm, destroys PTY, and removes the tab", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { api } = createTerminalMock([
+      info({ id: "term-a", title: "Alpha", status: "exited", pid: null }),
+      info({ id: "term-b", title: "Beta", status: "exited", pid: null }),
+    ]);
+    const { container } = await renderSessions(api);
+    const close = container.querySelector(
+      '[data-testid="terminal-tab-close-term-a"]'
+    ) as HTMLButtonElement;
+    expect(close.getAttribute("aria-label")).toBe("Close Alpha");
+    await act(async () => {
+      close.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(api.destroy).toHaveBeenCalledWith("term-a");
+    expect(container.querySelector('[data-testid="terminal-tab-term-a"]')).toBeNull();
+    expect(container.querySelector('[data-testid="terminal-tab-term-b"]')?.className).toContain(
+      "active"
+    );
+  });
+
+  it("asks for confirm on running close; Cancel leaves state unchanged", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { api } = createTerminalMock([info({ id: "term-a", title: "PowerShell", status: "active" })]);
+    const { container } = await renderSessions(api);
+    const close = container.querySelector('[data-testid="terminal-tab-close-term-a"]');
+    await act(async () => {
+      close?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(window.confirm).toHaveBeenCalled();
+    expect(api.destroy).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="terminal-tab-term-a"]')).toBeTruthy();
+    expect(container.querySelector('[data-active-terminal-id="term-a"]')).toBeTruthy();
+  });
+
+  it("Confirm Close destroys running PTY, clears output, and selects the next tab", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { api, outputListeners } = createTerminalMock([
+      info({ id: "term-a", title: "Alpha", status: "active" }),
+      info({ id: "term-b", title: "Beta", status: "active" }),
+    ]);
+    const { container } = await renderSessions(api);
+    act(() => {
+      for (const listener of outputListeners) {
+        listener({ terminalId: "term-a", data: "gone soon", timestamp: 1 });
+      }
+    });
+    expect(container.querySelector('[data-testid="terminal-output"]')?.textContent).toContain(
+      "gone soon"
+    );
+    await act(async () => {
+      container
+        .querySelector('[data-testid="terminal-tab-close-term-a"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(api.destroy).toHaveBeenCalledWith("term-a");
+    expect(container.querySelector('[data-testid="terminal-tab-term-a"]')).toBeNull();
+    expect(container.querySelector('[data-testid="terminal-tab-term-b"]')?.className).toContain(
+      "active"
+    );
+    expect(container.querySelector('[data-active-terminal-id="term-b"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="terminal-output"]')?.textContent).not.toContain(
+      "gone soon"
+    );
+  });
+
+  it("closing the last terminal sets activeTerminalId null and shows empty state", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { api } = createTerminalMock([info({ id: "term-a", title: "Solo", status: "active" })]);
+    const { container } = await renderSessions(api);
+    await act(async () => {
+      container
+        .querySelector('[data-testid="terminal-tab-close-term-a"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(api.destroy).toHaveBeenCalledWith("term-a");
+    expect(container.querySelector('[data-testid="terminal-empty"]')).toBeTruthy();
+    expect(container.querySelector('[data-active-terminal-id=""]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="terminal-tab-term-a"]')).toBeNull();
+    // Must not auto-create a replacement terminal.
+    expect(api.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps Explain/Suggest wired to the active terminal id", async () => {
+    const { api } = createTerminalMock([
+      info({ id: "term-a", title: "Alpha" }),
+      info({ id: "term-b", title: "Beta" }),
+    ]);
+    const { container } = await renderSessions(api);
+    act(() => {
+      container
+        .querySelector('[data-testid="terminal-tab-term-b"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-active-terminal-id="term-b"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="terminal-explain-btn"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="terminal-suggest-btn"]')).toBeTruthy();
+    expect(api.write).not.toHaveBeenCalled();
   });
 
   it("appends onOutput lines to the active tab", async () => {
@@ -187,7 +343,7 @@ describe("TerminalPanel", () => {
         listener(info({ id: "term-a", title: "Alpha", status: "exited", exitCode: 0, exitedAt: 2 }));
       }
     });
-    expect(container.querySelector('[aria-label="Status: exited"]')).toBeTruthy();
+    expect(container.querySelector('[aria-label="Status: idle"]')).toBeTruthy();
   });
 
   it("unsubscribes output and exit listeners on unmount", async () => {

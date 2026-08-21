@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CAVALLO</title>
+    <title>CAVAL</title>
     <link rel="stylesheet" href="./pulse-tech.css" />
     <link rel="stylesheet" href="./styles/glass.css" />
     <style>
@@ -710,37 +710,11 @@
         tab-size: 2;
       }
       .terminal-panel {
-        display: grid;
-        grid-template-rows: 34px minmax(0, 1fr) 34px;
+        display: flex;
+        flex-direction: column;
         min-height: 0;
         border-top: 1px solid #24262b;
         background: #0b0d10;
-      }
-      .terminal-panel header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 0 10px;
-        border-bottom: 1px solid #24262b;
-        color: #d7dee8;
-        font-size: 12px;
-      }
-      .terminal-panel header div {
-        display: flex;
-        gap: 6px;
-      }
-      .terminal-panel button {
-        border: 1px solid #2e333b;
-        border-radius: 6px;
-        padding: 4px 8px;
-        color: #c5ccd6;
-        background: #15171a;
-        font-size: 11px;
-      }
-      .terminal-panel button:hover {
-        border-color: #00e0ff;
-        color: #00e0ff;
       }
       .terminal-output {
         margin: 0;
@@ -1096,8 +1070,14 @@
   </head>
   <body>
     <div id="root">
-      <div id="caval-boot" style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0E0E0F;color:#8A95A6;font:600 14px Inter,system-ui,sans-serif;letter-spacing:0.04em">
-        CAVALLO se încarcă…
+      <div id="caval-boot" style="display:flex;align-items:center;justify-content:center;height:100vh;background:radial-gradient(circle at 50% 32%, rgba(0,224,255,0.12), rgba(14,14,15,0) 28%), #0E0E0F;color:#8A95A6;font-family:Inter,system-ui,sans-serif">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px">
+            <div style="font:600 46px Sora, Inter, system-ui, sans-serif;letter-spacing:0.18em;color:#F5F7FA;line-height:1">CAVAL</div>
+            <div style="font:500 17px Sora, Inter, system-ui, sans-serif;letter-spacing:0.62em;color:#AEB9CC;line-height:1;padding-left:0.62em">STUDIO</div>
+          </div>
+          <div style="font:600 13px Inter,system-ui,sans-serif;letter-spacing:0.08em;color:#8A95A6">CAVAL se încarcă…</div>
+        </div>
       </div>
     </div>
     <script src="./workbench-app.js"></script>

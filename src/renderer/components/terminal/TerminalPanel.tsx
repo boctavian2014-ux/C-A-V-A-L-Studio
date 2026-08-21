@@ -36,6 +36,44 @@ interface TerminalTab {
   info: TerminalInfo;
 }
 
+type TerminalUiStatus = 'running' | 'idle' | 'error' | 'starting';
+
+/** Short VS Code-style tab label from TerminalInfo. */
+export function shortTerminalTitle(info: Pick<TerminalInfo, 'title' | 'shell'>): string {
+  const title = info.title?.trim() ?? '';
+  const shell = info.shell?.trim() ?? '';
+  const source = title || shell;
+  if (/pwsh|powershell/i.test(source)) return 'PowerShell';
+  if (/cmd(\.exe)?|Command Prompt/i.test(source)) return 'Command Prompt';
+  if (/^Terminal\s+\d+$/i.test(title)) {
+    if (/pwsh|powershell/i.test(shell)) return 'PowerShell';
+    if (/cmd/i.test(shell)) return 'Command Prompt';
+    return shell || title;
+  }
+  if (title) return title;
+  if (/bash|zsh|fish|sh/i.test(shell)) return shell;
+  return shell || 'Terminal';
+}
+
+export function mapTerminalUiStatus(status: TerminalInfo['status']): TerminalUiStatus {
+  if (status === 'active') return 'running';
+  if (status === 'failed') return 'error';
+  if (status === 'creating') return 'starting';
+  return 'idle';
+}
+
+function isTerminalRunning(info: TerminalInfo): boolean {
+  return info.status === 'active' || info.status === 'creating';
+}
+
+function pickNextActiveId(tabs: TerminalTab[], closedId: string): string | null {
+  const index = tabs.findIndex((tab) => tab.id === closedId);
+  if (index < 0) return null;
+  const remaining = tabs.filter((tab) => tab.id !== closedId);
+  if (remaining.length === 0) return null;
+  return remaining[Math.min(index, remaining.length - 1)]?.id ?? remaining[0]?.id ?? null;
+}
+
 export function TerminalSessions() {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -45,9 +83,13 @@ export function TerminalSessions() {
     null
   );
   const [hasSelection, setHasSelection] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<TerminalTab[]>([]);
+  tabsRef.current = tabs;
 
   useEffect(() => {
     const api = window.caval?.terminal;
@@ -55,7 +97,7 @@ export function TerminalSessions() {
     void api.list().then((terminals) => {
       const loadedTabs = terminals.map((info) => ({
         id: info.id,
-        title: info.title || info.shell,
+        title: shortTerminalTitle(info),
         info,
       }));
       setTabs(loadedTabs);
@@ -77,7 +119,13 @@ export function TerminalSessions() {
 
   useEffect(() => {
     const unsubscribe = window.caval?.terminal?.onExit?.((info) => {
-      setTabs((prev) => prev.map((tab) => (tab.id === info.id ? { ...tab, info } : tab)));
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === info.id
+            ? { ...tab, title: shortTerminalTitle(info), info }
+            : tab
+        )
+      );
     });
     return () => unsubscribe?.();
   }, []);
@@ -93,17 +141,18 @@ export function TerminalSessions() {
   const handleCreateTab = useCallback(async () => {
     const api = window.caval?.terminal;
     if (!api?.create) return;
-    const info = await api.create({
-      title: `Terminal ${tabs.length + 1}`,
-    });
+    setMenuOpen(false);
+    // Let main assign shell.label as title when omitted — avoids blank / numbered placeholders.
+    const info = await api.create({});
+    const title = shortTerminalTitle(info);
     const newTab: TerminalTab = {
       id: info.id,
-      title: info.title || info.shell,
-      info,
+      title,
+      info: { ...info, title },
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(info.id);
-  }, [tabs.length]);
+  }, []);
 
   useEffect(() => {
     const onNew = () => {
@@ -118,13 +167,50 @@ export function TerminalSessions() {
   }, [handleCreateTab]);
 
   const handleCloseTab = useCallback(async (id: string) => {
+    const tab = tabsRef.current.find((entry) => entry.id === id);
+    if (!tab) return;
+
+    if (isTerminalRunning(tab.info)) {
+      const confirmed = window.confirm(
+        `Close "${tab.title}"?\n\nThe running process will be terminated.`
+      );
+      if (!confirmed) return;
+    }
+
     await window.caval?.terminal?.destroy?.(id);
+
+    setOutput((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+
     setTabs((prev) => {
-      const next = prev.filter((tab) => tab.id !== id);
-      setActiveTabId((current) => (current === id ? next[0]?.id ?? null : current));
+      const nextActive = pickNextActiveId(prev, id);
+      const next = prev.filter((entry) => entry.id !== id);
+      setActiveTabId((current) => (current === id ? nextActive : current));
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onPointer);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onPointer);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
 
   const handleInput = useCallback(
     async (data: string) => {
@@ -280,6 +366,7 @@ export function TerminalSessions() {
   const aiAvailable = hasSelection || hasRecentError;
   const explainShortcut = TERMINAL_AI_PALETTE.find((e) => e.id === 'explain')?.shortcut;
   const suggestShortcut = TERMINAL_AI_PALETTE.find((e) => e.id === 'suggest-fix')?.shortcut;
+  const hasTabs = tabs.length > 0;
 
   return (
     <div
@@ -288,10 +375,13 @@ export function TerminalSessions() {
       role="region"
       aria-label="Terminal"
       data-testid="terminal-sessions"
+      data-active-terminal-id={activeTabId ?? ''}
       style={{ position: 'relative' }}
     >
       <div className="terminal-tabs" role="tablist" aria-label="Terminal sessions">
-        {tabs.map((tab) => (
+        {tabs.map((tab) => {
+          const uiStatus = mapTerminalUiStatus(tab.info.status);
+          return (
             <div
               key={tab.id}
               role="tab"
@@ -308,141 +398,178 @@ export function TerminalSessions() {
               aria-selected={tab.id === activeTabId}
               data-testid={`terminal-tab-${tab.id}`}
             >
-            <span className="terminal-tab-title">{tab.title}</span>
-            <span
-              className={`terminal-tab-status status-${tab.info.status}`}
-              aria-label={`Status: ${tab.info.status}`}
+              <span
+                className={`terminal-tab-status status-${uiStatus} status-${tab.info.status}`}
+                aria-label={`Status: ${uiStatus}`}
+                data-testid={`terminal-tab-status-${tab.id}`}
+              />
+              <span className="terminal-tab-title">{tab.title}</span>
+              <button
+                type="button"
+                className="terminal-tab-close"
+                data-testid={`terminal-tab-close-${tab.id}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleCloseTab(tab.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.stopPropagation();
+                  }
+                }}
+                aria-label={`Close ${tab.title}`}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+        <div className="terminal-tabs-actions" ref={menuRef}>
+          <button
+            type="button"
+            className="terminal-tab-add"
+            onClick={() => void handleCreateTab()}
+            aria-label="New terminal"
+            data-testid="terminal-tab-add"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className="terminal-tab-menu"
+            aria-label="Terminal menu"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            data-testid="terminal-tab-menu"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            ▾
+          </button>
+          {menuOpen && (
+            <div className="terminal-tab-dropdown" role="menu" data-testid="terminal-tab-dropdown">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void handleCreateTab()}
+              >
+                New Terminal
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {hasTabs ? (
+        <>
+          <div className="terminal-toolbar">
+            <input
+              type="search"
+              placeholder="Search output…"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="terminal-search"
+              aria-label="Search terminal output"
+              data-testid="terminal-search"
             />
             <button
               type="button"
-              className="terminal-tab-close"
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleCloseTab(tab.id);
+              data-testid="terminal-explain-btn"
+              disabled={!hasSelection}
+              onClick={() => runExplainSelection(getSelectionInOutput())}
+              style={{
+                fontSize: 11,
+                padding: '3px 8px',
+                borderRadius: 4,
+                border: '1px solid var(--caval-border)',
+                background: 'transparent',
+                color: 'var(--caval-text-muted)',
+                cursor: hasSelection ? 'pointer' : 'not-allowed',
+                opacity: hasSelection ? 1 : 0.45,
               }}
-              aria-label={`Close ${tab.title}`}
+              title={`${TERMINAL_AI_PALETTE[0]?.label ?? 'Explain'} (${explainShortcut ?? 'Ctrl+Shift+E'})`}
             >
-              ×
+              Explain
             </button>
-            </div>
-        ))}
-        <button
-          type="button"
-          className="terminal-tab-add"
-          onClick={() => void handleCreateTab()}
-          aria-label="New terminal"
-          data-testid="terminal-tab-add"
-        >
-          +
-        </button>
-      </div>
-
-      <div className="terminal-toolbar">
-        <input
-          type="search"
-          placeholder="Search output…"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          className="terminal-search"
-          aria-label="Search terminal output"
-          data-testid="terminal-search"
-        />
-        <button
-          type="button"
-          data-testid="terminal-explain-btn"
-          disabled={!hasSelection}
-          onClick={() => runExplainSelection(getSelectionInOutput())}
-          style={{
-            marginLeft: 8,
-            fontSize: 11,
-            padding: '4px 8px',
-            borderRadius: 4,
-            border: '1px solid var(--caval-border)',
-            background: 'transparent',
-            color: 'var(--caval-text-muted)',
-            cursor: hasSelection ? 'pointer' : 'not-allowed',
-            opacity: hasSelection ? 1 : 0.45,
-          }}
-          title={`${TERMINAL_AI_PALETTE[0]?.label ?? 'Explain'} (${explainShortcut ?? 'Ctrl+Shift+E'})`}
-        >
-          Explain
-        </button>
-        <button
-          type="button"
-          data-testid="terminal-suggest-btn"
-          disabled={!hasRecentError && !hasSelection}
-          onClick={() => runSuggestFix()}
-          style={{
-            marginLeft: 6,
-            fontSize: 11,
-            padding: '4px 8px',
-            borderRadius: 4,
-            border: '1px solid var(--caval-border)',
-            background: 'transparent',
-            color: 'var(--caval-text-muted)',
-            cursor: hasRecentError || hasSelection ? 'pointer' : 'not-allowed',
-            opacity: hasRecentError || hasSelection ? 1 : 0.45,
-          }}
-          title={`${TERMINAL_AI_PALETTE[1]?.label ?? 'Suggest fix'} (${suggestShortcut ?? 'Ctrl+Shift+F'})`}
-        >
-          Suggest fix
-        </button>
-      </div>
-
-      <div
-        ref={outputRef}
-        className="terminal-output"
-        role="log"
-        aria-live="polite"
-        data-testid="terminal-output"
-        style={{ userSelect: 'text', cursor: 'text' }}
-        onContextMenu={(event) => {
-          const text = getSelectionInOutput();
-          if (!text.trim() && !hasRecentError) return;
-          event.preventDefault();
-          setContextMenu({
-            x: event.clientX,
-            y: event.clientY,
-            text: text.trim() || recentOutputText.slice(-2000),
-          });
-        }}
-      >
-        {filteredOutput.map((line, index) => (
-          <div key={`${line.timestamp}-${index}`} className="terminal-line">
-            {line.data}
+            <button
+              type="button"
+              data-testid="terminal-suggest-btn"
+              disabled={!hasRecentError && !hasSelection}
+              onClick={() => runSuggestFix()}
+              style={{
+                fontSize: 11,
+                padding: '3px 8px',
+                borderRadius: 4,
+                border: '1px solid var(--caval-border)',
+                background: 'transparent',
+                color: 'var(--caval-text-muted)',
+                cursor: hasRecentError || hasSelection ? 'pointer' : 'not-allowed',
+                opacity: hasRecentError || hasSelection ? 1 : 0.45,
+              }}
+              title={`${TERMINAL_AI_PALETTE[1]?.label ?? 'Suggest fix'} (${suggestShortcut ?? 'Ctrl+Shift+F'})`}
+            >
+              Suggest fix
+            </button>
           </div>
-        ))}
-        <div ref={outputEndRef} />
-      </div>
 
-      {contextMenu && (
-        <TerminalAiMenu
-          position={{ x: contextMenu.x, y: contextMenu.y }}
-          hasSelection={Boolean(getSelectionInOutput().trim())}
-          hasRecentError={hasRecentError || detectRecentTerminalError(contextMenu.text)}
-          onSelect={onPaletteCommand}
-          onClose={() => setContextMenu(null)}
-        />
-      )}
+          <div
+            ref={outputRef}
+            className="terminal-output"
+            role="log"
+            aria-live="polite"
+            data-testid="terminal-output"
+            style={{ userSelect: 'text', cursor: 'text' }}
+            onContextMenu={(event) => {
+              const text = getSelectionInOutput();
+              if (!text.trim() && !hasRecentError) return;
+              event.preventDefault();
+              setContextMenu({
+                x: event.clientX,
+                y: event.clientY,
+                text: text.trim() || recentOutputText.slice(-2000),
+              });
+            }}
+          >
+            {filteredOutput.map((line, index) => (
+              <div key={`${line.timestamp}-${index}`} className="terminal-line">
+                {line.data}
+              </div>
+            ))}
+            <div ref={outputEndRef} />
+          </div>
 
-      <SuggestedCommandsCard />
-      <TerminalExplainPopover />
+          {contextMenu && (
+            <TerminalAiMenu
+              position={{ x: contextMenu.x, y: contextMenu.y }}
+              hasSelection={Boolean(getSelectionInOutput().trim())}
+              hasRecentError={hasRecentError || detectRecentTerminalError(contextMenu.text)}
+              onSelect={onPaletteCommand}
+              onClose={() => setContextMenu(null)}
+            />
+          )}
 
-      {activeTab && (
-        <TerminalInput
-          key={activeTab.id}
-          terminalId={activeTab.id}
-          onInput={handleInput}
-          disabled={activeTab.info.status !== 'active'}
-          aiAvailable={aiAvailable}
-        />
-      )}
+          <SuggestedCommandsCard />
+          <TerminalExplainPopover />
 
-      {tabs.length === 0 && (
+          {activeTab && (
+            <TerminalInput
+              key={activeTab.id}
+              terminalId={activeTab.id}
+              onInput={handleInput}
+              disabled={activeTab.info.status !== 'active'}
+              aiAvailable={aiAvailable}
+            />
+          )}
+        </>
+      ) : (
         <div className="terminal-empty" data-testid="terminal-empty">
           <p>No terminals open.</p>
-          <button type="button" className="btn-primary" onClick={() => void handleCreateTab()}>
-            Open Terminal
+          <button
+            type="button"
+            className="btn-primary"
+            data-testid="terminal-empty-new"
+            onClick={() => void handleCreateTab()}
+          >
+            New Terminal
           </button>
         </div>
       )}
