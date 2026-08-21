@@ -518,6 +518,8 @@ export function WorkbenchRoot() {
 
     const offFolder = caval.onFolderOpened((folder) => {
       setProjectPath(folder.path);
+      // Re-bind main-process workspace root (File → Open Folder already binds; sync is idempotent).
+      void window.caval.workspaceSync?.(folder.path);
       void window.caval.fs.readTree(folder.path).then((tree) => setFileTree(tree));
       void useGitStore.getState().refresh();
       useAIStore.getState().setIncludeMode('project');
@@ -534,6 +536,13 @@ export function WorkbenchRoot() {
       offFile?.();
     };
   }, [setProjectPath, setFileTree, openFile]);
+
+  // Keep main-process sandbox root bound whenever renderer has a projectPath.
+  useEffect(() => {
+    const root = projectPath?.trim();
+    if (!root) return;
+    void window.caval?.workspaceSync?.(root);
+  }, [projectPath]);
 
   // Keyboard shortcuts globale
   useEffect(() => {

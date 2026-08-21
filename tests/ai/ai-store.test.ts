@@ -103,8 +103,15 @@ describe("ai-store sendMessage readiness gate", () => {
     expect(last?.content).toContain("Add key in Settings");
   });
 
-  it("blocks agentic send without project folder", async () => {
+  it("auto-creates Desktop/Downloads project when agentic has no folder", async () => {
     editorState.projectPath = null;
+    const win = (globalThis as unknown as { window: { caval: Record<string, unknown> } }).window;
+    win.caval.workspace = {
+      createOnDesktop: vi.fn().mockResolvedValue({
+        ok: false,
+        error: "Nu am putut crea folderul pe Desktop sau în Downloads.",
+      }),
+    };
     const { useAIStore } = await import("../../ai/composer/ai-store.js");
     useAIStore.setState({ agentMode: "agentic" });
     const store = useAIStore.getState();
@@ -112,7 +119,7 @@ describe("ai-store sendMessage readiness gate", () => {
 
     const last = useAIStore.getState().messages.at(-1);
     expect(last?.role).toBe("assistant");
-    expect(last?.error).toContain("Open Folder");
+    expect(last?.error).toMatch(/Desktop|Downloads/i);
     editorState.projectPath = "/proj/demo";
   });
 });

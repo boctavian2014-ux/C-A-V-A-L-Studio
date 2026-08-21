@@ -734,6 +734,7 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.invoke("workspace:createOnDesktop", input) as Promise<{
         ok: boolean;
         path?: string;
+        location?: "desktop" | "downloads";
         error?: string;
       }>,
   },

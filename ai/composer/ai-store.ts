@@ -43,6 +43,10 @@ import { useEditorStore } from '../../src/renderer/store/editor-store';
 import {
   bootstrapRoboticsDesktopProject,
 } from '../../src/renderer/components/engineering/bootstrap-robotics-project';
+import {
+  ensureDesktopProject,
+  projectNameFromPrompt,
+} from '../../src/renderer/hooks/useOpenWorkspace';
 import { useOutputStore } from '../../src/renderer/store/output-store';
 import { parseProblemsFromOutput } from '../../src/renderer/store/parse-problems';
 import { useProblemsStore } from '../../src/renderer/store/problems-store';
@@ -69,6 +73,11 @@ import {
   formatEngineeringContextForCoding,
 } from '../engineering/engineering-handoff';
 import { applyScaffoldToWorkspace, parseScaffoldFiles } from './scaffold-apply';
+import {
+  applyFallbackScaffold,
+  buildFallbackScaffoldTimelineEvent,
+  FALLBACK_SCAFFOLD_TOAST,
+} from './fallback-scaffold';
 import { parseStreamingScaffold } from './scaffold-parser';
 import {
   buildFashionMatchingAssistantReply,
@@ -291,7 +300,7 @@ interface CavalWindow {
     ) => () => void;
     contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<Record<string, unknown>> }>;
     workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
-    workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+    workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
     mcpEnsureReady?: () => Promise<{ ok: boolean; servers?: unknown[] }>;
     getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
     zlPrepare?: (signals: {
@@ -1041,34 +1050,50 @@ export const useAIStore = create<AIStore>()(
           agenticRepairWave = 0;
         }
 
-        const editorState = useEditorStore.getState();
-        const boundWorkspace = editorState.projectPath;
+        let editorState = useEditorStore.getState();
+        let boundWorkspace = editorState.projectPath;
 
-        // Desktop DIY folders are created only from Robotics (plan success / software handoff).
-        if (isAgenticPipelineMode(get().agentMode) && !boundWorkspace?.trim()) {
-          const userMsg: ChatMessage = {
-            id: generateId(),
-            role: 'user',
-            content: userText,
-            timestamp: Date.now(),
-          };
-          const assistantMsg: ChatMessage = {
-            id: generateId(),
-            role: 'assistant',
-            content: '',
-            error: 'Deschide un folder (File → Open Folder) înainte de modul Agentic.',
-            timestamp: Date.now(),
-          };
-          const nextMessages = [...get().messages, userMsg, assistantMsg];
-          set((s) => ({
-            messages: nextMessages,
-            threads: s.threads.map((t) =>
-              t.id === s.activeThreadId
-                ? { ...t, messages: nextMessages, updatedAt: Date.now() }
-                : t
-            ),
-          }));
-          return;
+        // Code / Agentic / Debug / fashion scaffolds: auto-create Desktop (fallback Downloads).
+        if (
+          (modeSupportsFileApply(get().agentMode) ||
+            isFashionMatchingEngineRequest(userText)) &&
+          !boundWorkspace?.trim()
+        ) {
+          const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+          if (!ensured.ok || !ensured.path) {
+            const userMsg: ChatMessage = {
+              id: generateId(),
+              role: 'user',
+              content: userText,
+              timestamp: Date.now(),
+            };
+            const assistantMsg: ChatMessage = {
+              id: generateId(),
+              role: 'assistant',
+              content: '',
+              error:
+                ensured.error ??
+                'Nu am putut crea un folder pe Desktop sau în Downloads. Deschide un folder manual.',
+              timestamp: Date.now(),
+            };
+            const nextMessages = [...get().messages, userMsg, assistantMsg];
+            set((s) => ({
+              messages: nextMessages,
+              threads: s.threads.map((t) =>
+                t.id === s.activeThreadId
+                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
+                  : t
+              ),
+            }));
+            return;
+          }
+          editorState = useEditorStore.getState();
+          boundWorkspace = ensured.path;
+          if (ensured.created) {
+            const where =
+              ensured.location === 'downloads' ? 'Downloads' : 'Desktop';
+            showWorkbenchToast(`Proiect creat pe ${where}: ${ensured.path}`);
+          }
         }
 
         let {
@@ -1415,17 +1440,20 @@ export const useAIStore = create<AIStore>()(
               : [...new Set([...toolWrittenPaths, ...pipelineWrittenFiles])];
 
             let scaffoldErrors: string[] = [];
+            let scaffoldParsed = 0;
+            let scaffoldSkipped = 0;
             if (pipelineWrittenFiles.length === 0) {
               const parsed = parseScaffoldFiles(parseSource);
+              scaffoldParsed = parsed.length;
               if (parsed.length > 0) {
                 const applied = await applyScaffoldToWorkspace(projectPath, parsed);
                 writtenFiles = [...writtenFiles, ...applied.written];
                 scaffoldErrors = applied.errors;
+                scaffoldSkipped = applied.skipped;
               }
             }
             writtenFiles = [...new Set(writtenFiles)];
             await useEditorStore.getState().refreshTree();
-
             const recapText = msgForParse?.recap ?? capturedRecapMeta?.pendingIssues?.join(' ');
             const gate = capturedRecapMeta?.completionGate;
             const fullDelivery: FullDeliveryConfig =
@@ -1496,12 +1524,10 @@ export const useAIStore = create<AIStore>()(
 
             if (writtenFiles.length === 0) {
               useEditorStore.getState().closeAiPreview();
-              const hadReasoningPlan = Boolean(
-                reasoningWithFences || msgForParse?.reasoning?.trim() || capturedReasoningBrief
-              );
+              // Retry AI emission only when fences existed but apply failed.
               if (
-                isAgenticPipelineMode(agentMode) &&
-                hadReasoningPlan &&
+                scaffoldParsed > 0 &&
+                modeSupportsFileApply(agentMode) &&
                 fullDelivery.autonomousFinish &&
                 canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
                 !isSessionStale()
@@ -1514,12 +1540,47 @@ export const useAIStore = create<AIStore>()(
                 void get().sendMessage(buildScaffoldContinueUserMessage(planContext));
                 return;
               }
-              updateAssistant({
-                error: hadReasoningPlan
-                  ? `AI a planificat fără fișiere valide (\`\`\`lang:path\`\`\`). Reformulează promptul sau deschide un folder.${scaffoldErrors.length ? `\n${scaffoldErrors[0]}` : ''}`
-                  : `Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.${scaffoldErrors.length ? `\n${scaffoldErrors[0]}` : ''}`,
+
+              const fallback = await applyFallbackScaffold(projectPath, {
+                projectName: workspaceFolderTitle(projectPath),
               });
-              return;
+              if (fallback.written.length > 0) {
+                writtenFiles = [
+                  ...fallback.written.filter((f) => f !== 'src/App.tsx'),
+                  ...(fallback.written.includes('src/App.tsx') ? ['src/App.tsx'] : []),
+                ];
+                showWorkbenchToast(FALLBACK_SCAFFOLD_TOAST);
+                const prevTl =
+                  get().messages.find((m) => m.id === assistantMsgId)?.timelineEvents ?? [];
+                updateAssistant({
+                  error: undefined,
+                  content: FALLBACK_SCAFFOLD_TOAST,
+                  writtenFiles,
+                  timelineEvents: [...prevTl, buildFallbackScaffoldTimelineEvent()],
+                  timelineExpanded: true,
+                });
+                await useEditorStore.getState().refreshTree();
+              } else {
+                const hadReasoningPlan = Boolean(
+                  reasoningWithFences ||
+                    msgForParse?.reasoning?.trim() ||
+                    capturedReasoningBrief
+                );
+                const detail =
+                  fallback.errors[0] ||
+                  scaffoldErrors[0] ||
+                  (scaffoldParsed > 0 && scaffoldSkipped === scaffoldParsed
+                    ? 'Blocurile de cod au fost filtrate (path invalid / fragment / junk).'
+                    : scaffoldParsed === 0
+                      ? 'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc.'
+                      : '');
+                updateAssistant({
+                  error: hadReasoningPlan
+                    ? `AI a planificat, dar nu a scris fișiere valide în workspace.${detail ? `\n${detail}` : ''}\nReformulează promptul (cere explicit fișiere cu path) sau retrimite.`
+                    : `Niciun fișier scris în workspace (folder: ${workspaceFolderTitle(projectPath)}).${detail ? `\n${detail}` : ''}\nRetrimite promptul sau cere „creează fișierele în proiect”.`,
+                });
+                return;
+              }
             }
             const lastFile = writtenFiles[writtenFiles.length - 1]!;
             const opened = await openWrittenFile(lastFile);
@@ -1639,19 +1700,29 @@ export const useAIStore = create<AIStore>()(
         }
 
         if (isFashionMatchingEngineRequest(userText) && !editorState.projectPath) {
-          finish(
-            'Deschide un folder de proiect (**File → Open Folder**) apoi retrimite promptul. Fără folder nu pot crea `fashion-matching-engine/`.',
-            { error: 'projectPath lipsă' }
-          );
-          return;
+          const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+          if (!ensured.ok || !ensured.path) {
+            finish(
+              ensured.error ??
+                'Nu am putut crea un folder pe Desktop/Downloads pentru fashion-matching-engine.',
+              { error: 'projectPath lipsă' }
+            );
+            return;
+          }
+          editorState = useEditorStore.getState();
         }
 
         if (isAgenticPipelineMode(agentMode) && !editorState.projectPath && !fashionSeeded) {
-          finish(
-            'Deschide un folder (**File → Open Folder**) — fără proiect deschis nu pot crea fișiere.',
-            { error: 'projectPath lipsă' }
-          );
-          return;
+          const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+          if (!ensured.ok || !ensured.path) {
+            finish(
+              ensured.error ??
+                'Nu am putut crea un folder pe Desktop sau în Downloads — fără proiect nu pot crea fișiere.',
+              { error: 'projectPath lipsă' }
+            );
+            return;
+          }
+          editorState = useEditorStore.getState();
         }
 
         if (fashionSeeded) {
@@ -1918,7 +1989,14 @@ export const useAIStore = create<AIStore>()(
         };
 
         if (editorState.projectPath) {
-          await caval?.workspaceSync?.(editorState.projectPath);
+          const syncRes = await caval?.workspaceSync?.(editorState.projectPath);
+          if (syncRes && syncRes.ok === false) {
+            finish(
+              `Nu pot lega workspace-ul: ${syncRes.error ?? 'sync eșuat'}.\nDeschide din nou folderul (File → Open Folder).`,
+              { error: 'workspace-sync-failed' }
+            );
+            return;
+          }
           void caval?.mcpEnsureReady?.();
         }
 
@@ -1931,14 +2009,7 @@ export const useAIStore = create<AIStore>()(
           uniqueMentions.length === 0 &&
           attachmentsSnapshot.length === 0;
 
-        const scaffoldMode =
-          modeSupportsFileApply(agentMode) &&
-          (fashionSeeded ||
-            attachmentsSnapshot.some((f) => f.path.startsWith('engineering://')) ||
-            /\bSCAFFOLD\b/i.test(apiPrompt) ||
-            isScaffoldContinueRequest(apiPrompt) ||
-            (isAgenticPipelineMode(agentMode) &&
-              (isDeliveryContinueRequest(apiPrompt) || isAgenticRepairRequest(apiPrompt))));
+        const scaffoldMode = modeSupportsFileApply(agentMode);
 
         if (isAgenticPipelineMode(agentMode) && editorState.projectPath) {
           useEditorStore.getState().showAiPreview('generating.ts', '// AI scrie cod…\n');

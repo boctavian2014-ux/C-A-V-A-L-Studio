@@ -4,6 +4,7 @@ import { useEditorStore } from '../store/editor-store';
 import { useGitStore } from '../store/git-store';
 
 export type WorkspaceOpenSource = 'folder' | 'clone';
+export { projectNameFromPrompt } from './project-name-from-prompt';
 
 export function useOpenWorkspace() {
   const setProjectPath = useEditorStore((s) => s.setProjectPath);
@@ -31,11 +32,15 @@ export function useOpenWorkspace() {
   return { openWorkspace, pickAndOpenFolder };
 }
 
-/** Create Desktop/{name} if needed, open as workspace. No-op when projectPath already set. */
+/**
+ * Ensure a writable workspace: reuse open project, else create on Desktop
+ * (fallback Downloads). No-op when projectPath already set.
+ */
 export async function ensureDesktopProject(name: string): Promise<{
   ok: boolean;
   path?: string;
   created?: boolean;
+  location?: 'desktop' | 'downloads';
   error?: string;
 }> {
   const existing = useEditorStore.getState().projectPath;
@@ -44,10 +49,15 @@ export async function ensureDesktopProject(name: string): Promise<{
   }
 
   const created = await window.caval.workspace?.createOnDesktop?.({
-    name: name.trim() || 'Cavallo-Project',
+    name: name.trim() || 'Caval-Project',
   });
   if (!created?.ok || !created.path) {
-    return { ok: false, error: created?.error ?? 'Nu am putut crea folderul pe Desktop.' };
+    return {
+      ok: false,
+      error:
+        created?.error ??
+        'Nu am putut crea folderul pe Desktop sau în Downloads.',
+    };
   }
 
   useEditorStore.getState().setProjectPath(created.path);
@@ -62,7 +72,12 @@ export async function ensureDesktopProject(name: string): Promise<{
   }
   await useGitStore.getState().refresh();
 
-  return { ok: true, path: created.path, created: true };
+  return {
+    ok: true,
+    path: created.path,
+    created: true,
+    location: created.location,
+  };
 }
 
 /** Write a file into the open workspace (absolute path under project root). */

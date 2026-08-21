@@ -781,7 +781,7 @@ interface CavalBridge {
     folderPath: string,
     options?: { source?: 'folder' | 'clone' }
   ) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
-  workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+  workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   workspace?: {
     listRecent: () => Promise<{
       ok: boolean;
@@ -806,6 +806,7 @@ interface CavalBridge {
     createOnDesktop: (input: { name: string }) => Promise<{
       ok: boolean;
       path?: string;
+      location?: 'desktop' | 'downloads';
       error?: string;
     }>;
   };
