@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import type { ProjectHealthCheckItem, ProjectHealthStatus } from "../../../shared/project-health-check";
-import {
-  healthStatusLabel,
-  PROJECT_HEALTH_UI_SAFETY_TIMEOUT_MS,
-} from "../../../shared/project-health-check";
+import { PROJECT_HEALTH_UI_SAFETY_TIMEOUT_MS } from "../../../shared/project-health-check";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
+import type { MessageKey } from "../../../../ai/i18n/locales/en";
 import { useEditorStore } from "../../store/editor-store";
 
 const STATUS_COLOR: Record<ProjectHealthStatus, string> = {
@@ -17,7 +16,18 @@ const STATUS_COLOR: Record<ProjectHealthStatus, string> = {
   timed_out: "#f97316",
 };
 
+const STATUS_KEY: Record<ProjectHealthStatus, MessageKey> = {
+  available: "health.status.available",
+  missing: "health.status.missing",
+  running: "health.status.running",
+  passed: "health.status.passed",
+  failed: "health.status.failed",
+  skipped: "health.status.skipped",
+  timed_out: "health.status.timed_out",
+};
+
 function StatusBadge({ status }: { status: ProjectHealthStatus }) {
+  const { t } = useTranslation();
   return (
     <span
       style={{
@@ -43,7 +53,7 @@ function StatusBadge({ status }: { status: ProjectHealthStatus }) {
               : undefined,
         }}
       />
-      {healthStatusLabel(status)}
+      {t(STATUS_KEY[status])}
     </span>
   );
 }
@@ -53,6 +63,7 @@ function shouldShowOutput(status: ProjectHealthStatus): boolean {
 }
 
 export function ProjectHealthPanel() {
+  const { t } = useTranslation();
   const { projectPath } = useEditorStore();
   const [checks, setChecks] = useState<ProjectHealthCheckItem[]>([]);
   const [packageFound, setPackageFound] = useState(true);
@@ -81,9 +92,7 @@ export function ProjectHealthPanel() {
       safetyTimer = setTimeout(() => {
         uiTimedOut = true;
         setRunning(false);
-        setError(
-          "Main process nu a răspuns la Project Health (timeout UI de siguranță). Verificările pot continua în fundal."
-        );
+        setError(t("health.timeout"));
         setChecks((prev) =>
           prev.map((check) =>
             check.status === "running" ? { ...check, status: "timed_out" } : check
@@ -97,7 +106,7 @@ export function ProjectHealthPanel() {
       const res = await window.caval.projectHealthCheck?.(action);
       if (uiTimedOut) return;
       if (!res?.ok) {
-        setError(res?.error ?? "Health check failed");
+        setError(res?.error ?? t("health.failed"));
         return;
       }
       setChecks(res.snapshot?.checks ?? []);
@@ -111,7 +120,7 @@ export function ProjectHealthPanel() {
       setLoading(false);
       if (!uiTimedOut) setRunning(false);
     }
-  }, [projectPath]);
+  }, [projectPath, t]);
 
   useEffect(() => {
     void refresh("scan");
@@ -120,15 +129,12 @@ export function ProjectHealthPanel() {
   return (
     <div style={{ padding: "4px 2px 24px", maxWidth: 560 }}>
       <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--caval-text-muted)", lineHeight: 1.5 }}>
-        Verifică dacă proiectul deschis definește scripturile standard din{" "}
-        <code style={{ fontSize: 11 }}>package.json</code> (typecheck, lint, test, build).
-        Statusul <strong>Available</strong> înseamnă script disponibil; rulează verificările pentru a detecta{" "}
-        <strong>Passed</strong>, <strong>Failed</strong> sau <strong>Timed out</strong>.
+        {t("health.intro")}
       </p>
 
       {!projectPath && (
         <p style={{ margin: 0, fontSize: 12, color: "var(--caval-text-muted)" }}>
-          Deschide un folder de proiect pentru Project Health Check.
+          {t("health.openFolder")}
         </p>
       )}
 
@@ -157,7 +163,7 @@ export function ProjectHealthPanel() {
                 cursor: loading || running ? "not-allowed" : "pointer",
               }}
             >
-              {loading ? "Scanare…" : "Re-scanează scripturi"}
+              {loading ? t("health.scanning") : t("health.rescan")}
             </button>
             <button
               type="button"
@@ -174,19 +180,20 @@ export function ProjectHealthPanel() {
                 fontWeight: 600,
               }}
             >
-              {running ? "Rulează verificări…" : "Rulează verificări"}
+              {running ? t("health.running") : t("health.run")}
             </button>
           </div>
 
           {packageFound && packageName && (
             <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--caval-text-muted)" }}>
-              Pachet: <span style={{ fontFamily: "monospace" }}>{packageName}</span>
+              {t("health.package")}
+              <span style={{ fontFamily: "monospace" }}>{packageName}</span>
             </p>
           )}
 
           {!packageFound && (
             <p style={{ margin: "0 0 10px", fontSize: 12, color: "#ef4444" }}>
-              Nu există <code>package.json</code> în workspace-ul deschis.
+              {t("health.noPackage")}
             </p>
           )}
 

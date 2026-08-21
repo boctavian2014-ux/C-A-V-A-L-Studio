@@ -40,6 +40,7 @@
     "audit": "tsx scripts/full-audit-engine.ts",
     "assets:neon-transparent": "tsx scripts/process-neon-horse-transparent.ts",
     "lint": "eslint \"{src,ai,context-engine,romania,marketplace,ui-kit,billing,admin,mobile-app,components}/**/*.{ts,tsx}\" --max-warnings 0",
+    "i18n:audit": "tsx scripts/i18n-audit.ts",
     "verify-runtime-assets": "tsx scripts/verify-runtime-assets.ts",
     "smoke:electron": "tsx scripts/electron-smoke.ts",
     "marketplace:serve": "tsx marketplace/server/standalone.ts",

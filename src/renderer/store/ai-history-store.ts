@@ -9,6 +9,7 @@ import type {
 import { HISTORY_LIST_PAGE_SIZE } from "../../shared/ai-history-contract";
 import type { ChatMessage } from "../../../ai/composer/ai-store";
 import { useAIStore } from "../../../ai/composer/ai-store";
+import { tActive } from "../../../ai/i18n/active-locale";
 import { useEditorStore } from "./editor-store";
 
 interface AiHistoryStore {
@@ -202,7 +203,7 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
     if (!api?.deleteConversation) return false;
     const confirmed =
       typeof window.confirm === "function"
-        ? window.confirm("Delete this conversation and its timeline history?")
+        ? window.confirm(tActive("dialog.deleteConversation"))
         : true;
     if (!confirmed) return false;
     const res = await api.deleteConversation(id);
@@ -225,7 +226,7 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
     if (!api?.revertWrittenFile) return false;
     const confirmed =
       typeof window.confirm === "function"
-        ? window.confirm("Restore this file to the accepted snapshot?")
+        ? window.confirm(tActive("dialog.restoreSnapshot"))
         : true;
     if (!confirmed) return false;
     const res = await api.revertWrittenFile(writtenFileId);
@@ -250,7 +251,9 @@ export const useAiHistoryStore = create<AiHistoryStore>((set, get) => ({
         const ok =
           typeof window.confirm === "function"
             ? window.confirm(
-                `Export is large (${Math.ceil((result.byteLength ?? 0) / (1024 * 1024))} MB). Continue?`
+                tActive("dialog.exportLarge", {
+                  mb: Math.ceil((result.byteLength ?? 0) / (1024 * 1024)),
+                })
               )
             : true;
         if (!ok) {

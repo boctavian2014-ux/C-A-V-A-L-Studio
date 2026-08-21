@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { useGitStore } from '../../store/git-store';
 
 function diffLineStyle(line: string): React.CSSProperties {
@@ -15,6 +16,7 @@ function diffLineStyle(line: string): React.CSSProperties {
 }
 
 export function GitDiffPanel() {
+  const { t } = useTranslation();
   const { selectedFile, diffContent, diffLoading, diffBinary, isDiffStaged, loadDiff } = useGitStore();
 
   if (!selectedFile) {
@@ -25,7 +27,7 @@ export function GitDiffPanel() {
         padding: '12px 10px', fontSize: 11.5, color: 'var(--caval-text-muted)',
         borderTop: '1px solid var(--caval-border)',
       }}>
-        Selectează un fișier pentru diff.
+        {t('empty.gitDiffSelect')}
       </div>
     );
   }
@@ -59,7 +61,7 @@ export function GitDiffPanel() {
             fontSize: 10, fontWeight: 600, cursor: 'pointer', borderRadius: 4, padding: '2px 6px',
           }}
         >
-          Working tree
+          {t('git.diff.workingTree')}
         </button>
         <button
           data-testid="git-diff-staged"
@@ -71,23 +73,23 @@ export function GitDiffPanel() {
             fontSize: 10, fontWeight: 600, cursor: 'pointer', borderRadius: 4, padding: '2px 6px',
           }}
         >
-          Staged
+          {t('git.diff.staged')}
         </button>
       </div>
       <div className="ai-messages-scroll" style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
         {diffLoading && (
           <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--caval-text-muted)' }}>
-            Se încarcă diff…
+            {t('git.diff.loading')}
           </div>
         )}
         {!diffLoading && diffBinary && (
           <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--caval-text-muted)' }}>
-            Fișier binar — diff text indisponibil.
+            {t('git.diff.binary')}
           </div>
         )}
         {!diffLoading && !diffBinary && !diffContent.trim() && (
           <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--caval-text-muted)' }}>
-            Nicio diferență unified pentru această vedere.
+            {t('git.diff.noUnified')}
           </div>
         )}
         {!diffLoading && !diffBinary && diffContent.trim() && diffContent.split(/\r?\n/).map((line, i) => (

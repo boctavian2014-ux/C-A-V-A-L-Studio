@@ -33,6 +33,8 @@ import { ExplainSelectionPanel } from './components/editor/ExplainSelectionPanel
 import { buildWorkbenchCommands } from './commands/command-registry';
 import { handleMenuCommand, type MenuCommandContext } from './commands/menu-command-router';
 import { showWorkbenchToast } from './commands/workbench-toast';
+import { tActive } from '../../ai/i18n/active-locale';
+import { useTranslation } from '../../ai/i18n/useTranslation';
 import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
@@ -238,6 +240,7 @@ function RoboticsCadStage() {
 // ──────────────────────────────────────────────
 
 export function WorkbenchRoot() {
+  const { t } = useTranslation();
   const [activeActivity, setActiveActivity] = React.useState<ActivityTab>('explorer');
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);
@@ -461,7 +464,7 @@ export function WorkbenchRoot() {
         const files = res.completion?.writtenFiles;
         if (!res.ok || !files?.length) return;
         showWorkbenchToast(
-          `Ultimul run Arena s-a terminat — ${files.length} fișier(e) scrise pe disc.`,
+          tActive('toast.arenaCompleted', { count: files.length }),
           6000
         );
         const last = files[files.length - 1];
@@ -923,7 +926,7 @@ export function WorkbenchRoot() {
                         fontSize: 13,
                       }}
                     >
-                      Loading editor…
+                      {t('loading.editor')}
                     </div>
                   }
                 >

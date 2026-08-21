@@ -106,6 +106,7 @@ import {
 import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import type { PipelineRecapMeta } from './multi-agent/types';
 import { showWorkbenchToast } from '../../src/renderer/commands/workbench-toast';
+import { tActive } from '../i18n/active-locale';
 import type { IdeContextMode, IdeContextPayload } from '../../src/shared/ai-context-contract';
 import type { TimelineEvent } from '../../src/shared/ai-timeline-contract';
 import { sanitizeTimelineEvent } from '../../src/shared/ai-timeline-contract';
@@ -1129,7 +1130,9 @@ export const useAIStore = create<AIStore>()(
           if (ensured.created) {
             const where =
               ensured.location === 'downloads' ? 'Downloads' : 'Desktop';
-            showWorkbenchToast(`Proiect creat pe ${where}: ${ensured.path}`);
+            showWorkbenchToast(
+              tActive('toast.projectCreated', { where, path: ensured.path })
+            );
           }
         }
 

@@ -23,9 +23,9 @@ export function WorkbenchHeader({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 12,
-        padding: '0 12px',
-        minHeight: 38,
+        gap: 14,
+        padding: '0 14px 0 12px',
+        minHeight: 46,
         borderBottom: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
         borderTop: '2px solid var(--caval-accent)',
         borderLeft: 'none',
@@ -40,16 +40,17 @@ export function WorkbenchHeader({
         style={{
           display: 'flex',
           alignItems: 'center',
+          paddingTop: 2,
           minWidth: 0,
           flex: 1,
         }}
       >
-        <CavaloLogo height={24} />
+        <CavaloLogo height={28} />
       </div>
 
       <nav
         aria-label="Workbench toolbar"
-        style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
       >
         <SidebarToggleButton sidebarOpen={sidebarOpen} onClick={onToggleSidebar} />
         <button

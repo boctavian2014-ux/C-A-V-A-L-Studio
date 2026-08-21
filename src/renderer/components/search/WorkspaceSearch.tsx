@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { debounce } from '../../lib/debounce';
 import { useEditorStore } from '../../store/editor-store';
 import type {
@@ -34,6 +35,7 @@ export function WorkspaceSearch({
   open: boolean;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const { projectPath, openFile } = useEditorStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<WorkspaceSearchResult[]>([]);
@@ -141,12 +143,12 @@ export function WorkspaceSearch({
   if (!open) return null;
 
   const emptyHint = !projectPath
-    ? 'Deschide un folder mai întâi'
+    ? t('workspaceSearch.openFolder')
     : !query.trim()
-      ? 'Type to search symbols, files, imports…'
+      ? t('workspaceSearch.typeToSearch')
       : error
         ? error
-        : 'Niciun rezultat';
+        : t('workspaceSearch.noResults');
 
   return (
     <div

@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { CadViewer } from './CadViewer';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
+import { tActive } from '../../../../ai/i18n/active-locale';
 
 import type { CadStorePhase } from '../../store/engineering-cad-store';
 
@@ -38,9 +39,7 @@ export function EngineeringCadPreview() {
 
   const handleClose = useCallback(() => {
     if (editDirty) {
-      const ok = window.confirm(
-        'Ai modificări nesalvate în viewer. Închizi fără a salva transformările?'
-      );
+      const ok = window.confirm(tActive('dialog.unsavedCadViewer'));
       if (!ok) return;
     }
     if (busy) {

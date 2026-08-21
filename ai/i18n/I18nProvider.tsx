@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 
+import { setActiveLocale } from "./active-locale";
 import {
   createTranslator,
   DEFAULT_LOCALE,
@@ -46,13 +47,16 @@ export function I18nProvider({
   /** Test / SSR override — skips async load when set. */
   initialLocale?: AppLocale;
 }) {
-  const [locale, setLocaleState] = useState<AppLocale>(
-    initialLocale ?? DEFAULT_LOCALE
-  );
+  const [locale, setLocaleState] = useState<AppLocale>(() => {
+    const initial = initialLocale ?? DEFAULT_LOCALE;
+    setActiveLocale(initial);
+    return initial;
+  });
   const [ready, setReady] = useState(Boolean(initialLocale));
 
   useEffect(() => {
     if (initialLocale) {
+      setActiveLocale(initialLocale);
       setLocaleState(initialLocale);
       setReady(true);
       return;
@@ -60,6 +64,7 @@ export function I18nProvider({
     let cancelled = false;
     void loadPreferredLocale().then((next) => {
       if (cancelled) return;
+      setActiveLocale(next);
       setLocaleState(next);
       setReady(true);
     });
@@ -70,6 +75,7 @@ export function I18nProvider({
 
   const setLocale = useCallback(async (next: AppLocale | string) => {
     const resolved = resolveLocale(next);
+    setActiveLocale(resolved);
     setLocaleState(resolved);
     try {
       await window.caval?.locale?.set?.(resolved);

@@ -1,4 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
+
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import type { MessageKey } from '../../../../ai/i18n/locales/en';
 
 export interface ShortcutEntry {
   keys: string;
@@ -6,36 +9,53 @@ export interface ShortcutEntry {
   category: string;
 }
 
-const DEFAULT_SHORTCUTS: ShortcutEntry[] = [
-  { category: 'Navigation', keys: 'Ctrl+P', label: 'Go to File (Quick Open)' },
-  { category: 'Navigation', keys: 'Ctrl+T', label: 'Search Workspace Symbols' },
-  { category: 'Navigation', keys: 'Ctrl+Shift+P', label: 'Command Palette' },
-  { category: 'Navigation', keys: 'F12', label: 'Go to Definition' },
-  { category: 'Navigation', keys: 'Shift+F12', label: 'Find References' },
-  { category: 'View', keys: 'Ctrl+B', label: 'Toggle Sidebar' },
-  { category: 'Navigation', keys: 'Ctrl+Shift+E', label: 'Explorer (or Explain terminal selection)' },
-  { category: 'View', keys: 'Ctrl+Shift+F', label: 'Search (or Suggest fix when terminal has recent error)' },
-  { category: 'AI', keys: 'Ctrl+Shift+E', label: 'Terminal: Explain with AI (when selection)' },
-  { category: 'AI', keys: 'Ctrl+Shift+F', label: 'Terminal: Suggest fix with AI (when recent error)' },
-  { category: 'View', keys: 'Ctrl+Shift+G', label: 'Source Control' },
-  { category: 'View', keys: 'Ctrl+Shift+X', label: 'Extensions' },
-  { category: 'View', keys: 'Ctrl+Shift+/', label: 'Keyboard Shortcuts' },
-  { category: 'AI', keys: 'Ctrl+Shift+A', label: 'Toggle AI Panel' },
-  { category: 'File', keys: 'Ctrl+S', label: 'Save' },
-  { category: 'File', keys: 'Ctrl+Shift+O', label: 'Open Folder' },
-  { category: 'Debug', keys: 'F5', label: 'Start Debugging' },
-  { category: 'Debug', keys: 'Shift+F5', label: 'Stop Debugging' },
+type ShortcutDef = {
+  categoryKey: MessageKey;
+  keys: string;
+  labelKey: MessageKey;
+};
+
+const DEFAULT_SHORTCUT_DEFS: ShortcutDef[] = [
+  { categoryKey: 'shortcutsOverlay.cat.navigation', keys: 'Ctrl+P', labelKey: 'shortcutsOverlay.goToFile' },
+  { categoryKey: 'shortcutsOverlay.cat.navigation', keys: 'Ctrl+T', labelKey: 'shortcutsOverlay.workspaceSymbols' },
+  { categoryKey: 'shortcutsOverlay.cat.navigation', keys: 'Ctrl+Shift+P', labelKey: 'shortcutsOverlay.commandPalette' },
+  { categoryKey: 'shortcutsOverlay.cat.navigation', keys: 'F12', labelKey: 'shortcutsOverlay.goToDefinition' },
+  { categoryKey: 'shortcutsOverlay.cat.navigation', keys: 'Shift+F12', labelKey: 'shortcutsOverlay.findReferences' },
+  { categoryKey: 'shortcutsOverlay.cat.view', keys: 'Ctrl+B', labelKey: 'shortcutsOverlay.toggleSidebar' },
+  { categoryKey: 'shortcutsOverlay.cat.navigation', keys: 'Ctrl+Shift+E', labelKey: 'shortcutsOverlay.explorerOrExplain' },
+  { categoryKey: 'shortcutsOverlay.cat.view', keys: 'Ctrl+Shift+F', labelKey: 'shortcutsOverlay.searchOrSuggest' },
+  { categoryKey: 'shortcutsOverlay.cat.ai', keys: 'Ctrl+Shift+E', labelKey: 'shortcutsOverlay.terminalExplain' },
+  { categoryKey: 'shortcutsOverlay.cat.ai', keys: 'Ctrl+Shift+F', labelKey: 'shortcutsOverlay.terminalSuggest' },
+  { categoryKey: 'shortcutsOverlay.cat.view', keys: 'Ctrl+Shift+G', labelKey: 'shortcutsOverlay.sourceControl' },
+  { categoryKey: 'shortcutsOverlay.cat.view', keys: 'Ctrl+Shift+X', labelKey: 'shortcutsOverlay.extensions' },
+  { categoryKey: 'shortcutsOverlay.cat.view', keys: 'Ctrl+Shift+/', labelKey: 'shortcutsOverlay.keyboardShortcuts' },
+  { categoryKey: 'shortcutsOverlay.cat.ai', keys: 'Ctrl+Shift+A', labelKey: 'shortcutsOverlay.toggleAi' },
+  { categoryKey: 'shortcutsOverlay.cat.file', keys: 'Ctrl+S', labelKey: 'shortcutsOverlay.save' },
+  { categoryKey: 'shortcutsOverlay.cat.file', keys: 'Ctrl+Shift+O', labelKey: 'shortcutsOverlay.openFolder' },
+  { categoryKey: 'shortcutsOverlay.cat.debug', keys: 'F5', labelKey: 'shortcutsOverlay.startDebug' },
+  { categoryKey: 'shortcutsOverlay.cat.debug', keys: 'Shift+F5', labelKey: 'shortcutsOverlay.stopDebug' },
 ];
 
 export function ShortcutsOverlay({
   open,
-  shortcuts = DEFAULT_SHORTCUTS,
+  shortcuts,
   onClose,
 }: {
   open: boolean;
   shortcuts?: ShortcutEntry[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
+
+  const resolved = useMemo(() => {
+    if (shortcuts) return shortcuts;
+    return DEFAULT_SHORTCUT_DEFS.map((d) => ({
+      keys: d.keys,
+      label: t(d.labelKey),
+      category: t(d.categoryKey),
+    }));
+  }, [shortcuts, t]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -47,7 +67,7 @@ export function ShortcutsOverlay({
 
   if (!open) return null;
 
-  const grouped = shortcuts.reduce<Record<string, ShortcutEntry[]>>((acc, item) => {
+  const grouped = resolved.reduce<Record<string, ShortcutEntry[]>>((acc, item) => {
     acc[item.category] = acc[item.category] ?? [];
     acc[item.category].push(item);
     return acc;
@@ -79,49 +99,52 @@ export function ShortcutsOverlay({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--caval-border)',
-          fontSize: 14,
-          fontWeight: 600,
-          color: 'var(--caval-text)',
-        }}>
-          Keyboard Shortcuts
+        <div
+          style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--caval-border)',
+            fontSize: 13,
+            fontWeight: 700,
+            color: 'var(--caval-text)',
+          }}
+        >
+          {t('shortcutsOverlay.title')}
         </div>
         {Object.entries(grouped).map(([category, items]) => (
-          <div key={category} style={{ padding: '10px 16px' }}>
-            <div style={{
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              color: 'var(--caval-text-muted)',
-              marginBottom: 6,
-            }}>
+          <div key={category} style={{ padding: '10px 16px 14px' }}>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--caval-text-muted)',
+                marginBottom: 8,
+              }}
+            >
               {category}
             </div>
             {items.map((item) => (
               <div
-                key={`${category}-${item.keys}-${item.label}`}
+                key={`${item.category}-${item.keys}-${item.label}`}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
+                  justifyContent: 'space-between',
                   gap: 12,
                   padding: '5px 0',
-                  fontSize: 12.5,
+                  fontSize: 12,
                   color: 'var(--caval-text)',
                 }}
               >
-                <span style={{ flex: 1 }}>{item.label}</span>
-                <kbd style={{
-                  fontFamily: 'JetBrains Mono, monospace',
-                  fontSize: 10.5,
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                  border: '1px solid var(--caval-border)',
-                  background: 'var(--caval-surface-raised)',
-                  color: 'var(--caval-text-muted)',
-                }}>
+                <span>{item.label}</span>
+                <kbd
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 10,
+                    color: 'var(--caval-text-muted)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {item.keys}
                 </kbd>
               </div>

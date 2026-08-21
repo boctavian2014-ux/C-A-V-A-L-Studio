@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+
 export interface ReferenceHit {
   filePath: string;
   line: number;
@@ -22,6 +24,7 @@ export function ReferencesOverlay({
   onClose: () => void;
   onOpenReference: (hit: ReferenceHit) => void;
 }) {
+  const { t } = useTranslation();
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -66,15 +69,15 @@ export function ReferencesOverlay({
           fontWeight: 600,
           color: 'var(--caval-text)',
         }}>
-          References: {symbol || '(symbol)'}
+          {t('references.title', { symbol: symbol || '(symbol)' })}
           <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--caval-text-muted)', fontWeight: 400 }}>
-            {loading ? 'Searching…' : `${references.length} results`}
+            {loading ? t('references.searching') : t('references.count', { count: references.length })}
           </span>
         </div>
         <div style={{ maxHeight: 'calc(55vh - 44px)', overflowY: 'auto' }}>
           {!loading && references.length === 0 && (
             <p style={{ padding: 12, margin: 0, fontSize: 12, color: 'var(--caval-text-muted)' }}>
-              Niciun rezultat
+              {t('references.noResults')}
             </p>
           )}
           {references.map((hit, i) => (

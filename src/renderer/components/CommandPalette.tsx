@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useTranslation } from '../../../ai/i18n/useTranslation';
 import {
   fuzzyCommandScore,
   type WorkbenchCommand,
@@ -14,6 +15,7 @@ export function CommandPalette({
   commands: WorkbenchCommand[];
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
 
@@ -99,7 +101,7 @@ export function CommandPalette({
             setQuery(e.target.value);
             setSelected(0);
           }}
-          placeholder="Command Palette (Ctrl+Shift+P)"
+          placeholder={t('palette.placeholder')}
           style={{
             width: '100%',
             boxSizing: 'border-box',
@@ -115,7 +117,7 @@ export function CommandPalette({
         <div style={{ maxHeight: 'calc(60vh - 48px)', overflowY: 'auto' }}>
           {items.length === 0 && (
             <p style={{ padding: 12, margin: 0, fontSize: 12, color: 'var(--caval-text-muted)' }}>
-              Niciun rezultat
+              {t('palette.noResults')}
             </p>
           )}
           {items.map((cmd, i) => (

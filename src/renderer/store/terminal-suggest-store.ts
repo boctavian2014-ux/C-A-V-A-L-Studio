@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { SuggestedCommand, TerminalSuggestContext } from "../../shared/ai-terminal-contract";
+import { tActive } from "../../../ai/i18n/active-locale";
 import {
   assertSuggestErrorWithinCap,
   insertCommandIntoTerminalPrompt,
@@ -67,7 +68,7 @@ export const useTerminalSuggestStore = create<TerminalSuggestStore>((set, get) =
   insertCommand: async (cmd) => {
     if (cmd.requiresConfirmation) {
       const ok = window.confirm(
-        `Insert command with side effects?\n\n${cmd.command}\n\nIt will appear in the terminal prompt — it will not run until you press Enter.`
+        tActive("dialog.insertSideEffects", { command: cmd.command })
       );
       if (!ok) return false;
     }
