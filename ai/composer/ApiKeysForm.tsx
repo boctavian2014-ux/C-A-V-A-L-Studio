@@ -7,6 +7,7 @@ import {
   filterNonEmptySecretsPatch,
 } from '../models/api-secrets';
 import { formatCadDualHealthOneLine } from '../engineering/cad-dual-health';
+import { OLLAMA_LOOPBACK_URL } from '../../src/shared/local-ai-contract';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -105,13 +106,28 @@ type PersistResult = {
   message?: string;
 };
 
+type LocalAiStatus = {
+  supported: boolean;
+  platform: string;
+  installed: boolean;
+  running: boolean;
+  configuredUrl: string;
+  runtimePath?: string;
+  models: string[];
+  defaultModel: string;
+  defaultModelReady: boolean;
+  managedByCaval: boolean;
+  inProgress: boolean;
+  policy: string;
+};
+
 export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProps) {
   const { apiKeys, setApiKey } = useAIStore();
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [providerDraft, setProviderDraft] = useState<Record<string, string>>({});
   const [providerSaved, setProviderSaved] = useState<Record<string, boolean>>({});
   const [openRouterDraft, setOpenRouterDraft] = useState('');
-  const [ollamaUrlDraft, setOllamaUrlDraft] = useState('http://localhost:11434');
+  const [ollamaUrlDraft, setOllamaUrlDraft] = useState<string>(OLLAMA_LOOPBACK_URL);
   const [openRouterSaved, setOpenRouterSaved] = useState(false);
   const [byokSaved, setByokSaved] = useState<Record<string, boolean>>({});
   const [healthChecking, setHealthChecking] = useState(false);
@@ -123,6 +139,18 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   const [saveMessage, setSaveMessage] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(
     null
   );
+  const [localAiStatus, setLocalAiStatus] = useState<LocalAiStatus | null>(null);
+  const [localAiBusy, setLocalAiBusy] = useState(false);
+  const [localAiMessage, setLocalAiMessage] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(
+    null
+  );
+
+  const refreshLocalAiStatus = async () => {
+    const res = await window.caval.localAiStatus?.();
+    if (res?.ok && res.status) {
+      setLocalAiStatus(res.status);
+    }
+  };
 
   const refreshConfiguredBadges = async (): Promise<Record<string, boolean>> => {
     const res = await window.caval.secretsGet?.();
@@ -150,7 +178,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     void Promise.all([
       window.caval.settingsLoad?.(),
       window.caval.secretsGet?.(),
-    ]).then(([settingsRes, secretsRes]) => {
+    ]).then(([_settingsRes, secretsRes]) => {
       const configured = secretsRes?.configured ?? {};
       setOpenRouterDraft('');
       setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
@@ -159,7 +187,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         openai: Boolean(configured.OPENAI_API_KEY),
         google: Boolean(configured.GOOGLE_API_KEY),
       });
-      setOllamaUrlDraft(settingsRes?.settings?.[OLLAMA_URL_SETTING] ?? 'http://localhost:11434');
+      setOllamaUrlDraft(OLLAMA_LOOPBACK_URL);
       const providerInitial: Record<string, string> = {};
       const saved: Record<string, boolean> = {};
       for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
@@ -177,6 +205,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         },
       });
     });
+    void refreshLocalAiStatus();
   }, []);
 
   const buildFullSecretsPatch = (): Record<string, string> => {
@@ -251,8 +280,8 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     }
   };
 
-  const saveOllamaUrl = async (value: string) => {
-    const trimmed = value.trim() || 'http://localhost:11434';
+  const saveOllamaUrl = async (_value?: string) => {
+    const trimmed = OLLAMA_LOOPBACK_URL;
     const settingsRes = await window.caval.settingsLoad?.();
     const settings = { ...(settingsRes?.settings ?? {}), [OLLAMA_URL_SETTING]: trimmed };
     await window.caval.settingsSave?.(settings);
@@ -309,6 +338,43 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
       setCadSummary('Verificare CAD indisponibilă — repornește aplicația.');
     } finally {
       setCadChecking(false);
+    }
+  };
+
+  const enableLocalAi = async () => {
+    setLocalAiBusy(true);
+    setLocalAiMessage({ kind: 'warn', text: 'Se configurează runtime-ul local și modelul gratuit…' });
+    try {
+      const result = await window.caval.localAiSetup?.({
+        installRuntime: true,
+        pullModel: true,
+        modelName: 'qwen2.5-coder:7b',
+      });
+      if (!result?.ok) {
+        setLocalAiMessage({
+          kind: 'err',
+          text: result?.error ?? 'Nu am putut configura Local AI pe acest sistem.',
+        });
+        return;
+      }
+      if (result.status?.configuredUrl) {
+        setOllamaUrlDraft(result.status.configuredUrl);
+      }
+      setLocalAiStatus(result.status ?? null);
+      // Switch active model to the local-first free route.
+      useAIStore.getState().setModel('caval-auto/free');
+      setLocalAiMessage({
+        kind: 'ok',
+        text: result.summary ?? 'Local AI este gata. Modelul activ a fost setat pe Auto Free (local).',
+      });
+    } catch (error) {
+      setLocalAiMessage({
+        kind: 'err',
+        text: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setLocalAiBusy(false);
+      await refreshLocalAiStatus();
     }
   };
 
@@ -423,11 +489,85 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         <input
           type="text"
           value={ollamaUrlDraft}
-          placeholder="http://localhost:11434"
+          placeholder={OLLAMA_LOOPBACK_URL}
+          readOnly
+          title="Ollama is loopback-only (127.0.0.1)"
           onChange={(e) => setOllamaUrlDraft(e.target.value)}
           onBlur={() => void saveOllamaUrl(ollamaUrlDraft)}
           style={inputStyle}
         />
+      </div>
+
+      <div
+        style={{
+          padding: '10px 12px',
+          borderRadius: 8,
+          background: 'var(--caval-bg)',
+          border: '1px solid var(--caval-border)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--caval-text)' }}>Local AI gratuit</div>
+            <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2, lineHeight: 1.45 }}>
+              Instalăm doar runtime-ul local. Modelul gratuit se descarcă la cerere după confirmare.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void enableLocalAi()}
+            disabled={localAiBusy || localAiStatus?.inProgress}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: 'var(--caval-accent)',
+              color: '#0E0E0F',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: localAiBusy ? 'wait' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {localAiBusy ? 'Configurare…' : 'Activează Local AI'}
+          </button>
+        </div>
+        {localAiStatus && (
+          <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', lineHeight: 1.5 }}>
+            Runtime: {localAiStatus.installed ? 'instalat' : 'lipsește'}
+            {' · '}
+            Serviciu: {localAiStatus.running ? 'rulează' : 'oprit'}
+            {' · '}
+            Model implicit: {localAiStatus.defaultModelReady ? 'gata' : 'nedescărcat'}
+            {localAiStatus.models.length ? (
+              <>
+                <br />
+                Modele locale: {localAiStatus.models.join(', ')}
+              </>
+            ) : null}
+            <br />
+            {localAiStatus.policy}
+          </div>
+        )}
+        {localAiMessage && (
+          <div
+            style={{
+              fontSize: 10.5,
+              lineHeight: 1.5,
+              color:
+                localAiMessage.kind === 'ok'
+                  ? 'var(--caval-success)'
+                  : localAiMessage.kind === 'warn'
+                    ? '#E6A817'
+                    : 'var(--caval-error, #f87171)',
+            }}
+          >
+            {localAiMessage.text}
+          </div>
+        )}
       </div>
 
       {KEY_FIELDS.map(({ key, label, placeholder, hint }) => {

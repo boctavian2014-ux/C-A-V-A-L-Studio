@@ -3,6 +3,8 @@
 //  Interfață unică pentru Claude, GPT-4o, Gemini, Ollama local
 // ──────────────────────────────────────────────
 
+import { getOllamaLoopbackUrl } from '../../src/shared/local-ai-contract';
+
 export type ModelId =
   | 'claude-opus-4'
   | 'claude-sonnet-4'
@@ -366,7 +368,7 @@ class GeminiProvider implements AIProvider {
 class OllamaProvider implements AIProvider {
   constructor(
     private readonly model: string,
-    private readonly baseUrl: string = 'http://localhost:11434'
+    private readonly baseUrl: string = getOllamaLoopbackUrl()
   ) {}
 
   async streamChat(

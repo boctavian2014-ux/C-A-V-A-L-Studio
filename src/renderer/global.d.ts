@@ -721,6 +721,10 @@ interface CavalBridge {
     preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
     error?: string;
   }>;
+  /** Pas 7f.2 — subscribe to live local AI status (optional; UI falls back to refresh). */
+  localAiOnStatusChanged?: (
+    listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void
+  ) => () => void;
   /** Lot C5.5 — user-initiated key test; no bodies/keys in the response. */
   testProviderKey?: (input: {
     providerId: string;
@@ -734,22 +738,7 @@ interface CavalBridge {
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
   localAiStatus?: () => Promise<{
     ok: boolean;
-    status?: {
-      supported: boolean;
-      platform: string;
-      installed: boolean;
-      running: boolean;
-      configuredUrl: string;
-      runtimePath?: string;
-      models: string[];
-      defaultModel: string;
-      defaultModelReady: boolean;
-      managedByCaval: boolean;
-      inProgress: boolean;
-      phase: "running" | "starting" | "unavailable";
-      lastError?: string;
-      policy: string;
-    };
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
     error?: string;
   }>;
   localAiSetup?: (input?: {

@@ -22,6 +22,28 @@ import {
   buildAiProvidersSnapshot,
   resolvePreferredProviderId,
 } from "../../../src/main/ai/provider-registry";
+import type { LocalAiStatus } from "../../../src/shared/local-ai-contract";
+import { OLLAMA_LOOPBACK_URL } from "../../../src/shared/local-ai-contract";
+
+function localStatus(partial: Partial<LocalAiStatus> & Pick<LocalAiStatus, "phase">): LocalAiStatus {
+  return {
+    installed: false,
+    reachable: false,
+    managedByCaval: false,
+    defaultModel: "qwen2.5-coder:7b",
+    defaultModelReady: false,
+    endpoint: OLLAMA_LOOPBACK_URL,
+    updatedAt: 1,
+    supported: true,
+    platform: "win32",
+    running: false,
+    configuredUrl: OLLAMA_LOOPBACK_URL,
+    models: [],
+    inProgress: false,
+    policy: "test",
+    ...partial,
+  };
+}
 
 describe("7f.1 provider status mapping", () => {
   it("maps Ollama phase fields to ProviderStatus", () => {
@@ -30,7 +52,7 @@ describe("7f.1 provider status mapping", () => {
         installed: false,
         running: false,
         defaultModelReady: false,
-        phase: "unavailable",
+        phase: "not-installed",
       })
     ).toBe("not-installed");
 
@@ -48,7 +70,7 @@ describe("7f.1 provider status mapping", () => {
         installed: true,
         running: true,
         defaultModelReady: false,
-        phase: "running",
+        phase: "model-missing",
       })
     ).toBe("model-missing");
 
@@ -57,7 +79,7 @@ describe("7f.1 provider status mapping", () => {
         installed: true,
         running: true,
         defaultModelReady: true,
-        phase: "running",
+        phase: "ready",
       })
     ).toBe("configured");
 
@@ -87,20 +109,14 @@ describe("7f.1 provider registry", () => {
       },
       preferredProviderId: "openai",
       encryptionAvailable: true,
-      localAiStatus: {
-        supported: true,
-        platform: "win32",
+      localAiStatus: localStatus({
         installed: true,
         running: true,
-        configuredUrl: "http://127.0.0.1:11434",
+        reachable: true,
         models: ["qwen2.5-coder:7b"],
-        defaultModel: "qwen2.5-coder:7b",
         defaultModelReady: true,
-        managedByCaval: false,
-        inProgress: false,
-        phase: "running",
-        policy: "test",
-      },
+        phase: "ready",
+      }),
     });
 
     expect(snapshot.providers.map((p) => p.id)).toEqual([...AI_PROVIDER_IDS]);
@@ -120,40 +136,24 @@ describe("7f.1 provider registry", () => {
     const missingInstall = await buildAiProvidersSnapshot({
       configured: {},
       encryptionAvailable: false,
-      localAiStatus: {
-        supported: true,
-        platform: "linux",
+      localAiStatus: localStatus({
         installed: false,
-        running: false,
-        configuredUrl: "http://127.0.0.1:11434",
-        models: [],
-        defaultModel: "qwen2.5-coder:7b",
-        defaultModelReady: false,
-        managedByCaval: false,
-        inProgress: false,
-        phase: "unavailable",
-        policy: "test",
-      },
+        phase: "not-installed",
+      }),
     });
     expect(missingInstall.providers[0]?.status).toBe("not-installed");
     expect(missingInstall.encryptionAvailable).toBe(false);
 
     const missingModel = await buildAiProvidersSnapshot({
       configured: {},
-      localAiStatus: {
-        supported: true,
-        platform: "linux",
+      localAiStatus: localStatus({
         installed: true,
         running: true,
-        configuredUrl: "http://127.0.0.1:11434",
+        reachable: true,
         models: [],
-        defaultModel: "qwen2.5-coder:7b",
         defaultModelReady: false,
-        managedByCaval: false,
-        inProgress: false,
-        phase: "running",
-        policy: "test",
-      },
+        phase: "model-missing",
+      }),
     });
     expect(missingModel.providers[0]?.status).toBe("model-missing");
   });

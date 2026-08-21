@@ -1,37 +1,29 @@
-import { app } from "electron";
+import { app, BrowserWindow } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
   clearOllamaReachableCache,
   fetchInstalledOllamaModels,
-  getOllamaBaseUrl,
   isOllamaReachable,
 } from "../../ai/models/ollama-client";
+import {
+  getOllamaHost,
+  getOllamaLoopbackUrl,
+  localAiStatusFingerprint,
+  OLLAMA_START_DELAYS_MS,
+  sanitizeLocalAiReason,
+  type LocalAiPhase,
+  type LocalAiStatus,
+} from "../shared/local-ai-contract";
+
+export type { LocalAiStatus, LocalAiPhase } from "../shared/local-ai-contract";
+
+export const LOCAL_AI_STATUS_CHANGED_CHANNEL = "caval:local-ai-status-changed";
 
 const DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:7b";
 const LOCAL_AI_MANAGED_SETTING = "localAi.manageRuntime";
 const SETTINGS_FILE = "caval-app-settings.json";
-/** Backoff delays after spawn — totals ~5s before fail. */
-const OLLAMA_READY_BACKOFF_MS = [1_000, 2_000, 2_000] as const;
-
-export interface LocalAiStatus {
-  supported: boolean;
-  platform: NodeJS.Platform;
-  installed: boolean;
-  running: boolean;
-  configuredUrl: string;
-  runtimePath?: string;
-  models: string[];
-  defaultModel: string;
-  defaultModelReady: boolean;
-  managedByCaval: boolean;
-  inProgress: boolean;
-  /** Boot / runtime phase for UI (existing IPC surface). */
-  phase: "running" | "starting" | "unavailable";
-  lastError?: string;
-  policy: string;
-}
 
 export interface EnsureLocalAiOptions {
   installRuntime?: boolean;
@@ -51,8 +43,11 @@ let setupInFlight: Promise<EnsureLocalAiResult> | null = null;
 /** Child we spawned with `ollama serve` — kill only this on quit. */
 let managedOllamaChild: ChildProcess | null = null;
 let weStartedOllama = false;
-let bootPhase: LocalAiStatus["phase"] = "unavailable";
+let bootPhase: LocalAiPhase = "unavailable";
 let lastOllamaError: string | undefined;
+let lastEmittedFingerprint: string | null = null;
+/** Internal only — never sent to renderer. */
+let lastRuntimePath: string | undefined;
 
 function settingsPath(): string {
   return path.join(app.getPath("userData"), SETTINGS_FILE);
@@ -71,7 +66,7 @@ function writeLocalSettings(next: Record<string, string>): void {
   fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2), "utf8");
 }
 
-function managedByCaval(): boolean {
+function managedByCavalFlag(): boolean {
   return readLocalSettings()[LOCAL_AI_MANAGED_SETTING] === "true";
 }
 
@@ -199,6 +194,117 @@ function runProcess(
   });
 }
 
+function resolvePhase(input: {
+  installed: boolean;
+  reachable: boolean;
+  defaultModelReady: boolean;
+  bootPhase: LocalAiPhase;
+  inProgress: boolean;
+}): LocalAiPhase {
+  if (!input.installed) return "not-installed";
+  if (input.bootPhase === "starting" || input.inProgress) return "starting";
+  if (input.reachable && input.defaultModelReady) return "ready";
+  if (input.reachable && !input.defaultModelReady) return "model-missing";
+  if (input.bootPhase === "not-installed") return "not-installed";
+  return "unavailable";
+}
+
+export function buildLocalAiStatusSnapshot(partial?: {
+  installed?: boolean;
+  reachable?: boolean;
+  models?: string[];
+  runtimePath?: string | null;
+}): LocalAiStatus {
+  const runtimePath =
+    partial?.runtimePath !== undefined
+      ? partial.runtimePath ?? undefined
+      : lastRuntimePath ?? detectOllamaBinary() ?? undefined;
+  if (runtimePath) lastRuntimePath = runtimePath;
+  const installed =
+    typeof partial?.installed === "boolean" ? partial.installed : Boolean(runtimePath);
+  const reachable = typeof partial?.reachable === "boolean" ? partial.reachable : false;
+  const models = partial?.models ?? [];
+  const defaultModelReady = models.some(
+    (name) => name === DEFAULT_OLLAMA_MODEL || name.startsWith("qwen2.5-coder:")
+  );
+  const inProgress = Boolean(setupInFlight) || bootPhase === "starting";
+  const phase = resolvePhase({
+    installed,
+    reachable,
+    defaultModelReady,
+    bootPhase,
+    inProgress,
+  });
+  const reason = sanitizeLocalAiReason(lastOllamaError);
+  const endpoint = getOllamaLoopbackUrl();
+  const managed = weStartedOllama || managedByCavalFlag();
+
+  return {
+    phase,
+    installed,
+    reachable,
+    managedByCaval: managed,
+    defaultModel: DEFAULT_OLLAMA_MODEL,
+    defaultModelReady,
+    endpoint,
+    updatedAt: Date.now(),
+    ...(reason ? { reason } : {}),
+    supported: ["win32", "darwin", "linux"].includes(process.platform),
+    platform: process.platform,
+    running: reachable,
+    configuredUrl: endpoint,
+    models,
+    inProgress,
+    ...(reason ? { lastError: reason } : {}),
+    policy: policyText(),
+  };
+}
+
+/** Push live status to all live windows when material fields change. */
+export function emitLocalAiStatusChanged(status: LocalAiStatus): void {
+  const fp = localAiStatusFingerprint(status);
+  if (fp === lastEmittedFingerprint) return;
+  lastEmittedFingerprint = fp;
+  const windows =
+    typeof BrowserWindow.getAllWindows === "function" ? BrowserWindow.getAllWindows() : [];
+  for (const win of windows) {
+    if (typeof win.isDestroyed === "function" && win.isDestroyed()) continue;
+    try {
+      win.webContents.send(LOCAL_AI_STATUS_CHANGED_CHANNEL, status);
+    } catch {
+      // window may be closing
+    }
+  }
+}
+
+async function refreshAndEmit(forceReachable?: boolean): Promise<LocalAiStatus> {
+  const runtimePath = detectOllamaBinary() ?? undefined;
+  lastRuntimePath = runtimePath;
+  const installed = Boolean(runtimePath);
+  if (!installed) {
+    bootPhase = "not-installed";
+  }
+  const reachable = await isOllamaReachable({
+    force: forceReachable ?? bootPhase === "starting",
+  });
+  const models = reachable ? await fetchInstalledOllamaModels() : [];
+  if (reachable) {
+    bootPhase = models.some(
+      (name) => name === DEFAULT_OLLAMA_MODEL || name.startsWith("qwen2.5-coder:")
+    )
+      ? "ready"
+      : "model-missing";
+  }
+  const status = buildLocalAiStatusSnapshot({
+    installed,
+    reachable,
+    models,
+    runtimePath,
+  });
+  emitLocalAiStatusChanged(status);
+  return status;
+}
+
 /**
  * Spawn `ollama serve` without waiting for process exit (serve is long-running).
  * Tracks the child so quit can stop only processes we started.
@@ -206,7 +312,7 @@ function runProcess(
 export function spawnOllamaServe(runtimePath: string): ChildProcess {
   const env = {
     ...process.env,
-    OLLAMA_HOST: "127.0.0.1:11434",
+    OLLAMA_HOST: getOllamaHost(),
   };
   const child = spawn(runtimePath, ["serve"], {
     env,
@@ -219,23 +325,24 @@ export function spawnOllamaServe(runtimePath: string): ChildProcess {
   weStartedOllama = true;
   child.on("error", (err) => {
     console.warn("[ollama] failed:", err.message);
-    lastOllamaError = err.message;
+    lastOllamaError = "Ollama failed to start";
     if (managedOllamaChild === child) {
       managedOllamaChild = null;
       weStartedOllama = false;
       bootPhase = "unavailable";
+      void refreshAndEmit(true);
     }
   });
   child.on("exit", (code, signal) => {
-    // Parent may exit after handing off to a daemon — only clear tracking if still ours.
     if (managedOllamaChild === child) {
       managedOllamaChild = null;
-      // Keep weStartedOllama true only while we still have a live child to stop.
       weStartedOllama = false;
       if (code && code !== 0) {
         const msg = `ollama serve exited (code=${code}${signal ? ` signal=${signal}` : ""})`;
         console.warn("[ollama] failed:", msg);
-        lastOllamaError = msg;
+        lastOllamaError = "Ollama failed to start";
+        bootPhase = "unavailable";
+        void refreshAndEmit(true);
       }
     }
   });
@@ -245,7 +352,7 @@ export function spawnOllamaServe(runtimePath: string): ChildProcess {
 
 async function waitForOllamaReadyWithBackoff(): Promise<boolean> {
   clearOllamaReachableCache();
-  for (const delay of OLLAMA_READY_BACKOFF_MS) {
+  for (const delay of OLLAMA_START_DELAYS_MS) {
     await wait(delay);
     if (await isOllamaReachable({ force: true })) return true;
   }
@@ -255,25 +362,35 @@ async function waitForOllamaReadyWithBackoff(): Promise<boolean> {
 async function startOllamaService(runtimePath: string): Promise<void> {
   clearOllamaReachableCache();
   if (await isOllamaReachable({ force: true })) {
-    bootPhase = "running";
     lastOllamaError = undefined;
+    weStartedOllama = false;
+    managedOllamaChild = null;
     console.info("[ollama] ready (already running)");
+    await refreshAndEmit(true);
     return;
   }
 
   bootPhase = "starting";
+  lastRuntimePath = runtimePath;
+  emitLocalAiStatusChanged(
+    buildLocalAiStatusSnapshot({
+      installed: true,
+      reachable: false,
+      models: [],
+      runtimePath,
+    })
+  );
   console.info("[ollama] starting:", runtimePath);
   spawnOllamaServe(runtimePath);
 
   const ready = await waitForOllamaReadyWithBackoff();
   if (ready) {
-    bootPhase = "running";
     lastOllamaError = undefined;
     console.info("[ollama] ready");
+    await refreshAndEmit(true);
     return;
   }
 
-  // Timed out — stop only the child we just spawned; leave any other Ollama alone.
   const child = managedOllamaChild;
   if (child && !child.killed) {
     try {
@@ -285,10 +402,10 @@ async function startOllamaService(runtimePath: string): Promise<void> {
   managedOllamaChild = null;
   weStartedOllama = false;
   bootPhase = "unavailable";
-  const msg = "Ollama did not become ready within ~5s after start";
-  lastOllamaError = msg;
-  console.warn("[ollama] failed:", msg);
-  throw new Error(msg);
+  lastOllamaError = "Ollama did not respond in time";
+  console.warn("[ollama] failed:", lastOllamaError);
+  await refreshAndEmit(true);
+  throw new Error(lastOllamaError);
 }
 
 /**
@@ -311,6 +428,22 @@ export function stopManagedOllamaIfStarted(): void {
   }
   managedOllamaChild = null;
   weStartedOllama = false;
+  bootPhase = "unavailable";
+  try {
+    const windows =
+      typeof BrowserWindow.getAllWindows === "function" ? BrowserWindow.getAllWindows() : [];
+    if (windows.some((w) => !(typeof w.isDestroyed === "function" && w.isDestroyed()))) {
+      emitLocalAiStatusChanged(
+        buildLocalAiStatusSnapshot({
+          installed: Boolean(detectOllamaBinary()),
+          reachable: false,
+          models: [],
+        })
+      );
+    }
+  } catch {
+    /* quitting */
+  }
 }
 
 /** Test helpers — reset process tracking between unit tests. */
@@ -321,6 +454,8 @@ export function __resetOllamaProcessTrackingForTests(): void {
   lastOllamaError = undefined;
   setupInFlight = null;
   detectBinaryOverrideForTests = undefined;
+  lastEmittedFingerprint = null;
+  lastRuntimePath = undefined;
 }
 
 export function __getOllamaProcessTrackingForTests(): {
@@ -330,34 +465,12 @@ export function __getOllamaProcessTrackingForTests(): {
   return { weStartedOllama, hasChild: Boolean(managedOllamaChild) };
 }
 
+export function __getLastEmittedFingerprintForTests(): string | null {
+  return lastEmittedFingerprint;
+}
+
 export async function getLocalAiStatus(): Promise<LocalAiStatus> {
-  const runtimePath = detectOllamaBinary() ?? undefined;
-  const running = await isOllamaReachable({ force: bootPhase === "starting" });
-  const models = running ? await fetchInstalledOllamaModels() : [];
-  const phase: LocalAiStatus["phase"] = running
-    ? "running"
-    : bootPhase === "starting" || Boolean(setupInFlight)
-      ? "starting"
-      : "unavailable";
-  if (running) bootPhase = "running";
-  return {
-    supported: ["win32", "darwin", "linux"].includes(process.platform),
-    platform: process.platform,
-    installed: Boolean(runtimePath),
-    running,
-    configuredUrl: getOllamaBaseUrl(),
-    runtimePath,
-    models,
-    defaultModel: DEFAULT_OLLAMA_MODEL,
-    defaultModelReady: models.some(
-      (name) => name === DEFAULT_OLLAMA_MODEL || name.startsWith("qwen2.5-coder:")
-    ),
-    managedByCaval: managedByCaval(),
-    inProgress: Boolean(setupInFlight) || bootPhase === "starting",
-    phase,
-    ...(lastOllamaError ? { lastError: lastOllamaError } : {}),
-    policy: policyText(),
-  };
+  return refreshAndEmit(bootPhase === "starting");
 }
 
 async function installOllamaRuntime(): Promise<string> {
@@ -378,7 +491,7 @@ async function pullDefaultModel(runtimePath: string, modelName: string): Promise
   await runProcess(runtimePath, ["pull", modelName], {
     env: {
       ...process.env,
-      OLLAMA_HOST: "127.0.0.1:11434",
+      OLLAMA_HOST: getOllamaHost(),
     },
   });
 }
@@ -394,11 +507,12 @@ export async function ensureLocalAiRuntime(options?: EnsureLocalAiOptions): Prom
       let runtimePath = detectOllamaBinary();
       if (!runtimePath) {
         if (!installRuntime) {
-          const error = "Ollama nu este instalat pe acest sistem.";
+          const error = "Ollama was not found";
           lastOllamaError = error;
-          bootPhase = "unavailable";
+          bootPhase = "not-installed";
           console.warn("[ollama] failed:", error);
-          return { ok: false, error };
+          const status = await refreshAndEmit(true);
+          return { ok: false, error, status };
         }
         runtimePath = await installOllamaRuntime();
         changed = true;
@@ -418,13 +532,15 @@ export async function ensureLocalAiRuntime(options?: EnsureLocalAiOptions): Prom
         status,
         changed,
         summary: status.defaultModelReady
-          ? `Local AI este gata pe ${status.configuredUrl} cu modelul ${status.defaultModel}.`
+          ? `Local AI este gata pe ${status.endpoint} cu modelul ${status.defaultModel}.`
           : "Runtime local instalat și pornit. Modelul implicit poate fi descărcat ulterior.",
       };
     } catch (error) {
       return {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: sanitizeLocalAiReason(
+          error instanceof Error ? error.message : String(error)
+        ),
         status: await getLocalAiStatus().catch(() => undefined),
       };
     } finally {
@@ -446,25 +562,32 @@ export async function ensureOllamaOnBoot(): Promise<void> {
   }
   try {
     clearOllamaReachableCache();
-    if (await isOllamaReachable({ force: true })) {
-      bootPhase = "running";
-      lastOllamaError = undefined;
-      console.info("[ollama] ready");
-      return;
-    }
     const runtimePath = detectOllamaBinary();
     if (!runtimePath) {
-      bootPhase = "unavailable";
-      lastOllamaError =
-        "Ollama is not installed. Install from https://ollama.com then restart Caval Studio.";
+      bootPhase = "not-installed";
+      lastOllamaError = "Ollama was not found";
       console.warn("[ollama] failed: not installed —", lastOllamaError);
+      await refreshAndEmit(true);
       return;
     }
+    lastRuntimePath = runtimePath;
+
+    if (await isOllamaReachable({ force: true })) {
+      lastOllamaError = undefined;
+      weStartedOllama = false;
+      console.info("[ollama] ready");
+      await refreshAndEmit(true);
+      return;
+    }
+
     await startOllamaService(runtimePath);
   } catch (error) {
     bootPhase = "unavailable";
-    lastOllamaError = error instanceof Error ? error.message : String(error);
+    lastOllamaError = sanitizeLocalAiReason(
+      error instanceof Error ? error.message : String(error)
+    );
     console.warn("[ollama] failed:", lastOllamaError);
+    await refreshAndEmit(true);
   }
 }
 

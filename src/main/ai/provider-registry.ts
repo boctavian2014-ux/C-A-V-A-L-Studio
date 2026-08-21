@@ -5,6 +5,8 @@
 
 import { safeStorage } from "electron";
 
+import { getLocalAiStatus } from "../local-ai-setup";
+import { toProviderStatus, type LocalAiStatus } from "../../shared/local-ai-contract";
 import {
   AI_PREFERRED_PROVIDER_SETTING,
   AI_PROVIDER_IDS,
@@ -13,16 +15,14 @@ import {
   type AiProvidersSnapshot,
   isAiProviderId,
   mapCloudKeyConfigured,
-  mapOllamaToProviderStatus,
 } from "../../shared/ai-provider-contract";
-import { getLocalAiStatus } from "../local-ai-setup";
 
 export interface BuildProvidersRegistryInput {
   /** configured map from secrets-get (booleans only). */
   configured: Record<string, boolean>;
   preferredProviderId?: string | null;
   /** Injected for tests. */
-  localAiStatus?: Awaited<ReturnType<typeof getLocalAiStatus>>;
+  localAiStatus?: LocalAiStatus;
   encryptionAvailable?: boolean;
 }
 
@@ -76,13 +76,7 @@ export async function buildAiProvidersSnapshot(
       ? input.encryptionAvailable
       : safeStorage.isEncryptionAvailable();
 
-  const ollamaStatus = mapOllamaToProviderStatus({
-    installed: local.installed,
-    running: local.running,
-    defaultModelReady: local.defaultModelReady,
-    phase: local.phase,
-    inProgress: local.inProgress,
-  });
+  const ollamaStatus = toProviderStatus(local);
 
   const ollama: AiProviderEntry = {
     id: "ollama",

@@ -907,6 +907,22 @@ contextBridge.exposeInMainWorld("caval", {
       preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
       error?: string;
     }>,
+  /** Pas 7f.2 — live local AI status (sanitized; no paths/process handles). */
+  localAiOnStatusChanged: (
+    listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void
+  ): (() => void) => {
+    const channel = "caval:local-ai-status-changed";
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      status: import("../shared/local-ai-contract").LocalAiStatus
+    ) => {
+      listener(status);
+    };
+    ipcRenderer.on(channel, wrapped);
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped);
+    };
+  },
   /** Lot C5.5 — user-initiated key test; returns only valid|invalid|unreachable (no bodies/keys). */
   testProviderKey: (input: { providerId: string; secretKey: string }) =>
     ipcRenderer.invoke("caval:test-provider-key", input) as Promise<{

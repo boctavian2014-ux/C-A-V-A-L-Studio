@@ -105,6 +105,7 @@ import {
   buildAiProvidersSnapshot,
   resolvePreferredProviderId,
 } from "./ai/provider-registry";
+import { getOllamaLoopbackUrl, OLLAMA_CHAT_URL } from "../shared/local-ai-contract";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -775,9 +776,7 @@ const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatRespo
 };
 
 const callOllama = async (request: CavalChatRequest): Promise<CavalChatResponse> => {
-  const raw = process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434/api/chat";
-  const withPath = raw.includes("/api/") ? raw : `${raw.replace(/\/+$/, "")}/api/chat`;
-  const validated = assertOllamaBaseUrl(withPath);
+  const validated = assertOllamaBaseUrl(OLLAMA_CHAT_URL);
   if (!validated.ok) {
     throw new Error(validated.error);
   }
@@ -1406,9 +1405,14 @@ const writePersistedAppSettings = (settings: Record<string, string>): void => {
 };
 
 const applySettingsToEnv = (settings: Record<string, string>): void => {
+  // Ollama is loopback-only — migrate/ignore legacy ollama.url overrides.
   if (settings["ollama.url"]?.trim()) {
-    process.env.OLLAMA_BASE_URL = settings["ollama.url"].trim();
+    const canonical = getOllamaLoopbackUrl();
+    if (settings["ollama.url"].trim() !== canonical) {
+      settings["ollama.url"] = canonical;
+    }
   }
+  process.env.OLLAMA_BASE_URL = OLLAMA_CHAT_URL;
   if (settings["cad.apiUrl"]?.trim()) {
     const validated = validateCadApiUrlSync(settings["cad.apiUrl"].trim());
     if (validated.ok) {
@@ -1461,6 +1465,9 @@ ipcMain.handle("caval:settings-save", async (event, settings: Record<string, str
       };
     }
     incoming["cad.apiUrl"] = validated.normalized;
+  }
+  if (incoming["ollama.url"] !== undefined) {
+    incoming["ollama.url"] = getOllamaLoopbackUrl();
   }
   const merged = { ...persistedAppSettings, ...incoming };
   writePersistedAppSettings(merged);

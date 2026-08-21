@@ -56,6 +56,15 @@ export function AiProvidersPanel(): React.ReactElement {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const unsubscribe = window.caval?.localAiOnStatusChanged?.(() => {
+      void refresh();
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [refresh]);
+
   const selectProvider = async (id: AiProviderId, selectable: boolean) => {
     if (!selectable) return;
     setMessage(null);

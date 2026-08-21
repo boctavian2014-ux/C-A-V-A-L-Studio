@@ -14,6 +14,7 @@ import { preloadPredictor } from "./preload-predictor";
 import { createDefaultStrategies, mergeTargets } from "./preload-strategy";
 import type { WorkerRequest, WorkerResponse } from "./preload-worker";
 import { zeroLatencyFusion } from "../composer/zero-latency/zl-fusion";
+import { getOllamaLoopbackUrl } from "../../src/shared/local-ai-contract";
 
 export interface PreloadStatus {
   enabled: boolean;
@@ -31,8 +32,7 @@ export interface PreloadManagerOptions {
   enableWorker?: boolean;
 }
 
-const OLLAMA_BASE =
-  process.env.OLLAMA_BASE_URL?.replace(/\/api\/chat\/?$/, "") ?? "http://localhost:11434";
+const OLLAMA_BASE = getOllamaLoopbackUrl();
 
 const DEFAULT_OPTIONS: Required<PreloadManagerOptions> = {
   maxConcurrentForeground: 2,
