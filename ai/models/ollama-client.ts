@@ -11,9 +11,17 @@ export function getOllamaBaseUrl(): string {
 const OLLAMA_REACHABLE_TTL_MS = 30_000;
 let ollamaReachableCache: { ok: boolean; at: number } | null = null;
 
-export async function isOllamaReachable(): Promise<boolean> {
+export function clearOllamaReachableCache(): void {
+  ollamaReachableCache = null;
+}
+
+export async function isOllamaReachable(options?: { force?: boolean }): Promise<boolean> {
   const now = Date.now();
-  if (ollamaReachableCache && now - ollamaReachableCache.at < OLLAMA_REACHABLE_TTL_MS) {
+  if (
+    !options?.force &&
+    ollamaReachableCache &&
+    now - ollamaReachableCache.at < OLLAMA_REACHABLE_TTL_MS
+  ) {
     return ollamaReachableCache.ok;
   }
   try {

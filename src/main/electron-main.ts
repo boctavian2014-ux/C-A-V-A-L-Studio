@@ -94,7 +94,12 @@ import {
   installWebContentsSecurity,
 } from "./renderer-security";
 import { registerWorkspaceBindingHandlers } from "./workspace-binding-handlers";
-import { ensureLocalAiRuntime, ensureManagedLocalAiOnBoot, getLocalAiStatus } from "./local-ai-setup";
+import {
+  ensureLocalAiRuntime,
+  ensureOllamaOnBoot,
+  getLocalAiStatus,
+  stopManagedOllamaIfStarted,
+} from "./local-ai-setup";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -1680,7 +1685,7 @@ app.whenReady().then(() => {
     applyCadCloudEnvDefaults();
     warmOpenRouterConnection(true);
     preloadCoreModels();
-    void ensureManagedLocalAiOnBoot();
+    void ensureOllamaOnBoot();
     void ensureLatestPowerShellInstalled().catch((err) => {
       console.warn("[shell] PowerShell 7 ensure skipped:", err instanceof Error ? err.message : err);
     });
@@ -1715,6 +1720,10 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("before-quit", () => {
+  stopManagedOllamaIfStarted();
+});
+
 app.on("window-all-closed", () => {
   shutdownAllPreviewSync();
   stopAllInteractiveTerminalsSync();
@@ -1723,6 +1732,7 @@ app.on("window-all-closed", () => {
   // the listen socket is reaped when this process exits.
   stopCadLocalServer();
   stopMarketplaceServer();
+  stopManagedOllamaIfStarted();
   if (process.platform !== "darwin") {
     app.quit();
   }

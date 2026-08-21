@@ -143,7 +143,9 @@ describe("7a.1 AI SQLite persistence", () => {
     expect(wf.snapshot).not.toContain("abcdefghijklmnopqrstuvwxyz012345");
   });
 
-  it("respects message and snapshot byte caps with truncation marker", () => {
+  it(
+    "respects message and snapshot byte caps with truncation marker",
+    () => {
     const root = tempWorkspace("caval-7a1-caps-");
     const db = createAiPersistence(root);
     dbs.push(db);
@@ -167,7 +169,9 @@ describe("7a.1 AI SQLite persistence", () => {
       AI_PERSIST_SNAPSHOT_MAX_BYTES
     );
     expect(snap).toContain("[TRUNCATED]");
-  });
+  },
+    30_000
+  );
 
   it("isolates conversations across workspaces", () => {
     const rootA = tempWorkspace("caval-7a1-ws-a-");

@@ -86,7 +86,6 @@ export async function scanWorkspace(
   const maxFiles = options?.maxFiles ?? WORKSPACE_INDEX_MAX_FILES;
   const maxFileBytes = options?.maxFileBytes ?? WORKSPACE_INDEX_MAX_FILE_BYTES;
   const indexed: IndexedFile[] = [];
-  let visited = 0;
 
   async function walk(dir: string): Promise<void> {
     if (indexed.length >= maxFiles) return;
@@ -111,7 +110,6 @@ export async function scanWorkspace(
       const rel = normalizeIndexRelativePath(path.relative(root, absolute));
       if (!isIndexableRelativePath(rel)) continue;
 
-      visited++;
       try {
         const stat = await fs.stat(absolute);
         if (stat.size > maxFileBytes) continue;

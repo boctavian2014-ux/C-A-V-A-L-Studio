@@ -733,6 +733,8 @@ interface CavalBridge {
       defaultModelReady: boolean;
       managedByCaval: boolean;
       inProgress: boolean;
+      phase: "running" | "starting" | "unavailable";
+      lastError?: string;
       policy: string;
     };
     error?: string;
@@ -758,6 +760,8 @@ interface CavalBridge {
       defaultModelReady: boolean;
       managedByCaval: boolean;
       inProgress: boolean;
+      phase: "running" | "starting" | "unavailable";
+      lastError?: string;
       policy: string;
     };
   }>;

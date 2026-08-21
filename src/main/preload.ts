@@ -836,6 +836,8 @@ contextBridge.exposeInMainWorld("caval", {
         defaultModelReady: boolean;
         managedByCaval: boolean;
         inProgress: boolean;
+        phase: "running" | "starting" | "unavailable";
+        lastError?: string;
         policy: string;
       };
       error?: string;
@@ -858,6 +860,8 @@ contextBridge.exposeInMainWorld("caval", {
         defaultModelReady: boolean;
         managedByCaval: boolean;
         inProgress: boolean;
+        phase: "running" | "starting" | "unavailable";
+        lastError?: string;
         policy: string;
       };
     }>,
