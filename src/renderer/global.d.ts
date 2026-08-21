@@ -12,6 +12,7 @@ declare module "*.jpeg" {
   export default src;
 }
 declare module "xterm/css/xterm.css";
+declare module "@xterm/xterm/css/xterm.css";
 
 interface CavalFsApi {
   pickFiles: () => Promise<string[] | null>;

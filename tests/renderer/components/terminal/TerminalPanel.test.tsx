@@ -3,6 +3,24 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../../../../src/renderer/components/terminal/XtermTerminal", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react") as typeof import("react");
+  return {
+    XtermTerminal: ({
+      terminalId,
+      isActive,
+    }: {
+      terminalId: string;
+      isActive: boolean;
+    }) =>
+      React.createElement("div", {
+        "data-testid": `xterm-host-${terminalId}`,
+        "data-active": isActive ? "1" : "0",
+      }),
+  };
+});
+
 import { TerminalInput } from "../../../../src/renderer/components/terminal/TerminalInput";
 import {
   mapTerminalUiStatus,

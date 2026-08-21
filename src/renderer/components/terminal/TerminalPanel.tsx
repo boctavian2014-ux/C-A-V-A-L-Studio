@@ -21,10 +21,10 @@ import {
   TERMINAL_AI_PALETTE,
   type TerminalAiCommand,
 } from '../../../shared/ai-terminal-contract';
-import { TerminalInput } from './TerminalInput';
 import { TerminalExplainPopover } from './TerminalExplainPopover';
 import { SuggestedCommandsCard } from './SuggestedCommandsCard';
 import { TerminalAiMenu } from './TerminalAiMenu';
+import { XtermTerminal } from './XtermTerminal';
 import { buildScrollbackContext } from '../../ai/terminal-explain-client';
 import { dispatchTerminalAiCommand } from '../../ai/terminal-ai-dispatch';
 import { showWorkbenchToast } from '../../commands/workbench-toast';
@@ -85,10 +85,12 @@ export function TerminalSessions({
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [fontSize, setFontSize] = useState(12);
   const [output, setOutput] = useState<Map<string, TerminalOutputLine[]>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(
     null
   );
+  const [xtermSelection, setXtermSelection] = useState('');
   const [hasSelection, setHasSelection] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const outputEndRef = useRef<HTMLDivElement>(null);
@@ -153,6 +155,10 @@ export function TerminalSessions({
     });
     return () => unsubscribe?.();
   }, []);
+
+  useEffect(() => {
+    setXtermSelection('');
+  }, [activeTabId]);
 
   useEffect(() => {
     const scrollToEnd = debounce(() => {
@@ -275,15 +281,8 @@ export function TerminalSessions({
     [removeTabFromUi, t]
   );
 
-  const handleInput = useCallback(
-    async (data: string) => {
-      if (!activeTabId) return;
-      await window.caval?.terminal?.write?.(activeTabId, data);
-    },
-    [activeTabId]
-  );
-
   const getSelectionInOutput = useCallback((): string => {
+    if (xtermSelection.trim()) return xtermSelection;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.toString().trim()) return '';
     const root = outputRef.current;
@@ -293,7 +292,11 @@ export function TerminalSessions({
     if (!anchor || !focus) return '';
     if (!root.contains(anchor) || !root.contains(focus)) return '';
     return sel.toString();
-  }, []);
+  }, [xtermSelection]);
+
+  useEffect(() => {
+    setHasSelection(Boolean(getSelectionInOutput().trim()));
+  }, [getSelectionInOutput, xtermSelection, searchQuery]);
 
   useEffect(() => {
     const syncSelection = () => setHasSelection(Boolean(getSelectionInOutput().trim()));
@@ -421,12 +424,10 @@ export function TerminalSessions({
     return () => window.removeEventListener('mousedown', close);
   }, [contextMenu]);
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeOutput = activeTabId ? output.get(activeTabId) ?? [] : [];
   const filteredOutput = searchQuery
     ? activeOutput.filter((line) => line.data.toLowerCase().includes(searchQuery.toLowerCase()))
     : activeOutput;
-  const aiAvailable = hasSelection || hasRecentError;
   const explainShortcut = TERMINAL_AI_PALETTE.find((e) => e.id === 'explain')?.shortcut;
   const suggestShortcut = TERMINAL_AI_PALETTE.find((e) => e.id === 'suggest-fix')?.shortcut;
   const hasTabs = tabs.length > 0;
@@ -519,6 +520,25 @@ export function TerminalSessions({
               aria-label={t('terminal.searchAria')}
               data-testid="terminal-search"
             />
+            <div className="terminal-font-controls" aria-label="Font size">
+              <button
+                type="button"
+                className="terminal-font-btn"
+                onClick={() => setFontSize((n) => Math.max(10, n - 1))}
+                aria-label="Decrease font size"
+              >
+                A−
+              </button>
+              <span className="terminal-font-size">{fontSize}</span>
+              <button
+                type="button"
+                className="terminal-font-btn"
+                onClick={() => setFontSize((n) => Math.min(20, n + 1))}
+                aria-label="Increase font size"
+              >
+                A+
+              </button>
+            </div>
             <button
               type="button"
               data-testid="terminal-explain-btn"
@@ -561,11 +581,11 @@ export function TerminalSessions({
 
           <div
             ref={outputRef}
-            className="terminal-output"
+            className="terminal-output terminal-output-xterm"
             role="log"
             aria-live="polite"
             data-testid="terminal-output"
-            style={{ userSelect: 'text', cursor: 'text' }}
+            style={{ userSelect: 'text', cursor: 'text', position: 'relative' }}
             onContextMenu={(event) => {
               const text = getSelectionInOutput();
               if (!text.trim() && !hasRecentError) return;
@@ -577,12 +597,35 @@ export function TerminalSessions({
               });
             }}
           >
-            {filteredOutput.map((line, index) => (
-              <div key={`${line.timestamp}-${index}`} className="terminal-line">
-                {line.data}
-              </div>
+            {tabs.map((tab) => (
+              <XtermTerminal
+                key={tab.id}
+                terminalId={tab.id}
+                isActive={tab.id === activeTabId && !searchQuery}
+                fontSize={fontSize}
+                onSelectionChange={(text) => {
+                  if (tab.id === activeTabId) setXtermSelection(text);
+                }}
+              />
             ))}
-            <div ref={outputEndRef} />
+            {searchQuery ? (
+              <div className="terminal-search-results">
+                {filteredOutput.map((line, index) => (
+                  <div key={`${line.timestamp}-${index}`} className="terminal-line">
+                    {line.data}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {/* Text-accessible mirror of buffered lines (xterm paints on canvas). */}
+            <div className="terminal-line-mirror" aria-hidden="true">
+              {filteredOutput.map((line, index) => (
+                <div key={`${line.timestamp}-${index}`} className="terminal-line">
+                  {line.data}
+                </div>
+              ))}
+              <div ref={outputEndRef} />
+            </div>
           </div>
 
           {contextMenu && (
@@ -597,16 +640,6 @@ export function TerminalSessions({
 
           <SuggestedCommandsCard />
           <TerminalExplainPopover />
-
-          {activeTab && (
-            <TerminalInput
-              key={activeTab.id}
-              terminalId={activeTab.id}
-              onInput={handleInput}
-              disabled={activeTab.info.status !== 'active'}
-              aiAvailable={aiAvailable}
-            />
-          )}
         </>
       ) : (
         <div className="terminal-empty" data-testid="terminal-empty">

@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("TerminalSession cleanup", () => {
+describe("XtermTerminal cleanup", () => {
   it("creates ResizeObserver before any disconnect in the same effect", () => {
     const src = fs.readFileSync(
-      path.join(__dirname, "../../../src/renderer/components/terminal/TerminalSession.tsx"),
+      path.join(__dirname, "../../../src/renderer/components/terminal/XtermTerminal.tsx"),
       "utf8"
     );
     const created = src.indexOf("const resizeObserver = new ResizeObserver");
