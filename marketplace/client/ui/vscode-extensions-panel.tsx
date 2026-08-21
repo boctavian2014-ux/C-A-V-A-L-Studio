@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useTranslation } from "../../../ai/i18n/useTranslation";
 import type { MarketplaceExtension } from "../../api";
 import { useOpenVsxSearch } from "../hooks/useOpenVsxSearch";
 import { marketplaceStore } from "../state/marketplace-store";
@@ -13,6 +14,7 @@ export interface VsCodeExtensionsPanelProps {
 }
 
 export const VsCodeExtensionsPanel = ({ onInstall, installedIds = [], isInstalled }: VsCodeExtensionsPanelProps) => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [installError, setInstallError] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
@@ -25,7 +27,7 @@ export const VsCodeExtensionsPanel = ({ onInstall, installedIds = [], isInstalle
       if (onInstall) {
         const res = await onInstall(extension);
         if (!res.ok) {
-          setInstallError(res.error ?? "Instalare eșuată.");
+          setInstallError(res.error ?? t("marketplace.installFailed"));
           return;
         }
       }
@@ -43,8 +45,8 @@ export const VsCodeExtensionsPanel = ({ onInstall, installedIds = [], isInstalle
   return (
     <section className="marketplace-panel">
       <header>
-        <p className="eyebrow">Open VSX</p>
-        <h1>Extensii</h1>
+        <p className="eyebrow">{t("marketplace.eyebrow")}</p>
+        <h1>{t("marketplace.heading")}</h1>
         <SearchBar
           query={query}
           suggestions={[]}
@@ -53,8 +55,10 @@ export const VsCodeExtensionsPanel = ({ onInstall, installedIds = [], isInstalle
       </header>
 
       <section>
-        <h2>{isPopular ? "Populare" : "Rezultate"}</h2>
-        {loading && <p>{isPopular ? "Se încarcă extensiile populare…" : "Se caută…"}</p>}
+        <h2>{isPopular ? t("marketplace.popular") : t("marketplace.results")}</h2>
+        {loading && (
+          <p>{isPopular ? t("marketplace.loadingPopular") : t("marketplace.searching")}</p>
+        )}
         {error && <p role="alert">{error}</p>}
         {installError && <p role="alert">{installError}</p>}
         <div className="extension-grid">
@@ -70,7 +74,7 @@ export const VsCodeExtensionsPanel = ({ onInstall, installedIds = [], isInstalle
         </div>
         {!loading && extensions.length === 0 && !error && (
           <p className="marketplace-hint">
-            {isPopular ? "Nicio extensie populară disponibilă." : "Nicio extensie găsită."}
+            {isPopular ? t("marketplace.noPopular") : t("marketplace.noExtensions")}
           </p>
         )}
       </section>

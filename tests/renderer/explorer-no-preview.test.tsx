@@ -96,7 +96,7 @@ describe("ExplorerPanel — no preview section", () => {
       </I18nProvider>
     );
     mounted = result;
-    expect(result.container.textContent).toMatch(/Deschide un folder pentru a începe/i);
+    expect(result.container.textContent).toMatch(/Niciun folder deschis/i);
     expect(result.container.textContent).toMatch(/Deschide folder/i);
   });
 });

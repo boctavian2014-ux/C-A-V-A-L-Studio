@@ -1,4 +1,6 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import type { MessageKey, TranslateFn } from '../../../../ai/i18n';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import type { GitApi, GitOperationState, GitStatus } from '../../../shared/git-contract';
 import { debounce } from '../../lib/debounce';
 import { GIT_STATUS_DEBOUNCE_MS } from '../../lib/panel-limits';
@@ -61,29 +63,63 @@ function statusLabel(s: string): string {
   }
 }
 
-function operationFeedback(operation: { operation: string; status: string } | null): string | null {
+function statusTitleKey(s: string): MessageKey {
+  switch (s) {
+    case 'M':
+    case 'modified':
+      return 'sourceControl.modified';
+    case 'A':
+    case 'added':
+      return 'sourceControl.added';
+    case 'D':
+    case 'deleted':
+      return 'sourceControl.deleted';
+    case 'R':
+    case 'renamed':
+      return 'sourceControl.renamed';
+    case 'C':
+    case 'copied':
+      return 'sourceControl.copied';
+    case 'U':
+    case 'conflicted':
+      return 'sourceControl.conflicted';
+    case '?':
+    case 'untracked':
+      return 'sourceControl.untracked';
+    case '!':
+    case 'ignored':
+      return 'sourceControl.ignored';
+    default:
+      return 'sourceControl.modified';
+  }
+}
+
+function operationFeedback(
+  operation: { operation: string; status: string } | null,
+  t: TranslateFn,
+): string | null {
   if (!operation || operation.status !== 'running') return null;
   switch (operation.operation) {
     case 'stage':
-      return 'Staging…';
+      return t('sourceControl.op.stage');
     case 'unstage':
-      return 'Unstaging…';
+      return t('sourceControl.op.unstage');
     case 'commit':
-      return 'Committing…';
+      return t('sourceControl.op.commit');
     case 'checkout':
-      return 'Checking out…';
+      return t('sourceControl.op.checkout');
     case 'push':
-      return 'Pushing…';
+      return t('sourceControl.op.push');
     case 'pull':
-      return 'Pulling…';
+      return t('sourceControl.op.pull');
     case 'stash':
-      return 'Stashing…';
+      return t('sourceControl.op.stash');
     case 'init':
-      return 'Initializing…';
+      return t('sourceControl.op.init');
     case 'clone':
-      return 'Cloning…';
+      return t('sourceControl.op.clone');
     default:
-      return 'Working…';
+      return t('sourceControl.op.working');
   }
 }
 
@@ -108,6 +144,7 @@ function FileRow({
   onDiscard: () => void;
   busy?: boolean;
 }) {
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const fileName = file.path.split('/').pop() || file.path;
   const dirPart = file.path.includes('/')
@@ -135,11 +172,14 @@ function FileRow({
       }}
     >
       {/* Status badge */}
-      <span style={{
-        fontSize: 10, fontWeight: 700, width: 14, textAlign: 'center',
-        color: statusColor(file.status), flexShrink: 0,
-        fontFamily: "'JetBrains Mono', monospace",
-      }}>
+      <span
+        title={t(statusTitleKey(file.status))}
+        style={{
+          fontSize: 10, fontWeight: 700, width: 14, textAlign: 'center',
+          color: statusColor(file.status), flexShrink: 0,
+          fontFamily: "'JetBrains Mono', monospace",
+        }}
+      >
         {statusLabel(file.status)}
       </span>
 
@@ -157,7 +197,7 @@ function FileRow({
 
       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
           {file.status !== 'deleted' && !file.staged && (
-            <MicroBtn title="Discard changes" onClick={onDiscard} danger>
+            <MicroBtn title={t('sourceControl.discard')} onClick={onDiscard} danger>
               {/* undo icon */}
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                 <path d="M3 7l-3 3 3 3M0 10h9a4 4 0 000-8H7" />
@@ -165,13 +205,13 @@ function FileRow({
             </MicroBtn>
           )}
           {file.staged ? (
-            <MicroBtn title="Unstage" testId="git-unstage" onClick={onUnstage} disabled={busy}>
+            <MicroBtn title={t('sourceControl.unstage')} testId="git-unstage" onClick={onUnstage} disabled={busy}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 2l-6 6h4v6h4V8h4L8 2z" />
               </svg>
             </MicroBtn>
           ) : (
-            <MicroBtn title="Stage" testId="git-stage" onClick={onStage} accent disabled={busy}>
+            <MicroBtn title={t('sourceControl.stage')} testId="git-stage" onClick={onStage} accent disabled={busy}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 14l6-6h-4V2H6v6H2l6 6z" />
               </svg>
@@ -228,6 +268,7 @@ function SectionHeader({
   onStageAll?: () => void;
   onUnstageAll?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={{
       display: 'flex', alignItems: 'center',
@@ -245,14 +286,14 @@ function SectionHeader({
       </span>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
         {staged && onUnstageAll && (
-          <MicroBtn title="Unstage all" onClick={onUnstageAll}>
+          <MicroBtn title={t('sourceControl.unstageAll')} onClick={onUnstageAll}>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 2l-6 6h4v6h4V8h4L8 2z" />
             </svg>
           </MicroBtn>
         )}
         {!staged && onStageAll && (
-          <MicroBtn title="Stage all" onClick={onStageAll} accent>
+          <MicroBtn title={t('sourceControl.stageAll')} onClick={onStageAll} accent>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 14l6-6h-4V2H6v6H2l6 6z" />
             </svg>
@@ -334,6 +375,7 @@ function formatRelDate(date: Date): string {
 // ──────────────────────────────────────────────
 
 function BranchPicker() {
+  const { t } = useTranslation();
   const {
     branches, branch, newBranchName,
     checkout, createBranch,
@@ -377,7 +419,7 @@ function BranchPicker() {
               fontSize: 11, cursor: 'pointer',
             }}
           >
-            Branch-uri
+            {t('sourceControl.branches')}
           </button>
           <button
             onClick={() => setMode('new')}
@@ -388,7 +430,7 @@ function BranchPicker() {
               fontSize: 11, cursor: 'pointer',
             }}
           >
-            + Branch nou
+            {t('sourceControl.newBranch')}
           </button>
         </div>
 
@@ -423,7 +465,7 @@ function BranchPicker() {
               value={newBranchName}
               onChange={(e) => setNewBranchName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createBranch(newBranchName); }}
-              placeholder="Nume branch nou…"
+              placeholder={t('sourceControl.newBranchPlaceholder')}
               style={{
                 flex: 1, background: 'var(--caval-surface-raised)', border: '1px solid var(--caval-border)',
                 borderRadius: 5, padding: '5px 8px', color: 'var(--caval-text)',
@@ -438,7 +480,7 @@ function BranchPicker() {
                 color: '#0E0E0F', fontWeight: 600, fontSize: 12, cursor: 'pointer',
               }}
             >
-              Crează
+              {t('sourceControl.create')}
             </button>
           </div>
         )}
@@ -452,6 +494,7 @@ function BranchPicker() {
 // ──────────────────────────────────────────────
 
 export function GitPanel() {
+  const { t } = useTranslation();
   const {
     isRepo, branch, upstream, ahead, behind,
     files, activeTab, selectedFile,
@@ -524,7 +567,7 @@ export function GitPanel() {
   const stagedFiles   = files.filter((f) => f.staged);
   const unstagedFiles = files.filter((f) => !f.staged);
   const canCommit = stagedFiles.length > 0 && Boolean(commitMessage.trim()) && !opLoading;
-  const runningFeedback = operationFeedback(operation);
+  const runningFeedback = operationFeedback(operation, t);
   const busyOp = operation?.status === 'running' ? operation.operation : null;
 
   const handleFileClick = useCallback((file: GitFileStatus) => {
@@ -535,8 +578,8 @@ export function GitPanel() {
     return (
       <EmptyState
         icon={<GitIcon />}
-        title={error ? 'Git indisponibil' : 'Nu este un repo Git'}
-        desc={error ?? 'Directorul curent nu are un repo Git inițializat.'}
+        title={error ? t('sourceControl.gitUnavailable') : t('sourceControl.noRepo')}
+        desc={error ?? t('sourceControl.noRepoDesc')}
         alert={error}
         action={error ? undefined : { label: 'git init', onClick: () => void useGitStore.getState().initRepo() }}
       />
@@ -586,8 +629,8 @@ export function GitPanel() {
             {/* Ahead/behind */}
             {(ahead > 0 || behind > 0) && (
               <span style={{ fontSize: 10, color: 'var(--caval-text-muted)', display: 'flex', gap: 4 }}>
-                {behind > 0 && <span title={`${behind} commits în spate`}>↓{behind}</span>}
-                {ahead  > 0 && <span title={`${ahead} commits înainte`}>↑{ahead}</span>}
+                {behind > 0 && <span title={t('sourceControl.behind', { count: behind })}>↓{behind}</span>}
+                {ahead  > 0 && <span title={t('sourceControl.ahead', { count: ahead })}>↑{ahead}</span>}
               </span>
             )}
             <span style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>▾</span>
@@ -598,7 +641,7 @@ export function GitPanel() {
         {/* Push / Pull / Refresh */}
         <div style={{ display: 'flex', gap: 4 }}>
           <ActionBtn
-            title="Pull"
+            title={t('sourceControl.pull')}
             onClick={pull}
             disabled={opLoading || busyOp === 'pull'}
             icon={
@@ -607,10 +650,10 @@ export function GitPanel() {
               </svg>
             }
           >
-            Pull
+            {t('sourceControl.pull')}
           </ActionBtn>
           <ActionBtn
-            title="Push"
+            title={t('sourceControl.push')}
             onClick={push}
             disabled={opLoading || busyOp === 'push'}
             accent
@@ -620,13 +663,13 @@ export function GitPanel() {
               </svg>
             }
           >
-            Push {ahead > 0 ? `(${ahead})` : ''}
+            {t('sourceControl.push')}{ahead > 0 ? ` (${ahead})` : ''}
           </ActionBtn>
           <button
             data-testid="git-refresh"
             onClick={() => void refresh()}
             disabled={loading}
-            title="Refresh status"
+            title={t('sourceControl.refreshStatus')}
             style={{
               width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
               background: 'var(--caval-surface)', cursor: 'pointer',
@@ -643,7 +686,7 @@ export function GitPanel() {
           <button
             onClick={stash}
             disabled={opLoading || files.length === 0}
-            title="Stash changes"
+            title={t('sourceControl.stash')}
             style={{
               width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
               background: 'var(--caval-surface)', cursor: 'pointer',
@@ -658,7 +701,7 @@ export function GitPanel() {
           <button
             onClick={stashPop}
             disabled={opLoading}
-            title="Stash pop"
+            title={t('sourceControl.stashPop')}
             style={{
               width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
               background: 'var(--caval-surface)', cursor: 'pointer',
@@ -735,7 +778,9 @@ export function GitPanel() {
               transition: 'all 0.12s',
             }}
           >
-            {tab === 'changes' ? `Changes ${files.length > 0 ? `(${files.length})` : ''}` : 'History'}
+            {tab === 'changes'
+              ? `${t('sourceControl.changes')}${files.length > 0 ? ` (${files.length})` : ''}`
+              : t('sourceControl.history')}
           </button>
         ))}
       </div>
@@ -747,7 +792,7 @@ export function GitPanel() {
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }} className="ai-messages-scroll">
             {files.length === 0 && !loading ? (
               <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
-                Nicio modificare. Working tree curat.
+                {t('sourceControl.noChangesClean')}
               </div>
             ) : (
               <>
@@ -755,7 +800,7 @@ export function GitPanel() {
                 {stagedFiles.length > 0 && (
                   <>
                     <SectionHeader
-                      label="Staged"
+                      label={t('sourceControl.stagedShort')}
                       count={stagedFiles.length}
                       staged
                       onUnstageAll={unstageAll}
@@ -779,7 +824,7 @@ export function GitPanel() {
                 {unstagedFiles.length > 0 && (
                   <>
                     <SectionHeader
-                      label="Changes"
+                      label={t('sourceControl.changes')}
                       count={unstagedFiles.length}
                       staged={false}
                       onStageAll={stageAll}
@@ -820,7 +865,7 @@ export function GitPanel() {
                   if (canCommit) void commit();
                 }
               }}
-              placeholder="Mesaj commit… (Ctrl+Enter pentru commit)"
+              placeholder={t('sourceControl.commitPlaceholder')}
               rows={2}
               style={{
                 background: 'var(--caval-surface)', border: '1px solid var(--caval-border)',
@@ -849,13 +894,13 @@ export function GitPanel() {
               }}
             >
               {busyOp === 'commit' ? (
-                <span style={{ animation: 'caval-blink 0.8s infinite' }}>Committing…</span>
+                <span style={{ animation: 'caval-blink 0.8s infinite' }}>{t('sourceControl.committing')}</span>
               ) : (
                 <>
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <circle cx="8" cy="8" r="3" /><path d="M8 1v4M8 11v4M1 8h4M11 8h4" />
                   </svg>
-                  Commit {stagedFiles.length > 0 ? `(${stagedFiles.length})` : ''}
+                  {t('sourceControl.commit')}{stagedFiles.length > 0 ? ` (${stagedFiles.length})` : ''}
                 </>
               )}
             </button>
@@ -868,7 +913,7 @@ export function GitPanel() {
         <div style={{ flex: 1, overflowY: 'auto' }} className="ai-messages-scroll">
           {commits.length === 0 ? (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
-              Niciun commit în istoric.
+              {t('sourceControl.noHistory')}
             </div>
           ) : (
             commits.map((c) => <CommitRow key={c.hash} commit={c} />)

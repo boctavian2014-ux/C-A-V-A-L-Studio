@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useState } from 'react';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { useEditorStore } from '../../store/editor-store';
 
 interface SearchHit {
@@ -26,6 +27,7 @@ function joinProjectPath(projectPath: string, relativePath: string): string {
 }
 
 export function SearchPanel() {
+  const { t } = useTranslation();
   const { projectPath, openFile } = useEditorStore();
   const [mode, setMode] = useState<SearchMode>('text');
   const [query, setQuery] = useState('');
@@ -42,7 +44,7 @@ export function SearchPanel() {
       return;
     }
     if (!projectPath) {
-      setError('Deschide un folder de proiect pentru căutare.');
+      setError(t('search.needProject'));
       return;
     }
 
@@ -52,7 +54,7 @@ export function SearchPanel() {
       await window.caval?.contextIndex?.();
       const res = await window.caval?.contextSearch?.({ query: q, limit: 40 });
       if (!res?.ok) {
-        setError(res && 'error' in res && typeof res.error === 'string' ? res.error : 'Căutarea a eșuat.');
+        setError(res && 'error' in res && typeof res.error === 'string' ? res.error : t('search.failed'));
         setResults([]);
         return;
       }
@@ -69,14 +71,14 @@ export function SearchPanel() {
         };
       });
       setResults(hits);
-      if (hits.length === 0) setError('Niciun rezultat.');
+      if (hits.length === 0) setError(t('search.noResults'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setResults([]);
     } finally {
       setLoading(false);
     }
-  }, [query, projectPath]);
+  }, [query, projectPath, t]);
 
   const runTextSearch = useCallback(async () => {
     const q = query.trim();
@@ -86,7 +88,7 @@ export function SearchPanel() {
       return;
     }
     if (!projectPath) {
-      setError('Deschide un folder de proiect pentru căutare.');
+      setError(t('search.needProject'));
       return;
     }
 
@@ -95,19 +97,19 @@ export function SearchPanel() {
     try {
       const res = await (window.caval as { search?: { text?: (input: { query: string }) => Promise<{ ok: boolean; hits?: TextHit[]; error?: string }> } })?.search?.text?.({ query: q });
       if (!res?.ok) {
-        setError(res?.error ?? 'Text search failed');
+        setError(res?.error ?? t('search.failed'));
         setTextResults([]);
         return;
       }
       setTextResults(res.hits ?? []);
-      if ((res.hits ?? []).length === 0) setError('Niciun rezultat.');
+      if ((res.hits ?? []).length === 0) setError(t('search.noResults'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setTextResults([]);
     } finally {
       setLoading(false);
     }
-  }, [query, projectPath]);
+  }, [query, projectPath, t]);
 
   const runSearch = useCallback(async () => {
     if (mode === 'text') await runTextSearch();
@@ -119,6 +121,11 @@ export function SearchPanel() {
     void openFile(joinProjectPath(projectPath, relativePath));
   };
 
+  const resultCount = mode === 'text' ? textResults.length : results.length;
+  const fileCount = mode === 'text'
+    ? new Set(textResults.map((h) => h.path)).size
+    : new Set(results.map((h) => h.path)).size;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div style={{
@@ -126,6 +133,12 @@ export function SearchPanel() {
         borderBottom: '1px solid var(--caval-border)',
         flexShrink: 0,
       }}>
+        <div style={{
+          fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+          letterSpacing: '0.08em', color: 'var(--caval-text-muted)', marginBottom: 8,
+        }}>
+          {t('search.title')}
+        </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           {(['text', 'semantic'] as const).map((m) => (
             <button
@@ -144,7 +157,7 @@ export function SearchPanel() {
                 cursor: 'pointer',
               }}
             >
-              {m === 'text' ? 'Text (ripgrep)' : 'Semantic'}
+              {m === 'text' ? t('search.modeText') : t('search.modeSemantic')}
             </button>
           ))}
         </div>
@@ -155,7 +168,7 @@ export function SearchPanel() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') void runSearch();
             }}
-            placeholder="Find in Files"
+            placeholder={t('search.placeholder')}
             style={{
               flex: 1,
               padding: '6px 8px',
@@ -181,7 +194,7 @@ export function SearchPanel() {
               cursor: loading ? 'wait' : 'pointer',
             }}
           >
-            {loading ? '…' : 'Go'}
+            {loading ? '…' : t('search.go')}
           </button>
         </div>
       </div>
@@ -189,12 +202,17 @@ export function SearchPanel() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }} className="ai-messages-scroll">
         {!projectPath && (
           <p style={{ padding: '8px 12px', fontSize: 11.5, color: 'var(--caval-text-muted)', margin: 0 }}>
-            Deschide un folder (File → Open Folder) pentru Find in Files.
+            {t('search.openFolder')}
           </p>
         )}
         {error && (mode === 'text' ? textResults.length === 0 : results.length === 0) && (
           <p style={{ padding: '8px 12px', fontSize: 11.5, color: 'var(--caval-text-muted)', margin: 0 }}>
             {error}
+          </p>
+        )}
+        {resultCount > 0 && !error && (
+          <p style={{ padding: '4px 12px 8px', fontSize: 11, color: 'var(--caval-text-muted)', margin: 0 }}>
+            {t('search.results', { count: resultCount, files: fileCount })}
           </p>
         )}
         {mode === 'text' && textResults.map((hit, i) => (
@@ -219,7 +237,7 @@ export function SearchPanel() {
               {hit.path}:{hit.line}
             </div>
             <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', lineHeight: 1.4 }}>
-              {hit.preview || '(fără preview)'}
+              {hit.preview || t('search.noPreview')}
             </div>
           </button>
         ))}
@@ -250,7 +268,7 @@ export function SearchPanel() {
               {hit.path}:{hit.startLine}
             </div>
             <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', lineHeight: 1.4 }}>
-              {hit.preview || '(fără preview)'}
+              {hit.preview || t('search.noPreview')}
             </div>
           </button>
         ))}

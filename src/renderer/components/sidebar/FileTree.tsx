@@ -61,19 +61,19 @@ function ContextMenu({ state, onClose }: { state: ContextMenuState; onClose: () 
     if (action === 'reveal') {
       await window.caval.fs.reveal(state.node.path);
     } else if (action === 'delete') {
-      if (confirm(t('confirm.deleteFile', { name: state.node.name }))) {
+      if (confirm(t('explorer.confirmDelete', { name: state.node.name }))) {
         await window.caval.fs.delete(state.node.path);
         await refreshTree();
       }
     } else if (action === 'newFile' && state.node.type === 'directory') {
-      const name = prompt('Nume fișier nou:');
+      const name = prompt(t('explorer.newFilePrompt'));
       if (name) {
         const newPath = `${state.node.path}/${name}`.replace(/\\/g, '/');
         await window.caval.fs.createFile(newPath);
         await refreshTree();
       }
     } else if (action === 'newDir' && state.node.type === 'directory') {
-      const name = prompt('Nume director nou:');
+      const name = prompt(t('explorer.newFolderPrompt'));
       if (name) {
         const newPath = `${state.node.path}/${name}`.replace(/\\/g, '/');
         await window.caval.fs.createDir(newPath);
@@ -93,14 +93,14 @@ function ContextMenu({ state, onClose }: { state: ContextMenuState; onClose: () 
     >
       {state.node.type === 'directory' && (
         <>
-          <MenuItem label="Fișier nou" onClick={() => handle('newFile')} />
-          <MenuItem label="Director nou" onClick={() => handle('newDir')} />
+          <MenuItem label={t('explorer.newFile')} onClick={() => handle('newFile')} />
+          <MenuItem label={t('explorer.newFolder')} onClick={() => handle('newDir')} />
           <div style={{ height: 1, background: 'var(--caval-border)', margin: '4px 0' }} />
         </>
       )}
-      <MenuItem label="Deschide în Explorer" onClick={() => handle('reveal')} />
+      <MenuItem label={t('explorer.reveal')} onClick={() => handle('reveal')} />
       <div style={{ height: 1, background: 'var(--caval-border)', margin: '4px 0' }} />
-      <MenuItem label="Șterge" onClick={() => handle('delete')} danger />
+      <MenuItem label={t('explorer.delete')} onClick={() => handle('delete')} danger />
     </div>
   );
 }
@@ -233,7 +233,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
     setContextMenu({ x: e.clientX, y: e.clientY, node });
   };
 
-  const projectName = projectPath?.split(/[/\\]/).pop() ?? 'Fără proiect';
+  const projectName = projectPath?.split(/[/\\]/).pop() ?? t('explorer.noProject');
 
   return (
     <div
@@ -264,7 +264,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
           <IconBtn title={t('common.openFolder')} onClick={handleOpenFolder}>
             <Cavalo3DIcon name="home" size={18} />
           </IconBtn>
-          <IconBtn title="Reîmprospătează" onClick={refreshTree}>
+          <IconBtn title={t('explorer.refresh')} onClick={refreshTree}>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M2 8a6 6 0 106-6H5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
               <path d="M3 5l2-3-2-0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
@@ -288,7 +288,9 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
               <Cavalo3DIcon name="home" size={44} />
             </div>
-            <p style={{ margin: 0 }}>{t('explorer.openFolderHint')}</p>
+            <p style={{ margin: 0 }}>
+              {projectPath ? t('explorer.openFolderHint') : t('explorer.empty')}
+            </p>
             <button
               onClick={handleOpenFolder}
               style={{
