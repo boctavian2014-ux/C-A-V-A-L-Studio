@@ -608,6 +608,7 @@ function StreamingText({ content }: { content: string }) {
 }
 
 function MandatoryReviewBadge() {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -623,11 +624,11 @@ function MandatoryReviewBadge() {
         fontWeight: 500,
         width: '100%',
       }}
-      title="Review obligatoriu: Merge + Supervisor + Test + Verify înainte de livrare ready-to-use"
+      title={t('ai.panel.readyToUseGateTitle')}
     >
       <span aria-hidden style={{ color: 'var(--caval-accent)' }}>●</span>
-      <span>Review obligatoriu (activ)</span>
-      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>Ready-to-use gate</span>
+      <span>{t('ai.panel.mandatoryReviewActive')}</span>
+      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>{t('ai.panel.readyToUseGate')}</span>
     </div>
   );
 }
@@ -1026,7 +1027,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         }}
       >
         <span
-          title="Folder activ — istoricul vechi e păstrat local"
+          title={t('ai.panel.activeFolderHint')}
           style={{
             fontSize: 10,
             color: 'var(--caval-text-muted)',
@@ -1094,7 +1095,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                   type="button"
                   data-testid="ai-history-export-md"
                   disabled={historyExportBusy}
-                  title="Export as Markdown"
+                  title={t('ai.history.exportMd')}
                   onClick={() => void exportHistoryConversation(exportConversationId, 'markdown')}
                   style={{
                     fontSize: 9,
@@ -1114,7 +1115,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                   type="button"
                   data-testid="ai-history-export-json"
                   disabled={historyExportBusy}
-                  title="Export as JSON"
+                  title={t('ai.history.exportJson')}
                   onClick={() => void exportHistoryConversation(exportConversationId, 'json')}
                   style={{
                     fontSize: 9,
@@ -1135,7 +1136,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           </div>
           {historyConversations.length === 0 && !historyLoading ? (
             <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
-              No saved conversations yet
+              {t('ai.history.empty')}
             </div>
           ) : (
             <HistoryList
@@ -1290,7 +1291,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         {isAgentic && <MandatoryReviewBadge />}
         {agentMode === 'code' && selectedModel.startsWith('caval-auto/') && (
           <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', lineHeight: 1.35 }}>
-            Auto routează modelul — alege un model explicit pentru a testa puterea lui.
+            {t('ai.panel.autoRouteHint')}
           </div>
         )}
         <div style={{
@@ -1345,7 +1346,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                       border: 'none', background: 'none', cursor: 'pointer',
                       color: 'var(--caval-text-muted)', fontSize: 12, lineHeight: 1, padding: 0,
                     }}
-                    title="Elimină atașament"
+                    title={t('ai.panel.removeAttachment')}
                   >
                     ✕
                   </button>
@@ -1370,7 +1371,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               display: 'flex', alignItems: 'center', gap: 6,
               flexWrap: 'wrap', minWidth: 0,
             }}>
-              <IconBtn title="Atașează fișier" onClick={() => void handleAttachClick()}>
+              <IconBtn title={t('ai.panel.attachFile')} onClick={() => void handleAttachClick()}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
                   <path d="M12.5 8.5L7 14a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54L5.5 11.5a1 1 0 01-1.42-1.42L10 4" strokeLinecap="round" />
                 </svg>

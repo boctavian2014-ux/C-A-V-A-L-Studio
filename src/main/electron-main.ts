@@ -52,6 +52,10 @@ import {
   applyLocaleToSettings,
   resolveLocalePreference,
 } from "./locale-settings";
+import {
+  buildRendererContextMenu,
+  installApplicationMenu as installLocalizedApplicationMenu,
+} from "./app-menu";
 import { LOCALE_SETTING_KEY } from "../shared/i18n-contract";
 import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
 import { setMcpSecretsProvider } from "../../ai/tools/tool-runtime";
@@ -224,24 +228,7 @@ interface CavalChatResponse {
 
 const installRendererContextMenu = (window: BrowserWindow): void => {
   window.webContents.on("context-menu", (_event, params) => {
-    const template: Electron.MenuItemConstructorOptions[] = [];
-
-    if (params.editFlags.canCopy || params.selectionText) {
-      template.push({ role: "copy", label: "Copy" });
-    }
-    if (params.editFlags.canPaste) {
-      template.push({ role: "paste", label: "Paste" });
-    }
-    if (params.editFlags.canCut) {
-      template.push({ role: "cut", label: "Cut" });
-    }
-    if (template.length > 0) {
-      template.push({ type: "separator" });
-    }
-    if (params.editFlags.canSelectAll) {
-      template.push({ role: "selectAll", label: "Select All" });
-    }
-
+    const template = buildRendererContextMenu(resolveUiLocale(), params);
     if (template.length === 0) return;
     Menu.buildFromTemplate(template).popup({ window });
   });
@@ -476,192 +463,23 @@ const sendWorkspaceToRenderer = async (
   preloadForContext(inferPreloadContext(folderPath, files.map((f) => f.path)));
 };
 
+const appMenuHandlers = {
+  sendMenuCommand,
+  createWindow,
+  openFile,
+  openFolder,
+  focusedWindow,
+  quit: () => app.quit(),
+  openDocs: () => {
+    void openExternalUrl("https://caval.studio", {
+      origin: "INTERNAL_CONSTANT",
+      allowedHosts: CAVALLO_TRUSTED_HOSTS,
+    });
+  },
+};
+
 const installApplicationMenu = (): void => {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: "File",
-      submenu: [
-        { label: "New Text File", accelerator: "CmdOrCtrl+N", click: () => sendMenuCommand("new-file") },
-        { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
-        { type: "separator" },
-        { label: "Open File...", accelerator: "CmdOrCtrl+O", click: () => void openFile() },
-        { label: "Open Folder...", accelerator: "CmdOrCtrl+Shift+O", click: () => void openFolder() },
-        { type: "separator" },
-        { label: "Save", accelerator: "CmdOrCtrl+S", click: () => sendMenuCommand("save") },
-        { label: "Save As...", accelerator: "CmdOrCtrl+Shift+S", click: () => sendMenuCommand("save-as") },
-        { type: "separator" },
-        { label: "Preferences...", accelerator: "CmdOrCtrl+,", click: () => sendMenuCommand("open-settings") },
-        { type: "separator" },
-        { label: "Close Window", accelerator: "Alt+F4", click: () => focusedWindow()?.close() },
-        { label: "Exit", click: () => app.quit() }
-      ]
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { type: "separator" },
-        { label: "Find", accelerator: "CmdOrCtrl+F", click: () => sendMenuCommand("find") },
-        { label: "Replace", accelerator: "CmdOrCtrl+H", click: () => sendMenuCommand("replace") },
-        { type: "separator" },
-        { label: "Find in Files", accelerator: "CmdOrCtrl+Shift+F", click: () => sendMenuCommand("find-in-files") },
-        { label: "Replace in Files", accelerator: "CmdOrCtrl+Shift+H", click: () => sendMenuCommand("replace-in-files") },
-        { type: "separator" },
-        { label: "Toggle Line Comment", accelerator: "CmdOrCtrl+/", click: () => sendMenuCommand("toggle-line-comment") },
-        { label: "Toggle Block Comment", accelerator: "Shift+Alt+A", click: () => sendMenuCommand("toggle-block-comment") },
-        { label: "Emmet: Expand Abbreviation", accelerator: "Tab", click: () => sendMenuCommand("emmet-expand") },
-        { type: "separator" },
-        { role: "selectAll" }
-      ]
-    },
-    {
-      label: "Selection",
-      submenu: [
-        { label: "Select All", accelerator: "CmdOrCtrl+A", role: "selectAll" },
-        { label: "Expand Selection", accelerator: "Shift+Alt+Right", click: () => sendMenuCommand("selection-expand") },
-        { label: "Shrink Selection", accelerator: "Shift+Alt+Left", click: () => sendMenuCommand("selection-shrink") },
-        { type: "separator" },
-        { label: "Copy Line Up", accelerator: "Shift+Alt+Up", click: () => sendMenuCommand("copy-line-up") },
-        { label: "Copy Line Down", accelerator: "Shift+Alt+Down", click: () => sendMenuCommand("copy-line-down") },
-        { label: "Move Line Up", accelerator: "Alt+Up", click: () => sendMenuCommand("move-line-up") },
-        { label: "Move Line Down", accelerator: "Alt+Down", click: () => sendMenuCommand("move-line-down") },
-        { type: "separator" },
-        { label: "Add Cursor Above", accelerator: "CmdOrCtrl+Alt+Up", click: () => sendMenuCommand("cursor-above") },
-        { label: "Add Cursor Below", accelerator: "CmdOrCtrl+Alt+Down", click: () => sendMenuCommand("cursor-below") }
-      ]
-    },
-    {
-      label: "View",
-      submenu: [
-        { label: "Command Palette...", accelerator: "CmdOrCtrl+Shift+P", click: () => sendMenuCommand("palette") },
-        { label: "Open View...", click: () => sendMenuCommand("open-view") },
-        { type: "separator" },
-        {
-          label: "Appearance",
-          submenu: [
-            { label: "Toggle Full Screen", accelerator: "F11", role: "togglefullscreen" },
-            { label: "Zoom In", accelerator: "CmdOrCtrl+=", role: "zoomIn" },
-            { label: "Zoom Out", accelerator: "CmdOrCtrl+-", role: "zoomOut" },
-            { label: "Reset Zoom", accelerator: "CmdOrCtrl+0", role: "resetZoom" }
-          ]
-        },
-        {
-          label: "Editor Layout",
-          submenu: [
-            { label: "Split Editor", accelerator: "CmdOrCtrl+\\", click: () => sendMenuCommand("split-editor") },
-            { label: "Single Editor", click: () => sendMenuCommand("single-editor") }
-          ]
-        },
-        { type: "separator" },
-        { label: "Primary Side Bar", accelerator: "CmdOrCtrl+B", click: () => sendMenuCommand("toggle-sidebar") },
-        { label: "Explorer", accelerator: "CmdOrCtrl+Shift+E", click: () => sendMenuCommand("view-explorer") },
-        { label: "Search", accelerator: "CmdOrCtrl+Shift+F", click: () => sendMenuCommand("view-search") },
-        { label: "Source Control", click: () => sendMenuCommand("view-source-control") },
-        { label: "Run", accelerator: "CmdOrCtrl+Shift+D", click: () => sendMenuCommand("view-run") },
-        { label: "Extensions", accelerator: "CmdOrCtrl+Shift+X", click: () => sendMenuCommand("view-extensions") },
-        { type: "separator" },
-        { label: "Problems", click: () => sendMenuCommand("view-problems") },
-        { label: "Output", accelerator: "CmdOrCtrl+Shift+U", click: () => sendMenuCommand("view-output") },
-        { label: "Debug Console", accelerator: "CmdOrCtrl+Shift+Alt+Y", click: () => sendMenuCommand("view-debug-console") },
-        { type: "separator" },
-        { label: "Word Wrap", accelerator: "Alt+Z", click: () => sendMenuCommand("word-wrap") },
-        { type: "separator" },
-        { role: "reload" },
-        { role: "toggleDevTools" }
-      ]
-    },
-    {
-      label: "Go",
-      submenu: [
-        { label: "Back", accelerator: "Alt+Left", click: () => sendMenuCommand("go-back") },
-        { label: "Forward", accelerator: "Alt+Right", click: () => sendMenuCommand("go-forward") },
-        { label: "Last Edit Location", accelerator: "CmdOrCtrl+M CmdOrCtrl+Q", click: () => sendMenuCommand("last-edit-location") },
-        { type: "separator" },
-        { label: "Switch Editor", click: () => sendMenuCommand("switch-editor") },
-        { label: "Switch Group", click: () => sendMenuCommand("switch-group") },
-        { type: "separator" },
-        { label: "Go to File...", accelerator: "CmdOrCtrl+P", click: () => sendMenuCommand("go-to-file") },
-        { label: "Go to Symbol in Workspace...", accelerator: "CmdOrCtrl+T", click: () => sendMenuCommand("go-to-symbol-workspace") },
-        { label: "Go to Symbol in Editor...", accelerator: "CmdOrCtrl+Shift+O", click: () => sendMenuCommand("go-to-symbol-editor") },
-        { label: "Go to Definition", accelerator: "F12", click: () => sendMenuCommand("go-to-definition") },
-        { label: "Go to Declaration", click: () => sendMenuCommand("go-to-declaration") },
-        { label: "Go to Type Definition", click: () => sendMenuCommand("go-to-type-definition") },
-        { label: "Go to Implementations", accelerator: "CmdOrCtrl+F12", click: () => sendMenuCommand("go-to-implementations") },
-        { label: "Add Symbol to Current Chat", click: () => sendMenuCommand("add-symbol-current-chat") },
-        { label: "Go to References", accelerator: "Shift+F12", click: () => sendMenuCommand("go-to-references") },
-        { label: "Add Symbol to New Chat", click: () => sendMenuCommand("add-symbol-new-chat") },
-        { type: "separator" },
-        { label: "Go to Line/Column...", accelerator: "CmdOrCtrl+G", click: () => sendMenuCommand("go-to-line") },
-        { label: "Go to Bracket", accelerator: "CmdOrCtrl+Shift+\\", click: () => sendMenuCommand("go-to-bracket") },
-        { type: "separator" },
-        { label: "Next Problem", accelerator: "F8", click: () => sendMenuCommand("next-problem") },
-        { label: "Previous Problem", accelerator: "Shift+F8", click: () => sendMenuCommand("previous-problem") },
-        { label: "Next Change", accelerator: "Alt+F3", click: () => sendMenuCommand("next-change") },
-        { label: "Previous Change", accelerator: "Shift+Alt+F3", click: () => sendMenuCommand("previous-change") }
-      ]
-    },
-    {
-      label: "Run",
-      submenu: [
-        { label: "Start Debugging", accelerator: "F5", click: () => sendMenuCommand("run-debug") },
-        { label: "Run Without Debugging", accelerator: "CmdOrCtrl+F5", click: () => sendMenuCommand("run-without-debug") },
-        { label: "Stop Debugging", accelerator: "Shift+F5", click: () => sendMenuCommand("stop-debug") },
-        { label: "Restart Debugging", accelerator: "CmdOrCtrl+Shift+F5", click: () => sendMenuCommand("restart-debug") },
-        { type: "separator" },
-        { label: "Run Active File", click: () => sendMenuCommand("run-active-file") },
-        { label: "Run Selected Text", click: () => sendMenuCommand("run-selected-text") },
-        { type: "separator" },
-        { label: "Add Configuration...", click: () => sendMenuCommand("add-run-config") }
-      ]
-    },
-    {
-      label: "Terminal",
-      submenu: [
-        { label: "New Terminal", accelerator: "Ctrl+Shift+`", click: () => sendMenuCommand("terminal-new") },
-        { label: "Split Terminal", accelerator: "Ctrl+Shift+5", click: () => sendMenuCommand("terminal-split") },
-        { type: "separator" },
-        { label: "Run Task...", click: () => sendMenuCommand("task-run") },
-        { label: "Run Build Task...", accelerator: "CmdOrCtrl+Shift+B", click: () => sendMenuCommand("task-build") },
-        { label: "Run Active File", click: () => sendMenuCommand("run-active-file") },
-        { label: "Run Selected Text", click: () => sendMenuCommand("run-selected-text") },
-        { type: "separator" },
-        { label: "Configure Tasks...", click: () => sendMenuCommand("tasks-configure") },
-        { label: "Configure Default Build Task...", click: () => sendMenuCommand("tasks-default-build") }
-      ]
-    },
-    {
-      label: "Help",
-      submenu: [
-        { label: "Show All Commands", accelerator: "CmdOrCtrl+Shift+P", click: () => sendMenuCommand("palette") },
-        { label: "Editor Playground", click: () => sendMenuCommand("editor-playground") },
-        { label: "Get Started with Accessibility Features", click: () => sendMenuCommand("accessibility") },
-        { type: "separator" },
-        { label: "Give Feedback...", click: () => sendMenuCommand("feedback") },
-        { type: "separator" },
-        { label: "View License", click: () => sendMenuCommand("license") },
-        { type: "separator" },
-        { label: "Toggle Developer Tools", role: "toggleDevTools" },
-        { label: "Open Process Explorer", click: () => sendMenuCommand("process-explorer") },
-        { type: "separator" },
-        { label: "Check for Updates...", click: () => sendMenuCommand("check-updates") },
-        {
-          label: "CAVAL Studio Docs",
-          click: () =>
-            void openExternalUrl("https://caval.studio", {
-              origin: "INTERNAL_CONSTANT",
-              allowedHosts: CAVALLO_TRUSTED_HOSTS,
-            }),
-        },
-        { label: "About", click: () => sendMenuCommand("about") }
-      ]
-    }
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  installLocalizedApplicationMenu(resolveUiLocale(), appMenuHandlers);
 };
 
 ipcMain.handle("caval:save-file", async (event, request: { path?: string; content: string; saveAs?: boolean }) => {
@@ -1409,6 +1227,13 @@ const readPersistedAppSettings = (): Record<string, string> => {
   }
 };
 
+const resolveUiLocale = (): string => {
+  const settings = Object.keys(persistedAppSettings).length
+    ? persistedAppSettings
+    : readPersistedAppSettings();
+  return resolveLocalePreference(settings, app.getLocale()).locale;
+};
+
 const writePersistedAppSettings = (settings: Record<string, string>): void => {
   const forDisk: Record<string, string> = {};
   for (const [key, value] of Object.entries(settings)) {
@@ -1565,11 +1390,13 @@ ipcMain.handle("caval:locale-set", (event, localeInput: unknown) => {
     return { ok: false, error: result.error };
   }
   writePersistedAppSettings(result.settings);
+  persistedAppSettings = result.settings;
   const forRenderer = { ...result.settings };
   for (const key of SETTINGS_SENSITIVE_KEYS) {
     delete forRenderer[key];
   }
   appSettings.set(event.sender.id, forRenderer);
+  installApplicationMenu();
   return { ok: true, locale: result.locale };
 });
 
@@ -1901,9 +1728,11 @@ app.whenReady().then(() => {
   app.setName("CAVAL");
   installRendererSessionPolicy();
   installWebContentsSecurity();
-  installApplicationMenu();
   if (!isElectronSmokeMode()) {
     loadPersistedAppSettings();
+  }
+  installApplicationMenu();
+  if (!isElectronSmokeMode()) {
     applyStoredSecretsToEnv();
     setCavalConfigExtraPaths([app.getAppPath()]);
     setMcpSecretsProvider(readApiSecrets);

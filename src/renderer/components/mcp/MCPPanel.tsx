@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useEditorStore } from '../../store/editor-store';
 import { mcpStartErrorHint } from '../../../../ai/mcp/mcp-env';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 interface McpToolInfo {
   serverId: string;
@@ -21,6 +22,7 @@ interface McpServerStatus {
 }
 
 export function MCPPanel() {
+  const { t } = useTranslation();
   const projectPath = useEditorStore((s) => s.projectPath);
   const [servers, setServers] = useState<McpServerStatus[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
@@ -116,7 +118,7 @@ export function MCPPanel() {
           type="button"
           onClick={() => void ensureTrusted()}
           disabled={loading === 'all' || needsFolder}
-          title="Start LOCAL_SAFE and already-trusted servers only"
+          title={t('mcp.startTrustedTitle')}
           style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--caval-border)', background: 'none', cursor: needsFolder ? 'not-allowed' : 'pointer', color: 'var(--caval-text-muted)' }}
         >
           {loading === 'all' ? '…' : 'Start trusted'}
@@ -146,7 +148,7 @@ export function MCPPanel() {
       )}
 
       <p style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginBottom: 10, lineHeight: 1.45 }}>
-        Configurează în <code style={{ fontSize: 10 }}>caval.jsonc</code>. Network/write servers start only after you Allow once per workspace.
+        {t('mcp.configureIn')} <code style={{ fontSize: 10 }}>caval.jsonc</code>. Network/write servers start only after you Allow once per workspace.
       </p>
 
       {servers.length === 0 && (

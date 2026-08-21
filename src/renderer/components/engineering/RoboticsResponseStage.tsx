@@ -20,9 +20,12 @@ import {
   resolveRoboticsCadUserPrompt,
   type RoboticsTabId,
 } from '../../store/robotics-session-store';
+import { CavalStudioHero } from '../brand/CavaloHorseMark';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 /** Center-stage Robotics plan / tabs (shared session store). */
 export function RoboticsResponseStage() {
+  const { t } = useTranslation();
   const projectPath = useEditorStore((s) => s.projectPath);
   const handoffFromEngineering = useAIStore((s) => s.handoffFromEngineering);
 
@@ -86,21 +89,12 @@ export function RoboticsResponseStage() {
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
-        gap: 12, padding: 32, textAlign: 'center', minHeight: 0,
+        gap: 14, padding: 32, textAlign: 'center', minHeight: 0,
+        background: '#0D1117',
       }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 16,
-          background: 'linear-gradient(135deg, rgba(0,224,255,0.12), rgba(124,58,237,0.12))',
-          border: '1px solid rgba(0,224,255,0.2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--caval-accent)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" />
-            <circle cx="12" cy="12" r="3.2" />
-          </svg>
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--caval-text)' }}>
-          Răspunsul apare aici, în centru
+        <CavalStudioHero size={248} />
+        <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--caval-text)' }}>
+          ROBOTICS AI ENGINE
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--caval-text-muted)', lineHeight: 1.55, maxWidth: 420 }}>
           Scrie cererea în panoul din dreapta și apasă Generează. Planul, BOM-ul și acțiunile CAD
@@ -176,7 +170,7 @@ export function RoboticsResponseStage() {
                 aria-live="polite"
                 style={{ fontSize: 11, color: 'var(--caval-text-muted)', opacity: 0.9 }}
               >
-                Mod non-streaming — aștept răspunsul complet.
+                {t('robotics.nonStreaming')}
               </div>
             )}
 
@@ -204,7 +198,7 @@ export function RoboticsResponseStage() {
 
             <div className="glass-panel" style={{ padding: '12px 14px', borderRadius: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--caval-text)' }}>
-                Secțiuni
+                {t('robotics.sections')}
               </div>
               {(!streamProgress || streamProgress.sections.length === 0) && (
                 <div style={{ fontSize: 12.5, color: 'var(--caval-text-muted)' }}>
@@ -319,7 +313,7 @@ export function RoboticsResponseStage() {
           <button
             type="button"
             onClick={handleSoftwareHandoff}
-            title="Deschide Coding Chat cu contextul Robotics AI"
+            title={t('robotics.openCodingChat')}
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -458,10 +452,11 @@ function ComponentsBomView({ bom }: { bom: RoboticsComponentBom }) {
 }
 
 function MarkdownSection({ html }: { html: string }) {
+  const { t } = useTranslation();
   if (!html.trim()) {
     return (
       <div style={{ fontSize: 13, color: 'var(--caval-text-muted)', fontStyle: 'italic' }}>
-        Secțiunea nu a fost generată încă.
+        {t('robotics.sectionPending')}
       </div>
     );
   }
@@ -483,6 +478,7 @@ function ExportPlanButton({
   title: string;
   projectPath: string | null;
 }) {
+  const { t } = useTranslation();
   const [msg, setMsg] = useState<string | null>(null);
   const handleExport = async () => {
     const content = roboticsPlanToMarkdown(plan, title);
@@ -507,7 +503,7 @@ function ExportPlanButton({
           fontWeight: 700, fontSize: 12, cursor: 'pointer',
         }}
       >
-        Export plan MD
+        {t('robotics.exportPlanMd')}
       </button>
       {msg && <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 6 }}>{msg}</div>}
     </div>
@@ -525,6 +521,7 @@ function CadActions({
   userPrompt: string;
   bom: RoboticsComponentBom | null;
 }) {
+  const { t } = useTranslation();
   const phase = useEngineeringCadStore((s) => s.phase);
   const cadBusy = useEngineeringCadStore((s) => s.cadBusy);
   const batchBusy = useEngineeringCadStore((s) => s.batchBusy);
@@ -555,7 +552,7 @@ function CadActions({
         }}
       >
         <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--caval-text)' }}>
-          Prompt salvat pentru STL
+          {t('robotics.promptSavedStl')}
         </div>
         {userPrompt.trim()
           ? userPrompt.trim().slice(0, 280) + (userPrompt.trim().length > 280 ? '…' : '')
@@ -630,7 +627,7 @@ function CadActions({
             fontWeight: 600, fontSize: 12, cursor: 'pointer',
           }}
         >
-          Export ZIP toate STL-urile
+          {t('robotics.exportZipAllStl')}
         </button>
       )}
 
@@ -661,7 +658,7 @@ function CadActions({
           background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.18)',
           color: '#EF4444', fontSize: 11.5, lineHeight: 1.45,
         }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Generarea 3D a eșuat</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('robotics.gen3dFailed')}</div>
           {cadError}
           <button
             type="button"
@@ -674,7 +671,7 @@ function CadActions({
               cursor: busy ? 'not-allowed' : 'pointer',
             }}
           >
-            Reîncearcă
+            {t('common.retry')}
           </button>
         </div>
       )}
@@ -712,6 +709,7 @@ function Card({ children }: { children: React.ReactNode }) {
 }
 
 function PartsView({ parts, projectPath }: { parts: PartItem[]; projectPath: string | null }) {
+  const { t } = useTranslation();
   const total = parts.reduce((sum, p) => sum + p.qty * p.unitPrice, 0);
   const currency = parts[0]?.currency ?? 'RON';
   const [exported, setExported] = useState(false);
@@ -767,7 +765,7 @@ function PartsView({ parts, projectPath }: { parts: PartItem[]; projectPath: str
       }}>
         <div>
           <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
-            Total estimat
+            {t('robotics.totalEstimated')}
           </div>
           <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--caval-accent)', fontFamily: "'JetBrains Mono', monospace" }}>
             {total.toFixed(2)} {currency}

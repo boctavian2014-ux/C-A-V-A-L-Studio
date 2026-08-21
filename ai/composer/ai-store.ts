@@ -560,7 +560,7 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createThread(title = 'Chat nou', workspacePath: string | null = null): ChatThread {
+function createThread(title = tActive('ai.panel.newChat'), workspacePath: string | null = null): ChatThread {
   const id = generateId();
   return {
     id,
@@ -2255,7 +2255,7 @@ export const useAIStore = create<AIStore>()(
         useLiveAiEditsStore.getState().clearAll();
         set((s) => {
           const updatedThreads = s.threads.map((t) =>
-            t.id === s.activeThreadId ? { ...t, messages: [], title: 'Chat nou' } : t
+            t.id === s.activeThreadId ? { ...t, messages: [], title: tActive('ai.panel.newChat') } : t
           );
           return { messages: [], threads: updatedThreads };
         });

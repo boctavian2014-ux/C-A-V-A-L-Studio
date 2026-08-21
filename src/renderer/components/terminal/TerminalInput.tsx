@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { TERMINAL_INSERT_COMMAND_EVENT } from "../../ai/terminal-suggest-client";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 interface TerminalInputProps {
   terminalId: string;
@@ -11,6 +12,7 @@ interface TerminalInputProps {
 }
 
 export function TerminalInput({ terminalId, onInput, disabled, aiAvailable }: TerminalInputProps) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -82,8 +84,8 @@ export function TerminalInput({ terminalId, onInput, disabled, aiAvailable }: Te
       {aiAvailable ? (
         <span
           data-testid="terminal-ai-available"
-          title="AI available — Explain (Ctrl+Shift+E) or Suggest fix (Ctrl+Shift+F)"
-          aria-label="Terminal AI available"
+          title={t("terminal.aiAvailableTitle")}
+          aria-label={t("terminal.aiAvailableAria")}
           style={{
             fontSize: 10,
             color: "var(--caval-accent, #00e0ff)",
@@ -102,8 +104,8 @@ export function TerminalInput({ terminalId, onInput, disabled, aiAvailable }: Te
         onKeyDown={handleKeyDown}
         disabled={disabled}
         className="terminal-input"
-        placeholder="Type command…"
-        aria-label="Terminal input"
+        placeholder={t("terminal.typeCommand")}
+        aria-label={t("terminal.inputAria")}
         data-testid="terminal-input"
       />
     </div>

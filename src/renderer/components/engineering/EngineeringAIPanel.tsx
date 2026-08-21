@@ -18,12 +18,14 @@ import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { useRoboticsSessionStore, issueAbortChatStreamOnce } from '../../store/robotics-session-store';
 import { CavaloAiMark } from '../brand/CavaloHorseMark';
 import { bootstrapRoboticsDesktopProject } from './bootstrap-robotics-project';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 // ──────────────────────────────────────────────────────────────
 //  Robotics AI ULTRA — composer (dreapta); răspunsul e în centru
 // ──────────────────────────────────────────────────────────────
 
 export function EngineeringAIPanel() {
+  const { t } = useTranslation();
   useCavalTheme();
   const projectPath = useEditorStore((s) => s.projectPath);
 
@@ -115,8 +117,8 @@ export function EngineeringAIPanel() {
     let cancelled = false;
     void (async () => {
       const [settingsRes, secretsRes] = await Promise.all([
-        window.caval.settingsLoad?.(),
-        window.caval.secretsGet?.(),
+        window.caval?.settingsLoad?.(),
+        window.caval?.secretsGet?.(),
       ]);
       const configured =
         settingsRes?.settings?.['openrouter.configured'] === 'true' ||
@@ -607,7 +609,7 @@ export function EngineeringAIPanel() {
             <div style={{
               fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.45, marginTop: 6,
             }}>
-              Roboți · vehicule · mecanisme · componente · CAD · fabricare
+              {t('robotics.tagline')}
             </div>
           </div>
         </div>
@@ -763,7 +765,7 @@ export function EngineeringAIPanel() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                 </svg>
-                Generează
+                {t('robotics.generate')}
               </>
             )}
           </button>

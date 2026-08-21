@@ -3,9 +3,11 @@ import React, { useCallback, useEffect, useRef } from "react";
 import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
 import { useTerminalExplainStore } from "../../store/terminal-explain-store";
 import { TerminalAiCard } from "./TerminalAiCard";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 /** Ephemeral popover for terminal output explain — does not persist into history.db. */
 export function TerminalExplainPopover(): React.ReactElement | null {
+  const { t } = useTranslation();
   const panel = useTerminalExplainStore((s) => s.panel);
   const clear = useTerminalExplainStore((s) => s.clear);
   const stop = useTerminalExplainStore((s) => s.stop);
@@ -57,7 +59,7 @@ export function TerminalExplainPopover(): React.ReactElement | null {
       <TerminalAiCard
         variant="explain"
         state={panel.phase}
-        title="Explain output"
+        title={t("terminal.explainOutput")}
         subtitle={panel.terminalId}
         onStop={onStop}
         onClose={() => clear()}
@@ -67,7 +69,7 @@ export function TerminalExplainPopover(): React.ReactElement | null {
       >
         {panel.phase === "loading" && (
           <div role="status" style={{ color: "var(--caval-text-muted)" }}>
-            Explaining…
+            {t("terminal.explaining")}
           </div>
         )}
         {panel.phase === "error" && (

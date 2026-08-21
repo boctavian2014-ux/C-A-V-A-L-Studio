@@ -9,6 +9,7 @@ import {
 import { formatCadDualHealthOneLine } from '../engineering/cad-dual-health';
 import { OLLAMA_LOOPBACK_URL, toProviderStatus, type LocalAiStatus } from '../../src/shared/local-ai-contract';
 import { OllamaProviderRow } from './AiProvidersPanel';
+import { useTranslation } from '../i18n/useTranslation';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -108,6 +109,7 @@ type PersistResult = {
 };
 
 export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProps) {
+  const { t } = useTranslation();
   const { apiKeys, setApiKey } = useAIStore();
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [providerDraft, setProviderDraft] = useState<Record<string, string>>({});
@@ -434,7 +436,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
           Ollama URL
         </label>
         <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', marginBottom: 4 }}>
-          Modele locale: qwen2.5-coder:7b, llama3.1:8b, etc.
+          {t('ai.keys.localModelsHint')}
         </div>
         <input
           type="text"
@@ -460,9 +462,9 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         }}
       >
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--caval-text)' }}>Local AI gratuit</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--caval-text)' }}>{t('ai.keys.localAiFree')}</div>
           <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2, lineHeight: 1.45 }}>
-            Instalăm doar runtime-ul local. Modelul se descarcă separat, după confirmare explicită.
+            {t('ai.keys.localAiInstallHint')}
           </div>
         </div>
         <OllamaProviderRow

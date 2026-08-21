@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useEditorStore } from '../../store/editor-store';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 interface QuickOpenItem {
   path: string;
@@ -35,6 +36,7 @@ function fuzzyScore(query: string, text: string): number {
 }
 
 export function QuickOpen({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
   const { fileTree, projectPath, openFile, tabs } = useEditorStore();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -141,7 +143,7 @@ export function QuickOpen({ open, onClose }: { open: boolean; onClose: () => voi
         <div style={{ maxHeight: 'calc(60vh - 48px)', overflowY: 'auto' }}>
           {items.length === 0 && (
             <p style={{ padding: 12, margin: 0, fontSize: 12, color: 'var(--caval-text-muted)' }}>
-              Niciun fișier
+              {t('quickOpen.noFiles')}
             </p>
           )}
           {items.map((item, i) => (

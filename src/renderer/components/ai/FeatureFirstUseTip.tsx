@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 import {
   FEATURE_TIP_COPY,
   hasSeenFeature,
@@ -18,6 +19,7 @@ export function FeatureFirstUseTip({
   active: boolean;
   onDismiss?: () => void;
 }): React.ReactElement | null {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export function FeatureFirstUseTip({
         type="button"
         data-testid={`onboarding-tip-dismiss-${feature}`}
         onClick={dismiss}
-        aria-label="Dismiss tip"
+        aria-label={t("ai.onboarding.dismissTip")}
         style={{
           flexShrink: 0,
           border: "none",

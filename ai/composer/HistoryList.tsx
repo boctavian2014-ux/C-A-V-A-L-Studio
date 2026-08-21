@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 
 import type { ConversationSummary } from "../../src/shared/ai-history-contract";
 import { formatHistoryWhen } from "../../src/shared/ai-history-contract";
+import { useTranslation } from "../i18n/useTranslation";
 
 export function HistoryList({
   conversations,
@@ -20,6 +21,7 @@ export function HistoryList({
   onDelete: (id: string) => void;
   onLoadMore: () => void;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function HistoryList({
   if (conversations.length === 0) {
     return (
       <div style={{ fontSize: 10, color: "var(--caval-text-muted)" }}>
-        No saved conversations yet
+        {t("ai.history.empty")}
       </div>
     );
   }
@@ -48,7 +50,7 @@ export function HistoryList({
       className="history-list"
       data-testid="ai-history-list-items"
       role="list"
-      aria-label="Conversation history"
+      aria-label={t("ai.history.aria")}
     >
       {conversations.map((c) => {
         const selected = activeId === c.id;
@@ -98,8 +100,8 @@ export function HistoryList({
             <button
               type="button"
               data-testid="ai-history-delete"
-              title="Delete conversation"
-              aria-label={`Delete ${c.title}`}
+              title={t("ai.history.delete")}
+              aria-label={t("ai.history.deleteNamed", { title: c.title })}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(c.id);
@@ -132,7 +134,7 @@ export function HistoryList({
       ) : null}
       {loadingMore ? (
         <div style={{ fontSize: 9.5, color: "var(--caval-text-muted)", padding: "2px 0" }}>
-          Loading…
+          {t("ai.history.loading")}
         </div>
       ) : null}
     </div>

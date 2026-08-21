@@ -553,9 +553,9 @@ export function TerminalSessions({
                 cursor: hasRecentError || hasSelection ? 'pointer' : 'not-allowed',
                 opacity: hasRecentError || hasSelection ? 1 : 0.45,
               }}
-              title={`${TERMINAL_AI_PALETTE[1]?.label ?? 'Suggest fix'} (${suggestShortcut ?? 'Ctrl+Shift+F'})`}
+              title={`${TERMINAL_AI_PALETTE[1]?.label ?? t('tasks.suggestFix')} (${suggestShortcut ?? 'Ctrl+Shift+F'})`}
             >
-              Suggest fix
+              {t('tasks.suggestFix')}
             </button>
           </div>
 

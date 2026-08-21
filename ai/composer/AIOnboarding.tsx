@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 import { CavaloAiMark } from "../../src/renderer/components/brand/CavaloHorseMark";
+import { useTranslation } from "../i18n/useTranslation";
 
 export interface OnboardingSuggestion {
   id: string;
@@ -39,6 +40,7 @@ export function AIOnboarding({
 }: {
   onStartChat: (prompt?: string) => void;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const [hint, setHint] = useState<string | null>(null);
 
   return (
@@ -131,7 +133,7 @@ export function AIOnboarding({
         }}
       >
         <summary style={{ cursor: "pointer", color: "var(--caval-text)" }}>
-          What tools does AI have access to?
+          {t("ai.onboarding.toolsSummary")}
         </summary>
         <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.55 }}>
           <li>

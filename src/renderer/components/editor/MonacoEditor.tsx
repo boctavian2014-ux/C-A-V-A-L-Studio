@@ -20,6 +20,7 @@ import {
   useLiveAiEditsStore,
 } from '../../../../ai/composer/live-ai-edits-store';
 import { ensureLiveAiEditStyles } from '../../../../ai/composer/live-ai-edit-styles';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -123,6 +124,7 @@ const EDITOR_OPTIONS: MonacoType.editor.IStandaloneEditorConstructionOptions = {
 // ──────────────────────────────────────────────
 
 export function MonacoEditor() {
+  const { t } = useTranslation();
   const [inlineTipActive, setInlineTipActive] = useState(false);
 
   useEffect(() => {
@@ -661,7 +663,7 @@ export function MonacoEditor() {
           <span style={{
             marginLeft: 6, width: 6, height: 6, borderRadius: '50%',
             background: '#F59E0B', display: 'inline-block',
-          }} title="Modificări nesalvate" />
+          }} title={t('editor.unsavedChanges')} />
         )}
       </div>
 
@@ -687,7 +689,7 @@ export function MonacoEditor() {
             background: '#0D1117', color: '#3B4658', fontFamily: 'JetBrains Mono, monospace',
             fontSize: 12,
           }}>
-            Se încarcă editorul...
+            {t('loading.editor')}
           </div>
         }
       />

@@ -305,7 +305,7 @@ export function ActivityBar({
       <div className="activity-bar-spacer" style={{ flex: 1, minHeight: 8 }} />
 
       <ActivityBarItem
-        title="Web Preview"
+        title={t("preview.webPreview")}
         active={previewPanelOpen && activePreview === "web"}
         status={previewStatus.web}
         statusLabel={statusLabel}
@@ -316,7 +316,7 @@ export function ActivityBar({
       </ActivityBarItem>
 
       <ActivityBarItem
-        title="Mobile Preview"
+        title={t("preview.mobilePreview")}
         active={previewPanelOpen && activePreview === "mobile"}
         status={previewStatus.mobile}
         statusLabel={statusLabel}
@@ -357,7 +357,7 @@ export function ActivityBar({
         </ActivityBarItem>
         <button
           type="button"
-          title="Cont & credite"
+          title={t("activity.accountCredits")}
           onClick={onOpenAccount}
           style={{
             width: ACTIVITY_BTN,
@@ -379,7 +379,7 @@ export function ActivityBar({
         <div
           className="glass-status-dot glow-emerald"
           title="Railway & MCP"
-          aria-label="Status conexiune"
+          aria-label={t("activity.connectionStatus")}
         />
       </div>
     </div>

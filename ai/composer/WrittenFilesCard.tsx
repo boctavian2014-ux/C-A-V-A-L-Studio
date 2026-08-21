@@ -16,6 +16,7 @@ import { useAiHistoryStore } from "../../src/renderer/store/ai-history-store";
 import { usePreviewStore } from "../../src/renderer/store/preview-store";
 import { useLiveAiEdits } from "./use-live-ai-edits";
 import type { LiveAiEdit, LiveAiEditStatus } from "./live-ai-edits-store";
+import { useTranslation } from "../i18n/useTranslation";
 
 function fileExtIcon(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
@@ -48,11 +49,12 @@ export function LiveAiFilesStrip({
   edits: LiveAiEdit[];
   onOpen: (rel: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!edits.length) return null;
   return (
     <div
       role="region"
-      aria-label="AI files live"
+      aria-label={t("ai.files.liveAria")}
       data-testid="live-ai-files-strip"
       style={{
         marginTop: 10,
@@ -150,6 +152,7 @@ export function WrittenFilesCard({
   /** When true (streaming message), also show live AI edit strip. */
   showLive?: boolean;
 }) {
+  const { t } = useTranslation();
   const projectPath = useEditorStore((s) => s.projectPath);
   const openFile = useEditorStore((s) => s.openFile);
   const revertWrittenFile = useAiHistoryStore((s) => s.revertWrittenFile);
@@ -218,7 +221,7 @@ export function WrittenFilesCard({
     return (
       <div
         role="region"
-        aria-label="Proposed file changes"
+        aria-label={t("ai.files.proposedAria")}
         data-testid="proposed-writes-card"
         style={{
           marginTop: 10,
@@ -311,7 +314,7 @@ export function WrittenFilesCard({
               style={btn(false)}
               title="Deletes newly created files (documented limitation — not Monaco undo)"
             >
-              Revert new files
+              {t("ai.files.revertNew")}
             </button>
           )}
         </div>
@@ -340,7 +343,7 @@ export function WrittenFilesCard({
   return (
     <div
       role="region"
-      aria-label="Fișiere create"
+      aria-label={t("ai.files.createdAria")}
       data-testid="written-files-card"
       style={{
         marginTop: 10,
@@ -411,7 +414,7 @@ export function WrittenFilesCard({
                   fontSize: 10,
                   cursor: "pointer",
                 }}
-                title="Restore accepted snapshot"
+                title={t("ai.files.restoreSnapshot")}
               >
                 {revertingId === row.id ? "…" : "Revert"}
               </button>
@@ -426,7 +429,7 @@ export function WrittenFilesCard({
           data-testid="written-files-open-web"
           onClick={() => startPreview("web")}
         >
-          Open Web
+          {t("ai.files.openWeb")}
         </button>
         <button
           type="button"
@@ -434,7 +437,7 @@ export function WrittenFilesCard({
           data-testid="written-files-open-mobile"
           onClick={() => startPreview("mobile")}
         >
-          Open Mobile
+          {t("ai.files.openMobile")}
         </button>
       </div>
       <p style={{ margin: "8px 0 0", fontSize: 11, color: "var(--caval-text-muted)" }}>

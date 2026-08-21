@@ -1,8 +1,10 @@
 import React, { useRef } from 'react';
 import { useAIStore } from './ai-store';
 import { AGENT_MODES, type AgentModeId } from '../modes/agent-modes';
+import { useTranslation } from '../i18n/useTranslation';
 
 export function ChatModeSelect() {
+  const { t } = useTranslation();
   const { agentMode, setAgentMode } = useAIStore();
   const selectRef = useRef<HTMLSelectElement>(null);
   const activeMode = AGENT_MODES.find((m) => m.id === agentMode) ?? AGENT_MODES[0];
@@ -14,7 +16,7 @@ export function ChatModeSelect() {
         value={agentMode}
         onChange={(e) => setAgentMode(e.target.value as AgentModeId)}
         title={activeMode.description}
-        aria-label="Mod agent"
+        aria-label={t('ai.mode.selectAria')}
         style={{
           width: '100%',
           padding: '6px 28px 6px 12px',

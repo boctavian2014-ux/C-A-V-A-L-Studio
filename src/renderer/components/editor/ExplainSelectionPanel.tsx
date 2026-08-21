@@ -2,9 +2,11 @@ import React from "react";
 
 import { useExplainPanelStore } from "../../store/explain-panel-store";
 import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 /** Ephemeral inline panel for selection explain — does not persist into the model. */
 export function ExplainSelectionPanel(): React.ReactElement | null {
+  const { t } = useTranslation();
   const panel = useExplainPanelStore((s) => s.panel);
   const clear = useExplainPanelStore((s) => s.clear);
 
@@ -13,7 +15,7 @@ export function ExplainSelectionPanel(): React.ReactElement | null {
   return (
     <div
       role="dialog"
-      aria-label="AI explain"
+      aria-label={t("editor.explainAria")}
       data-testid="explain-selection-panel"
       style={{
         position: "fixed",
@@ -34,7 +36,7 @@ export function ExplainSelectionPanel(): React.ReactElement | null {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <strong style={{ fontSize: 12 }}>AI Explain</strong>
+        <strong style={{ fontSize: 12 }}>{t("editor.explainTitle")}</strong>
         <span style={{ color: "var(--caval-text-muted, #8b949e)", fontSize: 10 }}>
           {panel.filePath}
         </span>
@@ -56,7 +58,7 @@ export function ExplainSelectionPanel(): React.ReactElement | null {
       </div>
       {panel.phase === "loading" && (
         <div role="status" style={{ color: "var(--caval-text-muted, #8b949e)" }}>
-          Explaining selection…
+          {t("editor.explainingSelection")}
         </div>
       )}
       {panel.phase === "error" && (

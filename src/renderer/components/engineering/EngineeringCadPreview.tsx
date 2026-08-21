@@ -177,7 +177,7 @@ export function EngineeringCadPreview() {
               cursor: 'pointer',
             }}
           >
-            Închide
+            {tActive('common.close')}
           </button>
         </div>
       </div>

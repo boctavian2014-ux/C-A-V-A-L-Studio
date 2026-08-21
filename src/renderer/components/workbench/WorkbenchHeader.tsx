@@ -2,6 +2,7 @@ import React from 'react';
 import { SidebarToggleButton } from './SidebarCloseButton';
 import { CavaloLogo } from '../brand/CavaloHorseMark';
 import { dispatchTerminalNew, dispatchTerminalToggle } from '../../terminal/terminal-events';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 export interface WorkbenchHeaderProps {
   engineeringOpen: boolean;
@@ -16,6 +17,8 @@ export function WorkbenchHeader({
   sidebarOpen,
   onToggleSidebar,
 }: WorkbenchHeaderProps) {
+  const { t } = useTranslation();
+
   return (
     <header
       className="glass-panel"
@@ -49,15 +52,15 @@ export function WorkbenchHeader({
       </div>
 
       <nav
-        aria-label="Workbench toolbar"
+        aria-label={t('workbench.toolbarAria')}
         style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
       >
         <SidebarToggleButton sidebarOpen={sidebarOpen} onClick={onToggleSidebar} />
         <button
           type="button"
           className="glass-panel-interactive"
-          title="Terminal nou (Ctrl+Shift+`)"
-          aria-label="Terminal nou"
+          title={t('workbench.newTerminalTitle')}
+          aria-label={t('terminal.newShort')}
           onClick={() => dispatchTerminalNew()}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -83,8 +86,8 @@ export function WorkbenchHeader({
         <button
           type="button"
           className={engineeringOpen ? 'glow-accent' : 'glass-panel-interactive'}
-          title="Robotics AI ULTRA"
-          aria-label="Robotics AI ULTRA"
+          title={t('workbench.roboticsAiUltra')}
+          aria-label={t('workbench.roboticsAiUltra')}
           aria-pressed={engineeringOpen}
           onClick={onToggleEngineering}
           style={{
@@ -108,7 +111,7 @@ export function WorkbenchHeader({
             <rect x="3" y="8" width="18" height="12" rx="2" />
             <path d="M7 8V5a2 2 0 012-2h6a2 2 0 012 2v3" />
           </svg>
-          Robotics AI
+          {t('workbench.roboticsAi')}
         </button>
       </nav>
     </header>

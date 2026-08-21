@@ -5,6 +5,7 @@ import type {
   CadSectionAxis,
   CadToolMode,
 } from './cad-viewer-tools';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 function ToolbarChip({
   label,
@@ -117,6 +118,7 @@ export function CadViewerToolbar({
   onSaveEdits: () => void;
   onExportPng: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={{
       position: 'absolute',
@@ -166,7 +168,7 @@ export function CadViewerToolbar({
           />
         ))}
 
-        <GroupLabel>Inspecție</GroupLabel>
+        <GroupLabel>{t('robotics.inspection')}</GroupLabel>
         <ToolbarChip
           label="Măsură"
           active={toolMode === 'measure'}
@@ -216,7 +218,7 @@ export function CadViewerToolbar({
           active={dirty}
           disabled={!dirty}
           onClick={onSaveEdits}
-          title="Bake transform în STL"
+          title={t('robotics.bakeTransform')}
         />
 
         <GroupLabel>Export</GroupLabel>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editor-store';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 interface DebugSession {
   id: string;
@@ -8,6 +9,7 @@ interface DebugSession {
 }
 
 export function DebugPanel() {
+  const { t } = useTranslation();
   const { projectPath } = useEditorStore();
   const [sessions, setSessions] = useState<DebugSession[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,7 @@ export function DebugPanel() {
         </button>
       </div>
       {!projectPath && (
-        <p style={{ margin: 0, color: 'var(--caval-text-muted)', fontSize: 11 }}>Deschide un folder pentru debug Node.js</p>
+        <p style={{ margin: 0, color: 'var(--caval-text-muted)', fontSize: 11 }}>{t('debug.openFolder')}</p>
       )}
       {launchConfig && (
         <p style={{ margin: '0 0 6px', color: 'var(--caval-text-muted)', fontSize: 10, fontFamily: 'monospace' }}>

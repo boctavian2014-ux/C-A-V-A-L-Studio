@@ -7,6 +7,7 @@ import {
 } from './chat-activity-types';
 import { CavaloHorseMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { getWaitGlowFilter, getWaitGlowBoxShadow, getCompletionGlowFilter, getCompletionGlowBoxShadow, activePhaseFromSteps } from './arena-wait-copy';
+import { useTranslation } from '../i18n/useTranslation';
 
 interface MultiAgentTimelineProps {
   steps: MultiAgentStepRecord[];
@@ -65,6 +66,7 @@ function ModelBadge({ modelId }: { modelId: string }) {
 }
 
 function ParallelBadge() {
+  const { t } = useTranslation();
   return (
     <span
       style={{
@@ -78,7 +80,7 @@ function ParallelBadge() {
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }}
-      title="Rulează în paralel cu alte etape din același grup"
+      title={t('ai.timeline.parallelTitle')}
     >
       ∥ parallel
     </span>
@@ -107,6 +109,7 @@ function LatencyBadge({ ms }: { ms: number }) {
 }
 
 function AuditBadge({ badge }: { badge: string }) {
+  const { t } = useTranslation();
   return (
     <span
       style={{
@@ -120,7 +123,7 @@ function AuditBadge({ badge }: { badge: string }) {
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }}
-      title="Self-audit scores"
+      title={t('ai.timeline.selfAudit')}
     >
       {badge}
     </span>
@@ -148,6 +151,7 @@ export function MultiAgentTimeline({
   showCompletionHorse = false,
   completionNeedsReview = false,
 }: MultiAgentTimelineProps) {
+  const { t } = useTranslation();
   if (!steps.length && !waitMessage && !showCompletionHorse) return null;
 
   const activeIdx = steps.findIndex((s) => s.status === 'active');
@@ -176,7 +180,7 @@ export function MultiAgentTimeline({
             color: 'var(--caval-text-muted)',
           }}
         >
-          Pipeline · multi-model
+          {t('ai.timeline.pipeline')}
         </div>
       ) : null}
       {hasStepList

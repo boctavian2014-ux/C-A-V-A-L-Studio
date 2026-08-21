@@ -9,8 +9,10 @@ import {
 } from "../../ai/refactor-controller";
 import { useRefactorStore } from "../../store/refactor-store";
 import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 export function RefactorDiffPreview(): React.ReactElement | null {
+  const { t } = useTranslation();
   const session = useRefactorStore((s) => s.session);
   const lastApplied = useRefactorStore((s) => s.lastApplied);
   const setActivePath = useRefactorStore((s) => s.setActivePath);
@@ -117,7 +119,7 @@ export function RefactorDiffPreview(): React.ReactElement | null {
   return (
     <div
       role="dialog"
-      aria-label="AI refactor preview"
+      aria-label={t("editor.refactorAria")}
       data-testid="refactor-diff-preview"
       style={{
         position: "fixed",
@@ -154,7 +156,7 @@ export function RefactorDiffPreview(): React.ReactElement | null {
           }}
         >
           <strong style={{ color: "var(--caval-text, #e6edf3)", fontSize: 13 }}>
-            Refactor with AI — multi-file diff
+            {t("editor.refactorTitle")}
           </strong>
           <span style={{ color: "var(--caval-text-muted, #8b949e)", fontSize: 11 }}>
             {session.kind} · {session.files.length} file
@@ -168,7 +170,7 @@ export function RefactorDiffPreview(): React.ReactElement | null {
               onClick={() => rejectRefactorPreview()}
               style={btnStyle(false)}
             >
-              Reject all
+              {t("editor.rejectAll")}
             </button>
             <button
               type="button"
@@ -179,7 +181,7 @@ export function RefactorDiffPreview(): React.ReactElement | null {
               }}
               style={btnStyle(true)}
             >
-              {session.phase === "applying" ? "Applying…" : "Accept all"}
+              {session.phase === "applying" ? t("editor.applying") : t("editor.acceptAll")}
             </button>
           </div>
         </div>

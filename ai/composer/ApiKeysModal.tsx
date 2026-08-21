@@ -2,12 +2,15 @@ import React, { useEffect } from 'react';
 import { zIndex } from '../../themes/tokens/z-index';
 import { createPortal } from 'react-dom';
 import { ApiKeysForm } from './ApiKeysForm';
+import { useTranslation } from '../i18n/useTranslation';
 
 interface ApiKeysModalProps {
   onClose: () => void;
 }
 
 export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -55,16 +58,16 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
         >
           <div style={{ flex: 1 }}>
             <div id="api-keys-title" style={{ fontSize: 14, fontWeight: 700, color: 'var(--caval-text)' }}>
-              API Keys
+              {t('ai.keys.title')}
             </div>
             <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', marginTop: 2 }}>
-              Cheile tale rămân local, în aplicație
+              {t('ai.keys.stayLocal')}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Închide"
+            aria-label={t('common.close')}
             style={{
               width: 28,
               height: 28,
@@ -107,7 +110,7 @@ export function ApiKeysModal({ onClose }: ApiKeysModalProps) {
               cursor: 'pointer',
             }}
           >
-            Închide
+            {t('common.close')}
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import type { MessageFeedback as MessageFeedbackRow } from "../../src/shared/ai-history-contract";
+import { useTranslation } from "../i18n/useTranslation";
 
 export function MessageFeedbackButtons({
   messageId,
@@ -9,6 +10,7 @@ export function MessageFeedbackButtons({
   messageId: string;
   streamId?: string | null;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const [feedback, setFeedback] = useState<MessageFeedbackRow | null>(null);
   const [showComment, setShowComment] = useState(false);
   const [comment, setComment] = useState("");
@@ -110,8 +112,8 @@ export function MessageFeedbackButtons({
           className={`feedback-btn${feedback?.rating === "positive" ? " active" : ""}`}
           disabled={busy}
           onClick={() => void handleRate("positive")}
-          title="Good response"
-          aria-label="Good response"
+          title={t("ai.feedback.good")}
+          aria-label={t("ai.feedback.good")}
           aria-pressed={feedback?.rating === "positive"}
           style={btnStyle(feedback?.rating === "positive")}
         >
@@ -123,8 +125,8 @@ export function MessageFeedbackButtons({
           className={`feedback-btn${feedback?.rating === "negative" ? " active" : ""}`}
           disabled={busy}
           onClick={() => void handleRate("negative")}
-          title="Bad response"
-          aria-label="Bad response"
+          title={t("ai.feedback.bad")}
+          aria-label={t("ai.feedback.bad")}
           aria-pressed={feedback?.rating === "negative"}
           style={btnStyle(feedback?.rating === "negative")}
         >

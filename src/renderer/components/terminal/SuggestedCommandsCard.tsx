@@ -3,12 +3,14 @@ import React from "react";
 import type { SuggestedCommand } from "../../../shared/ai-terminal-contract";
 import { useTerminalSuggestStore } from "../../store/terminal-suggest-store";
 import { TerminalAiCard } from "./TerminalAiCard";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 export function SuggestedCommandsCard({
   commands: overrideCommands,
 }: {
   commands?: SuggestedCommand[];
 }): React.ReactElement | null {
+  const { t } = useTranslation();
   const panel = useTerminalSuggestStore((s) => s.panel);
   const insertCommand = useTerminalSuggestStore((s) => s.insertCommand);
   const dismissCommand = useTerminalSuggestStore((s) => s.dismissCommand);
@@ -25,7 +27,7 @@ export function SuggestedCommandsCard({
     <TerminalAiCard
       variant="suggest"
       state={phase}
-      title="Suggested commands"
+      title={t("terminal.suggestedCommands")}
       onStop={() => stop()}
       onClose={overrideCommands ? undefined : () => clear()}
       className="suggested-commands-card"
@@ -35,7 +37,7 @@ export function SuggestedCommandsCard({
     >
       {phase === "loading" && (
         <div role="status" style={{ color: "var(--caval-text-muted)" }}>
-          Suggesting commands…
+          {t("terminal.suggesting")}
         </div>
       )}
       {phase === "error" && (

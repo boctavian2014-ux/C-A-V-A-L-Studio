@@ -5,8 +5,10 @@ import type * as MonacoType from "monaco-editor";
 import { acceptQuickFixPreview, rejectQuickFixPreview } from "../../ai/quick-fix-controller";
 import { useQuickFixStore } from "../../store/quick-fix-store";
 import { FeatureFirstUseTip } from "../ai/FeatureFirstUseTip";
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 export function QuickFixDiffPreview(): React.ReactElement | null {
+  const { t } = useTranslation();
   const session = useQuickFixStore((s) => s.session);
   const monaco = useMonaco();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -55,7 +57,7 @@ export function QuickFixDiffPreview(): React.ReactElement | null {
   return (
     <div
       role="dialog"
-      aria-label="AI quick fix preview"
+      aria-label={t("editor.quickFixAria")}
       data-testid="quick-fix-diff-preview"
       style={{
         position: "fixed",
@@ -92,7 +94,7 @@ export function QuickFixDiffPreview(): React.ReactElement | null {
           }}
         >
           <strong style={{ color: "var(--caval-text, #e6edf3)", fontSize: 13 }}>
-            Fix with AI — diff preview
+            {t("editor.quickFixTitle")}
           </strong>
           <span style={{ color: "var(--caval-text-muted, #8b949e)", fontSize: 11 }}>
             {session.filePath}

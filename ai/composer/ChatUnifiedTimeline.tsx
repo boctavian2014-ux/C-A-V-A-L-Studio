@@ -5,6 +5,7 @@ import {
   type MultiAgentStepRecord,
 } from './chat-activity-types';
 import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
+import { useTranslation } from '../i18n/useTranslation';
 
 export interface ChatMessageTimelineSource {
   timelineEvents?: TimelineEvent[];
@@ -100,6 +101,7 @@ export function ChatUnifiedTimeline({
   message: ChatMessageTimelineSource;
   onToggleExpanded?: (expanded: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const rows = useMemo(() => mergeUnifiedTimelineRows(message), [message]);
   const streaming = Boolean(message.isStreaming);
   const timelineDetail = useAiSettingsStore((s) => s.settings.timelineDetail);
@@ -130,7 +132,7 @@ export function ChatUnifiedTimeline({
       role="log"
       aria-live={streaming ? 'polite' : 'off'}
       aria-relevant="additions"
-      aria-label="AI activity"
+      aria-label={t('ai.timeline.activityAria')}
       style={{
         display: 'flex',
         flexDirection: 'column',

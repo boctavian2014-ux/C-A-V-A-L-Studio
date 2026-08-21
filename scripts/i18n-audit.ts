@@ -43,6 +43,11 @@ const ALLOWLIST: RegExp[] = [
   /\bBYOK\b/,
   /\bMCP\b/,
   /\bUIC\b/,
+  /\bLM Studio\b/,
+  /\bROBOTICS AI ENGINE\b/,
+  /\bAPI Ready\b/,
+  /\bAPI running\b/,
+  /^Express pe\b/,
   /\bCtrl[+ ]/,
   /\bCmdOrCtrl\+/,
   /\bShift\+/,
@@ -179,7 +184,7 @@ function main(): void {
   console.log(`i18n audit — scanned ${files.length} UI files`);
   console.log(`findings (after allowlist / heuristics): ${unique.length}`);
   console.log(
-    "Note: Electron native app menu (src/main/electron-main.ts) is out of scope — known gap."
+    "Note: Electron app menu labels live in ai/i18n (menu.*) via src/main/app-menu.ts."
   );
 
   if (unique.length === 0) {
