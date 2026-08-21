@@ -110,7 +110,7 @@ describe("ProblemsPanel", () => {
     const { api } = createProblemsMock();
     const { container } = await renderPanel(api);
     expect(container.querySelector('[data-testid="problems-empty"]')?.textContent).toMatch(
-      /No problems found/i
+      /No problems detected/i
     );
     expect(api.getProblems).toHaveBeenCalledTimes(1);
     expect(api.refresh).not.toHaveBeenCalled();

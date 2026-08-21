@@ -137,7 +137,7 @@ describe("TerminalPanel", () => {
   it("renders empty state without a New Terminal button when inactive", async () => {
     const { api } = createTerminalMock();
     const { container } = await renderSessions(api, false);
-    expect(container.textContent).toContain("No terminals open.");
+    expect(container.textContent).toContain("No terminal");
     expect(container.querySelector('[data-testid="terminal-empty"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="terminal-empty-new"]')).toBeNull();
     expect(container.textContent).not.toContain("New Terminal");

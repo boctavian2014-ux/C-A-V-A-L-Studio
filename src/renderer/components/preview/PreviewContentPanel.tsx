@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type MouseEvent } from "react";
 
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 import type {
   PreviewApi,
   PreviewLogLine,
@@ -8,6 +9,7 @@ import type {
 } from "../../../shared/preview-contract";
 import { idlePreviewState } from "../../../shared/preview-contract";
 import { MAX_PREVIEW_LOG_LINES, takeLast } from "../../lib/panel-limits";
+import { useEditorStore } from "../../store/editor-store";
 import { usePreviewStore } from "../../store/preview-store";
 
 function getPreviewApi(): PreviewApi | null {
@@ -25,12 +27,13 @@ function StatusBadge({
   status: PreviewState["status"];
   testId: string;
 }) {
+  const { t } = useTranslation();
   const labelMap: Record<PreviewState["status"], string> = {
-    "not-configured": "Not configured",
-    stopped: "Stopped",
-    starting: "Starting…",
-    running: "Running",
-    failed: "Failed",
+    "not-configured": t("preview.status.notConfigured"),
+    stopped: t("preview.status.stopped"),
+    starting: t("preview.status.starting"),
+    running: t("preview.status.running"),
+    failed: t("preview.status.failed"),
   };
   return (
     <span className={`status-badge status-badge-${status}`} data-testid={testId}>
@@ -40,6 +43,7 @@ function StatusBadge({
 }
 
 function TargetControls({ target, label }: { target: PreviewTarget; label: string }) {
+  const { t } = useTranslation();
   const [state, setState] = useState<PreviewState | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<PreviewLogLine[]>([]);
@@ -106,8 +110,28 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
 
   const handleStart = useCallback(() => {
     activatePreview(target, null);
-    void getPreviewApi()?.start(target);
-  }, [target, activatePreview]);
+    void getPreviewApi()
+      ?.start(target)
+      .then((next) => {
+        setState(next);
+        setPreviewStatus(target, next.status);
+        if (next.url) activatePreview(target, next.url);
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setState({
+          target,
+          status: "failed",
+          url: null,
+          pid: null,
+          startedAt: null,
+          lastError: message.includes("Open a folder")
+            ? t("preview.openFolder")
+            : message,
+        });
+        setPreviewStatus(target, "failed");
+      });
+  }, [target, activatePreview, setPreviewStatus, t]);
 
   const handleStop = useCallback(() => {
     void getPreviewApi()?.stop(target);
@@ -154,9 +178,9 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
             data-testid={`preview-${target}-start`}
             onClick={handleStart}
             disabled={apiMissing}
-            aria-label={`Open ${label}`}
+            aria-label={t("preview.open", { label })}
           >
-            Open {label}
+            {t("preview.open", { label })}
           </button>
         ) : (
           <>
@@ -166,9 +190,9 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
               data-testid={`preview-${target}-restart`}
               onClick={handleRestart}
               disabled={apiMissing}
-              aria-label={`Restart ${label} preview`}
+              aria-label={t("preview.restartAria", { label })}
             >
-              Restart
+              {t("preview.restart")}
             </button>
             <button
               type="button"
@@ -176,9 +200,9 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
               data-testid={`preview-${target}-stop`}
               onClick={handleStop}
               disabled={apiMissing}
-              aria-label={`Stop ${label} preview`}
+              aria-label={t("preview.stopAria", { label })}
             >
-              Stop
+              {t("preview.stop")}
             </button>
           </>
         )}
@@ -188,9 +212,9 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
           data-testid={`preview-${target}-logs`}
           onClick={() => void handleToggleLogs()}
           disabled={apiMissing}
-          aria-label={`Toggle logs for ${label}`}
+          aria-label={t("preview.logsAria", { label })}
         >
-          Logs
+          {t("preview.logs")}
         </button>
         {(status === "not-configured" || apiMissing) && (
           <button
@@ -200,25 +224,25 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
             onClick={() => void getPreviewApi()?.openConfig()}
             disabled={apiMissing}
           >
-            Configure in caval.jsonc
+            {t("preview.configure")}
           </button>
         )}
       </div>
 
       {apiMissing && (
         <p className="preview-target-error" role="status">
-          Restart CAVAL Studio after webpack finishes so Preview can start.
+          {t("preview.apiMissing")}
         </p>
       )}
 
       {status === "not-configured" && !apiMissing && (
         <p className="preview-target-hint" data-testid={`preview-${target}-not-configured-msg`}>
-          {label} preview is not configured. Open still tries detection, or add preview in caval.jsonc.
+          {t("preview.notConfigured", { label })}
         </p>
       )}
 
       {status === "starting" && (
-        <p className="preview-target-hint">{label} preview is starting…</p>
+        <p className="preview-target-hint">{t("preview.starting", { label })}</p>
       )}
 
       {state?.url && status === "running" && (
@@ -248,7 +272,7 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
           data-testid={`preview-${target}-log-content`}
         >
           {logs.length === 0 ? (
-            <p className="preview-target-logs-empty">No logs yet.</p>
+            <p className="preview-target-logs-empty">{t("preview.noLogs")}</p>
           ) : (
             logs.map((line, index) => (
               <div key={`${line.timestamp}-${index}`} className={`log-line log-line-${line.stream}`}>
@@ -263,21 +287,44 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
 }
 
 function PreviewFrame() {
+  const { t } = useTranslation();
   const activePreview = usePreviewStore((s) => s.activePreview);
   const previewUrl = usePreviewStore((s) => s.previewUrl);
+  const previewStatus = usePreviewStore((s) => s.previewStatus);
+  const projectPath = useEditorStore((s) => s.projectPath);
 
   if (!activePreview) {
     return (
       <div className="preview-empty" data-testid="preview-frame-empty">
-        <p>Select Web or Mobile preview</p>
+        <p>{t("preview.selectTarget")}</p>
+      </div>
+    );
+  }
+
+  const label = activePreview === "web" ? t("preview.web") : t("preview.mobile");
+
+  if (!projectPath?.trim()) {
+    return (
+      <div className="preview-empty" data-testid="preview-frame-no-folder">
+        <p>{t("preview.openFolder")}</p>
+        <p style={{ fontSize: 12, opacity: 0.75, marginTop: 8 }}>
+          {t("preview.openFolderHint")}
+        </p>
       </div>
     );
   }
 
   if (!previewUrl) {
+    const status = previewStatus[activePreview];
     return (
       <div className="preview-empty" data-testid="preview-frame-waiting">
-        <p>Starting {activePreview} preview…</p>
+        <p>
+          {status === "failed"
+            ? t("preview.failedDetail", { label })
+            : status === "not-configured"
+              ? t("preview.notConfiguredShort", { label })
+              : t("preview.starting", { label })}
+        </p>
       </div>
     );
   }
@@ -289,11 +336,11 @@ function PreviewFrame() {
   return (
     <div className={`preview-frame-host preview-${activePreview}`} data-testid="preview-frame-host">
       <div className="preview-toolbar">
-        <span className="preview-type">{activePreview === "web" ? "Web" : "Mobile"}</span>
+        <span className="preview-type">{label}</span>
         <span className="preview-url" title={previewUrl}>
           {previewUrl}
         </span>
-        <button type="button" className="preview-ghost-btn" onClick={refresh} title="Refresh">
+        <button type="button" className="preview-ghost-btn" onClick={refresh} title={t("preview.refresh")}>
           ↻
         </button>
       </div>
@@ -303,7 +350,7 @@ function PreviewFrame() {
           className={
             activePreview === "mobile" ? "preview-frame-mobile" : "preview-frame-web"
           }
-          title={`${activePreview} preview`}
+          title={t("preview.iframeTitle", { label })}
           data-testid="preview-iframe"
         />
       </div>
@@ -316,19 +363,20 @@ function PreviewFrame() {
  * Explorer no longer hosts this UI.
  */
 export function PreviewContentPanel() {
+  const { t } = useTranslation();
   const activePreview = usePreviewStore((s) => s.activePreview);
   const previewPanelOpen = usePreviewStore((s) => s.previewPanelOpen);
   const clearPreview = usePreviewStore((s) => s.clearPreview);
 
   if (!previewPanelOpen || !activePreview) return null;
 
-  const label = activePreview === "web" ? "Web" : "Mobile";
+  const label = activePreview === "web" ? t("preview.web") : t("preview.mobile");
 
   return (
     <div
       className="preview-content-panel"
       role="region"
-      aria-label={`${label} Preview`}
+      aria-label={t("preview.panelAria", { label })}
       data-testid="preview-content-panel"
       style={{
         display: "flex",
@@ -349,13 +397,15 @@ export function PreviewContentPanel() {
           flexShrink: 0,
         }}
       >
-        <strong style={{ fontSize: 12 }}>{label} Preview</strong>
+        <strong style={{ fontSize: 12 }}>
+          {activePreview === "web" ? t("preview.webPreview") : t("preview.mobilePreview")}
+        </strong>
         <button
           type="button"
           className="preview-ghost-btn"
           data-testid="preview-content-close"
           onClick={() => clearPreview()}
-          aria-label="Close preview"
+          aria-label={t("preview.close")}
           style={{
             marginLeft: "auto",
             border: "none",
@@ -378,7 +428,3 @@ export function PreviewContentPanel() {
   );
 }
 
-/** @deprecated Prefer {@link PreviewContentPanel} — kept for legacy test imports during migration. */
-export function PreviewPanel() {
-  return <PreviewContentPanel />;
-}

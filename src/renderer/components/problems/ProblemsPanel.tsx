@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
 import type {
   Problem,
   ProblemSeverity,
@@ -43,6 +44,7 @@ export function ProblemsPanel({
 }: {
   onSendToChat?: (problem: Problem) => void;
 }) {
+  const { t } = useTranslation();
   const projectPath = useEditorStore((s) => s.projectPath);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [summary, setSummary] = useState<ProblemsSummary | null>(null);
@@ -54,7 +56,7 @@ export function ProblemsPanel({
   useEffect(() => {
     const api = getProblemsApi();
     if (!api) {
-      setError("Problems API unavailable");
+      setError(t("problems.apiUnavailable"));
       return;
     }
 
@@ -83,7 +85,7 @@ export function ProblemsPanel({
       unsubscribeProblems();
       unsubscribeSummary();
     };
-  }, []);
+  }, [t]);
 
   const handleRefresh = useCallback(async () => {
     const api = getProblemsApi();
@@ -93,11 +95,11 @@ export function ProblemsPanel({
     try {
       await api.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Diagnostics failed");
+      setError(err instanceof Error ? err.message : t("problems.diagnosticsFailed"));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!projectPath) return;
@@ -158,7 +160,7 @@ export function ProblemsPanel({
   return (
     <div
       role="region"
-      aria-label="Problems"
+      aria-label={t("problems.title")}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -177,20 +179,24 @@ export function ProblemsPanel({
           flexShrink: 0,
         }}
       >
-        <span style={{ fontWeight: 600, color: "var(--caval-text)" }}>Problems</span>
+        <span style={{ fontWeight: 600, color: "var(--caval-text)" }}>{t("problems.title")}</span>
         {summary && (
           <span style={{ color: "var(--caval-text-muted)", fontSize: 10.5 }}>
-            <span style={{ color: "#EF4444" }}>{summary.errors} errors</span>
+            <span style={{ color: "#EF4444" }}>
+              {t("problems.summaryErrors", { count: summary.errors })}
+            </span>
             {" · "}
-            <span style={{ color: "#F59E0B" }}>{summary.warnings} warnings</span>
-            {summary.infos > 0 ? ` · ${summary.infos} info` : ""}
+            <span style={{ color: "#F59E0B" }}>
+              {t("problems.summaryWarnings", { count: summary.warnings })}
+            </span>
+            {summary.infos > 0 ? ` · ${t("problems.summaryInfo", { count: summary.infos })}` : ""}
           </span>
         )}
         <button
           type="button"
           onClick={() => void handleRefresh()}
           disabled={isLoading}
-          aria-label="Refresh problems"
+          aria-label={t("problems.refreshAria")}
           data-testid="problems-refresh"
           style={{
             marginLeft: "auto",
@@ -205,7 +211,7 @@ export function ProblemsPanel({
             fontFamily: "inherit",
           }}
         >
-          {isLoading ? "Refreshing…" : "Refresh"}
+          {isLoading ? t("problems.refreshing") : t("problems.refresh")}
         </button>
       </div>
 
@@ -221,7 +227,7 @@ export function ProblemsPanel({
         <select
           value={filterSeverity}
           onChange={(e) => setFilterSeverity(e.target.value as ProblemSeverity | "all")}
-          aria-label="Filter by severity"
+          aria-label={t("problems.filterSeverityAria")}
           data-testid="problems-filter-severity"
           style={{
             height: 24,
@@ -233,18 +239,18 @@ export function ProblemsPanel({
             fontFamily: "inherit",
           }}
         >
-          <option value="all">All severities</option>
-          <option value="error">Errors</option>
-          <option value="warning">Warnings</option>
-          <option value="info">Info</option>
-          <option value="hint">Hints</option>
+          <option value="all">{t("problems.allSeverities")}</option>
+          <option value="error">{t("problems.errors")}</option>
+          <option value="warning">{t("problems.warnings")}</option>
+          <option value="info">{t("problems.info")}</option>
+          <option value="hint">{t("problems.hints")}</option>
         </select>
         <input
           type="search"
-          placeholder="Filter by file…"
+          placeholder={t("problems.filterFile")}
           value={filterFile}
           onChange={(e) => setFilterFile(e.target.value)}
-          aria-label="Filter by file"
+          aria-label={t("problems.filterFileAria")}
           data-testid="problems-filter-file"
           style={{
             flex: 1,
@@ -336,7 +342,7 @@ export function ProblemsPanel({
                 {onSendToChat && (
                 <button
                   type="button"
-                  title="Trimite în chat"
+                  title={t("problems.sendToChat")}
                   onClick={() => onSendToChat(problem)}
                   style={{
                     flexShrink: 0,
@@ -351,13 +357,13 @@ export function ProblemsPanel({
                     padding: "2px 8px",
                   }}
                 >
-                  Chat
+                  {t("problems.chat")}
                 </button>
                 )}
                 {(problem.severity === "error" || problem.severity === "warning") && (
                 <button
                   type="button"
-                  title="Fix with AI"
+                  title={t("problems.fixWithAi")}
                   data-testid="problem-fix-with-ai"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -378,7 +384,7 @@ export function ProblemsPanel({
                     padding: "2px 8px",
                   }}
                 >
-                  Fix AI
+                  {t("problems.fixAi")}
                 </button>
                 )}
               </div>
@@ -387,7 +393,7 @@ export function ProblemsPanel({
         ))}
         {filteredProblems.length === 0 && (
           <div data-testid="problems-empty" style={{ padding: "8px 14px", color: "var(--caval-text-muted)" }}>
-            <p style={{ margin: "0 0 8px" }}>No problems found.</p>
+            <p style={{ margin: "0 0 8px" }}>{t("problems.empty")}</p>
             <button
               type="button"
               data-testid="problems-run"
@@ -405,7 +411,7 @@ export function ProblemsPanel({
                 fontFamily: "inherit",
               }}
             >
-              Run diagnostics
+              {t("problems.runDiagnostics")}
             </button>
           </div>
         )}

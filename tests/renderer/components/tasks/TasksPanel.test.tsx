@@ -99,7 +99,7 @@ describe("TasksPanel", () => {
     const { api } = createTasksMock();
     const { container } = await renderPanel(api);
     expect(container.querySelector('[data-testid="tasks-empty"]')?.textContent).toMatch(
-      /No tasks found/i
+      /No tasks configured/i
     );
     expect(api.list).toHaveBeenCalledTimes(1);
     expect(api.run).not.toHaveBeenCalled();
@@ -112,7 +112,8 @@ describe("TasksPanel", () => {
       runListeners[0]?.(running("dev"));
     });
     expect(container.textContent).toContain("dev");
-    expect(container.textContent).toContain("running");
+    expect(container.textContent).toMatch(/Running/i);
+    expect(container.querySelector('[data-run-status="running"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="tasks-history"]')).toBeTruthy();
   });
 

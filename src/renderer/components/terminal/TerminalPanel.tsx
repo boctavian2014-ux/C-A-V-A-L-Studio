@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { DebugPanel } from '../debug/DebugPanel';
 import { ProblemsPanel } from '../problems/ProblemsPanel';
 import { TasksPanel } from '../tasks/TasksPanel';
@@ -80,6 +81,7 @@ export function TerminalSessions({
   /** When the bottom TERMINAL tab is selected — used to open a session by default. */
   isPanelActive?: boolean;
 } = {}) {
+  const { t } = useTranslation();
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -163,7 +165,7 @@ export function TerminalSessions({
   const handleCreateTab = useCallback(async () => {
     const api = window.caval?.terminal;
     if (!api?.create) {
-      showWorkbenchToast('Terminal API unavailable');
+      showWorkbenchToast(t('terminal.apiUnavailable'));
       return;
     }
     if (creatingRef.current) return;
@@ -181,7 +183,7 @@ export function TerminalSessions({
         const message =
           typeof raw?.error === 'string' && raw.error.trim()
             ? raw.error
-            : 'Nu s-a putut deschide terminalul. Deschide un folder în workspace.';
+            : t('terminal.openFolderHint');
         showWorkbenchToast(message);
         return;
       }
@@ -194,11 +196,11 @@ export function TerminalSessions({
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(raw.id);
     } catch (err) {
-      showWorkbenchToast(err instanceof Error ? err.message : 'Failed to create terminal');
+      showWorkbenchToast(err instanceof Error ? err.message : t('terminal.createFailed'));
     } finally {
       creatingRef.current = false;
     }
-  }, []);
+  }, [t]);
 
   const ensureTerminal = useCallback(() => {
     if (!hydratedRef.current) return;
@@ -256,7 +258,7 @@ export function TerminalSessions({
 
       if (isTerminalRunning(tab.info)) {
         const confirmed = window.confirm(
-          `Close "${tab.title}"?\n\nThe running process will be terminated.`
+          t('terminal.closeConfirm', { title: tab.title })
         );
         if (!confirmed) return;
       }
@@ -270,7 +272,7 @@ export function TerminalSessions({
         // Session may already be gone; UI is already cleaned up.
       }
     },
-    [removeTabFromUi]
+    [removeTabFromUi, t]
   );
 
   const handleInput = useCallback(
@@ -315,12 +317,12 @@ export function TerminalSessions({
   const runExplainSelection = useCallback(
     (selectedText: string) => {
       if (!activeTabId) {
-        showWorkbenchToast('Niciun terminal activ');
+        showWorkbenchToast(t('terminal.noActive'));
         return;
       }
       const text = selectedText.trim();
       if (!text) {
-        showWorkbenchToast('Selectează output în terminal');
+        showWorkbenchToast(t('terminal.selectOutput'));
         return;
       }
       const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
@@ -332,20 +334,20 @@ export function TerminalSessions({
       });
       setContextMenu(null);
     },
-    [activeTabId, output]
+    [activeTabId, output, t]
   );
 
   const runSuggestFix = useCallback(
     (errorText?: string) => {
       if (!activeTabId) {
-        showWorkbenchToast('Niciun terminal activ');
+        showWorkbenchToast(t('terminal.noActive'));
         return;
       }
       const selected = getSelectionInOutput().trim();
       const lines = (output.get(activeTabId) ?? []).map((l) => l.data);
       const errorOutput = (errorText ?? (selected || lines.slice(-30).join('\n'))).trim();
       if (!errorOutput) {
-        showWorkbenchToast('Nu există output pentru Suggest fix');
+        showWorkbenchToast(t('terminal.noOutputSuggest'));
         return;
       }
       dispatchTerminalAiCommand('suggest-fix', {
@@ -355,7 +357,7 @@ export function TerminalSessions({
       });
       setContextMenu(null);
     },
-    [activeTabId, getSelectionInOutput, output]
+    [activeTabId, getSelectionInOutput, output, t]
   );
 
   const onPaletteCommand = useCallback(
@@ -434,12 +436,12 @@ export function TerminalSessions({
       ref={panelRef}
       className="terminal-panel"
       role="region"
-      aria-label="Terminal"
+      aria-label={t('terminal.title')}
       data-testid="terminal-sessions"
       data-active-terminal-id={activeTabId ?? ''}
       style={{ position: 'relative' }}
     >
-      <div className="terminal-tabs" role="tablist" aria-label="Terminal sessions">
+      <div className="terminal-tabs" role="tablist" aria-label={t('terminal.sessionsAria')}>
         {tabs.map((tab) => {
           const uiStatus = mapTerminalUiStatus(tab.info.status);
           return (
@@ -455,13 +457,13 @@ export function TerminalSessions({
                   setActiveTabId(tab.id);
                 }
               }}
-              aria-label={`Switch to ${tab.title}`}
+              aria-label={t('terminal.switchTo', { title: tab.title })}
               aria-selected={tab.id === activeTabId}
               data-testid={`terminal-tab-${tab.id}`}
             >
               <span
                 className={`terminal-tab-status status-${uiStatus} status-${tab.info.status}`}
-                aria-label={`Status: ${uiStatus}`}
+                aria-label={t('terminal.status', { status: uiStatus })}
                 data-testid={`terminal-tab-status-${tab.id}`}
               />
               <span className="terminal-tab-title">{tab.title}</span>
@@ -486,7 +488,7 @@ export function TerminalSessions({
                     void handleCloseTab(tab.id);
                   }
                 }}
-                aria-label={`Close ${tab.title}`}
+                aria-label={t('terminal.closeTab', { title: tab.title })}
               >
                 ×
               </button>
@@ -498,7 +500,7 @@ export function TerminalSessions({
             type="button"
             className="terminal-tab-add"
             onClick={() => void handleCreateTab()}
-            aria-label="New terminal"
+            aria-label={t('terminal.newShort')}
             data-testid="terminal-tab-add"
           >
             +
@@ -510,11 +512,11 @@ export function TerminalSessions({
           <div className="terminal-toolbar">
             <input
               type="search"
-              placeholder="Search output…"
+              placeholder={t('terminal.searchPlaceholder')}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="terminal-search"
-              aria-label="Search terminal output"
+              aria-label={t('terminal.searchAria')}
               data-testid="terminal-search"
             />
             <button
@@ -608,7 +610,8 @@ export function TerminalSessions({
         </>
       ) : (
         <div className="terminal-empty" data-testid="terminal-empty">
-          <p>No terminals open. Press + to start one.</p>
+          <p>{t('terminal.empty')}</p>
+          <p style={{ margin: '6px 0 0', fontSize: 11, opacity: 0.8 }}>{t('terminal.emptyHint')}</p>
         </div>
       )}
     </div>
@@ -626,6 +629,7 @@ function readStoredTerminalHeight(): number {
 }
 
 export function TerminalPanel() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TerminalPanelTab>('terminal');
   const [height, setHeight] = useState(readStoredTerminalHeight);
   const [isVisible, setIsVisible] = useState(true);
@@ -725,11 +729,11 @@ export function TerminalPanel() {
   }, [height]);
 
   const TABS: { id: TerminalPanelTab; label: string }[] = [
-    { id: 'terminal', label: 'TERMINAL' },
-    { id: 'output', label: 'OUTPUT' },
-    { id: 'problems', label: 'PROBLEME' },
-    { id: 'tasks', label: 'TASKS' },
-    { id: 'debug', label: 'DEBUG' },
+    { id: 'terminal', label: t('terminal.tab') },
+    { id: 'output', label: t('output.tab') },
+    { id: 'problems', label: t('problems.tab') },
+    { id: 'tasks', label: t('tasks.tab') },
+    { id: 'debug', label: t('debug.tab') },
   ];
 
   const activeChannel = outputChannels.find((c) => c.name === activeOutputChannel) ?? outputChannels[0];
@@ -807,17 +811,17 @@ export function TerminalPanel() {
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, padding: '0 8px', alignItems: 'center' }}>
           {activeTab === 'problems' && problems.length > 0 && (
-            <ChatActionBtn title="Trimite toate erorile în chat" onClick={sendAllProblemsToChat}>
+            <ChatActionBtn title={t('problems.sendAllToChat')} onClick={sendAllProblemsToChat}>
               → Chat
             </ChatActionBtn>
           )}
           {activeTab === 'output' && (activeChannel?.lines.length ?? 0) > 0 && (
-            <ChatActionBtn title="Trimite output-ul în chat" onClick={sendOutputToChat}>
+            <ChatActionBtn title={t('output.sendToChat')} onClick={sendOutputToChat}>
               → Chat
             </ChatActionBtn>
           )}
-          <PanelBtn title="Terminal nou" onClick={openTerminalTab}>+</PanelBtn>
-          <PanelBtn title="Minimizează" onClick={() => setIsVisible(false)}>⌄</PanelBtn>
+          <PanelBtn title={t('terminal.newShort')} onClick={openTerminalTab}>+</PanelBtn>
+          <PanelBtn title={t('terminal.minimize')} onClick={() => setIsVisible(false)}>⌄</PanelBtn>
         </div>
       </div>
 
@@ -839,10 +843,12 @@ export function TerminalPanel() {
             color: 'var(--caval-text-muted)', lineHeight: 1.7,
           }}>
             <div style={{ marginBottom: 8, fontSize: 10, color: 'var(--caval-accent)' }}>
-              Channel: {activeChannel?.name ?? 'CAVAL'}
+              {t('output.channel', { name: activeChannel?.name ?? 'CAVAL' })}
             </div>
             {(activeChannel?.lines ?? []).length === 0 ? (
-              <span>Output gol — rulează build sau verify pentru a vedea loguri.</span>
+              <span>
+                {t('output.empty')} — {t('output.emptyHint')}
+              </span>
             ) : (
               activeChannel?.lines.map((line, i) => (
                 <div key={`${i}-${line.slice(0, 24)}`} className="output-line">{line || '\u00a0'}</div>

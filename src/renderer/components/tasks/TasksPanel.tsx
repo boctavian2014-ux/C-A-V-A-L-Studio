@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useTranslation } from "../../../../ai/i18n/useTranslation";
+import type { MessageKey } from "../../../../ai/i18n";
 import type { Task, TaskRun, TasksApi } from "../../../shared/tasks-contract";
 import { MAX_TASK_PANEL_LOG_LINES, takeLast } from "../../lib/panel-limits";
 import { useEditorStore } from "../../store/editor-store";
@@ -16,6 +18,23 @@ const STATUS_COLOR: Record<TaskRun["status"], string> = {
   stopped: "#909090",
 };
 
+function statusLabelKey(status: TaskRun["status"]): MessageKey {
+  switch (status) {
+    case "starting":
+      return "tasks.starting";
+    case "running":
+      return "tasks.running";
+    case "success":
+      return "tasks.completed";
+    case "failed":
+      return "tasks.failed";
+    case "stopped":
+      return "tasks.stopped";
+    default:
+      return "tasks.running";
+  }
+}
+
 function getTasksApi(): TasksApi | undefined {
   const caval = window.caval as { tasks?: TasksApi } | undefined;
   return caval?.tasks;
@@ -26,6 +45,7 @@ function outputChannelName(taskName: string): string {
 }
 
 export function TasksPanel() {
+  const { t } = useTranslation();
   const projectPath = useEditorStore((s) => s.projectPath);
   const appendBlock = useOutputStore((s) => s.appendBlock);
   const setActiveChannel = useOutputStore((s) => s.setActiveChannel);
@@ -40,7 +60,7 @@ export function TasksPanel() {
   useEffect(() => {
     const api = getTasksApi();
     if (!api) {
-      setError("Tasks API unavailable");
+      setError(t("tasks.apiUnavailable"));
       return;
     }
 
@@ -54,7 +74,7 @@ export function TasksPanel() {
       (err: unknown) => {
         if (cancelled) return;
         setTasks([]);
-        setError(err instanceof Error ? err.message : "Could not list tasks");
+        setError(err instanceof Error ? err.message : t("tasks.listFailed"));
       }
     );
     void api.getRuns().then(
@@ -88,7 +108,7 @@ export function TasksPanel() {
       unsubscribeRun();
       unsubscribeOutput();
     };
-  }, [appendBlock, projectPath]);
+  }, [appendBlock, projectPath, t]);
 
   const handleRun = useCallback(async (taskName: string) => {
     const api = getTasksApi();
@@ -99,11 +119,11 @@ export function TasksPanel() {
     try {
       await api.run(taskName);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Task failed to start");
+      setError(err instanceof Error ? err.message : t("tasks.startFailed"));
     } finally {
       setPendingName(null);
     }
-  }, [setActiveChannel]);
+  }, [setActiveChannel, t]);
 
   const handleStop = useCallback(async (runId: string) => {
     const api = getTasksApi();
@@ -112,9 +132,9 @@ export function TasksPanel() {
     try {
       await api.stop(runId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not stop task");
+      setError(err instanceof Error ? err.message : t("tasks.stopFailed"));
     }
-  }, []);
+  }, [t]);
 
   const handleSuggestFix = useCallback(
     (run: TaskRun) => {
@@ -127,9 +147,9 @@ export function TasksPanel() {
         errorOutput,
         userQuery: `Fix failed task ${run.taskName}`,
       });
-      showWorkbenchToast("Suggesting commands for failed task…");
+      showWorkbenchToast(t("tasks.suggesting"));
     },
-    [logLines, suggest]
+    [logLines, suggest, t]
   );
 
   const activeRuns = useMemo(
@@ -141,7 +161,7 @@ export function TasksPanel() {
     <div
       className="tasks-panel"
       role="region"
-      aria-label="Tasks"
+      aria-label={t("tasks.title")}
       data-testid="tasks-panel"
       style={{
         height: "100%",
@@ -162,9 +182,9 @@ export function TasksPanel() {
           flexShrink: 0,
         }}
       >
-        <h3 style={{ margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: 0.4 }}>Tasks</h3>
+        <h3 style={{ margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: 0.4 }}>{t("tasks.title")}</h3>
         <span style={{ color: "var(--caval-text-muted)", fontSize: 10.5 }}>
-          {tasks.length} available
+          {t("tasks.available", { count: tasks.length })}
         </span>
       </div>
 
@@ -177,9 +197,9 @@ export function TasksPanel() {
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {tasks.length === 0 ? (
           <div data-testid="tasks-empty" style={{ padding: "12px 14px", color: "var(--caval-text-muted)" }}>
-            <p style={{ margin: 0 }}>No tasks found.</p>
+            <p style={{ margin: 0 }}>{t("tasks.empty")}</p>
             <p style={{ margin: "6px 0 0", fontSize: 11 }} className="tasks-empty-hint">
-              Add scripts to package.json to see them here.
+              {t("tasks.emptyHint")}
             </p>
           </div>
         ) : (
@@ -227,10 +247,10 @@ export function TasksPanel() {
                         className="btn-ghost"
                         data-testid="task-stop-btn"
                         onClick={() => void handleStop(activeRun.id)}
-                        aria-label={`Stop ${task.name}`}
+                        aria-label={t("tasks.stopAria", { name: task.name })}
                         style={actionButtonStyle(true)}
                       >
-                        Stop
+                        {t("tasks.stop")}
                       </button>
                     ) : (
                       <button
@@ -239,10 +259,10 @@ export function TasksPanel() {
                         data-testid="task-run-btn"
                         onClick={() => void handleRun(task.name)}
                         disabled={isPending}
-                        aria-label={`Run ${task.name}`}
+                        aria-label={t("tasks.runAria", { name: task.name })}
                         style={actionButtonStyle(false)}
                       >
-                        {isPending ? "…" : "Run"}
+                        {isPending ? "…" : t("tasks.runShort")}
                       </button>
                     )}
                   </div>
@@ -255,7 +275,7 @@ export function TasksPanel() {
         {runs.length > 0 && (
           <div className="tasks-history" data-testid="tasks-history" style={{ padding: "10px 14px 6px" }}>
             <h4 style={{ margin: "0 0 6px", fontSize: 10.5, color: "var(--caval-text-muted)" }}>
-              Recent runs
+              {t("tasks.recentRuns")}
             </h4>
             <div className="tasks-runs-list">
               {runs.slice(0, 10).map((run) => (
@@ -276,7 +296,7 @@ export function TasksPanel() {
                   <span className="task-run-name" style={{ color: "var(--caval-text)", minWidth: 0, flex: 1 }}>
                     {run.taskName}
                   </span>
-                  <span className="task-run-status">{run.status}</span>
+                  <span className="task-run-status">{t(statusLabelKey(run.status))}</span>
                   <span className="task-run-time" style={{ color: "var(--caval-text-muted)" }}>
                     {new Date(run.startedAt).toLocaleTimeString()}
                   </span>
@@ -295,7 +315,7 @@ export function TasksPanel() {
                         padding: "2px 6px",
                       }}
                     >
-                      Suggest fix
+                      {t("tasks.suggestFix")}
                     </button>
                   )}
                 </div>
