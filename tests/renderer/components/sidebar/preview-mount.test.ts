@@ -2,27 +2,26 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { PreviewPanel } from "../../../../src/renderer/components/sidebar/PreviewPanel";
+import { PreviewContentPanel } from "../../../../src/renderer/components/preview/PreviewContentPanel";
 
-describe("sidebar preview mount", () => {
-  it("exports PreviewPanel", () => {
-    expect(typeof PreviewPanel).toBe("function");
+describe("sidebar preview mount (rail migration)", () => {
+  it("exports PreviewContentPanel", () => {
+    expect(typeof PreviewContentPanel).toBe("function");
   });
 
-  it("mounts PreviewPanel and does not reference the legacy launcher", () => {
+  it("FileTree no longer mounts PreviewPanel", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "../../../../src/renderer/components/sidebar/FileTree.tsx"),
       "utf8"
     );
-    expect(source).toContain("from './PreviewPanel'");
-    expect(source).toContain("<PreviewPanel");
+    expect(source).not.toContain("from './PreviewPanel'");
+    expect(source).not.toContain("<PreviewPanel");
     expect(source).not.toContain("PreviewLauncherPanel");
-    expect(source).not.toContain("PreviewLauncher");
   });
 
-  it("PreviewPanel imports WEB/MOBILE SIDEBAR icons", () => {
+  it("ActivityBar imports WEB/MOBILE SIDEBAR icons", () => {
     const source = fs.readFileSync(
-      path.join(__dirname, "../../../../src/renderer/components/sidebar/PreviewPanel.tsx"),
+      path.join(__dirname, "../../../../src/renderer/components/sidebar/ActivityBar.tsx"),
       "utf8"
     );
     expect(source).toContain("WEB SIDEBAR.jpg");
