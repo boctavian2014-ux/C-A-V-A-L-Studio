@@ -60,29 +60,43 @@ describe("7e.1 AI onboarding", () => {
     });
   });
 
-  it("renders empty-state suggestions and tools expand", () => {
+  it("renders suggestion grid without intro title/copy; tools stay collapsed", () => {
     const onStartChat = vi.fn();
     const { container } = mount(<AIOnboarding onStartChat={onStartChat} />);
     mounted = { unmount: () => undefined };
     expect(container.querySelector('[data-testid="ai-onboarding"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="ai-onboarding-tools"]')).toBeTruthy();
+    expect(container.textContent).not.toContain("What can AI help with?");
+    expect(container.textContent).not.toContain(
+      "Chat, quick fix, inline Tab, explain, refactor, and preview"
+    );
+    const tools = container.querySelector(
+      '[data-testid="ai-onboarding-tools"]'
+    ) as HTMLDetailsElement | null;
+    expect(tools).toBeTruthy();
+    expect(tools?.hasAttribute("open")).toBe(false);
+    expect(tools?.open).toBe(false);
     for (const s of AI_ONBOARDING_SUGGESTIONS) {
       expect(container.querySelector(`[data-testid="ai-onboarding-suggestion-${s.id}"]`)).toBeTruthy();
     }
   });
 
-  it("clicking a prompt suggestion starts chat with that prompt", () => {
+  it("clicking prompt suggestions starts chat with the associated prompts", () => {
     const onStartChat = vi.fn();
     const { container, unmount } = mount(<AIOnboarding onStartChat={onStartChat} />);
     mounted = { unmount };
-    const fix = container.querySelector(
-      '[data-testid="ai-onboarding-suggestion-fix"]'
-    ) as HTMLButtonElement | null;
-    expect(fix).toBeTruthy();
-    act(() => {
-      fix?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(onStartChat).toHaveBeenCalledWith("Fix the errors in my current file");
+
+    const promptCards = AI_ONBOARDING_SUGGESTIONS.filter((s) => s.prompt);
+    for (const s of promptCards) {
+      onStartChat.mockClear();
+      const card = container.querySelector(
+        `[data-testid="ai-onboarding-suggestion-${s.id}"]`
+      ) as HTMLButtonElement | null;
+      expect(card).toBeTruthy();
+      act(() => {
+        card?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      expect(onStartChat).toHaveBeenCalledWith(s.prompt);
+    }
   });
 
   it("explain suggestion shows hint instead of starting chat", () => {

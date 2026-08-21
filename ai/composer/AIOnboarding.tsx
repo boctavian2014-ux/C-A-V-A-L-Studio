@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 
+import { CavaloAiMark } from "../../src/renderer/components/brand/CavaloHorseMark";
+
 export interface OnboardingSuggestion {
   id: string;
   label: string;
@@ -47,34 +49,21 @@ export function AIOnboarding({
         flex: 1,
         display: "flex",
         flexDirection: "column",
-        justifyContent: "center",
-        padding: "20px 16px",
+        justifyContent: "flex-start",
+        padding: "14% 16px 20px",
         gap: 14,
         color: "var(--caval-text)",
       }}
     >
-      <div>
-        <h3
-          style={{
-            margin: 0,
-            fontSize: 13,
-            fontWeight: 600,
-            letterSpacing: "0.02em",
-          }}
-        >
-          What can AI help with?
-        </h3>
-        <p
-          style={{
-            margin: "6px 0 0",
-            fontSize: 11,
-            color: "var(--caval-text-muted)",
-            lineHeight: 1.45,
-          }}
-        >
-          Chat, quick fix, inline Tab, explain, refactor, and preview — with a
-          safe tool set and an activity timeline you can restore from History.
-        </p>
+      <div
+        aria-hidden
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          opacity: 0.55,
+        }}
+      >
+        <CavaloAiMark size={28} />
       </div>
 
       <div
