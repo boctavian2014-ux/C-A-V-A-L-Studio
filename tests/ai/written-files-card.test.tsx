@@ -3,15 +3,9 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const openFile = vi.fn(async (..._args: unknown[]) => undefined);
-const refreshTree = vi.fn(async (..._args: unknown[]) => undefined);
-const startPreview = vi.fn(async () => undefined);
-
 vi.mock("../../src/renderer/store/editor-store", () => {
   const state = {
-    projectPath: "C:\\proj",
-    openFile: (...args: unknown[]) => openFile(...args),
-    refreshTree: (...args: unknown[]) => refreshTree(...args),
+    refreshTree: vi.fn(async () => undefined),
   };
   const useEditorStore = Object.assign(
     (select?: (s: typeof state) => unknown) => (select ? select(state) : state),
@@ -19,6 +13,10 @@ vi.mock("../../src/renderer/store/editor-store", () => {
   );
   return { useEditorStore };
 });
+
+vi.mock("@monaco-editor/react", () => ({
+  useMonaco: () => null,
+}));
 
 import { WrittenFilesCard } from "../../ai/composer/WrittenFilesCard";
 
@@ -47,13 +45,7 @@ describe("WrittenFilesCard", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     document.body.innerHTML = "";
-    openFile.mockClear();
-    refreshTree.mockClear();
-    startPreview.mockClear();
-    window.caval = {
-      preview: { start: startPreview },
-      fs: { readTree: vi.fn() },
-    } as unknown as Window["caval"];
+    window.caval = { fs: { readTree: vi.fn() } } as unknown as Window["caval"];
   });
 
   afterEach(() => {
@@ -61,44 +53,30 @@ describe("WrittenFilesCard", () => {
     mounted = undefined;
   });
 
-  it("lists every written file instead of truncating", () => {
-    const files = [
-      "api/matching_service.py",
-      "src/fashion_matching/embeddings.py",
-      "src/fashion_matching/matching.py",
-      "src/fashion_matching/scoring.py",
-      "src/fashion_matching/pipeline.py",
-      "src/fashion_matching/types.py",
-      "src/fashion_matching/similarity.py",
-      "src/fashion_matching/output_formatter.py",
-    ];
-    const result = mount(<WrittenFilesCard files={files} />);
+  it("renders nothing without proposed writes", () => {
+    const result = mount(<WrittenFilesCard />);
     mounted = result;
-    expect(result.container.textContent).toContain("✓ 8 fișier(e) create în workspace");
-    expect(result.container.textContent).not.toMatch(/scoring\.py…/);
-    expect(result.container.querySelectorAll('[data-testid="written-file-open"]')).toHaveLength(8);
-    expect(result.container.textContent).toContain("src/fashion_matching/output_formatter.py");
+    expect(result.container.querySelector('[data-testid="written-files-card"]')).toBeNull();
+    expect(result.container.querySelector('[data-testid="proposed-writes-card"]')).toBeNull();
   });
 
-  it("opens the clicked file in the editor", () => {
-    const result = mount(<WrittenFilesCard files={["api/matching_service.py"]} />);
+  it("renders proposed writes with Accept/Reject", () => {
+    const result = mount(
+      <WrittenFilesCard
+        messageId="msg-1"
+        proposedWrites={[
+          {
+            path: "src/App.tsx",
+            content: "export {}\n",
+            previousContent: "",
+            isNew: true,
+          },
+        ]}
+      />
+    );
     mounted = result;
-    act(() => {
-      result.container
-        .querySelector('[data-testid="written-file-open"]')
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(openFile).toHaveBeenCalledWith("C:\\proj\\api\\matching_service.py");
-  });
-
-  it("starts web preview from the completion card", () => {
-    const result = mount(<WrittenFilesCard files={["package.json"]} />);
-    mounted = result;
-    act(() => {
-      result.container
-        .querySelector('[data-testid="written-files-open-web"]')
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(startPreview).toHaveBeenCalledWith("web");
+    expect(result.container.querySelector('[data-testid="proposed-writes-card"]')).toBeTruthy();
+    expect(result.container.querySelector('[data-testid="proposed-writes-accept"]')).toBeTruthy();
+    expect(result.container.querySelector('[data-testid="proposed-writes-reject"]')).toBeTruthy();
   });
 });

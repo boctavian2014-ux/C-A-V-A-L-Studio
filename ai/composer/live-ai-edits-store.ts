@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { ProposedWrite } from "../../src/shared/ai-chat-apply-contract";
 import { normalizeProposedPath } from "../../src/shared/ai-chat-apply-contract";
 
-export type LiveAiEditStatus = "writing" | "done" | "error";
+export type LiveAiEditStatus = "waiting" | "writing" | "done" | "error";
 
 export type LiveAiEditEventType =
   | "ai-edit-start"
@@ -141,13 +141,12 @@ export const useLiveAiEditsStore = create<LiveAiEditsState>((set) => ({
       if (!path) continue;
       edits[path] = {
         path,
-        status: "writing",
+        status: "waiting",
         content: w.content,
         previousContent: w.previousContent ?? "",
         updatedAt: Date.now(),
       };
       order.push(path);
-      emit("ai-edit-start", { path, status: "writing", content: w.content });
     }
     set({ edits, order });
   },

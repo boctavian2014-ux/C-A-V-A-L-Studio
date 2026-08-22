@@ -54,8 +54,9 @@ describe("live-ai-edits-store", () => {
     window.removeEventListener("ai-edit-complete", handler);
   });
 
-  it("setProposed keeps writing status until clearAll", () => {
-    useLiveAiEditsStore.getState().setProposed([
+  it("setProposed queues waiting until beginEdit promotes to writing", () => {
+    const store = useLiveAiEditsStore.getState();
+    store.setProposed([
       {
         path: "a.ts",
         content: "console.log(1);\n",
@@ -64,10 +65,17 @@ describe("live-ai-edits-store", () => {
       },
       { path: "b.ts", content: "x\n", isNew: true },
     ]);
-    const active = selectActiveAiEditPaths(useLiveAiEditsStore.getState());
-    expect(active.has("a.ts")).toBe(true);
-    expect(active.has("b.ts")).toBe(true);
-    useLiveAiEditsStore.getState().clearAll();
+    let list = selectLiveEditsList(useLiveAiEditsStore.getState());
+    expect(list.every((e) => e.status === "waiting")).toBe(true);
+    expect(selectActiveAiEditPaths(useLiveAiEditsStore.getState()).size).toBe(0);
+
+    store.beginEdit("a.ts");
+    list = selectLiveEditsList(useLiveAiEditsStore.getState());
+    expect(list.find((e) => e.path === "a.ts")?.status).toBe("writing");
+    expect(list.find((e) => e.path === "b.ts")?.status).toBe("waiting");
+    expect(selectActiveAiEditPaths(useLiveAiEditsStore.getState()).has("a.ts")).toBe(true);
+
+    store.clearAll();
     expect(selectLiveEditsList(useLiveAiEditsStore.getState())).toHaveLength(0);
   });
 
@@ -84,6 +92,29 @@ describe("live-ai-edits-store", () => {
       false
     );
   });
+
+  it("keeps done edits until clearAll (no premature wipe)", () => {
+    const s = useLiveAiEditsStore.getState();
+    s.beginEdit("src/a.ts");
+    s.progressEdit("src/a.ts", "a");
+    s.completeEdit("src/a.ts");
+    expect(selectLiveEditsList(useLiveAiEditsStore.getState())).toHaveLength(1);
+    expect(selectLiveEditsList(useLiveAiEditsStore.getState())[0]?.status).toBe("done");
+    expect(selectActiveAiEditPaths(useLiveAiEditsStore.getState()).size).toBe(0);
+    expect(selectLiveEditsList(useLiveAiEditsStore.getState())[0]?.path).toBe("src/a.ts");
+    s.clearAll();
+    expect(selectLiveEditsList(useLiveAiEditsStore.getState())).toHaveLength(0);
+  });
+
+  it("beginEdit alone shows writing status before content arrives", () => {
+    useLiveAiEditsStore.getState().beginEdit("src/pending.ts");
+    const list = selectLiveEditsList(useLiveAiEditsStore.getState());
+    expect(list).toHaveLength(1);
+    expect(list[0]?.status).toBe("writing");
+    expect(selectActiveAiEditPaths(useLiveAiEditsStore.getState()).has("src/pending.ts")).toBe(
+      true
+    );
+  });
 });
 
 describe("computeLiveDiffLines", () => {
@@ -97,6 +128,16 @@ describe("computeLiveDiffLines", () => {
     const lines = computeLiveDiffLines("hello\nworld", "hello\nWORLD\nextra");
     expect(lines.find((l) => l.lineNumber === 2)?.kind).toBe("modified");
     expect(lines.find((l) => l.lineNumber === 3)?.kind).toBe("added");
+  });
+});
+
+describe("peekStreamingScaffoldPath", () => {
+  it("returns path from incomplete open fence", async () => {
+    const { peekStreamingScaffoldPath } = await import("../../ai/composer/scaffold-parser");
+    expect(
+      peekStreamingScaffoldPath("```ts:src/App.tsx\n")
+    ).toBe("src/App.tsx");
+    expect(peekStreamingScaffoldPath("hello")).toBeNull();
   });
 });
 
