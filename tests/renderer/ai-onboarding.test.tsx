@@ -3,7 +3,7 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AIOnboarding, AI_ONBOARDING_SUGGESTIONS } from "../../ai/composer/AIOnboarding";
+import { AIOnboarding } from "../../ai/composer/AIOnboarding";
 import { FeatureFirstUseTip } from "../../src/renderer/components/ai/FeatureFirstUseTip";
 import {
   ONBOARDING_SEEN_KEY,
@@ -11,6 +11,17 @@ import {
   markFeatureSeen,
   resetOnboardingSeenForTests,
 } from "../../src/renderer/store/onboarding-store";
+
+vi.mock("../../ai/i18n/useTranslation", () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const table: Record<string, string> = {
+        "ai.onboarding.welcome": "Ask anything or use Quick actions above to get started.",
+      };
+      return table[key] ?? key;
+    },
+  }),
+}));
 
 function mount(ui: ReactElement) {
   const container = document.createElement("div");
@@ -60,59 +71,15 @@ describe("7e.1 AI onboarding", () => {
     });
   });
 
-  it("renders suggestion grid without intro title/copy; tools stay collapsed", () => {
-    const onStartChat = vi.fn();
-    const { container } = mount(<AIOnboarding onStartChat={onStartChat} />);
+  it("renders short welcome without suggestion grid or tools info", () => {
+    const { container } = mount(<AIOnboarding />);
     mounted = { unmount: () => undefined };
     expect(container.querySelector('[data-testid="ai-onboarding"]')).toBeTruthy();
-    expect(container.textContent).not.toContain("What can AI help with?");
-    expect(container.textContent).not.toContain(
-      "Chat, quick fix, inline Tab, explain, refactor, and preview"
+    expect(container.querySelector('[data-testid="ai-onboarding-welcome"]')?.textContent).toMatch(
+      /Quick actions/i
     );
-    const tools = container.querySelector(
-      '[data-testid="ai-onboarding-tools"]'
-    ) as HTMLDetailsElement | null;
-    expect(tools).toBeTruthy();
-    expect(tools?.hasAttribute("open")).toBe(false);
-    expect(tools?.open).toBe(false);
-    for (const s of AI_ONBOARDING_SUGGESTIONS) {
-      expect(container.querySelector(`[data-testid="ai-onboarding-suggestion-${s.id}"]`)).toBeTruthy();
-    }
-  });
-
-  it("clicking prompt suggestions starts chat with the associated prompts", () => {
-    const onStartChat = vi.fn();
-    const { container, unmount } = mount(<AIOnboarding onStartChat={onStartChat} />);
-    mounted = { unmount };
-
-    const promptCards = AI_ONBOARDING_SUGGESTIONS.filter((s) => s.prompt);
-    for (const s of promptCards) {
-      onStartChat.mockClear();
-      const card = container.querySelector(
-        `[data-testid="ai-onboarding-suggestion-${s.id}"]`
-      ) as HTMLButtonElement | null;
-      expect(card).toBeTruthy();
-      act(() => {
-        card?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      });
-      expect(onStartChat).toHaveBeenCalledWith(s.prompt);
-    }
-  });
-
-  it("explain suggestion shows hint instead of starting chat", () => {
-    const onStartChat = vi.fn();
-    const { container, unmount } = mount(<AIOnboarding onStartChat={onStartChat} />);
-    mounted = { unmount };
-    const explain = container.querySelector(
-      '[data-testid="ai-onboarding-suggestion-explain"]'
-    ) as HTMLButtonElement | null;
-    act(() => {
-      explain?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(onStartChat).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="ai-onboarding-hint"]')?.textContent).toMatch(
-      /Explain/i
-    );
+    expect(container.querySelector('[data-testid="ai-onboarding-tools"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ai-onboarding-suggestion-fix"]')).toBeNull();
   });
 
   it("feature tip appears once then stays dismissed", () => {

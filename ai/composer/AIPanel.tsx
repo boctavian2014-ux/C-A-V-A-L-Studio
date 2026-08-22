@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAIStore, getModelDisplayLabel, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
-import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
@@ -27,6 +26,7 @@ import { WrittenFilesCard } from './WrittenFilesCard';
 import { LiveAiFileCards, writtenFilesToEdits } from './LiveAiFileCards';
 import { AiMessageDetails } from './AiMessageDetails';
 import { AIOnboarding } from './AIOnboarding';
+import { AiPanelToolbar } from './AiPanelToolbar';
 import { MessageFeedbackButtons } from './MessageFeedback';
 import { AiSettingsPanel } from './AiSettingsPanel';
 import { HistoryList } from './HistoryList';
@@ -770,9 +770,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
     agentMode, apiKeys,
     modeSwitchNotice, clearModeSwitchNotice,
-    verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
-    includeMode, setIncludeMode,
-    ideContextMode, setIdeContextMode,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
@@ -780,17 +777,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const isAgentic = isAgenticPipelineMode(agentMode);
   const inputPlaceholder = isStreaming
     ? t('ai.panel.placeholder.stop')
-    : isAgentic
-    ? t('ai.panel.placeholder.agentic')
-    : agentMode === 'plan'
-      ? t('ai.panel.placeholder.plan')
-      : agentMode === 'code'
-        ? t('ai.panel.placeholder.code')
-        : agentMode === 'debug'
-          ? t('ai.panel.placeholder.debug')
-          : agentMode === 'ask'
-            ? t('ai.panel.placeholder.ask')
-            : `${modeDef.label} — ${modeDef.description.slice(0, 60)}…`;
+    : t('chat.inputPlaceholder');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState('');
@@ -856,7 +843,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prepareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectPath = useEditorStore((s) => s.projectPath);
-  const editorSelection = useEditorStore((s) => s.editorSelection);
   /** Paths only — do not subscribe to tab `content` (live AI edits would re-render the whole chat). */
   const openFilePathsKey = useEditorStore((s) => s.tabs.map((t) => t.path).join('\0'));
   const activeTabPath = useEditorStore((s) => {
@@ -1067,9 +1053,10 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       {/* ── Header ─────────────────────────── */}
       <div style={{
         padding: `8px ${PANEL_PAD_X}px`, borderBottom: `1px solid ${theme.colors.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', flexDirection: 'column', gap: 6,
         flexShrink: 0,
       }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <CavaloAiMark size={22} />
           <div>
@@ -1138,6 +1125,13 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           </button>
         )}
         </div>
+        </div>
+        <AiPanelToolbar
+          isStreaming={isStreaming}
+          onStartChat={(prompt) => {
+            if (prompt.trim()) void sendMessage(prompt.trim());
+          }}
+        />
       </div>
 
       {showAiSettings ? (
@@ -1291,11 +1285,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         overscrollBehavior: 'contain',
       }}>
         {messages.length === 0 ? (
-          <AIOnboarding
-            onStartChat={(prompt) => {
-              if (prompt?.trim()) void sendMessage(prompt.trim());
-            }}
-          />
+          <AIOnboarding />
         ) : (
           <>
             {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
@@ -1312,86 +1302,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         flexShrink: 0,
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        <ChatModeSelect />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={() =>
-              setIdeContextMode(ideContextMode === 'disabled' ? 'enabled' : 'disabled')
-            }
-            title={
-              ideContextMode === 'disabled'
-                ? 'Activează context IDE (fișier, problems, git, output) pentru acest chat'
-                : 'Dezactivează context IDE pentru acest chat'
-            }
-            style={{
-              fontSize: 10,
-              padding: '3px 8px',
-              borderRadius: 999,
-              border: `1px solid ${ideContextMode !== 'disabled' ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
-              background:
-                ideContextMode !== 'disabled' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-              color: ideContextMode !== 'disabled' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-              cursor: 'pointer',
-            }}
-          >
-            {ideContextMode !== 'disabled' ? '◉' : '○'} IDE context
-          </button>
-          {editorSelection?.text && (
-            <button
-              type="button"
-              onClick={() => setIncludeMode(includeMode === 'selection' ? 'project' : 'selection')}
-              title={includeMode === 'selection' ? 'Context: doar selecția' : 'Include selecția în context'}
-              style={{
-                fontSize: 10,
-                padding: '3px 8px',
-                borderRadius: 999,
-                border: `1px solid ${includeMode === 'selection' ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
-                background: includeMode === 'selection' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-                color: includeMode === 'selection' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-                cursor: 'pointer',
-              }}
-            >
-              {includeMode === 'selection' ? '◉' : '○'} Selecție ({editorSelection.endLine - editorSelection.startLine + 1}L)
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void runWorkspaceVerifyAndReport()}
-            disabled={verifyInFlight !== 'none' || !projectPath || isStreaming}
-            title={projectPath ? 'Rulează npm test / verify workspace' : 'Deschide un folder de proiect'}
-            style={{
-              fontSize: 10.5,
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--caval-border)',
-              background: verifyInFlight === 'tests' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-              color: verifyInFlight === 'tests' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-              cursor: verifyInFlight !== 'none' || !projectPath || isStreaming ? 'default' : 'pointer',
-              opacity: verifyInFlight !== 'none' || !projectPath || isStreaming ? 0.55 : 1,
-            }}
-          >
-            {verifyInFlight === 'tests' ? '⏳ Run tests…' : '▶ Run tests'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void runBuildAndReport()}
-            disabled={verifyInFlight !== 'none' || !projectPath || isStreaming}
-            title={projectPath ? 'Rulează npm run build' : 'Deschide un folder de proiect'}
-            style={{
-              fontSize: 10.5,
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--caval-border)',
-              background: verifyInFlight === 'build' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-              color: verifyInFlight === 'build' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-              cursor: verifyInFlight !== 'none' || !projectPath || isStreaming ? 'default' : 'pointer',
-              opacity: verifyInFlight !== 'none' || !projectPath || isStreaming ? 0.55 : 1,
-            }}
-          >
-            {verifyInFlight === 'build' ? '⏳ Run build…' : '▶ Run build'}
-          </button>
-        </div>
         {modeSwitchNotice && !isAgentic && (
           <div
             style={{

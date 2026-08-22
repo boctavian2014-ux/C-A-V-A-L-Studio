@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 
 import { CavaloAiMark } from "../../src/renderer/components/brand/CavaloHorseMark";
 import { useTranslation } from "../i18n/useTranslation";
@@ -11,7 +11,8 @@ export interface OnboardingSuggestion {
   hint?: string;
 }
 
-const SUGGESTIONS: OnboardingSuggestion[] = [
+/** Quick-action definitions — consumed by AiPanelToolbar dropdown. */
+export const AI_ONBOARDING_SUGGESTIONS: OnboardingSuggestion[] = [
   {
     id: "fix",
     label: "Fix a bug",
@@ -35,13 +36,8 @@ const SUGGESTIONS: OnboardingSuggestion[] = [
   },
 ];
 
-export function AIOnboarding({
-  onStartChat,
-}: {
-  onStartChat: (prompt?: string) => void;
-}): React.ReactElement {
+export function AIOnboarding(): React.ReactElement {
   const { t } = useTranslation();
-  const [hint, setHint] = useState<string | null>(null);
 
   return (
     <div
@@ -51,111 +47,29 @@ export function AIOnboarding({
         flex: 1,
         display: "flex",
         flexDirection: "column",
-        justifyContent: "flex-start",
-        padding: "14% 16px 20px",
-        gap: 14,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "20% 24px 24px",
+        gap: 12,
         color: "var(--caval-text)",
+        textAlign: "center",
       }}
     >
-      <div
-        aria-hidden
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          opacity: 0.55,
-        }}
-      >
-        <CavaloAiMark size={28} />
+      <div aria-hidden style={{ opacity: 0.55 }}>
+        <CavaloAiMark size={32} />
       </div>
-
-      <div
-        className="ai-onboarding-grid"
+      <p
+        data-testid="ai-onboarding-welcome"
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 8,
-        }}
-      >
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className="ai-suggestion-card"
-            data-testid={`ai-onboarding-suggestion-${s.id}`}
-            onClick={() => {
-              if (s.prompt) {
-                setHint(null);
-                onStartChat(s.prompt);
-                return;
-              }
-              setHint(s.hint ?? "Use Explain from the editor selection.");
-            }}
-            style={{
-              textAlign: "left",
-              padding: "10px 12px",
-              borderRadius: 6,
-              border: "1px solid var(--caval-border)",
-              background: "var(--caval-surface-raised)",
-              color: "var(--caval-text)",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: 500,
-            }}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {hint && (
-        <p
-          role="status"
-          data-testid="ai-onboarding-hint"
-          style={{
-            margin: 0,
-            fontSize: 11,
-            color: "var(--caval-accent)",
-            lineHeight: 1.4,
-          }}
-        >
-          {hint}
-        </p>
-      )}
-
-      <details
-        className="ai-tools-info"
-        data-testid="ai-onboarding-tools"
-        style={{
-          fontSize: 11,
+          margin: 0,
+          fontSize: 13,
+          lineHeight: 1.5,
           color: "var(--caval-text-muted)",
-          borderTop: "1px solid var(--caval-border)",
-          paddingTop: 10,
+          maxWidth: 260,
         }}
       >
-        <summary style={{ cursor: "pointer", color: "var(--caval-text)" }}>
-          {t("ai.onboarding.toolsSummary")}
-        </summary>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.55 }}>
-          <li>
-            <code>get_problems</code> — reads diagnostics, no changes
-          </li>
-          <li>
-            <code>git_status</code> — reads repo state, no commits
-          </li>
-          <li>
-            <code>run_task</code> — runs scripts from package.json only
-          </li>
-          <li>
-            <code>open_preview</code> — opens web/mobile preview
-          </li>
-        </ul>
-        <p style={{ margin: "8px 0 0", lineHeight: 1.45 }}>
-          No free terminal access. No commits without your explicit action.
-          File edits always go through diff preview and Accept.
-        </p>
-      </details>
+        {t("ai.onboarding.welcome")}
+      </p>
     </div>
   );
 }
-
-export { SUGGESTIONS as AI_ONBOARDING_SUGGESTIONS };

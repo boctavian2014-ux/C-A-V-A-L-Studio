@@ -487,14 +487,22 @@ export const ro = {
   "ai.panel.accept": "Acceptă",
   "ai.panel.reject": "Respinge",
   "ai.panel.placeholder.stop": "Scrie stop / oprește pentru a opri (contextul rămâne în chat)",
-  "ai.panel.placeholder.agentic":
-    "Descrie proiectul — Agentic livrează end-to-end (Enter = trimite)",
-  "ai.panel.placeholder.plan":
-    "Planificare enterprise — arhitectură, roadmap, KPIs (Enter = trimite)",
-  "ai.panel.placeholder.code":
-    "Implementare cod — descrie ce să construiești (Enter = trimite)",
-  "ai.panel.placeholder.debug": "Lipește eroarea sau codul de analizat (Enter = trimite)",
-  "ai.panel.placeholder.ask": "Întrebare sau explicație (Enter = trimite)",
+
+  "chat.inputPlaceholder": "Scrie un mesaj…",
+
+  "ai.toolbar.mode": "Mod agent",
+  "ai.toolbar.ideContext": "Context IDE — fișier, probleme, git, output",
+  "ai.toolbar.selectionContext": "Include selecția din editor în context",
+  "ai.toolbar.runTests": "Rulează teste",
+  "ai.toolbar.runBuild": "Rulează build",
+  "ai.toolbar.quickActions": "Acțiuni rapide",
+  "ai.toolbar.fixBug": "Repară o eroare",
+  "ai.toolbar.explainCode": "Explică cod",
+  "ai.toolbar.refactor": "Refactor",
+  "ai.toolbar.previewApp": "Previzualizează aplicația",
+  "ai.toolbar.toolsInfo": "La ce unelte are acces AI-ul?",
+
+  "ai.onboarding.welcome": "Întreabă orice sau folosește Acțiuni rapide de sus pentru a începe.",
 
   "ai.providers.title": "Furnizori AI",
   "ai.providers.loading": "Se încarcă furnizorii…",
@@ -749,10 +757,7 @@ export const ro = {
   "ai.timeline.pipeline": "Pipeline · multi-model",
   "ai.timeline.activityAria": "Activitate AI",
 
-  "ai.onboarding.toolsSummary": "La ce unelte are acces AI-ul?",
   "ai.onboarding.dismissTip": "Închide sfatul",
-
-  "ai.mode.selectAria": "Mod agent",
 
   "mcp.startTrustedTitle": "Pornește doar serverele LOCAL_SAFE și deja de încredere",
   "mcp.configureIn": "Configurează în",

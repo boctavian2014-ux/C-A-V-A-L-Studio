@@ -486,11 +486,22 @@ export const en = {
   "ai.panel.accept": "Accept",
   "ai.panel.reject": "Reject",
   "ai.panel.placeholder.stop": "Type stop to cancel (context stays in chat)",
-  "ai.panel.placeholder.agentic": "Describe the project — Agentic delivers end-to-end (Enter = send)",
-  "ai.panel.placeholder.plan": "Enterprise planning — architecture, roadmap, KPIs (Enter = send)",
-  "ai.panel.placeholder.code": "Code implementation — describe what to build (Enter = send)",
-  "ai.panel.placeholder.debug": "Paste the error or code to analyze (Enter = send)",
-  "ai.panel.placeholder.ask": "Question or explanation (Enter = send)",
+
+  "chat.inputPlaceholder": "Message AI…",
+
+  "ai.toolbar.mode": "Agent mode",
+  "ai.toolbar.ideContext": "IDE context — file, problems, git, output",
+  "ai.toolbar.selectionContext": "Include editor selection in context",
+  "ai.toolbar.runTests": "Run tests",
+  "ai.toolbar.runBuild": "Run build",
+  "ai.toolbar.quickActions": "Quick actions",
+  "ai.toolbar.fixBug": "Fix a bug",
+  "ai.toolbar.explainCode": "Explain code",
+  "ai.toolbar.refactor": "Refactor",
+  "ai.toolbar.previewApp": "Preview my app",
+  "ai.toolbar.toolsInfo": "What tools does AI have access to?",
+
+  "ai.onboarding.welcome": "Ask anything or use Quick actions above to get started.",
 
   "ai.providers.title": "AI Providers",
   "ai.providers.loading": "Loading providers…",
@@ -746,10 +757,7 @@ export const en = {
   "ai.timeline.pipeline": "Pipeline · multi-model",
   "ai.timeline.activityAria": "AI activity",
 
-  "ai.onboarding.toolsSummary": "What tools does AI have access to?",
   "ai.onboarding.dismissTip": "Dismiss tip",
-
-  "ai.mode.selectAria": "Agent mode",
 
   "mcp.startTrustedTitle": "Start LOCAL_SAFE and already-trusted servers only",
   "mcp.configureIn": "Configure in",
