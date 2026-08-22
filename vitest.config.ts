@@ -123,8 +123,8 @@ export default defineConfig({
     testTimeout: 15_000,
     // Match testTimeout: first vi.resetModules()+handler import is cold, not hung.
     hookTimeout: 15_000,
-    // DIAGNOSTIC for #16 (do not merge): serial file execution to bisect
-    // Tinypool ERR_IPC_CHANNEL_CLOSED (pool forks alone did not fix).
-    fileParallelism: false,
+    // DIAGNOSTIC for #16 (do not merge): threads pool avoids ProcessWorker IPC
+    // (forks + fileParallelism=false both still hit ERR_IPC_CHANNEL_CLOSED).
+    pool: "threads",
   },
 });
