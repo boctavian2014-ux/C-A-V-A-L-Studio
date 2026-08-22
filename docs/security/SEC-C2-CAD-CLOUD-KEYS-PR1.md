@@ -1,6 +1,6 @@
 # SEC-C2 PR1 — CAD identity, provider profiles, legacy flag
 
-**Status:** **BACKEND FINALIZAT** (PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3) merged). Ticket [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) remains **Deschis / Mitigat** until PR2 desktop, E2E without keys in body, and legacy flag off without regression. Desktop `attachMainCadSecrets` is unchanged.
+**Status:** **BACKEND FINALIZAT** (PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3)). Ticket remains **Deschis / Mitigat**. Observation window: [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md). Desktop `attachMainCadSecrets` is unchanged.
 
 ## API contract
 
@@ -38,7 +38,7 @@ Public profile fields: `id`, `provider`, `capabilities`, `status`, `createdAt`, 
 
 `cadLog` writes to the CAD process stdout/stderr only (Railway logs). There is no Datadog/Sentry/PostHog hook on this path. `accountId` in those lines is internal operations identity, not an external analytics event. Payload bodies and secrets are not logged.
 
-Watch `requestClass` / `request_class` = `profile` vs `legacy` **after** a client can emit profile traffic. Until PR2, desktop still uses `attachMainCadSecrets`, so logs will normally show **only legacy**. Do not treat missing profile traffic as a backend defect.
+Daily observation query: `"requestClass":"legacy"` vs `"requestClass":"profile"`. Calendar start: **2026-08-13**. **Day 1/7 has not started** (`legacy=0`; availability-only check). Cadence: **daily**. Minimum **7 days** of real legacy traffic without incident (clock starts on Day 1). `profile=0` is expected until PR2. This window verifies backend infrastructure safety and availability, not profile adoption. Any secret pattern in CAD logs is a security incident, requires RCA, and blocks PR2. Six target-env confirmations are a **binary AND gate**, not suggestions.
 
 ## Encryption key rotation
 

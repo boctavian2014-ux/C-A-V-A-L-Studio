@@ -13,6 +13,10 @@ COPY engineering/cad-server ./engineering/cad-server
 # Shared toy OpenSCAD templates (imported by scad-prompt / job-processor)
 COPY ai/engineering/toy-vehicle-scad.ts ./ai/engineering/toy-vehicle-scad.ts
 COPY ai/engineering/toy-helicopter-scad.ts ./ai/engineering/toy-helicopter-scad.ts
+# Boot import chain outside cad-server (no further local imports beyond this set).
+COPY src/shared/command-output-redaction.ts ./src/shared/command-output-redaction.ts
+COPY src/main/subprocess-env.ts src/main/path-security.ts ./src/main/
+COPY ai/tools/workspace-execute-lock.ts ./ai/tools/workspace-execute-lock.ts
 # Supabase admin client only
 COPY billing/supabase/client.ts ./billing/supabase/client.ts
 

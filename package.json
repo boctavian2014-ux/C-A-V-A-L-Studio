@@ -46,6 +46,7 @@
     "marketplace:serve": "tsx marketplace/server/standalone.ts",
     "billing:serve": "tsx billing/standalone.ts",
     "cad:serve": "tsx engineering/cad-server/standalone.ts",
+    "c2:observe": "node scripts/check-c2-railway-observation.mjs",
     "docs": "node scripts/print-roadmap.js"
   },
   "keywords": [
@@ -89,6 +90,7 @@
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
     "eslint": "^10.5.0",
+    "expo": "^55.0.28",
     "jsdom": "^29.1.1",
     "monaco-editor-webpack-plugin": "^7.1.1",
     "png-to-ico": "^2.1.8",

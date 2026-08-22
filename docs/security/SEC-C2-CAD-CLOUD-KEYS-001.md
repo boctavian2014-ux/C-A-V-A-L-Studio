@@ -4,10 +4,10 @@
 |-------|--------|
 | **ID** | SEC-C2-CAD-CLOUD-KEYS-001 |
 | **Severitate** | **Medie** |
-| **Status** | **Deschis / Mitigat** — PR1 ([#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3)) este **BACKEND FINALIZAT**, nu Remediat. Desktop încă trimite chei (`attachMainCadSecrets`). |
+| **Status** | **Deschis / Mitigat** — PR1 ([#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3)) **BACKEND FINALIZAT**. Fereastră de observație [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md) pornită 2026-08-13. Desktop încă trimite chei (`attachMainCadSecrets`). Nu Remediat. |
 | **Owner** | CAD / platform |
-| **Sprint** | PR1 merged on `main`; PR2 desktop după observație telemetry, nu imediat |
-| **Related** | Lot C2 renderer isolation (done); Lot C5.6 analysis; [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md) (CI cloud separat) |
+| **Sprint** | Disponibilitate boot rezolvată (deploy `284fc574`). Ziua 1/7 C2 **nu a început** (`legacy=0`). PR2 blocat |
+| **Related** | Lot C2 renderer isolation (done); [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md) **Remediat** |
 
 ## Context
 
@@ -15,9 +15,16 @@ After C2, the renderer no longer receives/sends API keys. `cad-handlers.ts` stil
 
 ## PR1 (backend) — BACKEND FINALIZAT
 
-Merged: [PR #3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3). Local gates (2026-08-12): typecheck, lint, **1025 passed / 2 skipped / 226 files**, build, `git diff --check`. Cloud GitHub Actions `test` remains red on a **pre-existing** `expo/tsconfig.base` miss — see [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md); local green does not replace that gate.
+Merged: [PR #3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3).
 
-Until a desktop client emits `providerProfileId`, CAD logs will show `request_class=legacy` only. That is expected, not a backend defect.
+## Observation window (start: 2026-08-13)
+
+See [SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md](./SEC-C2-CAD-CLOUD-KEYS-OBSERVATION.md).
+
+- Verifică siguranța și disponibilitatea infrastructurii backend, **nu** adopția profilelor. Script zilnic: `scripts/check-c2-railway-observation.mjs` (raport agregat, fără raw logs).
+- `profile = 0` este așteptat până la PR2: desktop-ul folosește în continuare `attachMainCadSecrets`.
+- Orice pattern de secret în CAD logs este incident de securitate și **blochează PR2**.
+- PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) doar după fereastra de **7 zile** fără incident **și** cele șase confirmări **binare** din mediul țintă real.
 
 - JWT Bearer (`sub`) is the only accountId for provider profiles.
 - `x-caval-user-id` never beats JWT and cannot access profiles.
@@ -30,7 +37,7 @@ See [SEC-C2-CAD-CLOUD-KEYS-PR1.md](./SEC-C2-CAD-CLOUD-KEYS-PR1.md).
 
 ## Lot C5.6 decision
 
-**Do not remove BYOK/API keys from the desktop body yet** — PR2 after telemetry observation (`request_class=profile` vs `legacy`). Absence of profile traffic before PR2 is expected.
+**Do not remove BYOK/API keys from the desktop body yet** — PR2 after the observation window, as a separate desktop migration.
 
 ### Contract for true remediation (PR2 + E2E)
 
@@ -43,8 +50,10 @@ See [SEC-C2-CAD-CLOUD-KEYS-PR1.md](./SEC-C2-CAD-CLOUD-KEYS-PR1.md).
 
 | Criteriu | Stare |
 |----------|--------|
-| CAD cloud reads keys from per-account vault | **PR1 BACKEND FINALIZAT** (profile path) |
-| Main body contains no BYOK/API key fields | Pending PR2 desktop |
+| CAD cloud reads keys from per-account vault | **PR1 BACKEND FINALIZAT** |
+| Observation start 2026-08-13; cadență zilnică; 7 zile fără incident (ceasul din Ziua 1) | **Disponibilitate gata. Nu e zi C2** (`legacy=0`) |
+| Șase confirmări **binare** în mediul țintă real înainte de PR2 | Pending |
+| Main body contains no BYOK/API key fields | Pending PR2 (`security/sec-c2-cad-cloud-keys-001-pr2`) |
 | E2E: outbound CAD JSON has no API-key patterns | Pending after PR2 |
 | `CAD_LEGACY_CLIENT_SECRET_PAYLOAD=false` without regression | Pending after profile adoption |
-| Mark this ticket **Remediat** | Only after the three rows above |
+| Mark this ticket **Remediat** | Only after PR2 E2E without keys **and** legacy off without regression |

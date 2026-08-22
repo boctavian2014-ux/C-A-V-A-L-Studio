@@ -8,6 +8,7 @@ release-fixed/
 *.log
 coverage/
 .cicd-artifacts/
+artifacts/c2-observation/
 .DS_Store
 .caval/
 .cavalo/

@@ -1,6 +1,6 @@
 # Release security status — post-remediere (2026-08-12)
 
-**HEAD documentat:** `main` după merge PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3) (SEC-C2 PR1 backend)
+**HEAD documentat:** `main` după PR [#7](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/7) (criterii ieșire C2), PR [#6](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/6) (fereastră C2), PR [#5](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/5) (CI-EXPO **Remediat**), PR [#3](https://github.com/boctavian2014-ux/C-A-V-A-L-Studio/pull/3) (SEC-C2 PR1)
 **Baseline pre-remediere (nu descrie starea actuală):** `AUDIT-CAVALLO-COMPLET.md` (2026-07-19, commit `defb984`, **fără remedieri**). Nu intra în release; păstrează-l local ca referință istorică.
 
 Acest document înlocuiește auditul vechi ca **sursă de adevăr pentru starea de securitate după loturile A–C5, P1–P3, Q1 și SEC-IPC-WS-BINDING-001**.
@@ -9,7 +9,7 @@ Acest document înlocuiește auditul vechi ca **sursă de adevăr pentru starea 
 
 Nu mai există riscuri **Critic** deschise în backlog-ul urmărit. Binding-ul de workspace cere sender de încredere și un director existent/normalizat înainte de `bindWorkspace`, astfel încât Lot A/B, Project Health, git, terminal și CAD nu mai moștenesc un root contaminat.
 
-Quality gates locale (typecheck, lint `--max-warnings 0`, **1025** teste + 2 skipped / 226 fișiere, build, `git diff --check`) demonstrează că PR1 nu a introdus regresii în suite. Gate-ul **cloud** GitHub Actions `test` este încă roșu pe un eșec preexistent `expo/tsconfig.base` — [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md); gate-urile locale nu îl înlocuiesc.
+Quality gates (typecheck, lint `--max-warnings 0`, 1000 teste, build, `verify-runtime-assets`, smoke Electron fără chei/CAD cloud) sunt în `cicd:test` / `release:preflight` și blochează PR-ul.
 
 ## Închis în acest ciclu
 
@@ -25,9 +25,10 @@ Quality gates locale (typecheck, lint `--max-warnings 0`, **1025** teste + 2 ski
 | P1 streaming UI | — | Remediat |
 | P2 unified abort | — | Remediat |
 | P3 CAD anti-dup / OpenSCAD kill | — | Remediat cu Δ6 ticketed |
-| Q1 quality gates + Electron smoke | Medie (merge) | **FINALIZAT** |
+| Q1 quality gates + Electron smoke | Medie (merge) | **FINALIZAT** — cloud `test` + smoke pe `main` verzi (PR #5) |
 | SEC-IPC-WS-BINDING-001 | Critic | **FINALIZAT** |
 | SEC-IPC-WS-VERIFY-001 | Mare | Remediat (Lot B — bound root only) |
+| [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md) | Medie (CI) | **Remediat** |
 
 ## Backlog urmărit (nu limitări informale)
 
@@ -35,7 +36,7 @@ Quality gates locale (typecheck, lint `--max-warnings 0`, **1025** teste + 2 ski
 |--------|------------|-------------|
 | [SEC-EXT-RUNTIME-PERMISSIONS-001](./SEC-EXT-RUNTIME-PERMISSIONS-001.md) | Mare | Nu activa rularea extensiilor până există sandbox și permission grants |
 | [SEC-MCP-REMOTE-001](./SEC-MCP-REMOTE-001.md) | Mare | MCP remote rămâne OFF până la transport, trust și egress controlate |
-| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | **Deschis / Mitigat.** PR1 = **BACKEND FINALIZAT** (PR #3). Nu Remediat până la PR2 + E2E fără chei în body + legacy off fără regresii |
+| [SEC-C2-CAD-CLOUD-KEYS-001](./SEC-C2-CAD-CLOUD-KEYS-001.md) | Medie | **Deschis / Mitigat.** Boot production SUCCESS (`284fc574`). Ziua 1/7 C2 **nu a început** (`legacy=0`). PR2 după 7 zile trafic real **și** 6 confirmări binare |
 | [SEC-MCP-STDERR-REDACTION-001](./SEC-MCP-STDERR-REDACTION-001.md) | Medie | Redactare stderr MCP end-to-end înainte de UI/log |
 | [SEC-P3-BLOB-REVOKE-001](./SEC-P3-BLOB-REVOKE-001.md) | Scăzut | `URL.revokeObjectURL` exact-once pentru preview STL |
 | [SEC-UI-ACCELERATOR-001](./SEC-UI-ACCELERATOR-001.md) | Scăzut | Repară acceleratorul invalid; scoate warning-ul din allowlist-ul de smoke |
@@ -45,9 +46,3 @@ Quality gates locale (typecheck, lint `--max-warnings 0`, **1025** teste + 2 ski
 Vezi [docs/ci/quality-gates.md](../ci/quality-gates.md). Smoke pe PR: `continue-on-error` doar la `pull_request` (infrastructură xvfb). Pe `main` și în `release:preflight` smoke-ul este blocant.
 
 Cele 2 teste skipped: [docs/ci/skipped-tests.md](../ci/skipped-tests.md) (fashion-fullstack legacy).
-
-## CI cloud (separat de SEC-C2)
-
-| Ticket | Severitate | Ce lipsește |
-|--------|------------|-------------|
-| [CI-EXPO-TSCONFIG-BASE-001](../ci/CI-EXPO-TSCONFIG-BASE-001.md) | Medie (CI) | `tsc` pe GitHub Actions: `File 'expo/tsconfig.base' not found`. Preexistent pe `main`. Nu amesteca cu PR2 desktop. |
