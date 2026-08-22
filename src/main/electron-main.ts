@@ -1,5 +1,4 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } from "electron";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
@@ -22,12 +21,12 @@ import type { AgentExecuteStepRequest, AgentAuditReport, Goal } from "../../ai/a
 import { toolSandbox } from "../../ai/pipeline/tool-sandbox";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { assertShellCommandAllowed } from "./shell-security";
-import {
-  ensureLatestPowerShellInstalled,
-  resolvePreferredShell,
-} from "./powershell-shell";
+import { ensureLatestPowerShellInstalled } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
-import { registerTerminalHandlers } from "./terminal-handlers";
+import { registerProblemsHandlers } from "./problems-handlers";
+import { registerTasksHandlers, shutdownAllTasksSync } from "./tasks-handlers";
+import { registerTerminalHandlers, stopAllInteractiveTerminalsSync } from "./terminal-handlers";
+import { registerPreviewHandlers, shutdownAllPreviewSync } from "./preview/preview-handlers";
 import {
   addRecentWorkspace,
   listRecentWorkspaces,
@@ -38,11 +37,26 @@ import { createProjectOnDesktop } from "./desktop-project";
 import { registerEngineeringHandlers } from "./engineering-handlers";
 import { registerModelHandlers, abortAllStreamsForSender } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
+import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
+import { registerAiHistoryHandlers } from "./ai/ai-history-handlers";
+import { registerAiSettingsHandlers } from "./ai/ai-settings-handlers";
+import { registerWorkspaceIndexHandlers } from "./workspace/workspace-index-handlers";
+import { registerWorkspaceSearchHandlers } from "./workspace/workspace-search-handlers";
+import { workspaceIndexService } from "./workspace/workspace-index-service";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
 import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
 import { registerRoboticsLibraryHandlers } from "./robotics-library-handlers";
 import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
+import {
+  applyLocaleToSettings,
+  resolveLocalePreference,
+} from "./locale-settings";
+import {
+  buildRendererContextMenu,
+  installApplicationMenu as installLocalizedApplicationMenu,
+} from "./app-menu";
+import { LOCALE_SETTING_KEY } from "../shared/i18n-contract";
 import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
 import { setMcpSecretsProvider } from "../../ai/tools/tool-runtime";
 import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
@@ -80,7 +94,6 @@ import {
   normalizeWorkspaceRoot,
   resolveSandboxedWorkspacePath,
 } from "./path-security";
-import { sanitizeEnvForTerminal } from "./subprocess-env";
 import { requireBoundWorkspaceRoot } from "./bound-workspace";
 import { workspaceCommandMutex } from "../../ai/tools/workspace-execute-lock";
 import { runAllowedWorkspaceCommand } from "../../ai/tools/workspace-command-runner";
@@ -90,6 +103,24 @@ import {
   installWebContentsSecurity,
 } from "./renderer-security";
 import { registerWorkspaceBindingHandlers } from "./workspace-binding-handlers";
+import {
+  ensureLocalAiRuntime,
+  ensureOllamaOnBoot,
+  getLocalAiStatus,
+  stopManagedOllamaIfStarted,
+  installOllamaRuntimeOnly,
+  pullModelWithProgress,
+  cancelActiveModelPull,
+  LOCAL_AI_PULL_PROGRESS_CHANNEL,
+} from "./local-ai-setup";
+import {
+  AI_PREFERRED_PROVIDER_SETTING,
+  buildAiProvidersSnapshot,
+  resolvePreferredProviderId,
+} from "./ai/provider-registry";
+import { getOllamaLoopbackUrl, OLLAMA_CHAT_URL } from "../shared/local-ai-contract";
+import { isAllowedCustomUrl } from "../shared/ai-provider-contract";
+import { probeCustomProviderConnection } from "../../ai/providers/custom-openai-compatible";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -127,7 +158,6 @@ const loadLocalEnvFile = (): void => {
 
 loadLocalEnvFile();
 
-const terminals = new Map<number, ChildProcessWithoutNullStreams>();
 const workspaceRoots = new Map<number, string>();
 const composer = new AIComposer();
 const debugAgent = new DebugAgent();
@@ -147,12 +177,20 @@ export function getBoundWorkspaceRoot(senderId: number): string | undefined {
 }
 
 registerGitHandlers(getBoundWorkspaceRoot);
+registerProblemsHandlers(getBoundWorkspaceRoot);
+registerTasksHandlers(getBoundWorkspaceRoot);
 registerTerminalHandlers(getBoundWorkspaceRoot);
+registerPreviewHandlers(getBoundWorkspaceRoot);
 registerEngineeringHandlers(getBoundWorkspaceRoot);
 registerModelHandlers(
   (id) => workspaceRoots.get(id) ?? process.cwd(),
   getBoundWorkspaceRoot
 );
+registerChatApplyHandlers(getBoundWorkspaceRoot);
+registerAiHistoryHandlers(getBoundWorkspaceRoot);
+registerAiSettingsHandlers(getBoundWorkspaceRoot);
+registerWorkspaceIndexHandlers(getBoundWorkspaceRoot);
+registerWorkspaceSearchHandlers(getBoundWorkspaceRoot);
 registerMcpHandlers(getBoundWorkspaceRoot);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);
@@ -190,24 +228,7 @@ interface CavalChatResponse {
 
 const installRendererContextMenu = (window: BrowserWindow): void => {
   window.webContents.on("context-menu", (_event, params) => {
-    const template: Electron.MenuItemConstructorOptions[] = [];
-
-    if (params.editFlags.canCopy || params.selectionText) {
-      template.push({ role: "copy", label: "Copy" });
-    }
-    if (params.editFlags.canPaste) {
-      template.push({ role: "paste", label: "Paste" });
-    }
-    if (params.editFlags.canCut) {
-      template.push({ role: "cut", label: "Cut" });
-    }
-    if (template.length > 0) {
-      template.push({ type: "separator" });
-    }
-    if (params.editFlags.canSelectAll) {
-      template.push({ role: "selectAll", label: "Select All" });
-    }
-
+    const template = buildRendererContextMenu(resolveUiLocale(), params);
     if (template.length === 0) return;
     Menu.buildFromTemplate(template).popup({ window });
   });
@@ -222,7 +243,7 @@ const createWindow = (): BrowserWindow => {
     minHeight: 650,
     resizable: true,
     maximizable: true,
-    title: "CAVALLO",
+    title: "CAVAL",
     ...(fsSync.existsSync(iconPath) ? { icon: iconPath } : {}),
     backgroundColor: "#090B12",
     webPreferences: getRendererWebPreferences(path.join(__dirname, "preload.js")),
@@ -360,6 +381,7 @@ const openFile = async (): Promise<void> => {
   });
   bindWorkspace(window.webContents.id, projectPath);
   void contextEngine.indexWorkspace(projectPath).catch(() => undefined);
+  void workspaceIndexService.openWorkspace(projectPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(projectPath, projectFiles.map((f) => f.path));
   preloadForContext(inferPreloadContext(projectPath, projectFiles.map((f) => f.path)));
 };
@@ -412,6 +434,7 @@ const openFolder = async (): Promise<void> => {
   bindWorkspace(window.webContents.id, folderPath);
   addRecentWorkspace(folderPath, "folder");
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
+  void workspaceIndexService.openWorkspace(folderPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(folderPath);
   preloadForContext(inferPreloadContext(folderPath));
 };
@@ -435,196 +458,28 @@ const sendWorkspaceToRenderer = async (
     files,
   });
   void contextEngine.indexWorkspace(folderPath).catch(() => undefined);
+  void workspaceIndexService.openWorkspace(folderPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(folderPath, files.map((f) => f.path));
   preloadForContext(inferPreloadContext(folderPath, files.map((f) => f.path)));
 };
 
+const appMenuHandlers = {
+  sendMenuCommand,
+  createWindow,
+  openFile,
+  openFolder,
+  focusedWindow,
+  quit: () => app.quit(),
+  openDocs: () => {
+    void openExternalUrl("https://caval.studio", {
+      origin: "INTERNAL_CONSTANT",
+      allowedHosts: CAVALLO_TRUSTED_HOSTS,
+    });
+  },
+};
+
 const installApplicationMenu = (): void => {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: "File",
-      submenu: [
-        { label: "New Text File", accelerator: "CmdOrCtrl+N", click: () => sendMenuCommand("new-file") },
-        { label: "New Window", accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
-        { type: "separator" },
-        { label: "Open File...", accelerator: "CmdOrCtrl+O", click: () => void openFile() },
-        { label: "Open Folder...", accelerator: "CmdOrCtrl+Shift+O", click: () => void openFolder() },
-        { type: "separator" },
-        { label: "Save", accelerator: "CmdOrCtrl+S", click: () => sendMenuCommand("save") },
-        { label: "Save As...", accelerator: "CmdOrCtrl+Shift+S", click: () => sendMenuCommand("save-as") },
-        { type: "separator" },
-        { label: "Preferences...", accelerator: "CmdOrCtrl+,", click: () => sendMenuCommand("open-settings") },
-        { type: "separator" },
-        { label: "Close Window", accelerator: "Alt+F4", click: () => focusedWindow()?.close() },
-        { label: "Exit", click: () => app.quit() }
-      ]
-    },
-    {
-      label: "Edit",
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { type: "separator" },
-        { label: "Find", accelerator: "CmdOrCtrl+F", click: () => sendMenuCommand("find") },
-        { label: "Replace", accelerator: "CmdOrCtrl+H", click: () => sendMenuCommand("replace") },
-        { type: "separator" },
-        { label: "Find in Files", accelerator: "CmdOrCtrl+Shift+F", click: () => sendMenuCommand("find-in-files") },
-        { label: "Replace in Files", accelerator: "CmdOrCtrl+Shift+H", click: () => sendMenuCommand("replace-in-files") },
-        { type: "separator" },
-        { label: "Toggle Line Comment", accelerator: "CmdOrCtrl+/", click: () => sendMenuCommand("toggle-line-comment") },
-        { label: "Toggle Block Comment", accelerator: "Shift+Alt+A", click: () => sendMenuCommand("toggle-block-comment") },
-        { label: "Emmet: Expand Abbreviation", accelerator: "Tab", click: () => sendMenuCommand("emmet-expand") },
-        { type: "separator" },
-        { role: "selectAll" }
-      ]
-    },
-    {
-      label: "Selection",
-      submenu: [
-        { label: "Select All", accelerator: "CmdOrCtrl+A", role: "selectAll" },
-        { label: "Expand Selection", accelerator: "Shift+Alt+Right", click: () => sendMenuCommand("selection-expand") },
-        { label: "Shrink Selection", accelerator: "Shift+Alt+Left", click: () => sendMenuCommand("selection-shrink") },
-        { type: "separator" },
-        { label: "Copy Line Up", accelerator: "Shift+Alt+Up", click: () => sendMenuCommand("copy-line-up") },
-        { label: "Copy Line Down", accelerator: "Shift+Alt+Down", click: () => sendMenuCommand("copy-line-down") },
-        { label: "Move Line Up", accelerator: "Alt+Up", click: () => sendMenuCommand("move-line-up") },
-        { label: "Move Line Down", accelerator: "Alt+Down", click: () => sendMenuCommand("move-line-down") },
-        { type: "separator" },
-        { label: "Add Cursor Above", accelerator: "CmdOrCtrl+Alt+Up", click: () => sendMenuCommand("cursor-above") },
-        { label: "Add Cursor Below", accelerator: "CmdOrCtrl+Alt+Down", click: () => sendMenuCommand("cursor-below") }
-      ]
-    },
-    {
-      label: "View",
-      submenu: [
-        { label: "Command Palette...", accelerator: "CmdOrCtrl+Shift+P", click: () => sendMenuCommand("palette") },
-        { label: "Open View...", click: () => sendMenuCommand("open-view") },
-        { type: "separator" },
-        {
-          label: "Appearance",
-          submenu: [
-            { label: "Toggle Full Screen", accelerator: "F11", role: "togglefullscreen" },
-            { label: "Zoom In", accelerator: "CmdOrCtrl+=", role: "zoomIn" },
-            { label: "Zoom Out", accelerator: "CmdOrCtrl+-", role: "zoomOut" },
-            { label: "Reset Zoom", accelerator: "CmdOrCtrl+0", role: "resetZoom" }
-          ]
-        },
-        {
-          label: "Editor Layout",
-          submenu: [
-            { label: "Split Editor", accelerator: "CmdOrCtrl+\\", click: () => sendMenuCommand("split-editor") },
-            { label: "Single Editor", click: () => sendMenuCommand("single-editor") }
-          ]
-        },
-        { type: "separator" },
-        { label: "Primary Side Bar", accelerator: "CmdOrCtrl+B", click: () => sendMenuCommand("toggle-sidebar") },
-        { label: "Explorer", accelerator: "CmdOrCtrl+Shift+E", click: () => sendMenuCommand("view-explorer") },
-        { label: "Search", accelerator: "CmdOrCtrl+Shift+F", click: () => sendMenuCommand("view-search") },
-        { label: "Source Control", click: () => sendMenuCommand("view-source-control") },
-        { label: "Run", accelerator: "CmdOrCtrl+Shift+D", click: () => sendMenuCommand("view-run") },
-        { label: "Extensions", accelerator: "CmdOrCtrl+Shift+X", click: () => sendMenuCommand("view-extensions") },
-        { type: "separator" },
-        { label: "Problems", click: () => sendMenuCommand("view-problems") },
-        { label: "Output", accelerator: "CmdOrCtrl+Shift+U", click: () => sendMenuCommand("view-output") },
-        { label: "Debug Console", accelerator: "CmdOrCtrl+Shift+Alt+Y", click: () => sendMenuCommand("view-debug-console") },
-        { type: "separator" },
-        { label: "Word Wrap", accelerator: "Alt+Z", click: () => sendMenuCommand("word-wrap") },
-        { type: "separator" },
-        { role: "reload" },
-        { role: "toggleDevTools" }
-      ]
-    },
-    {
-      label: "Go",
-      submenu: [
-        { label: "Back", accelerator: "Alt+Left", click: () => sendMenuCommand("go-back") },
-        { label: "Forward", accelerator: "Alt+Right", click: () => sendMenuCommand("go-forward") },
-        { label: "Last Edit Location", accelerator: "CmdOrCtrl+M CmdOrCtrl+Q", click: () => sendMenuCommand("last-edit-location") },
-        { type: "separator" },
-        { label: "Switch Editor", click: () => sendMenuCommand("switch-editor") },
-        { label: "Switch Group", click: () => sendMenuCommand("switch-group") },
-        { type: "separator" },
-        { label: "Go to File...", accelerator: "CmdOrCtrl+P", click: () => sendMenuCommand("go-to-file") },
-        { label: "Go to Symbol in Workspace...", accelerator: "CmdOrCtrl+T", click: () => sendMenuCommand("go-to-symbol-workspace") },
-        { label: "Go to Symbol in Editor...", accelerator: "CmdOrCtrl+Shift+O", click: () => sendMenuCommand("go-to-symbol-editor") },
-        { label: "Go to Definition", accelerator: "F12", click: () => sendMenuCommand("go-to-definition") },
-        { label: "Go to Declaration", click: () => sendMenuCommand("go-to-declaration") },
-        { label: "Go to Type Definition", click: () => sendMenuCommand("go-to-type-definition") },
-        { label: "Go to Implementations", accelerator: "CmdOrCtrl+F12", click: () => sendMenuCommand("go-to-implementations") },
-        { label: "Add Symbol to Current Chat", click: () => sendMenuCommand("add-symbol-current-chat") },
-        { label: "Go to References", accelerator: "Shift+F12", click: () => sendMenuCommand("go-to-references") },
-        { label: "Add Symbol to New Chat", click: () => sendMenuCommand("add-symbol-new-chat") },
-        { type: "separator" },
-        { label: "Go to Line/Column...", accelerator: "CmdOrCtrl+G", click: () => sendMenuCommand("go-to-line") },
-        { label: "Go to Bracket", accelerator: "CmdOrCtrl+Shift+\\", click: () => sendMenuCommand("go-to-bracket") },
-        { type: "separator" },
-        { label: "Next Problem", accelerator: "F8", click: () => sendMenuCommand("next-problem") },
-        { label: "Previous Problem", accelerator: "Shift+F8", click: () => sendMenuCommand("previous-problem") },
-        { label: "Next Change", accelerator: "Alt+F3", click: () => sendMenuCommand("next-change") },
-        { label: "Previous Change", accelerator: "Shift+Alt+F3", click: () => sendMenuCommand("previous-change") }
-      ]
-    },
-    {
-      label: "Run",
-      submenu: [
-        { label: "Start Debugging", accelerator: "F5", click: () => sendMenuCommand("run-debug") },
-        { label: "Run Without Debugging", accelerator: "CmdOrCtrl+F5", click: () => sendMenuCommand("run-without-debug") },
-        { label: "Stop Debugging", accelerator: "Shift+F5", click: () => sendMenuCommand("stop-debug") },
-        { label: "Restart Debugging", accelerator: "CmdOrCtrl+Shift+F5", click: () => sendMenuCommand("restart-debug") },
-        { type: "separator" },
-        { label: "Run Active File", click: () => sendMenuCommand("run-active-file") },
-        { label: "Run Selected Text", click: () => sendMenuCommand("run-selected-text") },
-        { type: "separator" },
-        { label: "Add Configuration...", click: () => sendMenuCommand("add-run-config") }
-      ]
-    },
-    {
-      label: "Terminal",
-      submenu: [
-        { label: "New Terminal", accelerator: "Ctrl+Shift+`", click: () => sendMenuCommand("terminal-new") },
-        { label: "Split Terminal", accelerator: "Ctrl+Shift+5", click: () => sendMenuCommand("terminal-split") },
-        { type: "separator" },
-        { label: "Run Task...", click: () => sendMenuCommand("task-run") },
-        { label: "Run Build Task...", accelerator: "CmdOrCtrl+Shift+B", click: () => sendMenuCommand("task-build") },
-        { label: "Run Active File", click: () => sendMenuCommand("run-active-file") },
-        { label: "Run Selected Text", click: () => sendMenuCommand("run-selected-text") },
-        { type: "separator" },
-        { label: "Configure Tasks...", click: () => sendMenuCommand("tasks-configure") },
-        { label: "Configure Default Build Task...", click: () => sendMenuCommand("tasks-default-build") }
-      ]
-    },
-    {
-      label: "Help",
-      submenu: [
-        { label: "Show All Commands", accelerator: "CmdOrCtrl+Shift+P", click: () => sendMenuCommand("palette") },
-        { label: "Editor Playground", click: () => sendMenuCommand("editor-playground") },
-        { label: "Get Started with Accessibility Features", click: () => sendMenuCommand("accessibility") },
-        { type: "separator" },
-        { label: "Give Feedback...", click: () => sendMenuCommand("feedback") },
-        { type: "separator" },
-        { label: "View License", click: () => sendMenuCommand("license") },
-        { type: "separator" },
-        { label: "Toggle Developer Tools", role: "toggleDevTools" },
-        { label: "Open Process Explorer", click: () => sendMenuCommand("process-explorer") },
-        { type: "separator" },
-        { label: "Check for Updates...", click: () => sendMenuCommand("check-updates") },
-        {
-          label: "CAVALLO Studio Docs",
-          click: () =>
-            void openExternalUrl("https://caval.studio", {
-              origin: "INTERNAL_CONSTANT",
-              allowedHosts: CAVALLO_TRUSTED_HOSTS,
-            }),
-        },
-        { label: "About", click: () => sendMenuCommand("about") }
-      ]
-    }
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  installLocalizedApplicationMenu(resolveUiLocale(), appMenuHandlers);
 };
 
 ipcMain.handle("caval:save-file", async (event, request: { path?: string; content: string; saveAs?: boolean }) => {
@@ -696,8 +551,8 @@ const withTimeout = async <T>(operation: (signal: AbortSignal) => Promise<T>, ti
 
 const systemPromptForMode = (mode: "ask" | "plan"): string =>
   mode === "plan"
-    ? "Esti CAVALLO Studio AI in modul Plan. Raspunde cu pasi clari, fisiere relevante, riscuri si validari. Nu modifica direct codul."
-    : "Esti CAVALLO Studio AI in modul Ask. Raspunde concis si practic, folosind contextul fisierului activ cand exista.";
+    ? "Esti CAVAL Studio AI in modul Plan. Raspunde cu pasi clari, fisiere relevante, riscuri si validari. Nu modifica direct codul."
+    : "Esti CAVAL Studio AI in modul Ask. Raspunde concis si practic, folosind contextul fisierului activ cand exista.";
 
 const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatResponse> => {
   const endpoint = process.env.CAVAL_CLOUD_AI_URL;
@@ -750,9 +605,7 @@ const callCavalCloud = async (request: CavalChatRequest): Promise<CavalChatRespo
 };
 
 const callOllama = async (request: CavalChatRequest): Promise<CavalChatResponse> => {
-  const raw = process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434/api/chat";
-  const withPath = raw.includes("/api/") ? raw : `${raw.replace(/\/+$/, "")}/api/chat`;
-  const validated = assertOllamaBaseUrl(withPath);
+  const validated = assertOllamaBaseUrl(OLLAMA_CHAT_URL);
   if (!validated.ok) {
     throw new Error(validated.error);
   }
@@ -868,81 +721,6 @@ ipcMain.handle("caval:ai-chat", async (event, request: CavalChatRequest): Promis
     ].join("\n"),
     error: errors.join("\n")
   };
-});
-
-const shellCommand = (): { command: string; args: string[] } => {
-  if (process.platform === "win32") {
-    const shell = resolvePreferredShell();
-    return {
-      command: shell.command,
-      args: [...shell.interactiveArgs, "-NoExit"],
-    };
-  }
-  return { command: process.env.SHELL ?? "bash", args: ["-l"] };
-};
-
-ipcMain.handle("caval:terminal-start", async (event) => {
-  assertTrustedSender(event);
-  let cwd: string;
-  try {
-    cwd = requireBoundWorkspaceRoot(
-      getBoundWorkspaceRoot,
-      event.sender.id,
-      "Deschide un folder în workspace înainte de a deschide terminalul."
-    );
-  } catch (error) {
-    return {
-      started: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-  if (process.platform === "win32") {
-    await ensureLatestPowerShellInstalled();
-  }
-  const id = event.sender.id;
-  const existing = terminals.get(id);
-  if (existing && !existing.killed) {
-    return { started: true, reused: true, cwd };
-  }
-
-  // Zone A: explicit shell executable, shell:false — isolated from AI automated runners
-  const { command, args } = shellCommand();
-  const terminal = spawn(command, args, {
-    cwd,
-    env: sanitizeEnvForTerminal(),
-    shell: false,
-  });
-
-  terminals.set(id, terminal);
-  const send = (data: Buffer | string) => event.sender.send("caval:terminal-data", data.toString());
-  terminal.stdout.on("data", send);
-  terminal.stderr.on("data", send);
-  terminal.on("exit", (code) => {
-    event.sender.send("caval:terminal-data", `\r\n[process exited with code ${code ?? "unknown"}]\r\n`);
-    terminals.delete(id);
-  });
-  event.sender.send("caval:terminal-data", `Caval terminal started in ${cwd}\r\n`);
-  return { started: true, reused: false, cwd };
-});
-
-ipcMain.handle("caval:terminal-write", (event, data: string) => {
-  assertTrustedSender(event);
-  const terminal = terminals.get(event.sender.id);
-  if (!terminal || terminal.killed) {
-    return { ok: false, error: "Terminal is not running." };
-  }
-  terminal.stdin.write(data);
-  return { ok: true };
-});
-
-ipcMain.handle("caval:terminal-stop", (event) => {
-  assertTrustedSender(event);
-  const terminal = terminals.get(event.sender.id);
-  if (terminal && !terminal.killed) {
-    terminal.kill();
-  }
-  terminals.delete(event.sender.id);
-  return { ok: true };
 });
 
 ipcMain.handle("caval:composer-run", async (event, request: {
@@ -1362,6 +1140,10 @@ const SECRET_ENV_KEYS = [
   "SEMGREP_APP_TOKEN",
   "SUPABASE_SERVICE_ROLE_KEY",
   "BILLING_API_KEY",
+  "CUSTOM_PROVIDER_BASE_URL",
+  "CUSTOM_PROVIDER_API_KEY",
+  "CUSTOM_PROVIDER_MODEL_ID",
+  "CUSTOM_PROVIDER_LABEL",
 ] as const;
 
 /** Never returned to the renderer as plaintext (main/env only). */
@@ -1419,8 +1201,9 @@ const SETTINGS_KEYS_ON_DISK = new Set([
   "ollama.url",
   "cad.apiUrl",
   "caval.userId",
+  "ai.preferredProvider",
+  "ui.locale",
 ]);
-
 const SETTINGS_SENSITIVE_KEYS = new Set([
   "openrouter.apiKey",
   "caval.cloud.apiKey",
@@ -1444,6 +1227,13 @@ const readPersistedAppSettings = (): Record<string, string> => {
   }
 };
 
+const resolveUiLocale = (): string => {
+  const settings = Object.keys(persistedAppSettings).length
+    ? persistedAppSettings
+    : readPersistedAppSettings();
+  return resolveLocalePreference(settings, app.getLocale()).locale;
+};
+
 const writePersistedAppSettings = (settings: Record<string, string>): void => {
   const forDisk: Record<string, string> = {};
   for (const [key, value] of Object.entries(settings)) {
@@ -1456,9 +1246,14 @@ const writePersistedAppSettings = (settings: Record<string, string>): void => {
 };
 
 const applySettingsToEnv = (settings: Record<string, string>): void => {
+  // Ollama is loopback-only — migrate/ignore legacy ollama.url overrides.
   if (settings["ollama.url"]?.trim()) {
-    process.env.OLLAMA_BASE_URL = settings["ollama.url"].trim();
+    const canonical = getOllamaLoopbackUrl();
+    if (settings["ollama.url"].trim() !== canonical) {
+      settings["ollama.url"] = canonical;
+    }
   }
+  process.env.OLLAMA_BASE_URL = OLLAMA_CHAT_URL;
   if (settings["cad.apiUrl"]?.trim()) {
     const validated = validateCadApiUrlSync(settings["cad.apiUrl"].trim());
     if (validated.ok) {
@@ -1512,6 +1307,16 @@ ipcMain.handle("caval:settings-save", async (event, settings: Record<string, str
     }
     incoming["cad.apiUrl"] = validated.normalized;
   }
+  if (incoming["ollama.url"] !== undefined) {
+    incoming["ollama.url"] = getOllamaLoopbackUrl();
+  }
+  if (incoming[LOCALE_SETTING_KEY] !== undefined) {
+    const localeResult = applyLocaleToSettings({}, incoming[LOCALE_SETTING_KEY]);
+    if (!localeResult.ok) {
+      return { ok: false, error: localeResult.error };
+    }
+    incoming[LOCALE_SETTING_KEY] = localeResult.locale;
+  }
   const merged = { ...persistedAppSettings, ...incoming };
   writePersistedAppSettings(merged);
   const forRenderer = { ...merged };
@@ -1552,6 +1357,146 @@ ipcMain.handle("caval:settings-load", (event) => {
   appSettings.set(event.sender.id, withUser);
   return { ok: true, settings: withUser };
 });
+
+ipcMain.handle("caval:locale-get", (event) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  persistedAppSettings = readPersistedAppSettings();
+  const { locale, source } = resolveLocalePreference(
+    persistedAppSettings,
+    app.getLocale()
+  );
+  return { ok: true, locale, source };
+});
+
+ipcMain.handle("caval:locale-set", (event, localeInput: unknown) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  persistedAppSettings = readPersistedAppSettings();
+  const result = applyLocaleToSettings(persistedAppSettings, localeInput);
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+  writePersistedAppSettings(result.settings);
+  persistedAppSettings = result.settings;
+  const forRenderer = { ...result.settings };
+  for (const key of SETTINGS_SENSITIVE_KEYS) {
+    delete forRenderer[key];
+  }
+  appSettings.set(event.sender.id, forRenderer);
+  installApplicationMenu();
+  return { ok: true, locale: result.locale };
+});
+
+ipcMain.handle("caval:local-ai-status", async (event) => {
+  try {
+    assertTrustedSender(event);
+    const status = await getLocalAiStatus();
+    return { ok: true, status };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+/** Pas 7f.3 — install runtime only (confirmed: true required). */
+ipcMain.handle("caval:local-ai-install", async (event, req: { confirmed?: boolean }) => {
+  try {
+    assertTrustedSender(event);
+    if (req?.confirmed !== true) {
+      return { success: false, error: "Install requires explicit confirmation" };
+    }
+    return await installOllamaRuntimeOnly({ confirmed: true });
+  } catch {
+    return {
+      success: false,
+      error: "Installation failed",
+    };
+  }
+});
+
+const activePullControllers = new Map<string, AbortController>();
+
+/** Pas 7f.3 — pull model with progress events (confirmed: true required). */
+ipcMain.handle(
+  "caval:local-ai-pull-model",
+  async (event, req: { modelId?: string; confirmed?: boolean }) => {
+    try {
+      assertTrustedSender(event);
+      if (req?.confirmed !== true) {
+        return { success: false, error: "Model download requires explicit confirmation" };
+      }
+      const modelId = typeof req.modelId === "string" ? req.modelId.trim() : "";
+      if (!modelId) {
+        return { success: false, error: "Model id is required" };
+      }
+      const controller = new AbortController();
+      activePullControllers.set(modelId, controller);
+      try {
+        return await pullModelWithProgress(
+          { modelId, confirmed: true },
+          (progress) => {
+            try {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send(LOCAL_AI_PULL_PROGRESS_CHANNEL, progress);
+              }
+            } catch {
+              /* sender gone */
+            }
+          },
+          controller.signal
+        );
+      } finally {
+        activePullControllers.delete(modelId);
+      }
+    } catch {
+      return { success: false, error: "Model download failed" };
+    }
+  }
+);
+
+ipcMain.handle("caval:local-ai-pull-cancel", async (event, modelId: string) => {
+  try {
+    assertTrustedSender(event);
+    const id = typeof modelId === "string" ? modelId.trim() : "";
+    const controller = id ? activePullControllers.get(id) : undefined;
+    controller?.abort();
+    cancelActiveModelPull(id || undefined);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle(
+  "caval:local-ai-setup",
+  async (
+    event,
+    input?: { installRuntime?: boolean; pullModel?: boolean; modelName?: string }
+  ) => {
+    try {
+      assertTrustedSender(event);
+      // 7f.3: legacy channel no longer auto-pulls even if pullModel: true.
+      return await ensureLocalAiRuntime({
+        ...input,
+        pullModel: false,
+      });
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+);
 
 const billingBaseUrl = (): string =>
   process.env.BILLING_URL ?? `http://127.0.0.1:${process.env.BILLING_PORT ?? 8790}`;
@@ -1658,6 +1603,54 @@ ipcMain.handle("caval:secrets-get", (event) => {
   };
 });
 
+/** Pas 7f.1 — unified provider registry + status (no secret values). */
+ipcMain.handle("caval:ai-providers-list", async (event) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  try {
+    const stored = normalizeSecretsMap(readApiSecrets());
+    const configured = buildSecretsConfiguredMap(stored);
+    const snapshot = await buildAiProvidersSnapshot({
+      configured,
+      preferredProviderId: persistedAppSettings[AI_PREFERRED_PROVIDER_SETTING],
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+    });
+    return { ok: true, ...snapshot };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle(
+  "caval:ai-providers-set-preferred",
+  async (event, input: { providerId?: string }) => {
+    try {
+      assertTrustedSender(event);
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const preferred = resolvePreferredProviderId(input?.providerId);
+    const merged = {
+      ...persistedAppSettings,
+      [AI_PREFERRED_PROVIDER_SETTING]: preferred,
+    };
+    writePersistedAppSettings(merged);
+    return { ok: true, preferredProviderId: preferred };
+  }
+);
+
 ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => {
   assertTrustedSender(event);
   // Defense in depth: never apply empty / marker values that would wipe or corrupt keys.
@@ -1682,12 +1675,41 @@ ipcMain.handle("caval:secrets-set", (event, secrets: Record<string, string>) => 
  */
 ipcMain.handle(
   "caval:test-provider-key",
-  async (event, input: { providerId: string; secretKey: string }) => {
+  async (
+    event,
+    input: {
+      providerId: string;
+      secretKey?: string;
+      draft?: { baseUrl?: string; apiKey?: string; modelId?: string };
+    }
+  ) => {
     assertTrustedSender(event);
     const limit = consumeAiRateLimit("complete", event.sender.id, "secrets-test");
     if (!limit.ok) {
       return { ok: false, result: "unreachable" as const, error: "rate_limited" };
     }
+
+    if (input?.providerId === "custom") {
+      const secrets = normalizeSecretsMap(readApiSecrets());
+      const baseUrl = (input.draft?.baseUrl ?? secrets.CUSTOM_PROVIDER_BASE_URL ?? "").trim();
+      const apiKey = (input.draft?.apiKey ?? secrets.CUSTOM_PROVIDER_API_KEY ?? "").trim();
+      if (!baseUrl || !isAllowedCustomUrl(baseUrl)) {
+        return {
+          ok: false,
+          result: "invalid" as const,
+          error: "Custom endpoint must be localhost/loopback or https",
+        };
+      }
+      const probe = await probeCustomProviderConnection({
+        baseUrl,
+        apiKey: apiKey || undefined,
+      });
+      if (!probe.ok) {
+        return { ok: false, result: probe.result };
+      }
+      return { ok: true, result: "valid" as const };
+    }
+
     const secrets = normalizeSecretsMap(readApiSecrets());
     const keyName = String(input?.secretKey ?? "").trim();
     const value = secrets[keyName]?.trim();
@@ -1703,18 +1725,21 @@ ipcMain.handle(
 );
 
 app.whenReady().then(() => {
-  app.setName("CAVALLO");
+  app.setName("CAVAL");
   installRendererSessionPolicy();
   installWebContentsSecurity();
-  installApplicationMenu();
   if (!isElectronSmokeMode()) {
     loadPersistedAppSettings();
+  }
+  installApplicationMenu();
+  if (!isElectronSmokeMode()) {
     applyStoredSecretsToEnv();
     setCavalConfigExtraPaths([app.getAppPath()]);
     setMcpSecretsProvider(readApiSecrets);
     applyCadCloudEnvDefaults();
     warmOpenRouterConnection(true);
     preloadCoreModels();
+    void ensureOllamaOnBoot();
     void ensureLatestPowerShellInstalled().catch((err) => {
       console.warn("[shell] PowerShell 7 ensure skipped:", err instanceof Error ? err.message : err);
     });
@@ -1749,14 +1774,19 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("before-quit", () => {
+  stopManagedOllamaIfStarted();
+});
+
 app.on("window-all-closed", () => {
-  for (const terminal of terminals.values()) {
-    if (!terminal.killed) {
-      terminal.kill();
-    }
-  }
+  shutdownAllPreviewSync();
+  stopAllInteractiveTerminalsSync();
+  shutdownAllTasksSync();
+  // CAD: sync child.kill. Marketplace: Server.close() starts teardown;
+  // the listen socket is reaped when this process exits.
   stopCadLocalServer();
   stopMarketplaceServer();
+  stopManagedOllamaIfStarted();
   if (process.platform !== "darwin") {
     app.quit();
   }

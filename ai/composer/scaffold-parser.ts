@@ -297,6 +297,24 @@ export function parseScaffoldFiles(content: string): ParsedScaffoldFile[] {
   return [...found.entries()].map(([path, fileContent]) => ({ path, content: fileContent }));
 }
 
+/** Path from an incomplete open fence (```lang:path) — even before body arrives. */
+export function peekStreamingScaffoldPath(content: string): string | null {
+  const complete = parseScaffoldFiles(content);
+  if (complete.length > 0) {
+    return complete[complete.length - 1]!.path;
+  }
+  const openFence = content.match(/```(\w+)?(?:\s*:\s*([^\n`]+))?\n([\s\S]*)$/);
+  if (!openFence) return null;
+  const pathHint = openFence[2]?.trim() ?? '';
+  const lang = openFence[1]?.trim().toLowerCase() ?? '';
+  const body = openFence[3] ?? '';
+  const rel =
+    normalizeRelativePath(pathHint) ??
+    (pathHint || lang || body ? defaultPathForLang(lang, 0, body) : null);
+  if (!rel || isBlockedScaffoldPath(rel)) return null;
+  return rel;
+}
+
 /** Best-effort parse while the model is still streaming (may be incomplete fence). */
 export function parseStreamingScaffold(content: string): ParsedScaffoldFile | null {
   const complete = parseScaffoldFiles(content);

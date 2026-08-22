@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const IMPORT_RE = /from\s+["']([^"']+)["']/g;
 
 const HOST_BOOT_FILES = [
+  "src/shared/ai-settings-contract.ts",
   "src/shared/command-output-redaction.ts",
   "src/main/subprocess-env.ts",
   "src/main/path-security.ts",

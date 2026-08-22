@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAIStore, getModelDisplayLabel, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
-import { ChatModeSelect } from './ChatModeSelect';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
 import { getAgentMode, isAgenticPipelineMode } from '../modes/agent-modes';
 import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
+import { ChatUnifiedTimeline } from './ChatUnifiedTimeline';
 import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
@@ -22,6 +22,23 @@ import { workspaceFolderTitle } from './workspace-session';
 import { formatProjectCompletionWaitMessage } from './project-completion-announce';
 import { RoleMapPanel } from './RoleMapPanel';
 import { buildRoleMapEntries, hasModelOrchSteps } from './role-map-utils';
+import { WrittenFilesCard } from './WrittenFilesCard';
+import { LiveAiFileCards, writtenFilesToEdits } from './LiveAiFileCards';
+import { AiMessageDetails } from './AiMessageDetails';
+import { AIOnboarding } from './AIOnboarding';
+import { AiPanelToolbar } from './AiPanelToolbar';
+import { MessageFeedbackButtons } from './MessageFeedback';
+import { AiSettingsPanel } from './AiSettingsPanel';
+import { HistoryList } from './HistoryList';
+import { useAiHistoryStore } from '../../src/renderer/store/ai-history-store';
+import { useAiSettingsStore } from '../../src/renderer/store/ai-settings-store';
+import { extractShellCommandsFromAssistantText } from '../../src/shared/ai-terminal-contract';
+import { SuggestedCommandsCard } from '../../src/renderer/components/terminal/SuggestedCommandsCard';
+import { useTranslation } from '../i18n/useTranslation';
+import { useLiveAiEdits } from './use-live-ai-edits';
+import { joinWorkspaceRelativePath } from './written-files';
+import { dispatchOpenExplorerSidebar } from '../../src/renderer/components/engineering/bootstrap-robotics-project';
+import { usePreviewStore } from '../../src/renderer/store/preview-store';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -74,8 +91,10 @@ function escHtml(s: string): string {
 // ──────────────────────────────────────────────
 
 function DiffBlock({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation();
   const { applyDiff, rejectDiff, rollbackDiff } = useAIStore();
   const diff = message.diff!;
+  const fileName = diff.filePath.split(/[/\\]/).pop() ?? diff.filePath;
 
   if (diff.applied) {
     return (
@@ -85,7 +104,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
         fontSize: 11.5, color: 'var(--caval-success)',
         display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        <span style={{ flex: 1 }}>✓ Modificări aplicate în {diff.filePath.split(/[/\\]/).pop()}</span>
+        <span style={{ flex: 1 }}>{t('ai.diff.applied', { file: fileName })}</span>
         {diff.previousContent != null && (
           <button
             type="button"
@@ -96,7 +115,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
               color: 'var(--caval-success)', fontSize: 11, cursor: 'pointer',
             }}
           >
-            ↩ Anulează
+            {t('ai.diff.undo')}
           </button>
         )}
       </div>
@@ -141,7 +160,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
             fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
           }}
         >
-          ✓ Aplică
+          ✓ {t('ai.diff.apply')}
         </button>
         <button
           onClick={() => rejectDiff(message.id)}
@@ -151,7 +170,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
             color: 'var(--caval-text-muted)', fontSize: 11.5, cursor: 'pointer',
           }}
         >
-          ✕ Respinge
+          {t('ai.diff.reject')}
         </button>
       </div>
     </div>
@@ -165,9 +184,11 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   const globalStreaming = useAIStore((s) => s.isStreaming);
   const projectPath = useEditorStore((s) => s.projectPath);
-  const activeTab = useEditorStore((s) => {
+  const activeFileLabel = useEditorStore((s) => {
     const id = s.activeTabId;
-    return id ? s.tabs.find((t) => t.id === id) ?? null : null;
+    if (!id) return null;
+    const tab = s.tabs.find((t) => t.id === id);
+    return tab?.name ?? tab?.path ?? null;
   });
   const [cfg, setCfg] = useState<ReasoningLayerConfig>(DEFAULT_REASONING_LAYER_CONFIG);
 
@@ -215,7 +236,7 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
     () =>
       buildWaitSceneContext({
         projectTitle,
-        activeFile: activeTab?.name ?? activeTab?.path,
+        activeFile: activeFileLabel ?? undefined,
         steps: message.multiAgentSteps,
         modules: message.reasoningBrief?.modules,
         model: message.resolvedModel ?? message.model,
@@ -223,8 +244,7 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
       }),
     [
       projectTitle,
-      activeTab?.name,
-      activeTab?.path,
+      activeFileLabel,
       message.multiAgentSteps,
       message.reasoningBrief?.modules,
       message.resolvedModel,
@@ -260,58 +280,86 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
     Boolean(message.recap || hasModelOrchSteps(message.multiAgentSteps)) &&
     roleMapEntries.length > 0;
 
+  const hasDetails = Boolean(
+    (message.timelineEvents?.length ?? 0) > 0 ||
+      (message.multiAgentSteps?.length ?? 0) > 0 ||
+      (message.activitySteps?.length ?? 0) > 0 ||
+      liveReasoning ||
+      message.reasoningBrief ||
+      message.recap ||
+      showRoleMap ||
+      needsReview ||
+      planText
+  );
+
+  const { t } = useTranslation();
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {cfg.showPipelineTimeline && (message.multiAgentSteps?.length ?? 0) > 0 && (
-        <MultiAgentTimeline
-          steps={message.multiAgentSteps!}
-          collapsed={Boolean(message.recap)}
-          waitMessage={showWait ? waitMessage : undefined}
-          waitStatusLine={showWait ? waitStatusLine : undefined}
-          waitVisible={waitVisible}
-          completionMessage={completionMessage}
-          showCompletionHorse={showCompletionHorse}
-          completionNeedsReview={needsReview}
-        />
-      )}
-      {isStreaming && (message.activitySteps?.length ?? 0) > 0 && (
-        <ChatActivityTimeline
-          steps={message.activitySteps!}
-          collapsed={Boolean(message.recap || message.reasoningBrief)}
-        />
-      )}
-      {cfg.showLiveReasoning && liveReasoning && (
-        <ChatReasoningBlock
-          reasoning={liveReasoning}
-          isStreaming={Boolean(isStreaming && !message.recap)}
-          defaultExpanded={message.reasoningExpanded ?? true}
-        />
-      )}
-      {message.reasoningBrief && !message.recap && (
-        <CompactArenaStatus
-          text={planText || formatArenaReasoning(message.reasoningBrief, undefined, isStreaming)}
-        />
-      )}
-      {message.recap && <CompactArenaStatus text={planText} />}
-      {showRoleMap && (
-        <RoleMapPanel
-          entries={roleMapEntries}
-          userModel={message.model}
-          capabilitySnapshot={message.pipelineRecapMeta?.capabilitySnapshot}
-        />
-      )}
-      {!isStreaming && !message.recap && !message.reasoningBrief && planText && (
-        <CompactArenaStatus
-          text={
-            planText ||
-            formatChatPanelSummary(summarizeForChatPanel(message.content)) ||
-            (message.writtenFiles?.length
-              ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
-              : '')
-          }
-        />
-      )}
-    </div>
+    <>
+      {isStreaming && !(message.writtenFiles?.length) ? <StreamingDots /> : null}
+      {!isStreaming && (message.writtenFiles?.length ?? 0) > 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', marginBottom: 4 }}>
+          {t('ai.files.createdCount', { count: message.writtenFiles!.length })}
+        </div>
+      ) : null}
+      <AiMessageDetails hasContent={hasDetails}>
+        {needsReview ? <MandatoryReviewBadge /> : null}
+        <ChatUnifiedTimeline message={message} />
+        {cfg.showPipelineTimeline && (message.multiAgentSteps?.length ?? 0) > 0 && (
+          <MultiAgentTimeline
+            steps={message.multiAgentSteps!}
+            showSteps={false}
+            collapsed={Boolean(message.recap)}
+            waitMessage={showWait ? waitMessage : undefined}
+            waitStatusLine={showWait ? waitStatusLine : undefined}
+            waitVisible={waitVisible}
+            completionMessage={completionMessage}
+            showCompletionHorse={showCompletionHorse}
+            completionNeedsReview={needsReview}
+          />
+        )}
+        {isStreaming &&
+          (message.activitySteps?.length ?? 0) > 0 &&
+          !(message.timelineEvents?.length) && (
+          <ChatActivityTimeline
+            steps={message.activitySteps!}
+            collapsed={Boolean(message.recap || message.reasoningBrief)}
+          />
+        )}
+        {cfg.showLiveReasoning && liveReasoning && (
+          <ChatReasoningBlock
+            reasoning={liveReasoning}
+            isStreaming={Boolean(isStreaming && !message.recap)}
+            defaultExpanded={message.reasoningExpanded ?? false}
+          />
+        )}
+        {message.reasoningBrief && !message.recap && (
+          <CompactArenaStatus
+            live={isStreaming}
+            text={planText || formatArenaReasoning(message.reasoningBrief, undefined, isStreaming)}
+          />
+        )}
+        {message.recap && <CompactArenaStatus text={planText} />}
+        {showRoleMap && (
+          <RoleMapPanel
+            entries={roleMapEntries}
+            userModel={message.model}
+            capabilitySnapshot={message.pipelineRecapMeta?.capabilitySnapshot}
+          />
+        )}
+        {!isStreaming && !message.recap && !message.reasoningBrief && planText && (
+          <CompactArenaStatus
+            text={
+              planText ||
+              formatChatPanelSummary(summarizeForChatPanel(message.content)) ||
+              (message.writtenFiles?.length
+                ? t('ai.files.createdCount', { count: message.writtenFiles.length })
+                : '')
+            }
+          />
+        )}
+      </AiMessageDetails>
+    </>
   );
 }
 
@@ -341,7 +389,19 @@ function ModelProfileChips({ modelId }: { modelId: string }) {
 }
 
 function MessageBubble({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation();
+  const projectPath = useEditorStore((s) => s.projectPath);
+  const openFile = useEditorStore((s) => s.openFile);
+  const activeEditorPath = useEditorStore((s) => {
+    const id = s.activeTabId;
+    if (!id) return null;
+    return s.tabs.find((tab) => tab.id === id)?.path ?? null;
+  });
   const isUser = message.role === 'user';
+  const shellCommands = useMemo(() => {
+    if (isUser || message.isStreaming || !message.content) return [];
+    return extractShellCommandsFromAssistantText(message.content);
+  }, [isUser, message.content, message.isStreaming]);
   const { modelLabels, agentMode } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
   const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
@@ -351,11 +411,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const effectiveModelId = message.resolvedModel ?? message.model ?? '';
   const modelLabel = arenaMode
     ? resolvedLabel
-      ? `Agentic · ${resolvedLabel}`
-      : 'Agentic · multi-model'
+      ? t('ai.chat.agenticWithModel', { model: resolvedLabel })
+      : t('ai.chat.agenticMultiModel')
     : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
-      : resolvedLabel ?? selectionLabel ?? 'Model';
+      : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
 
   const displayText = arenaMode
     ? message.reasoningBrief || message.recap
@@ -371,6 +431,30 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       ? message.multiAgentStatus
       : displayText;
 
+  const nonAgenticDetails = Boolean(
+    !isUser &&
+      !arenaMode &&
+      ((message.timelineEvents?.length ?? 0) > 0 ||
+        (message.activitySteps?.length ?? 0) > 0 ||
+        Boolean(message.reasoning) ||
+        Boolean(effectiveModelId))
+  );
+
+  const completedFilePaths = useMemo(() => {
+    if (message.historicalWrittenFiles?.length) {
+      return message.historicalWrittenFiles.map((row) => row.filePath);
+    }
+    return message.writtenFiles ?? [];
+  }, [message.historicalWrittenFiles, message.writtenFiles]);
+
+  const openRelFile = useCallback(
+    (rel: string) => {
+      if (!projectPath) return;
+      void openFile(joinWorkspaceRelativePath(projectPath, rel));
+    },
+    [openFile, projectPath]
+  );
+
   return (
     <div style={{
       alignSelf: isUser ? 'flex-end' : 'flex-start',
@@ -378,11 +462,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     }}>
       {/* Label */}
       <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em', paddingLeft: 2 }}>
-        {isUser ? 'Tu' : (
+        {isUser ? t('ai.chat.userLabel') : (
           <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--caval-accent)', display: 'inline-block', flexShrink: 0 }} />
             <span>{modelLabel}</span>
-            {!arenaMode && effectiveModelId ? <ModelProfileChips modelId={effectiveModelId} /> : null}
           </span>
         )}
       </div>
@@ -397,59 +480,31 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         WebkitUserSelect: 'text',
         cursor: 'text',
       }}>
-        {message.reasoning && !arenaMode && (
-          <ChatReasoningBlock
-            reasoning={message.reasoning}
-            isStreaming={Boolean(message.isStreaming && !message.content)}
-            defaultExpanded={message.reasoningExpanded ?? true}
-          />
-        )}
         {!isUser && arenaMode ? (
           message.isStreaming ||
           message.reasoningBrief ||
           message.recap ||
           (message.multiAgentSteps?.length ?? 0) > 0 ||
+          (message.timelineEvents?.length ?? 0) > 0 ||
           Boolean(message.reasoning) ? (
             <ArenaWorkPanel message={message} />
           ) : (
-            <>
-              <CompactArenaStatus text={arenaStatusText || (message.writtenFiles?.length ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.` : '')} />
-              {message.writtenFiles && message.writtenFiles.length > 0 ? (
-                <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--caval-success)' }}>
-                  {message.writtenFiles.slice(0, 3).join(', ')}
-                  {message.writtenFiles.length > 3 ? '…' : ''}
-                </div>
-              ) : null}
-            </>
-          )
-        ) : arenaMode && !isUser ? (
-          <>
             <CompactArenaStatus
               text={
-                displayText ||
+                arenaStatusText ||
                 (message.writtenFiles?.length
-                  ? `✓ ${message.writtenFiles.length} fișier(e) — vezi editorul.`
-                  : message.isStreaming
-                    ? '⚡ Scriu în editor…'
-                    : '')
+                  ? t('ai.files.createdCount', { count: message.writtenFiles.length })
+                  : '')
               }
             />
-            {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming ? (
-              <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--caval-success)' }}>
-                {message.writtenFiles.slice(0, 3).join(', ')}
-                {message.writtenFiles.length > 3 ? '…' : ''}
-              </div>
-            ) : null}
-          </>
-        ) : message.isStreaming && message.activitySteps?.length ? (
+          )
+        ) : message.isStreaming && message.activitySteps?.length && !(message.timelineEvents?.length) ? (
           <>
-            <ChatActivityTimeline
-              steps={message.activitySteps}
-              collapsed={Boolean(message.content)}
-            />
             {message.content ? (
               <StreamingText content={message.content} />
-            ) : null}
+            ) : (
+              <StreamingDots />
+            )}
           </>
         ) : message.isStreaming && !message.content ? (
           <StreamingDots />
@@ -463,20 +518,67 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           />
         )}
 
+        {!isUser && !arenaMode ? (
+          <AiMessageDetails hasContent={nonAgenticDetails}>
+            {message.reasoning ? (
+              <ChatReasoningBlock
+                reasoning={message.reasoning}
+                isStreaming={Boolean(message.isStreaming && !message.content)}
+                defaultExpanded={false}
+              />
+            ) : null}
+            <ChatUnifiedTimeline message={message} />
+            {(message.activitySteps?.length ?? 0) > 0 && !(message.timelineEvents?.length) ? (
+              <ChatActivityTimeline
+                steps={message.activitySteps!}
+                collapsed={Boolean(message.content)}
+              />
+            ) : null}
+            {effectiveModelId ? <ModelProfileChips modelId={effectiveModelId} /> : null}
+          </AiMessageDetails>
+        ) : null}
+
         {/* Diff block dacă există */}
         {message.diff && !message.isStreaming && !message.diff.autoApplied && !arenaMode && (
           <DiffBlock message={message} />
         )}
 
-        {message.writtenFiles && message.writtenFiles.length > 0 && !message.isStreaming && !arenaMode && (
-          <div style={{
-            marginTop: 10, padding: '8px 12px', borderRadius: 6,
-            background: 'rgba(47,191,113,0.08)', border: '1px solid rgba(47,191,113,0.25)',
-            fontSize: 11.5, color: 'var(--caval-success)',
-          }}>
-            ✓ {message.writtenFiles.length} fișier(e) create în workspace: {message.writtenFiles.slice(0, 4).join(', ')}
-            {message.writtenFiles.length > 4 ? '…' : ''}
-          </div>
+        {!isUser && message.proposedWrites && message.proposedWrites.length > 0 && (
+          <WrittenFilesCard
+            proposedWrites={message.proposedWrites}
+            messageId={message.id}
+          />
+        )}
+
+        {!isUser &&
+          !message.isStreaming &&
+          completedFilePaths.length > 0 &&
+          !(message.proposedWrites && message.proposedWrites.length > 0) && (
+          <LiveAiFileCards
+            mode="completed"
+            edits={writtenFilesToEdits(completedFilePaths)}
+            onOpen={openRelFile}
+            activeEditorPath={activeEditorPath}
+            projectPath={projectPath}
+            onOpenWebPreview={() => {
+              dispatchOpenExplorerSidebar();
+              usePreviewStore.getState().activatePreview('web', null);
+              void window.caval?.preview?.start('web');
+            }}
+            onOpenMobilePreview={() => {
+              dispatchOpenExplorerSidebar();
+              usePreviewStore.getState().activatePreview('mobile', null);
+              void window.caval?.preview?.start('mobile');
+            }}
+          />
+        )}
+
+        {!isUser && !message.isStreaming && shellCommands.length > 0 && (
+          <SuggestedCommandsCard commands={shellCommands} />
+        )}
+
+        {!isUser && !message.isStreaming && !message.error && (
+          <MessageFeedbackButtons messageId={message.id} streamId={message.streamId} />
         )}
 
         {/* Eroare */}
@@ -490,14 +592,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-function CompactArenaStatus({ text }: { text: string }) {
+function CompactArenaStatus({ text, live }: { text: string; live?: boolean }) {
   return (
     <div
       title={text}
+      className={live ? 'caval-stream-text' : undefined}
       style={{
-        fontSize: 12,
-        lineHeight: 1.45,
-        color: 'var(--caval-text-muted)',
+        fontSize: live ? 10 : 12,
+        lineHeight: live ? 1.45 : 1.45,
+        letterSpacing: live ? '0.05em' : undefined,
+        fontFamily: live ? "'JetBrains Mono', ui-monospace, monospace" : undefined,
+        color: live ? 'rgba(186, 230, 253, 0.62)' : 'var(--caval-text-muted)',
         maxHeight: '5.8em',
         overflow: 'hidden',
         display: '-webkit-box',
@@ -513,17 +618,19 @@ function CompactArenaStatus({ text }: { text: string }) {
 
 function StreamingDots({ rotateMs = DEFAULT_REASONING_LAYER_CONFIG.waitMessageRotateMs }: { rotateMs?: number }) {
   const projectPath = useEditorStore((s) => s.projectPath);
-  const activeTab = useEditorStore((s) => {
+  const activeFileLabel = useEditorStore((s) => {
     const id = s.activeTabId;
-    return id ? s.tabs.find((t) => t.id === id) ?? null : null;
+    if (!id) return null;
+    const tab = s.tabs.find((t) => t.id === id);
+    return tab?.name ?? tab?.path ?? null;
   });
   const waitCtx = useMemo(
     () =>
       buildWaitSceneContext({
         projectTitle: workspaceFolderTitle(projectPath),
-        activeFile: activeTab?.name ?? activeTab?.path,
+        activeFile: activeFileLabel ?? undefined,
       }),
-    [projectPath, activeTab?.name, activeTab?.path]
+    [projectPath, activeFileLabel]
   );
   const { message, visible } = useArenaWaitMessage(undefined, true, rotateMs, undefined, waitCtx);
 
@@ -570,7 +677,12 @@ function StreamingText({ content }: { content: string }) {
         overflowWrap: 'break-word',
         userSelect: 'text',
         WebkitUserSelect: 'text',
-        lineHeight: 1.6,
+        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        fontSize: 10,
+        lineHeight: 1.42,
+        letterSpacing: '0.055em',
+        fontWeight: 400,
+        color: 'rgba(186, 230, 253, 0.58)',
       }}
     >
       {content}
@@ -580,6 +692,7 @@ function StreamingText({ content }: { content: string }) {
 }
 
 function MandatoryReviewBadge() {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -595,11 +708,11 @@ function MandatoryReviewBadge() {
         fontWeight: 500,
         width: '100%',
       }}
-      title="Review obligatoriu: Merge + Supervisor + Test + Verify înainte de livrare ready-to-use"
+      title={t('ai.panel.readyToUseGateTitle')}
     >
       <span aria-hidden style={{ color: 'var(--caval-accent)' }}>●</span>
-      <span>Review obligatoriu (activ)</span>
-      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>Ready-to-use gate</span>
+      <span>{t('ai.panel.mandatoryReviewActive')}</span>
+      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>{t('ai.panel.readyToUseGate')}</span>
     </div>
   );
 }
@@ -608,8 +721,48 @@ function MandatoryReviewBadge() {
 //  AIPanel — componenta principală
 // ──────────────────────────────────────────────
 
+function StickyLiveAiFiles() {
+  const liveEdits = useLiveAiEdits();
+  const projectPath = useEditorStore((s) => s.projectPath);
+  const openFile = useEditorStore((s) => s.openFile);
+  const activeEditorPath = useEditorStore((s) => {
+    const id = s.activeTabId;
+    if (!id) return null;
+    return s.tabs.find((tab) => tab.id === id)?.path ?? null;
+  });
+  const isStreaming = useAIStore((s) => s.isStreaming);
+
+  useEffect(() => {
+    if (liveEdits.length > 0) {
+      void import('./live-ai-edit-styles.js').then((m) => m.ensureLiveAiEditStyles());
+    }
+  }, [liveEdits.length]);
+
+  if (!liveEdits.length) return null;
+
+  return (
+    <div
+      data-testid="sticky-live-ai-files"
+      style={{ flexShrink: 0, padding: '0 10px 8px' }}
+    >
+      <LiveAiFileCards
+        mode="streaming"
+        edits={liveEdits}
+        isStreaming={isStreaming}
+        onOpen={(rel) => {
+          if (!projectPath) return;
+          void openFile(joinWorkspaceRelativePath(projectPath, rel));
+        }}
+        activeEditorPath={activeEditorPath}
+        projectPath={projectPath}
+      />
+    </div>
+  );
+}
+
 export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onOpenComposer?: () => void }) {
   const { theme } = useCavalTheme();
+  const { t } = useTranslation();
   const {
     messages, isStreaming,
     sendMessage, stopStreaming, clearChat, loadModelLabels,
@@ -619,31 +772,20 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     selectedModel, pendingChatDraft, clearPendingChatDraft, pendingAutoSend,
     agentMode, apiKeys,
     modeSwitchNotice, clearModeSwitchNotice,
-    verifyInFlight, runWorkspaceVerifyAndReport, runBuildAndReport,
-    includeMode, setIncludeMode,
   } = useAIStore();
 
   const { catalog, loading: catalogLoading, refresh: refreshCatalog } = useModelCatalog();
   const modeDef = getAgentMode(agentMode);
   const isAgentic = isAgenticPipelineMode(agentMode);
   const inputPlaceholder = isStreaming
-    ? 'Scrie stop / oprește pentru a opri (contextul rămâne în chat)'
-    : isAgentic
-    ? 'Descrie proiectul — Agentic livrează end-to-end (Enter = trimite)'
-    : agentMode === 'plan'
-      ? 'Planificare enterprise — arhitectură, roadmap, KPIs (Enter = trimite)'
-      : agentMode === 'code'
-        ? 'Implementare cod — descrie ce să construiești (Enter = trimite)'
-        : agentMode === 'debug'
-          ? 'Lipește eroarea sau codul de analizat (Enter = trimite)'
-          : agentMode === 'ask'
-            ? 'Întrebare sau explicație (Enter = trimite)'
-            : `${modeDef.label} — ${modeDef.description.slice(0, 60)}…`;
+    ? t('ai.panel.placeholder.stop')
+    : t('chat.inputPlaceholder');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState('');
   const [preloadHint, setPreloadHint] = useState('');
   const [readinessHint, setReadinessHint] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   useEffect(() => {
     ensurePipelineVerifyListener();
@@ -704,9 +846,39 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prepareTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectPath = useEditorStore((s) => s.projectPath);
-  const editorSelection = useEditorStore((s) => s.editorSelection);
-  const tabs = useEditorStore((s) => s.tabs);
-  const activeTabId = useEditorStore((s) => s.activeTabId);
+  /** Paths only — do not subscribe to tab `content` (live AI edits would re-render the whole chat). */
+  const openFilePathsKey = useEditorStore((s) => s.tabs.map((t) => t.path).join('\0'));
+  const activeTabPath = useEditorStore((s) => {
+    const id = s.activeTabId;
+    return id ? (s.tabs.find((t) => t.id === id)?.path ?? null) : null;
+  });
+  const openFilePaths = useMemo(
+    () => (openFilePathsKey ? openFilePathsKey.split('\0') : []),
+    [openFilePathsKey]
+  );
+  const historyConversations = useAiHistoryStore((s) => s.conversations);
+  const historyLoading = useAiHistoryStore((s) => s.loading);
+  const activeHistoryId = useAiHistoryStore((s) => s.activeHistoryId);
+  const historyExportBusy = useAiHistoryStore((s) => s.exportBusy);
+  const refreshHistory = useAiHistoryStore((s) => s.refresh);
+  const openHistoryConversation = useAiHistoryStore((s) => s.openConversation);
+  const deleteHistoryConversation = useAiHistoryStore((s) => s.deleteConversation);
+  const exportHistoryConversation = useAiHistoryStore((s) => s.exportConversation);
+  const loadMoreHistory = useAiHistoryStore((s) => s.loadMore);
+  const historyHasMore = useAiHistoryStore((s) => s.hasMore);
+  const historyLoadingMore = useAiHistoryStore((s) => s.loadingMore);
+  const activeThreadId = useAIStore((s) => s.activeThreadId);
+  const exportConversationId = activeHistoryId ?? activeThreadId;
+  const [showAiSettings, setShowAiSettings] = useState(false);
+  const refreshAiSettings = useAiSettingsStore((s) => s.refresh);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [projectPath, refreshHistory]);
+
+  useEffect(() => {
+    void refreshAiSettings();
+  }, [projectPath, refreshAiSettings]);
 
   const inputDraftHash = useMemo(
     () => (input.trim() ? hashChatDraft(input, selectedModel, projectPath) : null),
@@ -750,16 +922,15 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     setTimeout(() => textareaRef.current?.focus(), 80);
   }, [pendingChatDraft, pendingAutoSend, clearPendingChatDraft, sendMessage]);
 
-  // Zero-Latency Fusion: warm cache + model preload when panel opens
+  // Zero-Latency Fusion: warm once when workspace / open-file set changes (not on tab content).
   useEffect(() => {
     if (!projectPath) return;
-    const activeTab = tabs.find((t) => t.id === activeTabId);
     void window.caval?.zlPanelOpen?.({
       workspaceRoot: projectPath,
-      activeFile: activeTab?.path,
-      openFiles: tabs.map((t) => t.path),
+      activeFile: activeTabPath ?? undefined,
+      openFiles: openFilePaths,
     });
-  }, [projectPath, tabs, activeTabId]);
+  }, [projectPath, openFilePathsKey, activeTabPath, openFilePaths]);
 
   // Zero-Latency: prepare while user types (350ms debounce)
   useEffect(() => {
@@ -769,12 +940,11 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     }
     if (prepareTimer.current) clearTimeout(prepareTimer.current);
     prepareTimer.current = setTimeout(() => {
-      const activeTab = tabs.find((t) => t.id === activeTabId);
       void chatPrepareDraft({
         text: input,
         projectPath,
-        activeFile: activeTab?.path,
-        openFiles: tabs.map((t) => t.path),
+        activeFile: activeTabPath ?? undefined,
+        openFiles: openFilePaths,
       });
     }, input.length > 500
       ? DEFAULT_ZERO_LATENCY_CONFIG.typingDebounceMs * 2
@@ -782,19 +952,19 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     return () => {
       if (prepareTimer.current) clearTimeout(prepareTimer.current);
     };
-  }, [input, projectPath, tabs, activeTabId, chatPrepareDraft, clearPrepareState]);
+  }, [input, projectPath, activeTabPath, openFilePaths, chatPrepareDraft, clearPrepareState]);
 
-  // Auto-scroll: instant during stream (smooth scroll on every token causes jitter)
+  // Auto-scroll: stick to bottom without smooth scroll (smooth + token updates = jitter)
   useEffect(() => {
     const container = messagesScrollRef.current;
     if (!container) return;
 
-    if (isStreaming) {
-      container.scrollTop = container.scrollHeight;
-      return;
-    }
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const stick = isStreaming || distanceFromBottom < 96;
+    if (!stick) return;
 
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    container.scrollTop = container.scrollHeight;
   }, [messages, isStreaming]);
 
   const handleSend = useCallback(async () => {
@@ -868,6 +1038,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   return (
     <div style={{
       width: panelWidth,
+      height: '100%',
+      minHeight: 0,
       background: theme.colors.surfaceRaised,
       borderLeft: `1px solid ${theme.colors.border}`,
       display: 'flex', flexDirection: 'column',
@@ -884,9 +1056,10 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       {/* ── Header ─────────────────────────── */}
       <div style={{
         padding: `8px ${PANEL_PAD_X}px`, borderBottom: `1px solid ${theme.colors.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', flexDirection: 'column', gap: 6,
         flexShrink: 0,
       }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <CavaloAiMark size={22} />
           <div>
@@ -894,22 +1067,38 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               fontSize: 11.5, fontWeight: 600, color: 'var(--caval-text)',
               letterSpacing: '0.06em', textTransform: 'uppercase',
             }}>
-              {isAgentic ? 'Coding Arena' : modeDef.label}
+              {isAgentic ? t('ai.panel.codingArena') : modeDef.label}
             </span>
             <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', lineHeight: 1.2 }}>
               {isAgentic
-                ? 'Full SDE · livrare proiect'
+                ? t('ai.panel.arenaSubtitle')
                 : agentMode === 'code'
-                  ? 'Model direct · patch în editor'
+                  ? t('ai.panel.codeSubtitle')
                   : modeDef.description}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <button
+          type="button"
+          data-testid="ai-settings-open"
+          onClick={() => setShowAiSettings((v) => !v)}
+          title={t('ai.panel.settings')}
+          style={{
+            width: 24, height: 24, borderRadius: 4, border: 'none',
+            background: showAiSettings ? 'var(--caval-accent-glow)' : 'none',
+            color: showAiSettings ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13,
+          }}
+        >
+          ⚙
+        </button>
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            title="Șterge conversația"
+            title={t('ai.panel.clearChat')}
             style={{
               width: 24, height: 24, borderRadius: 4, border: 'none',
               background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
@@ -925,7 +1114,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         {onClose && (
           <button
             onClick={onClose}
-            title="Închide AI Panel (Ctrl+Shift+A)"
+            title={t('ai.panel.close')}
             style={{
               width: 24, height: 24, borderRadius: 4, border: 'none',
               background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
@@ -939,8 +1128,19 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           </button>
         )}
         </div>
+        </div>
+        <AiPanelToolbar
+          isStreaming={isStreaming}
+          onStartChat={(prompt) => {
+            if (prompt.trim()) void sendMessage(prompt.trim());
+          }}
+        />
       </div>
 
+      {showAiSettings ? (
+        <AiSettingsPanel onClose={() => setShowAiSettings(false)} />
+      ) : (
+      <>
       {/* Workspace bar — folder deschis + Chat nou (fără tab-uri vechi) */}
       <div
         style={{
@@ -953,7 +1153,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         }}
       >
         <span
-          title="Folder activ — istoricul vechi e păstrat local"
+          title={t('ai.panel.activeFolderHint')}
           style={{
             fontSize: 10,
             color: 'var(--caval-text-muted)',
@@ -968,8 +1168,12 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </span>
         <button
           type="button"
-          onClick={() => newThread()}
-          title="Chat nou"
+          onClick={() => {
+            newThread();
+            useAiHistoryStore.setState({ activeHistoryId: null });
+            void refreshHistory();
+          }}
+          title={t('ai.panel.newChat')}
           style={{
             padding: '2px 10px',
             fontSize: 10,
@@ -982,18 +1186,146 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             flexShrink: 0,
           }}
         >
-          Chat nou
+          {t('ai.panel.newChat')}
         </button>
       </div>
 
+      {projectPath && (
+        <div
+          data-testid="ai-history-list"
+          style={{
+            maxHeight: historyExpanded ? 132 : undefined,
+            overflowY: historyExpanded ? 'auto' : 'hidden',
+            borderBottom: `1px solid ${theme.colors.border}`,
+            flexShrink: 0,
+            padding: `4px ${PANEL_PAD_X}px 6px`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 9.5,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: 'var(--caval-text-muted)',
+              marginBottom: historyExpanded ? 4 : 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 6,
+            }}
+          >
+            <button
+              type="button"
+              data-testid="ai-history-toggle"
+              aria-expanded={historyExpanded}
+              title={historyExpanded ? t('ai.history.collapse') : t('ai.history.expand')}
+              onClick={() => setHistoryExpanded((open) => !open)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'inherit',
+                cursor: 'pointer',
+                padding: 0,
+                font: 'inherit',
+                letterSpacing: 'inherit',
+                textTransform: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span>
+                {historyExpanded
+                  ? `${t('ai.history.title')}${historyLoading ? ' …' : ''}`
+                  : t('ai.history.count', { count: historyConversations.length })}
+              </span>
+              <span aria-hidden="true" style={{ fontSize: 8 }}>{historyExpanded ? '▴' : '▾'}</span>
+            </button>
+            {historyExpanded && exportConversationId ? (
+              <span data-testid="ai-history-export-actions" style={{ display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  data-testid="ai-history-export-md"
+                  disabled={historyExportBusy}
+                  title={t('ai.history.exportMd')}
+                  onClick={() => void exportHistoryConversation(exportConversationId, 'markdown')}
+                  style={{
+                    fontSize: 9,
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                    border: '1px solid var(--caval-accent-ring)',
+                    background: 'transparent',
+                    color: 'var(--caval-accent)',
+                    cursor: historyExportBusy ? 'wait' : 'pointer',
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                  }}
+                >
+                  MD
+                </button>
+                <button
+                  type="button"
+                  data-testid="ai-history-export-json"
+                  disabled={historyExportBusy}
+                  title={t('ai.history.exportJson')}
+                  onClick={() => void exportHistoryConversation(exportConversationId, 'json')}
+                  style={{
+                    fontSize: 9,
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                    border: '1px solid var(--caval-accent-ring)',
+                    background: 'transparent',
+                    color: 'var(--caval-accent)',
+                    cursor: historyExportBusy ? 'wait' : 'pointer',
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                  }}
+                >
+                  JSON
+                </button>
+              </span>
+            ) : null}
+          </div>
+          {historyExpanded && (
+            historyConversations.length === 0 && !historyLoading ? (
+              <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
+                {t('ai.history.empty')}
+              </div>
+            ) : (
+              <HistoryList
+                conversations={historyConversations}
+                activeId={activeHistoryId}
+                hasMore={historyHasMore}
+                loadingMore={historyLoadingMore}
+                onSelect={(id) => void openHistoryConversation(id)}
+                onDelete={(id) => {
+                  void deleteHistoryConversation(id).then(() => refreshHistory());
+                }}
+                onLoadMore={() => void loadMoreHistory()}
+              />
+            )
+          )}
+        </div>
+      )}
+
       {/* ── Messages ───────────────────────── */}
       <div ref={messagesScrollRef} className="ai-messages-scroll caval-selectable" style={{
-        flex: 1, overflowY: 'auto', padding: messages.length === 0 ? 0 : '10px',
+        flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
+        padding: messages.length === 0 ? 0 : '10px',
         display: 'flex', flexDirection: 'column', gap: 10,
+        overscrollBehavior: 'contain',
       }}>
-        {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
-        {messages.length > 0 && <div ref={messagesEndRef} />}
+        {messages.length === 0 ? (
+          <AIOnboarding />
+        ) : (
+          <>
+            {messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)}
+            <div ref={messagesEndRef} />
+          </>
+        )}
       </div>
+
+      <StickyLiveAiFiles />
 
       {/* ── Input ──────────────────────────── */}
       <div style={{
@@ -1001,63 +1333,6 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         flexShrink: 0,
         display: 'flex', flexDirection: 'column', gap: 8,
       }}>
-        <ChatModeSelect />
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          {editorSelection?.text && (
-            <button
-              type="button"
-              onClick={() => setIncludeMode(includeMode === 'selection' ? 'project' : 'selection')}
-              title={includeMode === 'selection' ? 'Context: doar selecția' : 'Include selecția în context'}
-              style={{
-                fontSize: 10,
-                padding: '3px 8px',
-                borderRadius: 999,
-                border: `1px solid ${includeMode === 'selection' ? 'var(--caval-accent)' : 'var(--caval-border)'}`,
-                background: includeMode === 'selection' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-                color: includeMode === 'selection' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-                cursor: 'pointer',
-              }}
-            >
-              {includeMode === 'selection' ? '◉' : '○'} Selecție ({editorSelection.endLine - editorSelection.startLine + 1}L)
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void runWorkspaceVerifyAndReport()}
-            disabled={verifyInFlight !== 'none' || !projectPath || isStreaming}
-            title={projectPath ? 'Rulează npm test / verify workspace' : 'Deschide un folder de proiect'}
-            style={{
-              fontSize: 10.5,
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--caval-border)',
-              background: verifyInFlight === 'tests' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-              color: verifyInFlight === 'tests' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-              cursor: verifyInFlight !== 'none' || !projectPath || isStreaming ? 'default' : 'pointer',
-              opacity: verifyInFlight !== 'none' || !projectPath || isStreaming ? 0.55 : 1,
-            }}
-          >
-            {verifyInFlight === 'tests' ? '⏳ Run tests…' : '▶ Run tests'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void runBuildAndReport()}
-            disabled={verifyInFlight !== 'none' || !projectPath || isStreaming}
-            title={projectPath ? 'Rulează npm run build' : 'Deschide un folder de proiect'}
-            style={{
-              fontSize: 10.5,
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: '1px solid var(--caval-border)',
-              background: verifyInFlight === 'build' ? 'var(--caval-accent-glow)' : 'var(--caval-surface-raised)',
-              color: verifyInFlight === 'build' ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-              cursor: verifyInFlight !== 'none' || !projectPath || isStreaming ? 'default' : 'pointer',
-              opacity: verifyInFlight !== 'none' || !projectPath || isStreaming ? 0.55 : 1,
-            }}
-          >
-            {verifyInFlight === 'build' ? '⏳ Run build…' : '▶ Run build'}
-          </button>
-        </div>
         {modeSwitchNotice && !isAgentic && (
           <div
             style={{
@@ -1087,10 +1362,9 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             </button>
           </div>
         )}
-        {isAgentic && <MandatoryReviewBadge />}
         {agentMode === 'code' && selectedModel.startsWith('caval-auto/') && (
           <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', lineHeight: 1.35 }}>
-            Auto routează modelul — alege un model explicit pentru a testa puterea lui.
+            {t('ai.panel.autoRouteHint')}
           </div>
         )}
         <div style={{
@@ -1145,7 +1419,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                       border: 'none', background: 'none', cursor: 'pointer',
                       color: 'var(--caval-text-muted)', fontSize: 12, lineHeight: 1, padding: 0,
                     }}
-                    title="Elimină atașament"
+                    title={t('ai.panel.removeAttachment')}
                   >
                     ✕
                   </button>
@@ -1170,19 +1444,19 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               display: 'flex', alignItems: 'center', gap: 6,
               flexWrap: 'wrap', minWidth: 0,
             }}>
-              <IconBtn title="Atașează fișier" onClick={() => void handleAttachClick()}>
+              <IconBtn title={t('ai.panel.attachFile')} onClick={() => void handleAttachClick()}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
                   <path d="M12.5 8.5L7 14a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54L5.5 11.5a1 1 0 01-1.42-1.42L10 4" strokeLinecap="round" />
                 </svg>
               </IconBtn>
               <IconBtn
-                title="Refresh modele OpenRouter"
+                title={t('ai.panel.refreshModels')}
                 onClick={() => void refreshCatalog()}
               >
                 <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span>
               </IconBtn>
               {onOpenComposer && (
-                <IconBtn title="Deschide Composer (multi-file)" onClick={onOpenComposer}>
+                <IconBtn title={t('ai.panel.openComposer')} onClick={onOpenComposer}>
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
                     <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
                   </svg>
@@ -1209,7 +1483,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                       animation: isPrepareReady ? 'none' : 'dot-bounce 1.2s ease-in-out infinite',
                     }}
                   />
-                  {isPrepareReady ? 'Pregătit' : 'Pregătesc…'}
+                  {isPrepareReady ? t('ai.panel.prepareReady') : t('ai.panel.prepareBusy')}
                   {preloadHint && (
                     <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
                   )}
@@ -1286,7 +1560,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                       flexShrink: 0,
                     }}
                   >
-                    {isStreaming ? '■ Stop' : 'Trimite ↵'}
+                    {isStreaming ? `■ ${t('ai.panel.stop')}` : t('ai.panel.send')}
                   </button>
                 );
               })()}
@@ -1294,6 +1568,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

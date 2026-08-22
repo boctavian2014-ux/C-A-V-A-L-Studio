@@ -7,10 +7,13 @@ import {
 } from './chat-activity-types';
 import { CavaloHorseMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { getWaitGlowFilter, getWaitGlowBoxShadow, getCompletionGlowFilter, getCompletionGlowBoxShadow, activePhaseFromSteps } from './arena-wait-copy';
+import { useTranslation } from '../i18n/useTranslation';
 
 interface MultiAgentTimelineProps {
   steps: MultiAgentStepRecord[];
   collapsed?: boolean;
+  /** When false, only wait/completion banners render (steps live in ChatUnifiedTimeline). */
+  showSteps?: boolean;
   waitMessage?: string;
   waitStatusLine?: string;
   waitVisible?: boolean;
@@ -63,6 +66,7 @@ function ModelBadge({ modelId }: { modelId: string }) {
 }
 
 function ParallelBadge() {
+  const { t } = useTranslation();
   return (
     <span
       style={{
@@ -76,7 +80,7 @@ function ParallelBadge() {
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }}
-      title="Rulează în paralel cu alte etape din același grup"
+      title={t('ai.timeline.parallelTitle')}
     >
       ∥ parallel
     </span>
@@ -105,6 +109,7 @@ function LatencyBadge({ ms }: { ms: number }) {
 }
 
 function AuditBadge({ badge }: { badge: string }) {
+  const { t } = useTranslation();
   return (
     <span
       style={{
@@ -118,7 +123,7 @@ function AuditBadge({ badge }: { badge: string }) {
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }}
-      title="Self-audit scores"
+      title={t('ai.timeline.selfAudit')}
     >
       {badge}
     </span>
@@ -138,6 +143,7 @@ function stepLabel(step: MultiAgentStepRecord): string {
 export function MultiAgentTimeline({
   steps,
   collapsed,
+  showSteps = true,
   waitMessage,
   waitStatusLine,
   waitVisible = true,
@@ -145,7 +151,8 @@ export function MultiAgentTimeline({
   showCompletionHorse = false,
   completionNeedsReview = false,
 }: MultiAgentTimelineProps) {
-  if (!steps.length) return null;
+  const { t } = useTranslation();
+  if (!steps.length && !waitMessage && !showCompletionHorse) return null;
 
   const activeIdx = steps.findIndex((s) => s.status === 'active');
   const displaySteps = collapsed
@@ -159,20 +166,25 @@ export function MultiAgentTimeline({
         ? steps.slice(0, activeIdx + 1)
         : steps.slice(-8);
 
+  const hasStepList = showSteps && steps.length > 0;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-      <div
-        style={{
-          fontSize: 9.5,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: 'var(--caval-text-muted)',
-        }}
-      >
-        Pipeline · multi-model
-      </div>
-      {visible.map((step) => (
+      {hasStepList ? (
+        <div
+          style={{
+            fontSize: 9.5,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--caval-text-muted)',
+          }}
+        >
+          {t('ai.timeline.pipeline')}
+        </div>
+      ) : null}
+      {hasStepList
+        ? visible.map((step) => (
         <div
           key={`${step.stepId ?? step.phase}-${step.at}`}
           style={{
@@ -199,7 +211,8 @@ export function MultiAgentTimeline({
             <span style={{ fontSize: 10.5, opacity: 0.85 }}>{step.detail}</span>
           ) : null}
         </div>
-      ))}
+      ))
+        : null}
       {waitMessage ? (
         <div
           style={{
@@ -289,10 +302,12 @@ export function MultiAgentTimeline({
       <style>{`
         .arena-horse-wait-mark img {
           animation: cavalo-gallop 1.4s ease-in-out infinite;
+          will-change: transform;
+          transform: translateZ(0);
         }
         @keyframes cavalo-gallop {
-          0%, 100% { transform: scale(0.92) translateY(0); }
-          50% { transform: scale(1) translateY(-3px); }
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-2px); }
         }
       `}</style>
       <style>{`

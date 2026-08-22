@@ -3,6 +3,7 @@
  */
 import crypto from "node:crypto";
 import dns from "node:dns/promises";
+import type { LookupAddress, LookupAllOptions } from "node:dns";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -39,12 +40,18 @@ vi.mock("electron", () => ({
 }));
 
 function mockPublicDns() {
-  return vi.spyOn(dns, "lookup").mockImplementation(async (_host, opts) => {
-    if (typeof opts === "object" && opts && "all" in opts && opts.all) {
-      return [{ address: "93.184.216.34", family: 4 }] as never;
-    }
-    return { address: "93.184.216.34", family: 4 } as never;
-  });
+  const publicAddress: LookupAddress = { address: "93.184.216.34", family: 4 };
+  return vi.spyOn(dns, "lookup").mockImplementation(
+    (async (
+      _hostname: string,
+      options?: number | LookupAllOptions
+    ): Promise<LookupAddress | LookupAddress[]> => {
+      if (typeof options === "object" && options.all) {
+        return [publicAddress];
+      }
+      return publicAddress;
+    }) as typeof dns.lookup
+  );
 }
 
 function mkTmp(prefix: string): string {
@@ -159,7 +166,8 @@ function mockResponse(init: {
 }): Response {
   const headers = new Headers(init.headers ?? {});
   if (init.location) headers.set("location", init.location);
-  const body = init.body ?? "";
+  const raw = init.body ?? "";
+  const body: BodyInit = typeof raw === "string" ? raw : Uint8Array.from(raw);
   return new Response(body, { status: init.status ?? 200, headers });
 }
 
@@ -413,7 +421,7 @@ describe("Lot C2 — IPC handlers (mocked network)", () => {
     }));
 
     const { registerExtensionHandlers, __resetExtensionHostForTests } = await import(
-      "../../src/main/extension-handlers"
+      "../../src/main/extension-handlers.js"
     );
     __resetExtensionHostForTests();
     registerExtensionHandlers(() => workspace);
@@ -687,7 +695,7 @@ describe("Lot C2 — IPC handlers (mocked network)", () => {
 
 describe("Lot C2 — OpenVSX URL host gate (unit)", () => {
   it("isInstallableOpenVsxExtension rejects non-allowlisted download host", async () => {
-    const { isInstallableOpenVsxExtension } = await import("../../src/main/open-vsx-client");
+    const { isInstallableOpenVsxExtension } = await import("../../src/main/open-vsx-client.js");
     expect(
       isInstallableOpenVsxExtension({
         namespace: "a",

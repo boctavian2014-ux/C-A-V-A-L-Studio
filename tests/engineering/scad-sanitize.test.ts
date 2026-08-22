@@ -45,11 +45,6 @@ body();
   });
 });
 
-import {
-  buildToyVehicleScad,
-  isToyVehiclePrompt,
-} from "../../ai/engineering/toy-vehicle-scad";
-
 describe("toy vehicle template", () => {
   it("detects Ferrari / masina prompts", () => {
     expect(isToyVehiclePrompt("masina ferrari jucarie")).toBe(true);

@@ -3,7 +3,16 @@ declare module "*.png" {
   const src: string;
   export default src;
 }
+declare module "*.jpg" {
+  const src: string;
+  export default src;
+}
+declare module "*.jpeg" {
+  const src: string;
+  export default src;
+}
 declare module "xterm/css/xterm.css";
+declare module "@xterm/xterm/css/xterm.css";
 
 interface CavalFsApi {
   pickFiles: () => Promise<string[] | null>;
@@ -18,14 +27,25 @@ interface CavalFsApi {
   reveal: (filePath: string) => Promise<{ ok: boolean }>;
 }
 
-interface CavalTerminalApi {
-  create: (
+interface CavalTerminalApi extends Omit<import("../shared/terminal-contract").TerminalApi, "create"> {
+  create: {
+    (options?: import("../shared/terminal-contract").TerminalCreateOptions): Promise<
+      import("../shared/terminal-contract").TerminalInfo
+    >;
+    (
+      id: string,
+      options?: { cwd?: string }
+    ): Promise<
+      | import("../shared/terminal-contract").TerminalInfo
+      | { ok: boolean; error?: string; shell?: string; kind?: string; cwd?: string }
+    >;
+  };
+  write: (
     id: string,
-    options?: { cwd?: string }
-  ) => Promise<{ ok: boolean; error?: string; shell?: string; kind?: string }>;
-  write: (id: string, data: string) => Promise<{ ok: boolean; error?: string }>;
-  resize: (id: string, cols: number, rows: number) => Promise<{ ok: boolean }>;
-  destroy: (id: string) => Promise<{ ok: boolean }>;
+    data: string
+  ) => Promise<void | { ok: boolean; error?: string }>;
+  resize: (id: string, cols: number, rows: number) => Promise<void | { ok: boolean }>;
+  destroy: (id: string) => Promise<void | { ok: boolean }>;
   ensurePowerShell: () => Promise<{
     ok: boolean;
     already?: boolean;
@@ -137,7 +157,7 @@ type ChatActivityPhase =
 
 interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause" | "timeline";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -162,6 +182,14 @@ interface CavalStreamChunk {
   approach?: string;
   modules?: string[];
   reasoningBrief?: { goal: string; approach: string; modules: string[] };
+  event?: import('../../src/shared/ai-timeline-contract').TimelineEvent;
+  quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixResult;
+  explain?: import('../../src/shared/ai-explain-contract').ExplainResult;
+  terminalExplain?: import('../../src/shared/ai-terminal-contract').TerminalExplainResult;
+  terminalSuggest?: import('../../src/shared/ai-terminal-contract').TerminalSuggestResult;
+  refactor?: import('../../src/shared/ai-refactor-contract').RefactorResult;
+  proposedWrites?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  proposeStageKey?: string;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;
@@ -427,6 +455,8 @@ interface CavalSchematicApi {
   }>;
 }
 
+type CavalPreviewApi = import("../shared/preview-contract").PreviewApi;
+
 interface CavalBridge {
   version?: string;
   productName?: string;
@@ -455,6 +485,15 @@ interface CavalBridge {
       scaffoldMode?: boolean;
       skipMultiAgent?: boolean;
       strictReview?: boolean;
+      quickFix?: import('../../src/shared/ai-quick-fix-contract').QuickFixRequest;
+      quickFixAccept?: import('../../src/shared/ai-quick-fix-contract').QuickFixAcceptRequest;
+      timelineFileWrite?: import('../../src/shared/ai-inline-completion-contract').TimelineFileWriteRequest;
+      explain?: import('../../src/shared/ai-explain-contract').ExplainRequest;
+      terminalExplain?: import('../../src/shared/ai-terminal-contract').TerminalExplainRequest;
+      terminalSuggest?: import('../../src/shared/ai-terminal-contract').TerminalSuggestRequest;
+      refactor?: import('../../src/shared/ai-refactor-contract').RefactorRequest;
+      conversationId?: string;
+      assistantMessageId?: string;
       context?: {
         filePath?: string;
         fileContent?: string;
@@ -512,6 +551,116 @@ interface CavalBridge {
       finishedAt: string;
     } | null;
   }>;
+  chatApplyAccept?: (input: {
+    stageKey?: string;
+    writes?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+    conversationId?: string;
+    messageId?: string;
+    streamId?: string;
+  }) => Promise<{
+    ok: boolean;
+    applied: string[];
+    writes?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+    errors?: string[];
+    error?: string;
+  }>;
+  chatApplyReject?: (input: { stageKey?: string }) => Promise<{ ok: boolean }>;
+  chatApplyRevertNew?: (input: {
+    writes: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  }) => Promise<{ ok: boolean; deleted: string[]; errors?: string[] }>;
+  aiHistory?: {
+    listConversations: (
+      params?: import('../../src/shared/ai-history-contract').ListConversationsParams
+    ) => Promise<{
+      ok: boolean;
+      conversations?: import('../../src/shared/ai-history-contract').ConversationSummary[];
+      error?: string;
+    }>;
+    getConversation: (conversationId: string) => Promise<{
+      ok: boolean;
+      conversation?: import('../../src/shared/ai-history-contract').AiHistoryConversationPayload;
+      error?: string;
+    }>;
+    getMessageDetails?: (messageId: string) => Promise<{
+      ok: boolean;
+      timeline?: import('../../src/shared/ai-timeline-contract').TimelineEvent[];
+      writtenFiles?: import('../../src/shared/ai-history-contract').HistoryWrittenFile[];
+      error?: string;
+    }>;
+    deleteConversation: (conversationId: string) => Promise<{ ok: boolean; error?: string }>;
+    revertWrittenFile: (writtenFileId: string) => Promise<{
+      ok: boolean;
+      error?: string;
+      filePath?: string;
+    }>;
+    exportConversation: (
+      req: import('../../src/shared/ai-history-contract').ExportRequest
+    ) => Promise<import('../../src/shared/ai-history-contract').ExportResult>;
+    setFeedback: (
+      messageId: string,
+      rating: 'positive' | 'negative',
+      comment?: string,
+      streamId?: string
+    ) => Promise<{
+      ok: boolean;
+      feedback?: import('../../src/shared/ai-history-contract').MessageFeedback;
+      error?: string;
+    }>;
+    getFeedback: (
+      messageId: string,
+      streamId?: string
+    ) => Promise<{
+      ok: boolean;
+      feedback?: import('../../src/shared/ai-history-contract').MessageFeedback | null;
+      error?: string;
+    }>;
+    clearFeedback: (
+      messageId: string,
+      streamId?: string
+    ) => Promise<{ ok: boolean; error?: string }>;
+  };
+  aiSettings?: {
+    getSettings: () => Promise<{
+      ok: boolean;
+      settings?: import('../../src/shared/ai-settings-contract').AiSettings;
+      error?: string;
+    }>;
+    updateSettings: (
+      partial: Partial<import('../../src/shared/ai-settings-contract').AiSettings>
+    ) => Promise<{
+      ok: boolean;
+      settings?: import('../../src/shared/ai-settings-contract').AiSettings;
+      error?: string;
+    }>;
+    resetSettings: () => Promise<{
+      ok: boolean;
+      settings?: import('../../src/shared/ai-settings-contract').AiSettings;
+      error?: string;
+    }>;
+  };
+  workspaceIndex?: {
+    getSummary: () => Promise<{
+      ok: boolean;
+      summary?: import('../../src/shared/workspace-index-contract').WorkspaceIndexSummary;
+      error?: string;
+    }>;
+    getIndex: () => Promise<{
+      ok: boolean;
+      index?: import('../../src/shared/workspace-index-contract').WorkspaceIndex;
+      error?: string;
+    }>;
+    refresh: () => Promise<{
+      ok: boolean;
+      index?: import('../../src/shared/workspace-index-contract').WorkspaceIndex;
+      summary?: import('../../src/shared/workspace-index-contract').WorkspaceIndexSummary;
+      error?: string;
+    }>;
+  };
+  workspaceSearch?: {
+    query: (
+      query: import('../../src/shared/workspace-search-contract').WorkspaceSearchQuery
+    ) => Promise<import('../../src/shared/workspace-search-contract').WorkspaceSearchResponse>;
+  };
   pipelineResumeStream?: (
     input: {
       runId: string;
@@ -559,11 +708,29 @@ interface CavalBridge {
     configured?: Record<string, boolean>;
     error?: string;
   }>;
-  secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean }>;
-  /** Lot C5.5 — user-initiated key test; no bodies/keys in the response. */
+  secretsSet?: (secrets: Record<string, string>) => Promise<{ ok: boolean; error?: string; key?: string }>;
+  /** Pas 7f.1 — unified AI provider registry (no secret values). */
+  aiProvidersList?: () => Promise<{
+    ok: boolean;
+    providers?: import("../shared/ai-provider-contract").AiProviderEntry[];
+    preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+    encryptionAvailable?: boolean;
+    error?: string;
+  }>;
+  aiProvidersSetPreferred?: (input: { providerId: string }) => Promise<{
+    ok: boolean;
+    preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+    error?: string;
+  }>;
+  /** Pas 7f.2 — subscribe to live local AI status (optional; UI falls back to refresh). */
+  localAiOnStatusChanged?: (
+    listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void
+  ) => () => void;
+  /** Lot C5.5 / 7f.4 — user-initiated key test; no bodies/keys in the response. */
   testProviderKey?: (input: {
     providerId: string;
-    secretKey: string;
+    secretKey?: string;
+    draft?: { baseUrl?: string; apiKey?: string; modelId?: string };
   }) => Promise<{
     ok: boolean;
     result: "valid" | "invalid" | "unreachable";
@@ -571,6 +738,51 @@ interface CavalBridge {
   }>;
   settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
   settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
+  locale?: {
+    get: () => Promise<{
+      ok: boolean;
+      locale?: string;
+      source?: "saved" | "system" | "default";
+      error?: string;
+    }>;
+    set: (locale: string) => Promise<{
+      ok: boolean;
+      locale?: string;
+      error?: string;
+    }>;
+  };
+  localAiStatus?: () => Promise<{
+    ok: boolean;
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
+    error?: string;
+  }>;
+  localAiSetup?: (input?: {
+    installRuntime?: boolean;
+    pullModel?: boolean;
+    modelName?: string;
+  }) => Promise<{
+    ok: boolean;
+    changed?: boolean;
+    summary?: string;
+    error?: string;
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
+  }>;
+  /** Pas 7f.3 — separate install / pull. */
+  localAiInstall?: (req: { confirmed: true }) => Promise<{
+    success: boolean;
+    error?: string;
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
+  }>;
+  localAiPullModel?: (req: { modelId: string; confirmed: true }) => Promise<{
+    success: boolean;
+    cancelled?: boolean;
+    error?: string;
+    status?: import("../shared/local-ai-contract").LocalAiStatus;
+  }>;
+  localAiPullCancel?: (modelId: string) => Promise<{ ok: boolean; error?: string }>;
+  onLocalAiPullProgress?: (
+    listener: (progress: import("../shared/local-ai-contract").OllamaModelPullProgress) => void
+  ) => () => void;
   modelsHealth?: () => Promise<{
     ok: boolean;
     summary?: string;
@@ -583,7 +795,7 @@ interface CavalBridge {
     folderPath: string,
     options?: { source?: 'folder' | 'clone' }
   ) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
-  workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+  workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   workspace?: {
     listRecent: () => Promise<{
       ok: boolean;
@@ -608,6 +820,7 @@ interface CavalBridge {
     createOnDesktop: (input: { name: string }) => Promise<{
       ok: boolean;
       path?: string;
+      location?: 'desktop' | 'downloads';
       error?: string;
     }>;
   };
@@ -726,6 +939,7 @@ interface CavalBridge {
   };
   fs: CavalFsApi;
   terminal: CavalTerminalApi;
+  preview: CavalPreviewApi;
   extensions?: {
     list: () => Promise<{ ok: boolean; extensions?: unknown[] }>;
     register: (manifest: { id: string; name: string; version: string }) => Promise<{ ok: boolean; error?: string }>;

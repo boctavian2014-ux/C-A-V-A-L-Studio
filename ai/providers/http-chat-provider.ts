@@ -14,6 +14,8 @@ import type {
 export interface HttpProviderConfig {
   name: string;
   apiKeyEnv: string;
+  /** Optional inline key (custom provider draft / config); falls back to env. */
+  apiKey?: string;
   defaultHeaders?: Record<string, string>;
 }
 
@@ -205,7 +207,7 @@ export abstract class HttpChatProvider implements ModelProvider {
   }
 
   private headers(): Record<string, string> {
-    const apiKey = process.env[this.config.apiKeyEnv];
+    const apiKey = this.config.apiKey?.trim() || process.env[this.config.apiKeyEnv];
     return {
       "content-type": "application/json",
       ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),

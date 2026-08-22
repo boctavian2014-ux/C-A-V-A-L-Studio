@@ -29,7 +29,8 @@ function mockResponse(init: {
 }): Response {
   const headers = new Headers(init.headers ?? {});
   if (init.location) headers.set("location", init.location);
-  const body = init.body ?? "solid ok";
+  const raw = init.body ?? "solid ok";
+  const body: BodyInit = typeof raw === "string" ? raw : Uint8Array.from(raw);
   return new Response(body, { status: init.status ?? 200, headers });
 }
 

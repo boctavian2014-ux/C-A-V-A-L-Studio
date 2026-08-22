@@ -19,8 +19,18 @@ describe("github-clone", () => {
     expect(result?.repo).toBe("react");
   });
 
+  it("rewrites GitHub SSH URLs to HTTPS", () => {
+    expect(normalizeGithubRepoUrl("git@github.com:facebook/react.git")?.cloneUrl).toBe(
+      "https://github.com/facebook/react.git"
+    );
+    expect(normalizeGithubRepoUrl("ssh://git@github.com/facebook/react.git")?.cloneUrl).toBe(
+      "https://github.com/facebook/react.git"
+    );
+  });
+
   it("rejects invalid hosts and injection", () => {
     expect(normalizeGithubRepoUrl("https://gitlab.com/a/b")).toBeNull();
+    expect(normalizeGithubRepoUrl("https://evil.com/repo.git")).toBeNull();
     expect(normalizeGithubRepoUrl("octocat/repo;rm -rf")).toBeNull();
     expect(normalizeGithubRepoUrl("")).toBeNull();
   });

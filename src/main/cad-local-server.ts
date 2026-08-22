@@ -121,10 +121,24 @@ export async function ensureCadLocalServer(): Promise<boolean> {
 }
 
 export function stopCadLocalServer(): void {
-  if (cadChild && !cadChild.killed) {
-    cadChild.kill();
-  }
+  const child = cadChild;
   cadChild = null;
+  if (!child || child.killed) {
+    return;
+  }
+  const pid = child.pid;
+  if (typeof pid === "number" && pid > 1 && process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+      timeout: 8_000,
+    });
+  }
+  try {
+    child.kill();
+  } catch {
+    // already gone
+  }
 }
 
 export function localCadUrl(): string {

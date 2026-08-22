@@ -24,8 +24,9 @@ export async function runParallelArenaScans(opts: {
   callbacks?: MultiAgentPipelineCallbacks;
   scanModelId?: string;
   isAborted?: () => boolean;
+  skipVerify?: boolean;
 }): Promise<ParallelArenaScanResult> {
-  const { workspaceRoot, writtenFiles, callbacks, scanModelId, isAborted } = opts;
+  const { workspaceRoot, writtenFiles, callbacks, scanModelId, isAborted, skipVerify } = opts;
   const started = Date.now();
 
   if (isAborted?.()) {
@@ -58,7 +59,7 @@ export async function runParallelArenaScans(opts: {
   emit('performance', 'active', 'parallel');
 
   const [userSim, security, performance] = await Promise.all([
-    runArenaUserSimulator(workspaceRoot, writtenFiles),
+    runArenaUserSimulator(workspaceRoot, writtenFiles, { skipVerify }),
     Promise.resolve().then(() => runStaticSecurityScan(workspaceRoot, writtenFiles)),
     Promise.resolve().then(() => runStaticPerformanceScan(workspaceRoot, writtenFiles)),
   ]);

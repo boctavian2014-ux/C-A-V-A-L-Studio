@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { gitApi } from "./preload-git";
+import { problemsApi } from "./preload-problems";
+import { tasksApi } from "./preload-tasks";
+import { previewApi } from "./preload-preview";
+import { cavalTerminalPreload } from "./preload-terminal";
 
 export interface CavalOpenedFile {
   path: string;
@@ -74,6 +79,26 @@ export interface CavalChatStreamRequest {
   skipMultiAgent?: boolean;
   /** Force merge + supervisor review in Agentic pipeline */
   strictReview?: boolean;
+  /** Pas 5.2 — optional IDE snapshot; omit when per-thread toggle is OFF. */
+  ideContext?: import("../shared/ai-context-contract").IdeContextPayload;
+  /** Pas 6.1 — propose localized diagnostic fix (no disk write). */
+  quickFix?: import("../shared/ai-quick-fix-contract").QuickFixRequest;
+  /** Pas 6.1 — after renderer accept: emit file_write on timeline only. */
+  quickFixAccept?: import("../shared/ai-quick-fix-contract").QuickFixAcceptRequest;
+  /** Pas 6.2 — after inline completion Tab accept: emit file_write on timeline only. */
+  timelineFileWrite?: import("../shared/ai-inline-completion-contract").TimelineFileWriteRequest;
+  /** Pas 6.3 — read-only explain on hover / selection. */
+  explain?: import("../shared/ai-explain-contract").ExplainRequest;
+  /** Pas 7c.1 — read-only terminal output explain. */
+  terminalExplain?: import("../shared/ai-terminal-contract").TerminalExplainRequest;
+  /** Pas 7c.2 — propose-only terminal command suggestions. */
+  terminalSuggest?: import("../shared/ai-terminal-contract").TerminalSuggestRequest;
+  /** Pas 6.5 — gated multi-file refactor propose. */
+  refactor?: import("../shared/ai-refactor-contract").RefactorRequest;
+  /** Pas 7a.2 — UI thread id; used as conversation_id when persisting the assistant message. */
+  conversationId?: string;
+  /** Pas 7e.2 — UI assistant message id aligned with SQLite messages.id. */
+  assistantMessageId?: string;
   context?: {
     filePath?: string;
     fileContent?: string;
@@ -107,7 +132,7 @@ export type MultiAgentPhase =
 
 export interface CavalStreamChunk {
   streamId: string;
-  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause";
+  type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause" | "timeline";
   delta?: string;
   reasoningDelta?: string;
   error?: string;
@@ -132,6 +157,21 @@ export interface CavalStreamChunk {
   approach?: string;
   modules?: string[];
   reasoningBrief?: { goal: string; approach: string; modules: string[] };
+  /** Pas 5.4 — sanitized activity row for the assistant bubble timeline. */
+  event?: import("../shared/ai-timeline-contract").TimelineEvent;
+  /** Pas 6.1 — proposed / accept result for quick fix. */
+  quickFix?: import("../shared/ai-quick-fix-contract").QuickFixResult;
+  /** Pas 6.3 — read-only explain result. */
+  explain?: import("../shared/ai-explain-contract").ExplainResult;
+  /** Pas 7c.1 — read-only terminal output explain result. */
+  terminalExplain?: import("../shared/ai-terminal-contract").TerminalExplainResult;
+  /** Pas 7c.2 — propose-only terminal command suggestions. */
+  terminalSuggest?: import("../shared/ai-terminal-contract").TerminalSuggestResult;
+  /** Pas 6.5 — multi-file refactor proposal. */
+  refactor?: import("../shared/ai-refactor-contract").RefactorResult;
+  /** Pas 6.4 — staged file proposals (not on disk until Accept). */
+  proposedWrites?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+  proposeStageKey?: string;
   pipelineRecapMeta?: {
     taskCount: number;
     fastPipeline: boolean;
@@ -249,7 +289,7 @@ export interface CavalPipelineEvent {
 
 contextBridge.exposeInMainWorld("caval", {
   version: "0.1.0",
-  productName: "CAVALLO Studio",
+  productName: "CAVAL Studio",
   ready: () => ipcRenderer.send("caval:renderer-ready"),
   onMenuCommand: (callback: (command: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, command: string) => callback(command);
@@ -418,6 +458,145 @@ contextBridge.exposeInMainWorld("caval", {
         finishedAt: string;
       } | null;
     }>,
+  chatApplyAccept: (input: {
+    stageKey?: string;
+    writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+    conversationId?: string;
+    messageId?: string;
+    streamId?: string;
+  }) =>
+    ipcRenderer.invoke("caval:chat-apply-accept", input) as Promise<{
+      ok: boolean;
+      applied: string[];
+      writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+      errors?: string[];
+      error?: string;
+    }>,
+  chatApplyReject: (input: { stageKey?: string }) =>
+    ipcRenderer.invoke("caval:chat-apply-reject", input) as Promise<{ ok: boolean }>,
+  chatApplyRevertNew: (input: {
+    writes: import("../shared/ai-chat-apply-contract").ProposedWrite[];
+  }) =>
+    ipcRenderer.invoke("caval:chat-apply-revert-new", input) as Promise<{
+      ok: boolean;
+      deleted: string[];
+      errors?: string[];
+    }>,
+  aiHistory: {
+    listConversations: (params?: import("../shared/ai-history-contract").ListConversationsParams) =>
+      ipcRenderer.invoke("caval:ai-history-list", params) as Promise<{
+        ok: boolean;
+        conversations?: import("../shared/ai-history-contract").ConversationSummary[];
+        error?: string;
+      }>,
+    getConversation: (conversationId: string) =>
+      ipcRenderer.invoke("caval:ai-history-get", { conversationId }) as Promise<{
+        ok: boolean;
+        conversation?: import("../shared/ai-history-contract").AiHistoryConversationPayload;
+        error?: string;
+      }>,
+    getMessageDetails: (messageId: string) =>
+      ipcRenderer.invoke("caval:ai-history-message-details", { messageId }) as Promise<{
+        ok: boolean;
+        timeline?: import("../shared/ai-timeline-contract").TimelineEvent[];
+        writtenFiles?: import("../shared/ai-history-contract").HistoryWrittenFile[];
+        error?: string;
+      }>,
+    deleteConversation: (conversationId: string) =>
+      ipcRenderer.invoke("caval:ai-history-delete", { conversationId }) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
+    revertWrittenFile: (writtenFileId: string) =>
+      ipcRenderer.invoke("caval:ai-history-revert-written", { writtenFileId }) as Promise<{
+        ok: boolean;
+        error?: string;
+        filePath?: string;
+      }>,
+    exportConversation: (req: {
+      conversationId: string;
+      format: import("../shared/ai-history-contract").ExportFormat;
+      acknowledgeLarge?: boolean;
+    }) =>
+      ipcRenderer.invoke("caval:ai-history-export", req) as Promise<
+        import("../shared/ai-history-contract").ExportResult
+      >,
+    setFeedback: (
+      messageId: string,
+      rating: "positive" | "negative",
+      comment?: string,
+      streamId?: string
+    ) =>
+      ipcRenderer.invoke("caval:ai-history-set-feedback", {
+        messageId,
+        rating,
+        comment,
+        streamId,
+      }) as Promise<{
+        ok: boolean;
+        feedback?: import("../shared/ai-history-contract").MessageFeedback;
+        error?: string;
+      }>,
+    getFeedback: (messageId: string, streamId?: string) =>
+      ipcRenderer.invoke("caval:ai-history-get-feedback", { messageId, streamId }) as Promise<{
+        ok: boolean;
+        feedback?: import("../shared/ai-history-contract").MessageFeedback | null;
+        error?: string;
+      }>,
+    clearFeedback: (messageId: string, streamId?: string) =>
+      ipcRenderer.invoke("caval:ai-history-clear-feedback", { messageId, streamId }) as Promise<{
+        ok: boolean;
+        error?: string;
+      }>,
+  },
+  aiSettings: {
+    getSettings: () =>
+      ipcRenderer.invoke("caval:ai-settings-get") as Promise<{
+        ok: boolean;
+        settings?: import("../shared/ai-settings-contract").AiSettings;
+        error?: string;
+      }>,
+    updateSettings: (partial: Partial<import("../shared/ai-settings-contract").AiSettings>) =>
+      ipcRenderer.invoke("caval:ai-settings-update", { partial }) as Promise<{
+        ok: boolean;
+        settings?: import("../shared/ai-settings-contract").AiSettings;
+        error?: string;
+      }>,
+    resetSettings: () =>
+      ipcRenderer.invoke("caval:ai-settings-reset") as Promise<{
+        ok: boolean;
+        settings?: import("../shared/ai-settings-contract").AiSettings;
+        error?: string;
+      }>,
+  },
+  workspaceIndex: {
+    getSummary: () =>
+      ipcRenderer.invoke("caval:workspace-index-summary") as Promise<{
+        ok: boolean;
+        summary?: import("../shared/workspace-index-contract").WorkspaceIndexSummary;
+        error?: string;
+      }>,
+    getIndex: () =>
+      ipcRenderer.invoke("caval:workspace-index-get") as Promise<{
+        ok: boolean;
+        index?: import("../shared/workspace-index-contract").WorkspaceIndex;
+        error?: string;
+      }>,
+    refresh: () =>
+      ipcRenderer.invoke("caval:workspace-index-refresh") as Promise<{
+        ok: boolean;
+        index?: import("../shared/workspace-index-contract").WorkspaceIndex;
+        summary?: import("../shared/workspace-index-contract").WorkspaceIndexSummary;
+        error?: string;
+      }>,
+  },
+  workspaceSearch: {
+    query: (query: import("../shared/workspace-search-contract").WorkspaceSearchQuery) =>
+      ipcRenderer.invoke(
+        "caval:workspace-search-query",
+        query
+      ) as Promise<import("../shared/workspace-search-contract").WorkspaceSearchResponse>,
+  },
   getReasoningLayerConfig: (workspaceRoot?: string) =>
     ipcRenderer.invoke("multiagent:reasoning-config", workspaceRoot) as Promise<{
       ok: boolean;
@@ -555,6 +734,7 @@ contextBridge.exposeInMainWorld("caval", {
       ipcRenderer.invoke("workspace:createOnDesktop", input) as Promise<{
         ok: boolean;
         path?: string;
+        location?: "desktop" | "downloads";
         error?: string;
       }>,
   },
@@ -642,6 +822,85 @@ contextBridge.exposeInMainWorld("caval", {
   settingsSave: (settings: Record<string, string>) =>
     ipcRenderer.invoke("caval:settings-save", settings) as Promise<{ ok: boolean }>,
   settingsLoad: () => ipcRenderer.invoke("caval:settings-load") as Promise<{ ok: boolean; settings?: Record<string, string> }>,
+  locale: {
+    get: () =>
+      ipcRenderer.invoke("caval:locale-get") as Promise<{
+        ok: boolean;
+        locale?: string;
+        source?: "saved" | "system" | "default";
+        error?: string;
+      }>,
+    set: (locale: string) =>
+      ipcRenderer.invoke("caval:locale-set", locale) as Promise<{
+        ok: boolean;
+        locale?: string;
+        error?: string;
+      }>,
+  },
+  localAiStatus: () =>
+    ipcRenderer.invoke("caval:local-ai-status") as Promise<{
+      ok: boolean;
+      status?: {
+        supported: boolean;
+        platform: string;
+        installed: boolean;
+        running: boolean;
+        configuredUrl: string;
+        runtimePath?: string;
+        models: string[];
+        defaultModel: string;
+        defaultModelReady: boolean;
+        managedByCaval: boolean;
+        inProgress: boolean;
+        phase: "running" | "starting" | "unavailable";
+        lastError?: string;
+        policy: string;
+      };
+      error?: string;
+    }>,
+  localAiSetup: (input?: { installRuntime?: boolean; pullModel?: boolean; modelName?: string }) =>
+    ipcRenderer.invoke("caval:local-ai-setup", input) as Promise<{
+      ok: boolean;
+      changed?: boolean;
+      summary?: string;
+      error?: string;
+      status?: import("../shared/local-ai-contract").LocalAiStatus;
+    }>,
+  /** Pas 7f.3 — install Ollama only (requires confirmed: true). */
+  localAiInstall: (req: { confirmed: true }) =>
+    ipcRenderer.invoke("caval:local-ai-install", req) as Promise<{
+      success: boolean;
+      error?: string;
+      status?: import("../shared/local-ai-contract").LocalAiStatus;
+    }>,
+  /** Pas 7f.3 — pull model with progress events. */
+  localAiPullModel: (req: { modelId: string; confirmed: true }) =>
+    ipcRenderer.invoke("caval:local-ai-pull-model", req) as Promise<{
+      success: boolean;
+      cancelled?: boolean;
+      error?: string;
+      status?: import("../shared/local-ai-contract").LocalAiStatus;
+    }>,
+  localAiPullCancel: (modelId: string) =>
+    ipcRenderer.invoke("caval:local-ai-pull-cancel", modelId) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>,
+  onLocalAiPullProgress: (
+    listener: (progress: import("../shared/local-ai-contract").OllamaModelPullProgress) => void
+  ): (() => void) => {
+    const channel = "caval:local-ai-pull-progress";
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      progress: import("../shared/local-ai-contract").OllamaModelPullProgress
+    ) => {
+      listener(progress);
+    };
+    ipcRenderer.on(channel, wrapped);
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped);
+    };
+  },
   billingUserId: () =>
     ipcRenderer.invoke("caval:billing-user-id") as Promise<{ ok: boolean; userId?: string }>,
   billingEntitlements: () =>
@@ -669,8 +928,43 @@ contextBridge.exposeInMainWorld("caval", {
     }>,
   secretsSet: (secrets: Record<string, string>) =>
     ipcRenderer.invoke("caval:secrets-set", secrets) as Promise<{ ok: boolean }>,
-  /** Lot C5.5 — user-initiated key test; returns only valid|invalid|unreachable (no bodies/keys). */
-  testProviderKey: (input: { providerId: string; secretKey: string }) =>
+  /** Pas 7f.1 — unified AI provider registry (status only; no secret values). */
+  aiProvidersList: () =>
+    ipcRenderer.invoke("caval:ai-providers-list") as Promise<{
+      ok: boolean;
+      providers?: import("../shared/ai-provider-contract").AiProviderEntry[];
+      preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+      encryptionAvailable?: boolean;
+      error?: string;
+    }>,
+  aiProvidersSetPreferred: (input: { providerId: string }) =>
+    ipcRenderer.invoke("caval:ai-providers-set-preferred", input) as Promise<{
+      ok: boolean;
+      preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
+      error?: string;
+    }>,
+  /** Pas 7f.2 — live local AI status (sanitized; no paths/process handles). */
+  localAiOnStatusChanged: (
+    listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void
+  ): (() => void) => {
+    const channel = "caval:local-ai-status-changed";
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      status: import("../shared/local-ai-contract").LocalAiStatus
+    ) => {
+      listener(status);
+    };
+    ipcRenderer.on(channel, wrapped);
+    return () => {
+      ipcRenderer.removeListener(channel, wrapped);
+    };
+  },
+  /** Lot C5.5 / 7f.4 — user-initiated key or custom endpoint test. */
+  testProviderKey: (input: {
+    providerId: string;
+    secretKey?: string;
+    draft?: { baseUrl?: string; apiKey?: string; modelId?: string };
+  }) =>
     ipcRenderer.invoke("caval:test-provider-key", input) as Promise<{
       ok: boolean;
       result: "valid" | "invalid" | "unreachable";
@@ -702,14 +996,6 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.invoke("caval:tool-execute", input),
   autocomplete: (input: { prefix: string; filePath: string; language: string }) =>
     ipcRenderer.invoke("caval:autocomplete", input) as Promise<{ ok: boolean; suggestion?: string }>,
-  startTerminal: () => ipcRenderer.invoke("caval:terminal-start"),
-  writeTerminal: (data: string) => ipcRenderer.invoke("caval:terminal-write", data),
-  stopTerminal: () => ipcRenderer.invoke("caval:terminal-stop"),
-  onTerminalData: (callback: (data: string) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, data: string) => callback(data);
-    ipcRenderer.on("caval:terminal-data", listener);
-    return () => ipcRenderer.removeListener("caval:terminal-data", listener);
-  },
 
   fs: {
     pickFiles: () => ipcRenderer.invoke("fs:pickFiles") as Promise<string[] | null>,
@@ -724,53 +1010,15 @@ contextBridge.exposeInMainWorld("caval", {
     reveal: (filePath: string) => ipcRenderer.invoke("fs:reveal", filePath)
   },
 
-  terminal: {
-    create: (id: string, options?: { cwd?: string }) => ipcRenderer.invoke("terminal:create", id, options),
-    write: (id: string, data: string) => ipcRenderer.invoke("terminal:write", id, data),
-    resize: (id: string, cols: number, rows: number) => ipcRenderer.invoke("terminal:resize", id, cols, rows),
-    destroy: (id: string) => ipcRenderer.invoke("terminal:destroy", id),
-    ensurePowerShell: () => ipcRenderer.invoke("terminal:ensurePowerShell"),
-    onData: (id: string, cb: (data: string) => void) => {
-      const channel = `terminal:data:${id}`;
-      const listener = (_event: Electron.IpcRendererEvent, data: string) => cb(data);
-      ipcRenderer.on(channel, listener);
-      return () => ipcRenderer.removeListener(channel, listener);
-    }
-  },
+  terminal: cavalTerminalPreload,
 
-  git: {
-    status: (projectPath: string) => ipcRenderer.invoke("git:status", projectPath),
-    diff: (projectPath: string, filePath: string, staged: boolean) =>
-      ipcRenderer.invoke("git:diff", projectPath, filePath, staged),
-    filePair: (projectPath: string, filePath: string, staged: boolean) =>
-      ipcRenderer.invoke("git:filePair", projectPath, filePath, staged) as Promise<{
-        original: string;
-        modified: string;
-        language: string;
-      }>,
-    revertHunk: (projectPath: string, filePath: string, hunkPatch: string) =>
-      ipcRenderer.invoke("git:revertHunk", projectPath, filePath, hunkPatch) as Promise<{
-        ok: boolean;
-        error?: string;
-      }>,
-    stage: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:stage", projectPath, filePath),
-    unstage: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:unstage", projectPath, filePath),
-    stageAll: (projectPath: string) => ipcRenderer.invoke("git:stageAll", projectPath),
-    unstageAll: (projectPath: string) => ipcRenderer.invoke("git:unstageAll", projectPath),
-    discard: (projectPath: string, filePath: string) => ipcRenderer.invoke("git:discard", projectPath, filePath),
-    commit: (projectPath: string, message: string) => ipcRenderer.invoke("git:commit", projectPath, message),
-    push: (projectPath: string, setUpstream?: boolean) => ipcRenderer.invoke("git:push", projectPath, setUpstream),
-    pull: (projectPath: string) => ipcRenderer.invoke("git:pull", projectPath),
-    log: (projectPath: string, limit?: number) => ipcRenderer.invoke("git:log", projectPath, limit),
-    branches: (projectPath: string) => ipcRenderer.invoke("git:branches", projectPath),
-    checkout: (projectPath: string, branch: string) => ipcRenderer.invoke("git:checkout", projectPath, branch),
-    createBranch: (projectPath: string, name: string) => ipcRenderer.invoke("git:createBranch", projectPath, name),
-    init: (projectPath: string) => ipcRenderer.invoke("git:init", projectPath),
-    stash: (projectPath: string, message?: string) => ipcRenderer.invoke("git:stash", projectPath, message),
-    stashPop: (projectPath: string) => ipcRenderer.invoke("git:stashPop", projectPath),
-    clone: (input: { url: string; parentDir?: string }) =>
-      ipcRenderer.invoke("git:clone", input) as Promise<{ ok: boolean; path?: string; error?: string }>,
-  },
+  preview: previewApi,
+
+  git: gitApi,
+
+  problems: problemsApi,
+
+  tasks: tasksApi,
 
 
   preload: {

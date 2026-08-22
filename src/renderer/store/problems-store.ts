@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Problem } from '../../shared/problems-contract';
 import type { ProblemEntry } from './parse-problems';
 
 interface ProblemsStore {
@@ -79,6 +80,25 @@ export function formatProblemsForChat(problems: ProblemEntry[]): string {
     '',
     ...lines,
   ].join('\n');
+}
+
+export function problemToEntry(problem: Problem): ProblemEntry {
+  return {
+    id: problem.id,
+    file: problem.file,
+    line: problem.line,
+    col: problem.column,
+    message: problem.code ? `${problem.message} (${problem.code})` : problem.message,
+    severity: problem.severity === 'hint' ? 'info' : problem.severity,
+    source: problem.source,
+  };
+}
+
+export function mergeDiagnosticProblems(problems: Problem[]): void {
+  const typescript = problems.filter((p) => p.source === 'typescript').map(problemToEntry);
+  const eslint = problems.filter((p) => p.source === 'eslint').map(problemToEntry);
+  useProblemsStore.getState().mergeProblems(typescript, 'typescript');
+  useProblemsStore.getState().mergeProblems(eslint, 'eslint');
 }
 
 export function revealProblem(problem: ProblemEntry, projectPath: string | null): void {

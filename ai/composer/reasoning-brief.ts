@@ -53,12 +53,9 @@ export function buildEarlyArenaMessage(brief: ReasoningBrief, continuing = false
 
 export function buildFinalRecap(input: RecapInput): string {
   const files = input.writtenFiles;
-  const fileList = files.slice(0, 3).join(', ');
-  const fileSuffix = files.length > 3 ? '…' : '';
-
   const implemented =
     files.length > 0
-      ? `Implementat: ${files.length} fișier(e)${fileList ? ` (${fileList}${fileSuffix})` : ''}`
+      ? `Implementat: ${files.length} fișier(e)`
       : 'Implementat: vezi editorul';
 
   const pipelineLabel = fastPipelineRecapLabel(input.fastPipeline ? 'fast' : 'full');
@@ -86,8 +83,8 @@ export function buildFinalRecap(input: RecapInput): string {
   if (input.devTools?.git?.isRepo && (input.devTools.git.changedFiles ?? 0) > 0) {
     nextParts.push('git commit');
   }
-  if (input.devTools?.git?.isRepo && (input.devTools.git.changedFiles ?? 0) > 0) {
-    nextParts.push('git commit');
+  if (files.length > 0) {
+    nextParts.push('Open Web / Open Mobile în Explorer');
   }
   const next =
     nextParts.length > 0 ? `Next: ${nextParts.join(' → ')}` : 'Next: verifică fișierele în editor';

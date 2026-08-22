@@ -7,7 +7,7 @@ import {
   isForbiddenSecretFieldName,
   SETTINGS_FORBIDDEN_SECRET_KEYS,
 } from "../../src/shared/secrets-metadata";
-import { CONFIGURED_MARKER } from "../../ai/models/api-secrets";
+import { CONFIGURED_MARKER } from "../../ai/models/api-secrets.js";
 
 describe("C2 secrets renderer isolation", () => {
   it("secrets metadata never includes values, prefixes, suffixes, or lengths", () => {
@@ -80,7 +80,7 @@ describe("C2 secrets renderer isolation", () => {
 
   it("configured marker is not a persistable secret", async () => {
     const { isPersistableSecret, isConfiguredMarker } = await import(
-      "../../ai/models/api-secrets"
+      "../../ai/models/api-secrets.js"
     );
     expect(isConfiguredMarker(CONFIGURED_MARKER)).toBe(true);
     expect(isPersistableSecret(CONFIGURED_MARKER)).toBe(false);

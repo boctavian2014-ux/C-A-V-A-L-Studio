@@ -7,6 +7,8 @@ import type {
   CadToolMode,
 } from './cad-viewer-tools';
 import type { CadBatchViewerPart, CadViewerCanvasHandle } from './CadViewerCanvas';
+import { CavalStudioHero } from '../brand/CavaloHorseMark';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 type ViewerCanvasProps = {
   stlUrl: string;
@@ -53,6 +55,7 @@ export function CadViewer({
   onSaveEditedStl?: (base64: string) => void;
   onEditDirtyChange?: (dirty: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [ViewerCanvas, setViewerCanvas] = useState<
     React.ForwardRefExoticComponent<
       ViewerCanvasProps & React.RefAttributes<CadViewerCanvasHandle>
@@ -170,13 +173,14 @@ export function CadViewer({
         fontSize: 13,
         textAlign: 'center',
         padding: 24,
+        background: '#0D1117',
       }}>
-        <div>
-          <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.35 }}>◇</div>
-          <div style={{ fontWeight: 600, color: 'var(--caval-text)', marginBottom: 6 }}>
-            Niciun model 3D
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <CavalStudioHero size={268} />
+          <div style={{ fontWeight: 600, color: 'var(--caval-text)', letterSpacing: '0.08em', fontSize: 12 }}>
+            ROBOTICS AI ENGINE
           </div>
-          <div style={{ maxWidth: 340, lineHeight: 1.5 }}>
+          <div style={{ maxWidth: 360, lineHeight: 1.55 }}>
             Flux: plan hardware → schematic → o piesă concretă (ex: cadru 5 inch, suport motor).
             Nu genera „dronă completă” ca un singur STL.
           </div>
@@ -197,7 +201,7 @@ export function CadViewer({
         color: 'var(--caval-text-muted)',
         fontSize: 12,
       }}>
-        Se încarcă viewer 3D…
+        {t('robotics.loadingViewer')}
       </div>
     );
   }

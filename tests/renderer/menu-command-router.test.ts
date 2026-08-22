@@ -18,12 +18,40 @@ describe('menu-command-router', () => {
 
   it('dispatches go-to-file to openQuickOpen', () => {
     const openQuickOpen = vi.fn();
-    handleMenuCommand('go-to-file', {
+    const openWorkspaceSearch = vi.fn();
+    const ctx = {
       toggleAI: vi.fn(),
       toggleSidebar: vi.fn(),
       setActiveActivity: vi.fn(),
       setSidebarOpen: vi.fn(),
       openQuickOpen,
+      openWorkspaceSearch,
+      saveActiveTab: vi.fn(),
+      openFolder: vi.fn(),
+      runWorkspaceVerify: vi.fn(),
+      runBuild: vi.fn(),
+      setPaletteVisible: vi.fn(),
+      openReferences: vi.fn(),
+      openDefinition: vi.fn(),
+      setAgentModeBuild: vi.fn(),
+      openComposer: vi.fn(),
+      pushNavLocation: vi.fn(),
+      navBack: vi.fn(),
+      navForward: vi.fn(),
+    };
+    handleMenuCommand('go-to-file', ctx);
+    expect(openQuickOpen).toHaveBeenCalledOnce();
+  });
+
+  it('dispatches go-to-symbol-workspace to openWorkspaceSearch', () => {
+    const openWorkspaceSearch = vi.fn();
+    handleMenuCommand('go-to-symbol-workspace', {
+      toggleAI: vi.fn(),
+      toggleSidebar: vi.fn(),
+      setActiveActivity: vi.fn(),
+      setSidebarOpen: vi.fn(),
+      openQuickOpen: vi.fn(),
+      openWorkspaceSearch,
       saveActiveTab: vi.fn(),
       openFolder: vi.fn(),
       runWorkspaceVerify: vi.fn(),
@@ -37,6 +65,6 @@ describe('menu-command-router', () => {
       navBack: vi.fn(),
       navForward: vi.fn(),
     });
-    expect(openQuickOpen).toHaveBeenCalledOnce();
+    expect(openWorkspaceSearch).toHaveBeenCalledOnce();
   });
 });

@@ -14,7 +14,7 @@ describe("schematic IPC", () => {
   });
 
   it("registers schematic handlers and returns sample graph", async () => {
-    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers");
+    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers.js");
     registerSchematicHandlers(() => "/mock/workspace");
 
     const result = await harness.invoke<{ ok: boolean; graph?: { nodes: unknown[] } }>(
@@ -27,8 +27,8 @@ describe("schematic IPC", () => {
   });
 
   it("resolves workspace from sender when omitted", async () => {
-    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers");
-    registerSchematicHandlers((id) =>
+    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers.js");
+    registerSchematicHandlers((id: number) =>
       id === harness.sender.id ? "/sender/workspace" : process.cwd()
     );
 
@@ -42,7 +42,7 @@ describe("schematic IPC", () => {
   });
 
   it("ignores workspaceRoot '.' and uses sender workspace", async () => {
-    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers");
+    const { registerSchematicHandlers } = await import("../../src/main/schematic-handlers.js");
     registerSchematicHandlers(() => "/resolved/from/sender");
 
     const result = await harness.invoke<{

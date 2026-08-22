@@ -185,15 +185,15 @@ describe("Lot A filesystem IPC handlers", () => {
     harness.sender.getURL = () => "file:///caval-renderer/index.html";
     harness.sender.mainFrame.url = "file:///caval-renderer/index.html";
 
-    const { setIpcWorkspaceRoot } = await import("../../src/main/ipc-handlers");
+    const { setIpcWorkspaceRoot } = await import("../../src/main/ipc-handlers.js");
     setIpcWorkspaceRoot(harness.sender.id, normalizeWorkspaceRoot(workspace));
-    await import("../../src/main/ipc-handlers");
+    await import("../../src/main/ipc-handlers.js");
 
-    const { registerEngineeringHandlers } = await import("../../src/main/engineering-handlers");
+    const { registerEngineeringHandlers } = await import("../../src/main/engineering-handlers.js");
     registerEngineeringHandlers((id) => boundRoots.get(id));
 
     const { registerRoboticsLibraryHandlers } = await import(
-      "../../src/main/robotics-library-handlers"
+      "../../src/main/robotics-library-handlers.js"
     );
     registerRoboticsLibraryHandlers((id) => boundRoots.get(id));
   });

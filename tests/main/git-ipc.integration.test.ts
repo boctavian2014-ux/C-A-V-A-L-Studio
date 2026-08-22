@@ -53,8 +53,8 @@ describe.skipIf(!hasGit)("Git IPC integration (Lot B Zone C)", () => {
 
     boundRoots.set(harness.sender.id, repoPath);
 
-    const { registerGitHandlers } = await import("../../src/main/git-handlers");
-    registerGitHandlers((id) => boundRoots.get(id));
+    const { registerGitHandlers } = await import("../../src/main/git-handlers.js");
+    registerGitHandlers((id: number) => boundRoots.get(id));
   });
 
   afterEach(async () => {
@@ -74,7 +74,7 @@ describe.skipIf(!hasGit)("Git IPC integration (Lot B Zone C)", () => {
     expect(status.isRepo).toBe(true);
     expect(status.branch).toBeTruthy();
     expect(status.files.some((f) => f.path === "app.ts" && !f.staged)).toBe(true);
-    expect(status.files.some((f) => f.path === "new.txt" && f.status === "?")).toBe(true);
+    expect(status.files.some((f) => f.path === "new.txt" && f.status === "untracked")).toBe(true);
   });
 
   it("git:status returns isRepo false when bound root is not a repository", async () => {
@@ -129,8 +129,8 @@ describe.skipIf(!hasGit)("Git IPC integration (Lot B Zone C)", () => {
     expect(commit.ok).toBe(true);
     expect(commit.hash).toMatch(/^[a-f0-9]+$/);
 
-    const log = await harness.invoke<Array<{ subject: string }>>("git:log", repoPath, 5);
-    expect(log[0]?.subject).toBe("Bump version constant");
+    const log = await harness.invoke<Array<{ message: string }>>("git:log", repoPath, 5);
+    expect(log[0]?.message).toBe("Bump version constant");
   });
 
   it("git:revertHunk requires confirmation and reverses a working-tree patch", async () => {
@@ -156,7 +156,11 @@ describe.skipIf(!hasGit)("Git IPC integration (Lot B Zone C)", () => {
   });
 
   it("git:branches lists local branches", async () => {
-    const branches = await harness.invoke<string[]>("git:branches", repoPath);
+    const branches = await harness.invoke<Array<{ name: string; current: boolean }>>(
+      "git:branches",
+      repoPath
+    );
     expect(branches.length).toBeGreaterThan(0);
+    expect(branches.some((branch) => branch.name.length > 0)).toBe(true);
   });
 });

@@ -3,7 +3,6 @@ import { persist } from 'zustand/middleware';
 
 export interface AppSettings {
   theme: 'dark' | 'light';
-  language: 'ro' | 'en';
   fontSize: number;
   tabSize: number;
   wordWrap: boolean;
@@ -41,7 +40,6 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       app: {
         theme: 'dark',
-        language: 'ro',
         fontSize: 14,
         tabSize: 2,
         wordWrap: false,
@@ -64,6 +62,11 @@ export const useSettingsStore = create<SettingsState>()(
         const section = state.activeSection as string;
         if (LEGACY_SECTIONS.has(section)) {
           state.activeSection = section === 'editor' ? 'editor' : 'general';
+        }
+        // Drop legacy UI language from localStorage — locale lives in caval-app-settings.json
+        const app = state.app as AppSettings & { language?: string };
+        if (app && 'language' in app) {
+          delete app.language;
         }
       },
     }

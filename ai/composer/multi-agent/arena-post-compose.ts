@@ -67,8 +67,9 @@ export async function runArenaPostCompose(opts: {
   };
 
   const partitioned = partitionTasksByRole(tasks);
+  const skipExtraLlm = config.fastPipeline !== false;
 
-  if (partitioned.tester.length > 0 && !isAborted()) {
+  if (!skipExtraLlm && partitioned.tester.length > 0 && !isAborted()) {
     callbacks.onMultiAgentStatus?.('subagent', 'active', `tester (${partitioned.tester.length})`);
     await runSubAgents(partitioned.tester, plan, store, config, workspaceRoot, rotator, callbacks, isAborted);
     callbacks.onMultiAgentStatus?.('subagent', 'done', 'tester');
@@ -88,6 +89,7 @@ export async function runArenaPostCompose(opts: {
     callbacks,
     scanModelId,
     isAborted,
+    skipVerify: skipExtraLlm || config.devtoolsAsyncVerify,
   });
   summaries.userSim = parallel.summaries.userSim;
   summaries.security = parallel.summaries.security;
@@ -109,7 +111,7 @@ export async function runArenaPostCompose(opts: {
     ...partitioned.implementerPerf,
   ];
 
-  if (fixTasks.length > 0 && !isAborted()) {
+  if (!skipExtraLlm && fixTasks.length > 0 && !isAborted()) {
     callbacks.onMultiAgentStatus?.('subagent', 'active', `fix (${fixTasks.length})`);
     const fixResults = await runSubAgents(
       fixTasks,
@@ -129,7 +131,7 @@ export async function runArenaPostCompose(opts: {
     callbacks.onMultiAgentStatus?.('subagent', 'done', 'fix');
   }
 
-  if (partitioned.refactorer.length > 0 && !isAborted()) {
+  if (!skipExtraLlm && partitioned.refactorer.length > 0 && !isAborted()) {
     callbacks.onMultiAgentStatus?.('subagent', 'active', `refactor (${partitioned.refactorer.length})`);
     const refResults = await runSubAgents(
       partitioned.refactorer,

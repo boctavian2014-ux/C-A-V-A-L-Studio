@@ -30,9 +30,9 @@ describe("ipc-handlers path security", () => {
     outside = await fs.promises.mkdtemp(path.join(os.tmpdir(), "caval-out-"));
     await fs.promises.writeFile(path.join(workspace, "inside.txt"), "secret", "utf8");
 
-    const { setIpcWorkspaceRoot } = await import("../../src/main/ipc-handlers");
+    const { setIpcWorkspaceRoot } = await import("../../src/main/ipc-handlers.js");
     setIpcWorkspaceRoot(42, workspace);
-    await import("../../src/main/ipc-handlers");
+    await import("../../src/main/ipc-handlers.js");
   });
 
   afterEach(async () => {

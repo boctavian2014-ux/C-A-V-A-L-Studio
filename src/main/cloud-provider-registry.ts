@@ -1,6 +1,8 @@
 /**
  * Lot C5.3 — Declarative provider registry (fixed base URLs; renderer cannot override host).
  */
+import { isAllowedCustomUrl } from "../shared/ai-provider-contract";
+
 export type ProviderAuthPolicy = "bearer_env" | "none_local" | "billing_api_key";
 
 export interface CloudProviderPolicy {
@@ -165,6 +167,16 @@ export function assertProviderRequestUrl(
     const ollama = assertOllamaBaseUrl(rawUrl);
     if (!ollama.ok) return ollama;
     return { ok: true, url: new URL(ollama.normalized) };
+  }
+  if (providerId === "custom") {
+    if (!isAllowedCustomUrl(rawUrl)) {
+      return { ok: false, error: "Custom endpoint must be localhost/loopback or https" };
+    }
+    try {
+      return { ok: true, url: new URL(rawUrl.trim()) };
+    } catch {
+      return { ok: false, error: "Invalid provider URL" };
+    }
   }
   let url: URL;
   try {

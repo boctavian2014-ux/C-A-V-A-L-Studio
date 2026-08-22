@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
+import { useTranslation } from "../../../ai/i18n/useTranslation";
 import type { MarketplaceExtension } from "../../api";
 import { useExtensions } from "../hooks/useExtensions";
 import { useSearch } from "../hooks/useSearch";
@@ -21,6 +22,7 @@ export const MarketplacePanel = ({
   marketplaceOnlineHint,
   onInstall,
 }: MarketplacePanelProps) => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | undefined>();
   const [installError, setInstallError] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export const MarketplacePanel = ({
       if (onInstall) {
         const res = await onInstall(extension);
         if (!res.ok) {
-          setInstallError(res.error ?? "Instalare eșuată.");
+          setInstallError(res.error ?? t("marketplace.installFailed"));
           return;
         }
       }
@@ -60,14 +62,14 @@ export const MarketplacePanel = ({
   return (
     <section className="marketplace-panel">
       <header>
-        <p className="eyebrow">Caval Marketplace</p>
-        <h1>Extensions, plugins, themes and AI tools</h1>
+        <p className="eyebrow">{t("marketplace.brandEyebrow")}</p>
+        <h1>{t("marketplace.tagline")}</h1>
         {marketplaceOnlineHint && <p className="marketplace-hint">{marketplaceOnlineHint}</p>}
         <SearchBar query={query} suggestions={suggestions} onChange={setQuery} />
       </header>
 
-      <nav className="marketplace-categories" aria-label="Marketplace categories">
-        <button type="button" onClick={() => setCategory(undefined)}>All</button>
+      <nav className="marketplace-categories" aria-label={t("marketplace.categoriesAria")}>
+        <button type="button" onClick={() => setCategory(undefined)}>{t("marketplace.all")}</button>
         {categories.map((item) => (
           <button key={item} type="button" onClick={() => setCategory(item)}>{item}</button>
         ))}
@@ -75,7 +77,7 @@ export const MarketplacePanel = ({
 
       {featured.length > 0 && (
         <section>
-          <h2>Featured</h2>
+          <h2>{t("marketplace.featured")}</h2>
           <div className="extension-grid">
             {featured.map((extension) => (
               <ExtensionCard key={extension.id} extension={extension} installed={installed.includes(extension.id)} onInstall={install} />
@@ -85,8 +87,8 @@ export const MarketplacePanel = ({
       )}
 
       <section>
-        <h2>{query ? "Search results" : "Trending"}</h2>
-        {loading && <p>Loading marketplace...</p>}
+        <h2>{query ? t("marketplace.searchResults") : t("marketplace.trending")}</h2>
+        {loading && <p>{t("marketplace.loading")}</p>}
         {error && <p role="alert">{error}</p>}
         {installError && <p role="alert">{installError}</p>}
         <div className="extension-grid">
@@ -100,6 +102,9 @@ export const MarketplacePanel = ({
             />
           ))}
         </div>
+        {!loading && visibleExtensions.length === 0 && !error && (
+          <p className="marketplace-hint">{t("marketplace.noExtensions")}</p>
+        )}
       </section>
     </section>
   );

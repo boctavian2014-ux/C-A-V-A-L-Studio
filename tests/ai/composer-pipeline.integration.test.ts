@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pipelineEventBus } from "../../ai/pipeline/pipeline-event-bus";
-import type { PipelineEvent } from "../../ai/pipeline/pipeline-event-bus";
+import type { PipelineEvent } from "../../components/ui/logicflow/types";
 
 const PLAN_JSON = JSON.stringify({
   steps: [
@@ -90,7 +90,7 @@ describe("Composer pipeline integration", () => {
     events = [];
     unsubscribe = pipelineEventBus.on((event) => events.push(event));
 
-    const { suggestionsStore } = await import("../../ai/suggestions/suggestions-store");
+    const { suggestionsStore } = await import("../../ai/suggestions/suggestions-store.js");
     suggestionsStore.clear();
   });
 
@@ -100,7 +100,7 @@ describe("Composer pipeline integration", () => {
   });
 
   it("stops at suggestions gate when skipSuggestions is false", async () => {
-    const { AIComposer } = await import("../../ai/composer/composer");
+    const { AIComposer } = await import("../../ai/composer/composer.js");
     const composer = new AIComposer();
 
     const result = await composer.run({
@@ -116,7 +116,7 @@ describe("Composer pipeline integration", () => {
   });
 
   it("runs plan → patch → dry apply when suggestions and review are skipped", async () => {
-    const { AIComposer } = await import("../../ai/composer/composer");
+    const { AIComposer } = await import("../../ai/composer/composer.js");
     const composer = new AIComposer();
 
     const result = await composer.run({
@@ -152,7 +152,7 @@ describe("Composer pipeline integration", () => {
       return { content: PLAN_JSON, model: "test", provider: "test", latencyMs: 1 };
     });
 
-    const { AIComposer } = await import("../../ai/composer/composer");
+    const { AIComposer } = await import("../../ai/composer/composer.js");
     const composer = new AIComposer();
 
     const result = await composer.run({
@@ -174,8 +174,8 @@ describe("Composer pipeline integration", () => {
     const objective = "Set app.ts value to 42";
 
     it("completes compose after approveSuggestions and proceedAfterSuggestions", async () => {
-      const { AIComposer } = await import("../../ai/composer/composer");
-      const { suggestionsStore } = await import("../../ai/suggestions/suggestions-store");
+      const { AIComposer } = await import("../../ai/composer/composer.js");
+      const { suggestionsStore } = await import("../../ai/suggestions/suggestions-store.js");
       const composer = new AIComposer();
 
       const capabilities: string[] = [];
@@ -248,8 +248,8 @@ describe("Composer pipeline integration", () => {
     });
 
     it("completes compose when approved session is passed on a second run", async () => {
-      const { AIComposer } = await import("../../ai/composer/composer");
-      const { suggestionsApi } = await import("../../ai/suggestions/suggestions-api");
+      const { AIComposer } = await import("../../ai/composer/composer.js");
+      const { suggestionsApi } = await import("../../ai/suggestions/suggestions-api.js");
       const composer = new AIComposer();
 
       const gate = await composer.run({
@@ -281,7 +281,7 @@ describe("Composer pipeline integration", () => {
     });
 
     it("stays at suggestions gate when session is still pending", async () => {
-      const { AIComposer } = await import("../../ai/composer/composer");
+      const { AIComposer } = await import("../../ai/composer/composer.js");
       const composer = new AIComposer();
 
       const first = await composer.run({

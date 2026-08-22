@@ -4,10 +4,9 @@ import { getModelConfig } from "./model-registry";
 import { modelCache } from "./model-cache";
 import { canPreloadHttpModel, providerApiKeyEnv } from "./provider-credentials";
 
-const OLLAMA_BASE =
-  (typeof process !== "undefined" && process.env.OLLAMA_BASE_URL
-    ? process.env.OLLAMA_BASE_URL.replace(/\/api\/chat\/?$/, "")
-    : undefined) ?? "http://localhost:11434";
+import { getOllamaLoopbackUrl } from "../../src/shared/local-ai-contract";
+
+const OLLAMA_BASE = getOllamaLoopbackUrl();
 
 /** Load a model into cache — HTTP probe or Ollama warm. */
 export async function loadModel(config: AIModelConfig): Promise<LoadedModelHandle> {

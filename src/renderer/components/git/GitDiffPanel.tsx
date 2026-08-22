@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { useGitStore } from '../../store/git-store';
 
 function diffLineStyle(line: string): React.CSSProperties {
@@ -15,46 +16,83 @@ function diffLineStyle(line: string): React.CSSProperties {
 }
 
 export function GitDiffPanel() {
-  const { selectedFile, diffContent, diffLoading, filePair } = useGitStore();
+  const { t } = useTranslation();
+  const { selectedFile, diffContent, diffLoading, diffBinary, isDiffStaged, loadDiff } = useGitStore();
 
   if (!selectedFile) {
     return (
-      <div style={{
+      <div
+        data-testid="git-diff-empty"
+        style={{
         padding: '12px 10px', fontSize: 11.5, color: 'var(--caval-text-muted)',
         borderTop: '1px solid var(--caval-border)',
       }}>
-        Selectează un fișier pentru diff.
+        {t('empty.gitDiffSelect')}
       </div>
     );
   }
 
   return (
-    <div style={{
+    <div
+      data-testid="git-diff"
+      style={{
       borderTop: '1px solid var(--caval-border)',
       display: 'flex', flexDirection: 'column',
       maxHeight: 220, minHeight: 120, flexShrink: 0,
     }}>
       <div style={{
         padding: '6px 10px', fontSize: 10.5, fontWeight: 600,
-        textTransform: 'uppercase', letterSpacing: '0.06em',
+        letterSpacing: '0.06em',
         color: 'var(--caval-text-muted)',
         borderBottom: '1px solid var(--caval-border)',
         fontFamily: "'JetBrains Mono', monospace",
+        display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        Diff — {selectedFile.path} {selectedFile.staged ? '(staged)' : ''}
+        <span style={{ textTransform: 'uppercase', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          Diff — {selectedFile.path}
+        </span>
+        <button
+          data-testid="git-diff-working"
+          type="button"
+          onClick={() => void loadDiff(selectedFile, false)}
+          style={{
+            border: 'none', background: !isDiffStaged ? 'rgba(0,224,255,0.12)' : 'transparent',
+            color: !isDiffStaged ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+            fontSize: 10, fontWeight: 600, cursor: 'pointer', borderRadius: 4, padding: '2px 6px',
+          }}
+        >
+          {t('git.diff.workingTree')}
+        </button>
+        <button
+          data-testid="git-diff-staged"
+          type="button"
+          onClick={() => void loadDiff(selectedFile, true)}
+          style={{
+            border: 'none', background: isDiffStaged ? 'rgba(0,224,255,0.12)' : 'transparent',
+            color: isDiffStaged ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
+            fontSize: 10, fontWeight: 600, cursor: 'pointer', borderRadius: 4, padding: '2px 6px',
+          }}
+        >
+          {t('git.diff.staged')}
+        </button>
       </div>
       <div className="ai-messages-scroll" style={{ flex: 1, overflow: 'auto', padding: '6px 0' }}>
         {diffLoading && (
           <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--caval-text-muted)' }}>
-            Se încarcă diff…
+            {t('git.diff.loading')}
           </div>
         )}
-        {!diffLoading && !diffContent.trim() && filePair && (
+        {!diffLoading && diffBinary && (
           <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--caval-text-muted)' }}>
-            Fișier nou sau fără patch unified — conținut modificat disponibil.
+            {t('git.diff.binary')}
           </div>
         )}
-        {!diffLoading && diffContent.trim() && diffContent.split(/\r?\n/).map((line, i) => (
+        {!diffLoading && !diffBinary && !diffContent.trim() && (
+          <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--caval-text-muted)' }}>
+            {t('git.diff.noUnified')}
+          </div>
+        )}
+        {!diffLoading && !diffBinary && diffContent.trim() && diffContent.split(/\r?\n/).map((line, i) => (
           <div
             key={`${i}-${line.slice(0, 12)}`}
             style={{

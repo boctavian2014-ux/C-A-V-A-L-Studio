@@ -5,6 +5,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ContextEngineApi } from "../../context-engine/api";
+import { AI_TOOL_DEFINITIONS, isAiToolName, type AiToolName } from "../../src/shared/ai-tools-contract";
+import { executeAiTool } from "../../src/main/ai/ai-tools-executor";
 import { runAllowedWorkspaceCommand } from "./workspace-command-runner";
 import { runTerminalCommand } from "../../src/main/terminal-bridge";
 
@@ -70,6 +72,7 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
       required: ["command"],
     },
   },
+  ...AI_TOOL_DEFINITIONS,
 ];
 
 type McpToolInvoker = (serverId: string, toolName: string, args: Record<string, unknown>) => Promise<ToolResult>;
@@ -125,8 +128,23 @@ export class ToolRegistry {
       case "run_terminal":
         return this.runTerminal(String(call.arguments.command ?? ""));
       default:
+        if (isAiToolName(call.name)) {
+          return this.executeIdeTool(call.name, call.arguments);
+        }
         return { ok: false, error: `Unknown tool: ${call.name}` };
     }
+  }
+
+  private async executeIdeTool(name: AiToolName, args: Record<string, unknown>): Promise<ToolResult> {
+    const result = await executeAiTool(
+      { id: `tool-${name}`, name, args: args ?? {} },
+      this.workspaceRoot
+    );
+    return {
+      ok: result.success,
+      output: result.output,
+      error: result.error,
+    };
   }
 
   private resolvePath(relative: string): string {

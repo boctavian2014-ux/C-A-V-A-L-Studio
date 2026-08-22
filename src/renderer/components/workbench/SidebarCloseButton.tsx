@@ -1,19 +1,23 @@
 import React from 'react';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 export function SidebarCloseButton({
   onClick,
-  title = 'Închide sidebar (Ctrl+B)',
+  title,
   style,
 }: {
   onClick: () => void;
   title?: string;
   style?: React.CSSProperties;
 }) {
+  const { t } = useTranslation();
+  const resolvedTitle = title ?? t('workbench.sidebarClose');
+
   return (
     <button
       type="button"
-      title={title}
-      aria-label={title}
+      title={resolvedTitle}
+      aria-label={resolvedTitle}
       onClick={onClick}
       style={{
         width: 22,
@@ -54,7 +58,9 @@ export function SidebarToggleButton({
   onClick: () => void;
   sidebarOpen: boolean;
 }) {
-  const title = sidebarOpen ? 'Ascunde sidebar (Ctrl+B)' : 'Arată sidebar (Ctrl+B)';
+  const { t } = useTranslation();
+  const title = sidebarOpen ? t('workbench.sidebarHide') : t('workbench.sidebarShow');
+
   return (
     <button
       type="button"

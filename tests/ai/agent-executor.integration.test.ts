@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Executor } from "../../ai/agent/executor";
 import type { Goal, PlanStep } from "../../ai/agent/types";
 import { pipelineEventBus } from "../../ai/pipeline/pipeline-event-bus";
-import type { PipelineEvent } from "../../ai/pipeline/pipeline-event-bus";
+import type { PipelineEvent } from "../../components/ui/logicflow/types";
 
 describe("AI Agent executor integration", () => {
   let workspaceRoot: string;
@@ -50,8 +50,14 @@ describe("AI Agent executor integration", () => {
       suggestions: expect.arrayContaining([expect.stringMatching(/1\.2\.0/)]),
     });
 
-    const toolCall = events.find((e) => e.type === "tool.call" && e.tool === "agent.suggest");
-    const toolResult = events.find((e) => e.type === "tool.result" && e.id === toolCall?.id);
+    const toolCall = events.find(
+      (e): e is Extract<PipelineEvent, { type: "tool.call" }> =>
+        e.type === "tool.call" && e.tool === "agent.suggest"
+    );
+    const toolResult = events.find(
+      (e): e is Extract<PipelineEvent, { type: "tool.result" }> =>
+        e.type === "tool.result" && e.id === toolCall?.id
+    );
     expect(toolCall).toBeDefined();
     expect(toolResult?.success).toBe(true);
     expect(events.some((e) => e.type === "node.enter")).toBe(true);

@@ -16,7 +16,7 @@ describe("PlanValidator", () => {
 
   it("errors when plan has no steps", async () => {
     const diagnostics = await new PlanValidator().validate(
-      { id: "p1", objective: "test", steps: [], estimatedFiles: 0, estimatedLines: { min: 0, max: 0 } },
+      { objective: "test", steps: [], risks: [], validation: [] },
       baseContext("/tmp")
     );
     expect(diagnostics.some((d) => d.message.includes("no steps"))).toBe(true);
@@ -25,10 +25,9 @@ describe("PlanValidator", () => {
   it("warns when referenced files are missing", async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "caval-plan-"));
     const plan: ComposerPlan = {
-      id: "p2",
       objective: "refactor",
-      estimatedFiles: 1,
-      estimatedLines: { min: 1, max: 10 },
+      risks: [],
+      validation: [],
       steps: [{
         id: "s1",
         title: "Update module",

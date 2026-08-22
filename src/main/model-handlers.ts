@@ -10,6 +10,7 @@ import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { clearOpenRouterCache } from "../../ai/models/openrouter-catalog";
 
 import { resolveModelSelection } from "../../ai/models/auto-router";
+import { getModelProfile } from "../../ai/model-profiles";
 
 import {
 
@@ -45,9 +46,15 @@ import {
   markOperationTerminal,
   registerStreamOperation,
 } from "./operation-registry";
+import {
+  abortAbortableStream,
+  finishAbortableStream,
+  parseAbortStreamId,
+  startAbortableStream,
+} from "./abort/stream-abort";
 import { cancelCadJobRemote } from "./cad-handlers";
 import { releaseCadWorkspaceLock } from "./cad-workspace-lock";
-import { loadReasoningConfig } from "../../ai/composer/multi-agent/config";
+import { loadMultiAgentConfig, loadReasoningConfig, usesAgenticToolRuntime } from "../../ai/composer/multi-agent/config";
 import {
   buildWorkspaceBootstrap,
   mergeProjectContextWithBootstrap,
@@ -59,6 +66,56 @@ import { parseProjectHealthAction } from "../../src/shared/project-health-check"
 import { assertTrustedSender } from "./ipc-trust";
 import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
 import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
+import type { IdeContextPayload } from "../shared/ai-context-contract";
+import { applyIdeContextToChatRequest, applyEnhancedContextToChatRequest } from "./ai/ide-context-collector";
+import { emitTimelineEvent } from "./ai/timeline-emit";
+import {
+  discardIncompleteStreamTimeline,
+  persistAssistantMessageAndFlush,
+} from "./ai/timeline-persistence";
+import { persistAcceptedWrittenFiles } from "./ai/written-files-persistence";
+import {
+  emitQuickFixAcceptTimeline,
+  emitQuickFixProposeTimeline,
+  proposeQuickFix,
+} from "./ai/quick-fix-runner";
+import { summarizeToolDetail } from "../shared/ai-timeline-contract";
+import type {
+  QuickFixAcceptRequest,
+  QuickFixRequest,
+  QuickFixResult,
+} from "../shared/ai-quick-fix-contract";
+import type { TimelineFileWriteRequest } from "../shared/ai-inline-completion-contract";
+import type {
+  ExplainRequest,
+  ExplainResult,
+} from "../shared/ai-explain-contract";
+import {
+  emitExplainTimeline,
+  runExplain,
+} from "./ai/explain-runner";
+import type {
+  TerminalExplainRequest,
+  TerminalExplainResult,
+  TerminalSuggestRequest,
+  TerminalSuggestResult,
+} from "../shared/ai-terminal-contract";
+import {
+  emitTerminalExplainTimeline,
+  runTerminalExplain,
+} from "./ai/terminal-explain";
+import {
+  emitTerminalSuggestTimeline,
+  runTerminalSuggest,
+} from "./ai/terminal-suggest";
+import type {
+  RefactorRequest,
+  RefactorResult,
+} from "../shared/ai-refactor-contract";
+import {
+  emitRefactorProposeTimeline,
+  runRefactorPropose,
+} from "./ai/refactor-runner";
 
 
 
@@ -119,6 +176,40 @@ export interface CavalChatStreamRequest {
 
   /** Force merge + supervisor review (overrides fastPipeline from caval.jsonc) */
   strictReview?: boolean;
+
+  /**
+   * Optional IDE snapshot from the renderer (Pas 5.2).
+   * Main re-validates and budgets; absent when the per-thread toggle is OFF.
+   * Must not carry workspaceRoot as authority.
+   */
+  ideContext?: IdeContextPayload;
+
+  /** Pas 6.1 — propose localized diagnostic fix (no disk write). */
+  quickFix?: QuickFixRequest;
+
+  /** Pas 6.1 — after renderer accept: emit file_write on timeline only. */
+  quickFixAccept?: QuickFixAcceptRequest;
+
+  /** Pas 6.2 — after inline completion Tab accept: emit file_write on timeline only. */
+  timelineFileWrite?: TimelineFileWriteRequest;
+
+  /** Pas 6.3 — read-only explain on hover / selection. */
+  explain?: ExplainRequest;
+
+  /** Pas 7c.1 — read-only terminal output explain (no PTY/disk writes). */
+  terminalExplain?: TerminalExplainRequest;
+
+  /** Pas 7c.2 — propose-only terminal command suggestions. */
+  terminalSuggest?: TerminalSuggestRequest;
+
+  /** Pas 6.5 — gated multi-file refactor propose (no disk write). */
+  refactor?: RefactorRequest;
+
+  /** Pas 7a.2 — UI thread id used as conversation_id at assistant completion. */
+  conversationId?: string;
+
+  /** Pas 7e.2 — UI assistant bubble id; reused as messages.id for feedback alignment. */
+  assistantMessageId?: string;
 
 }
 
@@ -188,7 +279,9 @@ function capabilityForMode(mode?: string): CompleteModelTextInput["capability"] 
 
   if (mode === "debug") return "debug";
 
-  if (mode === "code" || mode === "agentic") return "code";
+  if (mode === "code") return "code";
+
+  if (mode === "agentic") return "chat";
 
   return "chat";
 
@@ -292,6 +385,20 @@ function scaffoldSystemAddon(): string {
   ].join("\n");
 }
 
+function agenticToolLoopAddon(): string {
+  return [
+    "",
+    "TOOL LOOP MODE:",
+    "- Use tools first: list_dir, search_codebase, read_file, then write_file with REAL relative paths.",
+    "- Prefer targeted reads before edits; avoid rewriting unrelated files.",
+    "- After edits, verify with run_command or run_terminal using allowlisted commands such as npm install, npm run build, npm test, npm run typecheck.",
+    "- Iterate on tool outputs until the task is complete or a concrete blocker remains.",
+    "- Do NOT emit ```lang:path``` fenced files unless the user explicitly asks for raw code in chat.",
+    "- Never invent placeholder paths like src/index_17.tsx or unnamed generated files.",
+    "- Keep chat output short; the work should happen through tools and real files.",
+  ].join("\n");
+}
+
 function injectProjectContextIntoMessages(
   msgs: ChatStreamMessage[],
   projectContext: string
@@ -319,7 +426,14 @@ function injectProjectContextIntoMessages(
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
 
   let system = systemPromptForMode(request.mode, request.workspaceRoot);
-  if (request.mode === "agentic" && request.workspaceRoot) {
+  const multiAgentConfig = request.workspaceRoot?.trim()
+    ? loadMultiAgentConfig(request.workspaceRoot)
+    : undefined;
+  const usesToolLoopAgentic =
+    request.mode === "agentic" && usesAgenticToolRuntime(multiAgentConfig);
+  if (usesToolLoopAgentic) {
+    system += agenticToolLoopAddon();
+  } else if (request.mode === "agentic" && request.workspaceRoot) {
     system += scaffoldSystemAddon();
   } else if (request.scaffoldMode && request.mode === "agentic") {
     system += scaffoldSystemAddon();
@@ -450,11 +564,13 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 
 
 
-function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
+export function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
   if (!workspaceRoot?.trim()) return false;
-  if (mode !== "code" && mode !== "debug") return false;
+  if (mode !== "code" && mode !== "debug" && mode !== "agentic") return false;
   if (!model || model === "ollama-local") return false;
   if (model.startsWith("caval-auto/free")) return false;
+  const profile = getModelProfile(model);
+  if (profile?.provider === "open_source" || profile?.costEstimate === "local") return false;
   return true;
 }
 
@@ -512,8 +628,56 @@ function sendStatusChunk(
   return stream.send({ type: "status", phase, status, detail });
 }
 
+function sendToolTimeline(
+  stream: StreamChunkSender,
+  streamId: string,
+  toolName: string,
+  status: "start" | "done" | "error",
+  detail?: string,
+  writtenPath?: string
+): void {
+  const shortName = toolName.replace(/^mcp:[^:]+:/, "");
+  if (status === "start") {
+    emitTimelineEvent(stream, streamId, {
+      type: "tool_call",
+      label: `Running ${shortName}`,
+      toolName: shortName,
+    });
+    return;
+  }
+
+  const success = status === "done";
+  emitTimelineEvent(stream, streamId, {
+    type: "tool_result",
+    label: success ? `${shortName} succeeded` : `${shortName} failed`,
+    toolName: shortName,
+    success,
+    detail: summarizeToolDetail(detail, success),
+  });
+
+  if (success && writtenPath?.trim()) {
+    emitTimelineEvent(stream, streamId, {
+      type: "file_write",
+      label: `Updated ${writtenPath.trim().replace(/\\/g, "/")}`,
+      filePath: writtenPath.trim().replace(/\\/g, "/"),
+      success: true,
+    });
+  }
+
+  if (!success) {
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: `${shortName} error`,
+      toolName: shortName,
+      success: false,
+      detail: summarizeToolDetail(detail, false),
+    });
+  }
+}
+
 function sendMultiAgentStatusChunk(
   stream: StreamChunkSender,
+  streamId: string,
   phase: import("../../ai/composer/chat-activity-types").MultiAgentPhase,
   status: "active" | "done",
   detail?: string,
@@ -522,6 +686,16 @@ function sendMultiAgentStatusChunk(
   auditBadge?: string,
   parallelGroup?: string
 ): boolean {
+  if (status === "active") {
+    const label =
+      detail?.trim() ||
+      phase;
+    emitTimelineEvent(stream, streamId, {
+      type: "reasoning",
+      label: `Pipeline · ${label}`.slice(0, 160),
+      detail: modelId ? `model ${modelId}` : undefined,
+    });
+  }
   return stream.send({
     type: "multiagent",
     multiAgentPhase: phase,
@@ -671,9 +845,431 @@ export function abortAllStreamsForSender(senderId: number): void {
   const streams = activeStreamsBySender.get(senderId);
   if (!streams?.size) return;
   for (const streamId of [...streams]) {
+    discardIncompleteStreamTimeline(streamId);
+    abortAbortableStream(streamId, "sender gone");
     abortMultiAgentPipeline(streamId);
   }
   streams.clear();
+}
+
+async function streamRefactorToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const refactor = request.refactor;
+  if (!refactor) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: RefactorResult = { success: false, error: "No bound workspace" };
+    emitRefactorProposeTimeline(stream, streamId, refactor, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Refactor.",
+      refactor: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "refactor");
+
+  const result = await runRefactorPropose({
+    workspaceRoot,
+    request: { ...refactor, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens, jsonMode }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "multi_file",
+        capability: "code",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        jsonMode,
+        temperature: 0.1,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitRefactorProposeTimeline(stream, streamId, refactor, result);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Refactor failed"),
+      refactor: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    refactor: result,
+  });
+}
+
+async function streamExplainToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const explain = request.explain;
+  if (!explain) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: ExplainResult = { success: false, error: "No bound workspace" };
+    emitExplainTimeline(stream, streamId, explain.filePath, result, explain.symbol ?? "selection");
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Explain.",
+      explain: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "explain");
+
+  const result = await runExplain({
+    workspaceRoot,
+    request: { ...explain, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "analysis",
+        capability: "chat",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        temperature: 0.2,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  const focus = explain.symbol ?? "selection";
+  emitExplainTimeline(stream, streamId, explain.filePath, result, focus);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Explain failed"),
+      explain: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    explain: result,
+  });
+}
+
+async function streamTerminalExplainToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const terminalExplain = request.terminalExplain;
+  if (!terminalExplain) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: TerminalExplainResult = { success: false, error: "No bound workspace" };
+    emitTerminalExplainTimeline(stream, streamId, terminalExplain.terminalId, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Explain.",
+      terminalExplain: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "explain terminal");
+
+  const result = await runTerminalExplain({
+    request: { ...terminalExplain, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "analysis",
+        capability: "chat",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        temperature: 0.2,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    discardIncompleteStreamTimeline(streamId);
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitTerminalExplainTimeline(stream, streamId, terminalExplain.terminalId, result);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Explain failed"),
+      terminalExplain: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    terminalExplain: result,
+  });
+}
+
+async function streamTerminalSuggestToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+  const terminalSuggest = request.terminalSuggest;
+  if (!terminalSuggest) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: TerminalSuggestResult = { success: false, error: "No bound workspace" };
+    emitTerminalSuggestTimeline(stream, streamId, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de Suggest.",
+      terminalSuggest: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "suggest commands");
+
+  const result = await runTerminalSuggest({
+    request: { ...terminalSuggest, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "analysis",
+        capability: "chat",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        temperature: 0.2,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    discardIncompleteStreamTimeline(streamId);
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitTerminalSuggestTimeline(stream, streamId, result);
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Suggest failed"),
+      terminalSuggest: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    terminalSuggest: result,
+  });
+}
+
+async function streamQuickFixToRenderer(
+  stream: StreamChunkSender,
+  streamId: string,
+  request: CavalChatStreamRequest,
+  signal: AbortSignal
+): Promise<void> {
+  const workspaceRoot = request.workspaceRoot?.trim() ?? "";
+
+  if (request.quickFixAccept || request.timelineFileWrite) {
+    const acceptPayload: QuickFixAcceptRequest & { detail?: string } = request.quickFixAccept
+      ? { ...request.quickFixAccept }
+      : {
+          filePath: request.timelineFileWrite!.filePath,
+          editCount: 1,
+          detail: request.timelineFileWrite!.detail,
+        };
+    if (!workspaceRoot) {
+      markOperationTerminal(streamId, "failed");
+      emitTimelineEvent(stream, streamId, {
+        type: "error",
+        label: "Editor accept failed",
+        success: false,
+        detail: "No bound workspace",
+      });
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de această acțiune AI.",
+        quickFix: { success: false, error: "No bound workspace" } satisfies QuickFixResult,
+      });
+      return;
+    }
+    const acceptResult = emitQuickFixAcceptTimeline(stream, streamId, acceptPayload);
+    if (!acceptResult.success) {
+      markOperationTerminal(streamId, "failed");
+      stream.send({
+        type: "error",
+        error: acceptResult.error ?? "Accept failed",
+        quickFix: acceptResult,
+      });
+      return;
+    }
+    const writtenRel = acceptPayload.filePath.replace(/\\/g, "/");
+    // Pas 7a.3 — snapshot post-Accept (editor already wrote disk / buffer).
+    persistAcceptedWrittenFiles({
+      workspaceRoot,
+      filePaths: [writtenRel],
+      conversationId: request.conversationId,
+      streamId,
+    });
+    markOperationTerminal(streamId, "completed");
+    stream.send({
+      type: "done",
+      quickFix: acceptResult,
+      writtenFiles: [writtenRel],
+    });
+    return;
+  }
+
+  const quickFix = request.quickFix;
+  if (!quickFix) return;
+
+  if (!workspaceRoot) {
+    markOperationTerminal(streamId, "failed");
+    const result: QuickFixResult = { success: false, error: "No bound workspace" };
+    emitQuickFixProposeTimeline(stream, streamId, quickFix.filePath, quickFix.diagnostic.startLine, result);
+    stream.send({
+      type: "error",
+      error: "Deschide un folder în workspace înainte de quick fix.",
+      quickFix: result,
+    });
+    return;
+  }
+
+  sendStatusChunk(stream, "prepare", "done");
+  sendStatusChunk(stream, "think", "active", "quick fix");
+
+  const result = await proposeQuickFix({
+    workspaceRoot,
+    request: { ...quickFix, streamId },
+    signal,
+    complete: async ({ messages, signal: completeSignal, maxTokens, jsonMode }) => {
+      const completed = await completeModelText({
+        model: (request.model || "auto-balanced") as CompleteModelTextInput["model"],
+        intent: "debug",
+        capability: "code",
+        messages,
+        workspaceRoot,
+        requestId: streamId,
+        signal: completeSignal ?? signal,
+        maxTokens,
+        jsonMode,
+        temperature: 0.1,
+      });
+      if (!completed.ok) return { ok: false, error: completed.error };
+      return { ok: true, text: completed.text };
+    },
+  });
+
+  if (!stream.isAlive() || signal.aborted) {
+    markOperationTerminal(streamId, "aborted");
+    stream.send({ type: "error", error: "Generare anulată." });
+    return;
+  }
+
+  emitQuickFixProposeTimeline(
+    stream,
+    streamId,
+    quickFix.filePath,
+    quickFix.diagnostic.startLine,
+    result
+  );
+  sendStatusChunk(stream, "think", "done");
+
+  if (!result.success) {
+    markOperationTerminal(streamId, "failed");
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Quick fix failed"),
+      quickFix: result,
+    });
+    return;
+  }
+
+  markOperationTerminal(streamId, "completed");
+  stream.send({
+    type: "done",
+    quickFix: result,
+  });
 }
 
 async function streamToRenderer(
@@ -691,14 +1287,148 @@ async function streamToRenderer(
   const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim();
   const userBoundWorkspace = Boolean(explicitRoot || boundRoot);
   const workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
+  const multiAgentConfig = workspaceRoot?.trim()
+    ? loadMultiAgentConfig(workspaceRoot)
+    : undefined;
   streamOwners.set(streamId, { senderId, workspaceRoot: workspaceRoot?.trim() ?? "" });
   registerStreamOperation({
     streamId,
     senderId,
     workspaceRoot: workspaceRoot?.trim() ?? "",
   });
+  const abortRoot = startAbortableStream(streamId);
+  // Bound workspace is authoritative — never trust renderer cwd for context.
   request = { ...request, workspaceRoot };
+  if (request.ideContext !== undefined) {
+    request = applyIdeContextToChatRequest(request, request.ideContext);
+  }
+  // Pas 7d.3 — related workspace files from lexical index search (skip editor micro-ops).
+  if (
+    !request.quickFix &&
+    !request.quickFixAccept &&
+    !request.timelineFileWrite &&
+    !request.explain &&
+    !request.terminalExplain &&
+    !request.terminalSuggest &&
+    !request.refactor
+  ) {
+    request = await applyEnhancedContextToChatRequest(request, workspaceRoot);
+  }
   request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
+
+  // Pas 6.1 / 6.2 — editor write accepts + quick-fix propose on existing stream channel.
+  if (request.quickFixAccept || request.quickFix || request.timelineFileWrite) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result = {
+        success: false,
+        error: "No bound workspace",
+      } as const;
+      if (request.quickFix) {
+        emitQuickFixProposeTimeline(
+          stream,
+          streamId,
+          request.quickFix.filePath,
+          request.quickFix.diagnostic.startLine,
+          result
+        );
+      } else {
+        emitTimelineEvent(stream, streamId, {
+          type: "error",
+          label: "Editor timeline emit failed",
+          success: false,
+          detail: "No bound workspace",
+        });
+      }
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de această acțiune AI.",
+        quickFix: result,
+      });
+      return;
+    }
+    await streamQuickFixToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 6.3 — read-only explain (no file_write).
+  if (request.explain) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: ExplainResult = { success: false, error: "No bound workspace" };
+      emitExplainTimeline(
+        stream,
+        streamId,
+        request.explain.filePath,
+        result,
+        request.explain.symbol ?? "selection"
+      );
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Explain.",
+        explain: result,
+      });
+      return;
+    }
+    await streamExplainToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 7c.1 — read-only terminal output explain (no PTY / file_write).
+  if (request.terminalExplain) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: TerminalExplainResult = { success: false, error: "No bound workspace" };
+      emitTerminalExplainTimeline(
+        stream,
+        streamId,
+        request.terminalExplain.terminalId,
+        result
+      );
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Explain.",
+        terminalExplain: result,
+      });
+      return;
+    }
+    await streamTerminalExplainToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 7c.2 — propose-only terminal command suggestions (no execute).
+  if (request.terminalSuggest) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: TerminalSuggestResult = { success: false, error: "No bound workspace" };
+      emitTerminalSuggestTimeline(stream, streamId, result);
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Suggest.",
+        terminalSuggest: result,
+      });
+      return;
+    }
+    await streamTerminalSuggestToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
+
+  // Pas 6.5 — gated multi-file refactor (no disk write until Accept).
+  if (request.refactor) {
+    if (!userBoundWorkspace) {
+      markOperationTerminal(streamId, "failed");
+      const result: RefactorResult = { success: false, error: "No bound workspace" };
+      emitRefactorProposeTimeline(stream, streamId, request.refactor, result);
+      stream.send({
+        type: "error",
+        error: "Deschide un folder în workspace înainte de Refactor.",
+        refactor: result,
+      });
+      return;
+    }
+    await streamRefactorToRenderer(stream, streamId, request, abortRoot.signal);
+    return;
+  }
 
   if (workspaceRoot?.trim()) {
     void ensureMcpServersReady(workspaceRoot).catch(() => undefined);
@@ -715,7 +1445,7 @@ async function streamToRenderer(
 
   const useMultiAgent =
     !request.skipMultiAgent &&
-    shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot, undefined, {
+    shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot, multiAgentConfig, {
       userBoundWorkspace,
     });
 
@@ -723,12 +1453,16 @@ async function streamToRenderer(
     if (!stream.isAlive()) return;
     sendStatusChunk(stream, "prepare", "done");
     sendStatusChunk(stream, "route", "active");
-    sendMultiAgentStatusChunk(stream, "context", "active", "pipeline start");
+    sendMultiAgentStatusChunk(stream, streamId, "context", "active", "pipeline start");
 
-    const result = await runCavalloMultiAgentPipeline(sender, streamId, request, {
+    const result = await runCavalloMultiAgentPipeline(
+      sender,
+      streamId,
+      request,
+      {
       onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
+        sendMultiAgentStatusChunk(stream, streamId, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
       },
       onReasoningBrief: (brief) => {
         if (!stream.isAlive()) return;
@@ -750,7 +1484,9 @@ async function streamToRenderer(
         if (!stream.isAlive()) return;
         sendStatusChunk(stream, phase, status, detail);
       },
-    });
+    },
+      abortRoot.id
+    );
 
     if (!stream.isAlive()) return;
 
@@ -768,6 +1504,29 @@ async function streamToRenderer(
       if (result.text?.includes('```')) {
         if (!stream.send({ type: "delta", delta: result.text })) return;
       }
+      const proposedWrites = result.proposedWrites ?? [];
+      if (proposedWrites.length > 0) {
+        emitTimelineEvent(stream, streamId, {
+          type: "tool_call",
+          label: `propose ${proposedWrites.length} file(s)`,
+          toolName: "chat_apply",
+        });
+        emitTimelineEvent(stream, streamId, {
+          type: "tool_result",
+          label: `${proposedWrites.length} change(s) awaiting Accept`,
+          toolName: "chat_apply",
+          success: true,
+        });
+      }
+      // Pas 6.4 — no file_write until Accept; paths listed as proposed only.
+      persistAssistantMessageAndFlush({
+        workspaceRoot,
+        conversationId: request.conversationId,
+        messageId: request.assistantMessageId,
+        streamId,
+        content: result.composeText ?? result.text ?? "",
+        modelId: result.resolvedModel || request.model,
+      });
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -775,7 +1534,9 @@ async function streamToRenderer(
         reasoningBrief: result.reasoningBrief,
         pipelineRecapMeta: result.pipelineRecapMeta,
         composeText: result.composeText ?? result.text,
-        writtenFiles: result.writtenFiles,
+        writtenFiles: [],
+        proposedWrites,
+        proposeStageKey: result.runId,
         completionGate: result.completionGate,
         deliveryBlocked: result.deliveryBlocked,
         needsReview: result.needsReview,
@@ -784,6 +1545,12 @@ async function streamToRenderer(
       return;
     }
 
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Pipeline failed",
+      success: false,
+      detail: summarizeToolDetail(result.error, false),
+    });
     stream.send({
       type: "error",
       error: safeErrorMessageForUi(result.error ?? "Multi-agent pipeline failed"),
@@ -813,11 +1580,14 @@ async function streamToRenderer(
     toolRegistry,
     useTools,
     workspaceRoot,
-    signal: getStreamAbortSignal(streamId),
+    signal: getStreamAbortSignal(streamId) ?? abortRoot.signal,
+    abortParentId: abortRoot.id,
   };
 
   sendStatusChunk(stream, "prepare", "done");
   sendStatusChunk(stream, "route", "active");
+
+  let emittedReasoningTimeline = false;
 
   const result = await executeModelCompletion(completionInput, {
     onMeta: (resolvedModel, reason) => {
@@ -830,15 +1600,30 @@ async function streamToRenderer(
     },
     onReasoning: (reasoningDelta) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
+      if (!emittedReasoningTimeline && reasoningDelta.trim()) {
+        emittedReasoningTimeline = true;
+        emitTimelineEvent(stream, streamId, {
+          type: "reasoning",
+          label: "Analyzing…",
+        });
+      }
       stream.send({ type: "reasoning", reasoningDelta });
     },
     onStatus: (phase, status, detail) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
+      if (phase === "think" && status === "active" && !emittedReasoningTimeline) {
+        emittedReasoningTimeline = true;
+        emitTimelineEvent(stream, streamId, {
+          type: "reasoning",
+          label: detail?.trim() ? detail : "Thinking…",
+        });
+      }
       sendStatusChunk(stream, phase, status, detail);
     },
     onToolCall: (toolName, status, detail, writtenPath) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
-      const isDirectCodingMode = fusedRequest.mode === "code" || fusedRequest.mode === "debug";
+      const isDirectCodingMode =
+        fusedRequest.mode === "code" || fusedRequest.mode === "debug" || fusedRequest.mode === "agentic";
       if (!isDirectCodingMode) {
         const notice = formatToolCallNotice(toolName, status, detail);
         if (notice) {
@@ -852,6 +1637,7 @@ async function streamToRenderer(
       } else if (status === "done" && toolName === "write_file" && writtenPath) {
         sendStatusChunk(stream, "write", "active", writtenPath);
       }
+      sendToolTimeline(stream, streamId, toolName, status, detail, writtenPath);
       stream.send({
         type: "tool",
         toolName,
@@ -866,6 +1652,11 @@ async function streamToRenderer(
 
   if (getStreamAbortSignal(streamId)?.aborted) {
     markOperationTerminal(streamId, "aborted");
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Generation cancelled",
+      success: false,
+    });
     stream.send({
       type: "error",
       error: "Generare anulată.",
@@ -875,6 +1666,14 @@ async function streamToRenderer(
 
   if (result.ok) {
     markOperationTerminal(streamId, "completed");
+    persistAssistantMessageAndFlush({
+      workspaceRoot,
+      conversationId: request.conversationId,
+      messageId: request.assistantMessageId,
+      streamId,
+      content: result.text ?? "",
+      modelId: result.resolvedModel || request.model,
+    });
     stream.send({
       type: "done",
       model: result.resolvedModel,
@@ -884,12 +1683,20 @@ async function streamToRenderer(
   }
 
   markOperationTerminal(streamId, result.error?.includes("anulat") ? "aborted" : "failed");
-  stream.send({
-    type: "error",
-    error: safeErrorMessageForUi(result.error ?? "Stream failed"),
-  });
+  emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Stream failed",
+      success: false,
+      detail: summarizeToolDetail(result.error, false),
+    });
+    stream.send({
+      type: "error",
+      error: safeErrorMessageForUi(result.error ?? "Stream failed"),
+    });
 
   } finally {
+    discardIncompleteStreamTimeline(streamId);
+    finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
   }
 }
@@ -910,14 +1717,20 @@ async function streamResumeToRenderer(
   trackActiveStream(senderId, streamId);
   const stream = createStreamChunkSender(sender, senderId, streamId);
   try {
+    registerStreamOperation({
+      streamId,
+      senderId,
+      workspaceRoot: input.workspaceRoot?.trim() ?? "",
+    });
+    const abortRoot = startAbortableStream(streamId);
     if (!stream.isAlive()) return;
     sendStatusChunk(stream, "prepare", "done");
-    sendMultiAgentStatusChunk(stream, "subagent", "active", "UI delivery resume");
+    sendMultiAgentStatusChunk(stream, streamId, "subagent", "active", "UI delivery resume");
 
     const result = await resumeCavalloMultiAgentPipeline(sender, streamId, input, {
       onMultiAgentStatus: (phase, status, detail, modelId, stepId, auditBadge, parallelGroup) => {
         if (!stream.isAlive()) return;
-        sendMultiAgentStatusChunk(stream, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
+        sendMultiAgentStatusChunk(stream, streamId, phase, status, detail, modelId, stepId, auditBadge, parallelGroup);
       },
       onMeta: (resolvedModel, reason) => {
         if (!stream.isAlive()) return;
@@ -935,7 +1748,7 @@ async function streamResumeToRenderer(
         if (!stream.isAlive()) return;
         sendStatusChunk(stream, phase, status, detail);
       },
-    });
+    }, abortRoot.id);
 
     if (!stream.isAlive()) return;
 
@@ -949,6 +1762,27 @@ async function streamResumeToRenderer(
       if (result.text?.includes("```")) {
         if (!stream.send({ type: "delta", delta: result.text })) return;
       }
+      const proposedWrites = result.proposedWrites ?? [];
+      if (proposedWrites.length > 0) {
+        emitTimelineEvent(stream, streamId, {
+          type: "tool_call",
+          label: `propose ${proposedWrites.length} file(s)`,
+          toolName: "chat_apply",
+        });
+        emitTimelineEvent(stream, streamId, {
+          type: "tool_result",
+          label: `${proposedWrites.length} change(s) awaiting Accept`,
+          toolName: "chat_apply",
+          success: true,
+        });
+      }
+      persistAssistantMessageAndFlush({
+        workspaceRoot: input.workspaceRoot,
+        conversationId: undefined,
+        streamId,
+        content: result.composeText ?? result.text ?? "",
+        modelId: result.resolvedModel || input.model,
+      });
       stream.send({
         type: "done",
         model: result.resolvedModel,
@@ -956,7 +1790,9 @@ async function streamResumeToRenderer(
         reasoningBrief: result.reasoningBrief,
         pipelineRecapMeta: result.pipelineRecapMeta,
         composeText: result.composeText ?? result.text,
-        writtenFiles: result.writtenFiles,
+        writtenFiles: [],
+        proposedWrites,
+        proposeStageKey: result.runId ?? input.runId,
         completionGate: result.completionGate,
         deliveryBlocked: result.deliveryBlocked,
         needsReview: result.needsReview,
@@ -965,11 +1801,19 @@ async function streamResumeToRenderer(
       return;
     }
 
+    emitTimelineEvent(stream, streamId, {
+      type: "error",
+      label: "Pipeline resume failed",
+      success: false,
+      detail: summarizeToolDetail(result.error, false),
+    });
     stream.send({
       type: "error",
       error: safeErrorMessageForUi(result.error ?? "Pipeline resume failed"),
     });
   } finally {
+    discardIncompleteStreamTimeline(streamId);
+    finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
   }
 }
@@ -1117,24 +1961,29 @@ export function registerModelHandlers(
     return { ok: true, started: true };
   });
 
-  ipcMain.handle("caval:ai-stream-abort", async (event, streamId: string) => {
+  ipcMain.handle("caval:ai-stream-abort", async (event, streamId: unknown) => {
     assertTrustedSender(event);
     allowAiAbort();
-    const sid = String(streamId ?? "");
-    const owned = assertStreamOwnedBySender(event.sender.id, sid);
+    const parsed = parseAbortStreamId(streamId);
+    if (!parsed.ok) {
+      return { ok: false, error: parsed.error };
+    }
+    const owned = assertStreamOwnedBySender(event.sender.id, parsed.streamId);
     if (!owned.ok) {
       return { ok: false, error: owned.error };
     }
+    discardIncompleteStreamTimeline(parsed.streamId);
+    const cascaded = abortAbortableStream(parsed.streamId, "user cancelled");
     const cancel = beginCancelOperation({
-      streamId: sid,
+      streamId: parsed.streamId,
       senderId: event.sender.id,
     });
-    abortMultiAgentPipeline(sid);
-    untrackActiveStream(event.sender.id, sid);
+    abortMultiAgentPipeline(parsed.streamId);
+    untrackActiveStream(event.sender.id, parsed.streamId);
     return {
       ok: cancel.ok,
       status: cancel.status,
-      signalAborted: cancel.signalAborted,
+      signalAborted: cascaded || Boolean(cancel.signalAborted),
       error: cancel.error,
     };
   });
@@ -1189,6 +2038,7 @@ export function registerModelHandlers(
       }
 
       if (streamId) {
+        abortAbortableStream(streamId, "user cancelled");
         abortMultiAgentPipeline(streamId);
         untrackActiveStream(event.sender.id, streamId);
       }

@@ -49,7 +49,7 @@ describe('agentic completion gate', () => {
       arenaIssues: [{ severity: 'minor', source: 'user-sim', message: 'optional polish' }],
       verify: {
         ran: true,
-        commands: [{ command: 'npm test', ok: true, output: '' }],
+        commands: [{ command: 'npm test', ok: true, exitCode: 0, output: '' }],
         summary: 'npm test: ok',
       },
     });

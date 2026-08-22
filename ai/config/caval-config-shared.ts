@@ -7,7 +7,54 @@ import type { ModelSelectionId } from '../models/model-catalog';
 import { hasProviderCredentials } from '../models/provider-credentials';
 
 export function stripJsonc(raw: string): string {
-  return raw.replace(/\/\/.*$/gm, '').replace(/,\s*}/g, '}');
+  let result = "";
+  let i = 0;
+  let inString = false;
+  let stringChar = "";
+
+  while (i < raw.length) {
+    const char = raw[i];
+    const next = raw[i + 1];
+
+    if (inString) {
+      result += char;
+      if (char === "\\" && next !== undefined) {
+        result += next;
+        i += 2;
+        continue;
+      }
+      if (char === stringChar) {
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      stringChar = char;
+      result += char;
+      i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      while (i < raw.length && raw[i] !== "\n") i += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      i += 2;
+      while (i < raw.length && !(raw[i] === "*" && raw[i + 1] === "/")) i += 1;
+      if (i < raw.length) i += 2;
+      continue;
+    }
+
+    result += char;
+    i += 1;
+  }
+
+  return result.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
 }
 
 export function mergeCavalConfig(parsed: Partial<CavalConfig>): CavalConfig {

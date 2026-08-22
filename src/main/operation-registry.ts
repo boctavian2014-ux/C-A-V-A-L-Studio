@@ -83,6 +83,14 @@ export function getStreamAbortSignal(streamId: string): AbortSignal | undefined 
   return streamControllers.get(streamId)?.signal;
 }
 
+/** Abort the P2 ask-mode controller without going through beginCancelOperation. */
+export function abortRegisteredStreamController(streamId: string): boolean {
+  const controller = streamControllers.get(streamId);
+  if (!controller || controller.signal.aborted) return false;
+  controller.abort();
+  return true;
+}
+
 export function getOperationByStreamId(streamId: string): OperationRecord | undefined {
   const id = operationByStreamId.get(streamId);
   return id ? operationsById.get(id) : undefined;

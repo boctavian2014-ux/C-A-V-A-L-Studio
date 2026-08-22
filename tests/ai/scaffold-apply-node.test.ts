@@ -27,18 +27,7 @@ describe('scaffold-apply-node', () => {
   });
 
   it('collects sub-agent outputs when composer is empty', () => {
-    const store = new PipelineContextStore({
-      userMessage: 'build app',
-      workspaceRoot: '/tmp',
-      context: {
-        normalizedRequirements: 'app',
-        architectureContext: '',
-        interfaceContext: '',
-        dependencyMap: '',
-        storeCompliance: [],
-        pendingIssues: [],
-      },
-    });
+    const store = PipelineContextStore.createFallback('build app');
     store.setTasks([
       {
         id: 't1',

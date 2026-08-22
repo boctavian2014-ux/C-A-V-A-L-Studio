@@ -24,18 +24,22 @@ function thread(
   };
 }
 
+function msg(content: string, id = 'm1'): ChatMessage {
+  return { id, role: 'user', content, timestamp: 1 };
+}
+
 describe('chat thread archive helpers', () => {
   it('archiveThreadInList marks thread archived and keeps messages', () => {
-    const msg = [{ id: 'm1', role: 'user' as const, content: 'hi' }];
+    const messages = [msg('hi')];
     const threads = [thread('a', '/proj', { messages: [] })];
-    const next = archiveThreadInList(threads, 'a', msg);
+    const next = archiveThreadInList(threads, 'a', messages);
     expect(next[0]?.archived).toBe(true);
-    expect(next[0]?.messages).toEqual(msg);
+    expect(next[0]?.messages).toEqual(messages);
   });
 
   it('archiveThreadsForWorkspaceSwitch archives other workspaces', () => {
     const threads = [
-      thread('a', '/haine', { messages: [{ id: 'm', role: 'user', content: 'x' }] }),
+      thread('a', '/haine', { messages: [msg('x', 'm')] }),
       thread('b', '/other'),
     ];
     const next = archiveThreadsForWorkspaceSwitch(threads, '/haine', 'a', threads[0]!.messages);

@@ -21,7 +21,6 @@ describe("Zero-Latency Fusion", () => {
 
   it("buildWarmContextBlock reads warm cache entries", () => {
     warmCacheStore.upsertFromParallel({
-      workspaceRoot: "/proj",
       documents: [
         {
           id: "d1",
@@ -35,6 +34,7 @@ describe("Zero-Latency Fusion", () => {
       symbols: [{ name: "main", kind: "function", file: "/proj/src/app.ts", line: 1 }],
       dependencies: [],
       semantics: [{ file: "/proj/src/app.ts", tokens: 10, lines: 1, imports: 0, exports: 1, keywords: ["main"] }],
+      durationMs: 0,
     });
 
     const block = buildWarmContextBlock({

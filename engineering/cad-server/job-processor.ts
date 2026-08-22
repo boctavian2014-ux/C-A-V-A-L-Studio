@@ -398,7 +398,7 @@ const processOpenScadJob = async (
 };
 
 export const cancelCadJobProcessing = async (jobId: string): Promise<boolean> => {
-  const { cancelJobProcessing } = await import("./services/job-registry");
+  const { cancelJobProcessing } = await import("./services/job-registry.js");
   const aborted = cancelJobProcessing(jobId);
   const job = await getCadJob(jobId);
   if (job && !["done", "failed", "cancelled"].includes(job.status)) {

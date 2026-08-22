@@ -2,8 +2,11 @@ import { AIClient } from "../ai-client";
 import { getModelProfile } from "../model-profiles";
 import type { ToolRegistry } from "../tools/tool-registry";
 import type { ChatMessage, ModelRequest } from "../types";
+import { abortRegistry } from "../../src/main/abort/abort-registry";
 
 const MAX_TOOL_STEPS = 16;
+const MAX_AGENTIC_TOOL_STEPS = 48;
+const ABORTED_ERROR = "Generare anulată.";
 
 export interface ToolLoopCallbacks {
   onMeta?: (resolvedModel: string, reason: string) => void;
@@ -14,6 +17,10 @@ export interface ToolLoopCallbacks {
     detail?: string,
     writtenPath?: string
   ) => void;
+}
+
+export function maxToolStepsForIntent(intent?: ModelRequest["intent"]): number {
+  return intent === "kilocode" ? MAX_AGENTIC_TOOL_STEPS : MAX_TOOL_STEPS;
 }
 
 function toChatMessages(
@@ -38,17 +45,60 @@ export async function runCompletionWithTools(input: {
   initialMessages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
   modelId: string;
   callbacks?: ToolLoopCallbacks;
+  parentAbortId?: string;
+  signal?: AbortSignal;
 }): Promise<
   | { ok: true; text: string; writtenPaths: string[] }
   | { ok: false; error: string; writtenPaths?: string[] }
 > {
   const { aiClient, registry, baseRequest, initialMessages, modelId, callbacks } = input;
+  const toolAbort = input.parentAbortId
+    ? abortRegistry.create("tool-loop", input.parentAbortId)
+    : null;
+  const signal = toolAbort?.signal ?? input.signal ?? baseRequest.signal;
+
+  try {
+    return await runToolLoopBody({
+      aiClient,
+      registry,
+      baseRequest: { ...baseRequest, signal },
+      initialMessages,
+      modelId,
+      callbacks,
+      signal,
+    });
+  } finally {
+    if (toolAbort) abortRegistry.release(toolAbort.id);
+  }
+}
+
+async function runToolLoopBody(input: {
+  aiClient: AIClient;
+  registry: ToolRegistry;
+  baseRequest: ModelRequest;
+  initialMessages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  modelId: string;
+  callbacks?: ToolLoopCallbacks;
+  signal?: AbortSignal;
+}): Promise<
+  | { ok: true; text: string; writtenPaths: string[] }
+  | { ok: false; error: string; writtenPaths?: string[] }
+> {
+  const { aiClient, registry, baseRequest, initialMessages, modelId, callbacks, signal } = input;
   const profile = getModelProfile(modelId);
   const tools = registry.listTools();
+  const maxSteps = maxToolStepsForIntent(baseRequest.intent);
+
+  if (signal?.aborted) {
+    return { ok: false, error: ABORTED_ERROR, writtenPaths: [] };
+  }
 
   if (!tools.length || !profile?.supportsToolCalling) {
     let full = "";
-    for await (const chunk of aiClient.stream({ ...baseRequest, stream: true })) {
+    for await (const chunk of aiClient.stream({ ...baseRequest, stream: true, signal })) {
+      if (signal?.aborted) {
+        return { ok: false, error: ABORTED_ERROR, writtenPaths: [] };
+      }
       if (chunk.kind !== "content") continue;
       full += chunk.text;
       callbacks?.onDelta?.(chunk.text);
@@ -59,18 +109,27 @@ export async function runCompletionWithTools(input: {
   const messages: ChatMessage[] = toChatMessages(initialMessages);
   const writtenPaths: string[] = [];
 
-  for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+  for (let step = 0; step < maxSteps; step++) {
+    if (signal?.aborted) {
+      return { ok: false, error: ABORTED_ERROR, writtenPaths };
+    }
+
     const response = await aiClient.complete({
       ...baseRequest,
       messages,
       tools,
       stream: false,
+      signal,
     });
+
+    if (signal?.aborted) {
+      return { ok: false, error: ABORTED_ERROR, writtenPaths };
+    }
 
     if (!response.toolCalls?.length) {
       let text = response.content ?? "";
       if (!text.trim() && writtenPaths.length > 0) {
-        text = `✓ ${writtenPaths.length} fișier(e) create: ${writtenPaths.slice(-5).join(", ")}`;
+        text = `✓ ${writtenPaths.length} fișier(e) create în workspace.`;
       }
       if (writtenPaths.length === 0) {
         return {
@@ -97,6 +156,9 @@ export async function runCompletionWithTools(input: {
     });
 
     for (const call of response.toolCalls) {
+      if (signal?.aborted) {
+        return { ok: false, error: ABORTED_ERROR, writtenPaths };
+      }
       callbacks?.onToolCall?.(call.name, "start");
       const result = await registry.execute({
         name: call.name,
@@ -134,14 +196,14 @@ export async function runCompletionWithTools(input: {
   }
 
   if (writtenPaths.length > 0) {
-    const text = `✓ ${writtenPaths.length} fișier(e) create: ${writtenPaths.slice(-5).join(", ")}`;
+    const text = `✓ ${writtenPaths.length} fișier(e) create în workspace.`;
     callbacks?.onDelta?.(text);
     return { ok: true, text, writtenPaths };
   }
 
   return {
     ok: false,
-    error: `Limită de apeluri tool atinsă (max ${MAX_TOOL_STEPS}) — retrying with code stream.`,
+    error: `Limită de apeluri tool atinsă (max ${maxSteps}) — retrying with code stream.`,
     writtenPaths,
   };
 }

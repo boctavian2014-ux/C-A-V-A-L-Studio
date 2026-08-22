@@ -52,6 +52,8 @@ export interface CompleteModelTextInput {
   timeoutMs?: number;
   /** P2: abort in-flight provider fetch / stream. */
   signal?: AbortSignal;
+  /** Chat abort root — tool-loop registers as a child of this id. */
+  abortParentId?: string;
 }
 
 export type CompleteModelTextResult =
@@ -166,8 +168,11 @@ async function getModelsToTry(
   intent: RoutingIntent = 'kilocode'
 ): Promise<string[]> {
   let ids: string[];
-  if (selectionId === 'caval-auto/free') {
-    ids = await getAutoFreeModelCandidates();
+  if (selectionId === 'caval-auto/free' || !hasOpenRouterKey()) {
+    const candidates = await getAutoFreeModelCandidates();
+    ids = candidates.includes(resolvedModelId)
+      ? [resolvedModelId, ...candidates.filter((id) => id !== resolvedModelId)]
+      : candidates;
   } else if (selectionId === 'caval-auto/balanced') {
     const candidates = getAutoBalancedModelCandidates(intent);
     ids = !candidates.includes(resolvedModelId)
@@ -200,15 +205,28 @@ function formatCompletionError(
 ): string {
   const joined = errors.join('\n').toLowerCase();
 
+  if (joined.includes('ollama') || selectionId === 'caval-auto/free') {
+    return [
+      'Niciun model local nu a răspuns.',
+      '',
+      errors.join('\n'),
+      '',
+      'Verifică:',
+      '• Settings → API Keys → Activează Local AI',
+      '• Ollama rulează (ollama serve)',
+      '• Model instalat: ollama pull qwen2.5-coder:7b',
+    ].join('\n');
+  }
+
   if (
     !hasOpenRouterKey() &&
     (isAutoTier(selectionId) || selectionId.startsWith('openrouter:'))
   ) {
     return [
-      'OpenRouter neconfigurat.',
+      'Niciun provider cloud configurat, iar Local AI nu a răspuns.',
       '',
-      'Panoul AI → 🔑 API Keys → adaugă cheia OpenRouter (sk-or-...).',
-      'Alternativ: selectează Auto Free (Ollama local).',
+      'Settings → API Keys → Activează Local AI',
+      'sau adaugă o cheie OpenRouter (sk-or-...).',
     ].join('\n');
   }
 
@@ -240,18 +258,6 @@ function formatCompletionError(
       '• Selectează „Auto Free” în panoul AI (folosește Ollama local)',
       '• Sau: ollama pull qwen2.5-coder:7b (ai deja instalat — repornește app)',
       '• Sau: adaugă OpenRouter API Key valid (🔑 în panoul AI)',
-    ].join('\n');
-  }
-
-  if (selectionId === 'caval-auto/free') {
-    return [
-      'Niciun model local free nu a răspuns.',
-      '',
-      errors.join('\n'),
-      '',
-      'Verifică:',
-      '• Ollama rulează (ollama serve sau app deschisă)',
-      '• Model instalat: ollama pull qwen2.5-coder:7b',
     ].join('\n');
   }
 
@@ -342,15 +348,16 @@ export async function executeModelCompletion(
     (input.model === 'caval-auto/balanced' ||
       input.model === 'caval-auto/frontier' ||
       input.model.startsWith('openrouter:')) &&
-    !hasOpenRouterKey()
+    !hasOpenRouterKey() &&
+    !(await isOllamaReachable())
   ) {
     return {
       ok: false,
       error: [
-        'OpenRouter neconfigurat.',
+        'Niciun provider cloud configurat.',
         '',
-        'Panoul AI → 🔑 API Keys → adaugă cheia OpenRouter (sk-or-...).',
-        'Alternativ: selectează Auto Free (Ollama local).',
+        'Settings → API Keys → Activează Local AI (gratuit, Ollama),',
+        'sau adaugă o cheie OpenRouter (sk-or-...).',
       ].join('\n'),
     };
   }
@@ -363,7 +370,9 @@ export async function executeModelCompletion(
     input.capability === 'code' ||
     input.capability === 'planning' ||
     input.capability === 'debug' ||
-    !isChat;
+    !isChat ||
+    !hasOpenRouterKey() ||
+    input.model === 'caval-auto/free';
 
   const modelIdsToTry = needsModelFallback
     ? (await getModelsToTry(input.model, resolved.modelId, intent)).slice(
@@ -395,6 +404,8 @@ export async function executeModelCompletion(
             initialMessages: input.messages,
             modelId,
             callbacks,
+            parentAbortId: input.abortParentId,
+            signal: input.signal,
           });
 
           if (toolResult.ok) {

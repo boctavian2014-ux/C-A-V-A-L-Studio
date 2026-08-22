@@ -1,6 +1,10 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import type { MessageKey, TranslateFn } from '../../../../ai/i18n';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import type { GitApi, GitOperationState, GitStatus } from '../../../shared/git-contract';
+import { debounce } from '../../lib/debounce';
+import { GIT_STATUS_DEBOUNCE_MS } from '../../lib/panel-limits';
 import { useGitStore, type GitFileStatus, type GitCommit } from '../../store/git-store';
-import { useEditorStore } from '../../store/editor-store';
 import { GitDiffPanel } from './GitDiffPanel';
 
 // ──────────────────────────────────────────────
@@ -9,23 +13,113 @@ import { GitDiffPanel } from './GitDiffPanel';
 
 function statusColor(s: string): string {
   switch (s) {
-    case 'M':  return '#E2C08D'; // portocaliu auriu — modificat
-    case 'A':  return '#2FBF71'; // verde — adăugat
-    case 'D':  return '#F47067'; // roșu — șters
-    case 'R':  return '#78B9E0'; // albastru — redenumit
-    case '?':  return '#909090'; // gri — untracked
-    default:   return '#909090';
+    case 'M':
+    case 'modified':
+      return '#E2C08D';
+    case 'A':
+    case 'added':
+      return '#2FBF71';
+    case 'D':
+    case 'deleted':
+      return '#F47067';
+    case 'R':
+    case 'renamed':
+    case 'C':
+    case 'copied':
+      return '#78B9E0';
+    case 'U':
+    case 'conflicted':
+      return '#F47067';
+    case '?':
+    case 'untracked':
+    case '!':
+    case 'ignored':
+      return '#909090';
+    default:
+      return '#909090';
   }
 }
 
 function statusLabel(s: string): string {
   switch (s) {
-    case 'M':  return 'M';
-    case 'A':  return 'A';
-    case 'D':  return 'D';
-    case 'R':  return 'R';
-    case '?':  return 'U';
-    default:   return s;
+    case 'modified':
+      return 'M';
+    case 'added':
+      return 'A';
+    case 'deleted':
+      return 'D';
+    case 'renamed':
+      return 'R';
+    case 'copied':
+      return 'C';
+    case 'untracked':
+      return 'U';
+    case 'ignored':
+      return '!';
+    case 'conflicted':
+      return 'U';
+    default:
+      return s;
+  }
+}
+
+function statusTitleKey(s: string): MessageKey {
+  switch (s) {
+    case 'M':
+    case 'modified':
+      return 'sourceControl.modified';
+    case 'A':
+    case 'added':
+      return 'sourceControl.added';
+    case 'D':
+    case 'deleted':
+      return 'sourceControl.deleted';
+    case 'R':
+    case 'renamed':
+      return 'sourceControl.renamed';
+    case 'C':
+    case 'copied':
+      return 'sourceControl.copied';
+    case 'U':
+    case 'conflicted':
+      return 'sourceControl.conflicted';
+    case '?':
+    case 'untracked':
+      return 'sourceControl.untracked';
+    case '!':
+    case 'ignored':
+      return 'sourceControl.ignored';
+    default:
+      return 'sourceControl.modified';
+  }
+}
+
+function operationFeedback(
+  operation: { operation: string; status: string } | null,
+  t: TranslateFn,
+): string | null {
+  if (!operation || operation.status !== 'running') return null;
+  switch (operation.operation) {
+    case 'stage':
+      return t('sourceControl.op.stage');
+    case 'unstage':
+      return t('sourceControl.op.unstage');
+    case 'commit':
+      return t('sourceControl.op.commit');
+    case 'checkout':
+      return t('sourceControl.op.checkout');
+    case 'push':
+      return t('sourceControl.op.push');
+    case 'pull':
+      return t('sourceControl.op.pull');
+    case 'stash':
+      return t('sourceControl.op.stash');
+    case 'init':
+      return t('sourceControl.op.init');
+    case 'clone':
+      return t('sourceControl.op.clone');
+    default:
+      return t('sourceControl.op.working');
   }
 }
 
@@ -40,6 +134,7 @@ function FileRow({
   onStage,
   onUnstage,
   onDiscard,
+  busy,
 }: {
   file: GitFileStatus;
   isSelected: boolean;
@@ -47,7 +142,9 @@ function FileRow({
   onStage: () => void;
   onUnstage: () => void;
   onDiscard: () => void;
+  busy?: boolean;
 }) {
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const fileName = file.path.split('/').pop() || file.path;
   const dirPart = file.path.includes('/')
@@ -56,6 +153,10 @@ function FileRow({
 
   return (
     <div
+      className="git-file-row"
+      data-testid="git-file"
+      data-path={file.path}
+      data-staged={file.staged ? 'true' : 'false'}
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -71,11 +172,14 @@ function FileRow({
       }}
     >
       {/* Status badge */}
-      <span style={{
-        fontSize: 10, fontWeight: 700, width: 14, textAlign: 'center',
-        color: statusColor(file.status), flexShrink: 0,
-        fontFamily: "'JetBrains Mono', monospace",
-      }}>
+      <span
+        title={t(statusTitleKey(file.status))}
+        style={{
+          fontSize: 10, fontWeight: 700, width: 14, textAlign: 'center',
+          color: statusColor(file.status), flexShrink: 0,
+          fontFamily: "'JetBrains Mono', monospace",
+        }}
+      >
         {statusLabel(file.status)}
       </span>
 
@@ -91,11 +195,9 @@ function FileRow({
         )}
       </div>
 
-      {/* Action buttons — vizibile la hover */}
-      {(hovered || isSelected) && (
-        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-          {file.status !== 'D' && !file.staged && (
-            <MicroBtn title="Discard changes" onClick={onDiscard} danger>
+      <div style={{ display: 'flex', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          {file.status !== 'deleted' && !file.staged && (
+            <MicroBtn title={t('sourceControl.discard')} onClick={onDiscard} danger>
               {/* undo icon */}
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                 <path d="M3 7l-3 3 3 3M0 10h9a4 4 0 000-8H7" />
@@ -103,43 +205,47 @@ function FileRow({
             </MicroBtn>
           )}
           {file.staged ? (
-            <MicroBtn title="Unstage" onClick={onUnstage}>
+            <MicroBtn title={t('sourceControl.unstage')} testId="git-unstage" onClick={onUnstage} disabled={busy}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 2l-6 6h4v6h4V8h4L8 2z" />
               </svg>
             </MicroBtn>
           ) : (
-            <MicroBtn title="Stage" onClick={onStage} accent>
+            <MicroBtn title={t('sourceControl.stage')} testId="git-stage" onClick={onStage} accent disabled={busy}>
               <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 14l6-6h-4V2H6v6H2l6 6z" />
               </svg>
             </MicroBtn>
           )}
         </div>
-      )}
     </div>
   );
 }
 
 function MicroBtn({
-  title, onClick, children, danger, accent,
+  title, onClick, children, danger, accent, disabled, testId,
 }: {
   title: string;
   onClick: () => void;
   children: React.ReactNode;
   danger?: boolean;
   accent?: boolean;
+  disabled?: boolean;
+  testId?: string;
 }) {
   return (
     <button
       title={title}
+      data-testid={testId}
       onClick={onClick}
+      disabled={disabled}
       style={{
         width: 20, height: 20, borderRadius: 3,
-        border: 'none', background: 'none', cursor: 'pointer',
+        border: 'none', background: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: danger ? '#F47067' : accent ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
         transition: 'all 0.1s',
+        opacity: disabled ? 0.45 : 1,
       }}
       onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
@@ -162,6 +268,7 @@ function SectionHeader({
   onStageAll?: () => void;
   onUnstageAll?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={{
       display: 'flex', alignItems: 'center',
@@ -179,14 +286,14 @@ function SectionHeader({
       </span>
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
         {staged && onUnstageAll && (
-          <MicroBtn title="Unstage all" onClick={onUnstageAll}>
+          <MicroBtn title={t('sourceControl.unstageAll')} onClick={onUnstageAll}>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 2l-6 6h4v6h4V8h4L8 2z" />
             </svg>
           </MicroBtn>
         )}
         {!staged && onStageAll && (
-          <MicroBtn title="Stage all" onClick={onStageAll} accent>
+          <MicroBtn title={t('sourceControl.stageAll')} onClick={onStageAll} accent>
             <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 14l6-6h-4V2H6v6H2l6 6z" />
             </svg>
@@ -268,6 +375,7 @@ function formatRelDate(date: Date): string {
 // ──────────────────────────────────────────────
 
 function BranchPicker() {
+  const { t } = useTranslation();
   const {
     branches, branch, newBranchName,
     checkout, createBranch,
@@ -311,7 +419,7 @@ function BranchPicker() {
               fontSize: 11, cursor: 'pointer',
             }}
           >
-            Branch-uri
+            {t('sourceControl.branches')}
           </button>
           <button
             onClick={() => setMode('new')}
@@ -322,7 +430,7 @@ function BranchPicker() {
               fontSize: 11, cursor: 'pointer',
             }}
           >
-            + Branch nou
+            {t('sourceControl.newBranch')}
           </button>
         </div>
 
@@ -330,23 +438,23 @@ function BranchPicker() {
           <div style={{ overflowY: 'auto', flex: 1 }} className="ai-messages-scroll">
             {branches.map((b) => (
               <button
-                key={b}
-                onClick={() => checkout(b)}
+                key={b.name}
+                onClick={() => checkout(b.name)}
                 style={{
                   width: '100%', padding: '6px 12px', border: 'none', textAlign: 'left',
-                  background: b === branch ? 'rgba(0,224,255,0.07)' : 'transparent',
-                  color: b === branch ? 'var(--caval-accent)' : 'var(--caval-text)',
+                  background: b.name === branch ? 'rgba(0,224,255,0.07)' : 'transparent',
+                  color: b.name === branch ? 'var(--caval-accent)' : 'var(--caval-text)',
                   cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
                 }}
-                onMouseEnter={(e) => { if (b !== branch) e.currentTarget.style.background = 'var(--caval-surface-raised)'; }}
-                onMouseLeave={(e) => { if (b !== branch) e.currentTarget.style.background = 'transparent'; }}
+                onMouseEnter={(e) => { if (b.name !== branch) e.currentTarget.style.background = 'var(--caval-surface-raised)'; }}
+                onMouseLeave={(e) => { if (b.name !== branch) e.currentTarget.style.background = 'transparent'; }}
               >
-                {b === branch && (
+                {b.name === branch && (
                   <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--caval-accent)">
                     <circle cx="5" cy="5" r="5" />
                   </svg>
                 )}
-                {b}
+                {b.name}
               </button>
             ))}
           </div>
@@ -357,7 +465,7 @@ function BranchPicker() {
               value={newBranchName}
               onChange={(e) => setNewBranchName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') createBranch(newBranchName); }}
-              placeholder="Nume branch nou…"
+              placeholder={t('sourceControl.newBranchPlaceholder')}
               style={{
                 flex: 1, background: 'var(--caval-surface-raised)', border: '1px solid var(--caval-border)',
                 borderRadius: 5, padding: '5px 8px', color: 'var(--caval-text)',
@@ -372,7 +480,7 @@ function BranchPicker() {
                 color: '#0E0E0F', fontWeight: 600, fontSize: 12, cursor: 'pointer',
               }}
             >
-              Crează
+              {t('sourceControl.create')}
             </button>
           </div>
         )}
@@ -386,67 +494,102 @@ function BranchPicker() {
 // ──────────────────────────────────────────────
 
 export function GitPanel() {
+  const { t } = useTranslation();
   const {
     isRepo, branch, upstream, ahead, behind,
     files, activeTab, selectedFile,
-    commitMessage, loading, opLoading, opResult, error,
+    commitMessage, loading, opLoading, opResult, error, operation,
     showBranchPicker,
-    refresh, loadDiff, stage, unstage, stageAll, unstageAll, discard,
+    refresh, applyStatus, setOperation, loadDiff, stage, unstage, stageAll, unstageAll, discard,
     commit, push, pull, loadLog, commits,
     setActiveTab, setCommitMessage, setShowBranchPicker,
     stash, stashPop,
   } = useGitStore();
 
-  const projectPath = useEditorStore((s) => s.projectPath);
-
-  // Refresh automat la montare și când se schimbă proiectul
   useEffect(() => {
-    if (projectPath) refresh();
-  }, [projectPath]);
+    let cancelled = false;
+    const git = window.caval?.git as unknown as GitApi | undefined;
 
-  // Refresh la focus fereastra (utilizatorul poate face git extern)
+    const runRefresh = async () => {
+      if (!git?.status) {
+        if (!cancelled) {
+          useGitStore.setState({ loading: false, error: 'Git API unavailable' });
+        }
+        return;
+      }
+      try {
+        const status = await git.status();
+        if (!cancelled) applyStatus(status);
+      } catch (err) {
+        if (!cancelled) {
+          useGitStore.setState({
+            loading: false,
+            error: err instanceof Error ? err.message : 'Git status failed',
+          });
+        }
+      }
+    };
+
+    void runRefresh();
+    const applyLatestStatus = debounce((status: GitStatus) => {
+      if (!cancelled) applyStatus(status);
+    }, GIT_STATUS_DEBOUNCE_MS);
+    const unsubscribeStatus = git?.onStatusChange((status: GitStatus) => {
+      applyLatestStatus(status);
+    }) ?? (() => undefined);
+    const unsubscribeOperation = git?.onOperationChange((state: GitOperationState) => {
+      if (!cancelled) setOperation(state);
+    }) ?? (() => undefined);
+
+    return () => {
+      cancelled = true;
+      applyLatestStatus.cancel();
+      unsubscribeStatus();
+      unsubscribeOperation();
+    };
+  }, [applyStatus, setOperation]);
+
   useEffect(() => {
-    const handler = () => { if (projectPath) refresh(); };
+    const handler = debounce(() => {
+      void refresh();
+    }, GIT_STATUS_DEBOUNCE_MS);
     window.addEventListener('focus', handler);
-    return () => window.removeEventListener('focus', handler);
-  }, [projectPath]);
+    return () => {
+      handler.cancel();
+      window.removeEventListener('focus', handler);
+    };
+  }, [refresh]);
 
-  // Încarcă log când se comută pe tab History
   useEffect(() => {
-    if (activeTab === 'history') loadLog();
-  }, [activeTab]);
+    if (activeTab === 'history') void loadLog();
+  }, [activeTab, loadLog]);
 
   const stagedFiles   = files.filter((f) => f.staged);
   const unstagedFiles = files.filter((f) => !f.staged);
+  const canCommit = stagedFiles.length > 0 && Boolean(commitMessage.trim()) && !opLoading;
+  const runningFeedback = operationFeedback(operation, t);
+  const busyOp = operation?.status === 'running' ? operation.operation : null;
 
   const handleFileClick = useCallback((file: GitFileStatus) => {
-    loadDiff(file);
+    void loadDiff(file);
   }, [loadDiff]);
-
-  // ── Repo inexistent ──
-  if (!projectPath) {
-    return (
-      <EmptyState
-        icon={<GitIcon />}
-        title="Niciun proiect deschis"
-        desc="Deschide un folder pentru a vedea statusul Git."
-      />
-    );
-  }
 
   if (!isRepo && !loading) {
     return (
       <EmptyState
         icon={<GitIcon />}
-        title="Nu este un repo Git"
-        desc="Directorul curent nu are un repo Git inițializat."
-        action={{ label: 'git init', onClick: () => void useGitStore.getState().initRepo() }}
+        title={error ? t('sourceControl.gitUnavailable') : t('sourceControl.noRepo')}
+        desc={error ?? t('sourceControl.noRepoDesc')}
+        alert={error}
+        action={error ? undefined : { label: 'git init', onClick: () => void useGitStore.getState().initRepo() }}
       />
     );
   }
 
   return (
-    <div style={{
+    <div
+      data-testid="git-panel"
+      style={{
       display: 'flex', flexDirection: 'column',
       height: '100%', overflow: 'hidden',
       background: 'var(--caval-bg)',
@@ -486,8 +629,8 @@ export function GitPanel() {
             {/* Ahead/behind */}
             {(ahead > 0 || behind > 0) && (
               <span style={{ fontSize: 10, color: 'var(--caval-text-muted)', display: 'flex', gap: 4 }}>
-                {behind > 0 && <span title={`${behind} commits în spate`}>↓{behind}</span>}
-                {ahead  > 0 && <span title={`${ahead} commits înainte`}>↑{ahead}</span>}
+                {behind > 0 && <span title={t('sourceControl.behind', { count: behind })}>↓{behind}</span>}
+                {ahead  > 0 && <span title={t('sourceControl.ahead', { count: ahead })}>↑{ahead}</span>}
               </span>
             )}
             <span style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>▾</span>
@@ -498,21 +641,21 @@ export function GitPanel() {
         {/* Push / Pull / Refresh */}
         <div style={{ display: 'flex', gap: 4 }}>
           <ActionBtn
-            title="Pull"
+            title={t('sourceControl.pull')}
             onClick={pull}
-            disabled={opLoading}
+            disabled={opLoading || busyOp === 'pull'}
             icon={
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                 <path d="M8 2v10M3 9l5 5 5-5" />
               </svg>
             }
           >
-            Pull
+            {t('sourceControl.pull')}
           </ActionBtn>
           <ActionBtn
-            title="Push"
+            title={t('sourceControl.push')}
             onClick={push}
-            disabled={opLoading}
+            disabled={opLoading || busyOp === 'push'}
             accent
             icon={
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
@@ -520,12 +663,13 @@ export function GitPanel() {
               </svg>
             }
           >
-            Push {ahead > 0 ? `(${ahead})` : ''}
+            {t('sourceControl.push')}{ahead > 0 ? ` (${ahead})` : ''}
           </ActionBtn>
           <button
-            onClick={refresh}
+            data-testid="git-refresh"
+            onClick={() => void refresh()}
             disabled={loading}
-            title="Refresh status"
+            title={t('sourceControl.refreshStatus')}
             style={{
               width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
               background: 'var(--caval-surface)', cursor: 'pointer',
@@ -542,7 +686,7 @@ export function GitPanel() {
           <button
             onClick={stash}
             disabled={opLoading || files.length === 0}
-            title="Stash changes"
+            title={t('sourceControl.stash')}
             style={{
               width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
               background: 'var(--caval-surface)', cursor: 'pointer',
@@ -557,7 +701,7 @@ export function GitPanel() {
           <button
             onClick={stashPop}
             disabled={opLoading}
-            title="Stash pop"
+            title={t('sourceControl.stashPop')}
             style={{
               width: 28, height: 28, borderRadius: 5, border: '1px solid var(--caval-border)',
               background: 'var(--caval-surface)', cursor: 'pointer',
@@ -574,9 +718,26 @@ export function GitPanel() {
         </div>
       </div>
 
-      {/* ── Op result toast ─────────────────── */}
+      {runningFeedback && (
+        <div
+          data-testid="git-operation"
+          role="status"
+          style={{
+            margin: '6px 10px 0', padding: '6px 10px', borderRadius: 6, fontSize: 11.5,
+            background: 'rgba(0,224,255,0.08)',
+            border: '1px solid rgba(0,224,255,0.18)',
+            color: 'var(--caval-accent)',
+            flexShrink: 0,
+          }}
+        >
+          {runningFeedback}
+        </div>
+      )}
+
       {opResult && (
-        <div style={{
+        <div
+          data-testid="git-op-result"
+          style={{
           margin: '6px 10px 0', padding: '6px 10px', borderRadius: 6, fontSize: 11.5,
           background: opResult.ok ? 'rgba(47,191,113,0.1)' : 'rgba(244,112,103,0.1)',
           border: `1px solid ${opResult.ok ? 'rgba(47,191,113,0.2)' : 'rgba(244,112,103,0.2)'}`,
@@ -587,9 +748,11 @@ export function GitPanel() {
         </div>
       )}
 
-      {/* ── Error ───────────────────────────── */}
       {error && (
-        <div style={{
+        <div
+          data-testid="git-error"
+          role="alert"
+          style={{
           margin: '6px 10px 0', padding: '6px 10px', borderRadius: 6, fontSize: 11.5,
           background: 'rgba(244,112,103,0.08)', border: '1px solid rgba(244,112,103,0.15)',
           color: '#F47067', flexShrink: 0,
@@ -615,7 +778,9 @@ export function GitPanel() {
               transition: 'all 0.12s',
             }}
           >
-            {tab === 'changes' ? `Changes ${files.length > 0 ? `(${files.length})` : ''}` : 'History'}
+            {tab === 'changes'
+              ? `${t('sourceControl.changes')}${files.length > 0 ? ` (${files.length})` : ''}`
+              : t('sourceControl.history')}
           </button>
         ))}
       </div>
@@ -627,7 +792,7 @@ export function GitPanel() {
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }} className="ai-messages-scroll">
             {files.length === 0 && !loading ? (
               <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
-                Nicio modificare. Working tree curat.
+                {t('sourceControl.noChangesClean')}
               </div>
             ) : (
               <>
@@ -635,7 +800,7 @@ export function GitPanel() {
                 {stagedFiles.length > 0 && (
                   <>
                     <SectionHeader
-                      label="Staged"
+                      label={t('sourceControl.stagedShort')}
                       count={stagedFiles.length}
                       staged
                       onUnstageAll={unstageAll}
@@ -646,9 +811,10 @@ export function GitPanel() {
                         file={f}
                         isSelected={selectedFile?.path === f.path && selectedFile.staged === f.staged}
                         onSelect={() => handleFileClick(f)}
-                        onStage={() => stage(f.path)}
-                        onUnstage={() => unstage(f.path)}
-                        onDiscard={() => discard(f.path)}
+                        onStage={() => void stage(f.path)}
+                        onUnstage={() => void unstage(f.path)}
+                        onDiscard={() => void discard(f.path)}
+                        busy={busyOp === 'unstage' || busyOp === 'stage'}
                       />
                     ))}
                   </>
@@ -658,7 +824,7 @@ export function GitPanel() {
                 {unstagedFiles.length > 0 && (
                   <>
                     <SectionHeader
-                      label="Changes"
+                      label={t('sourceControl.changes')}
                       count={unstagedFiles.length}
                       staged={false}
                       onStageAll={stageAll}
@@ -669,9 +835,10 @@ export function GitPanel() {
                         file={f}
                         isSelected={selectedFile?.path === f.path && selectedFile.staged === f.staged}
                         onSelect={() => handleFileClick(f)}
-                        onStage={() => stage(f.path)}
-                        onUnstage={() => unstage(f.path)}
-                        onDiscard={() => discard(f.path)}
+                        onStage={() => void stage(f.path)}
+                        onUnstage={() => void unstage(f.path)}
+                        onDiscard={() => void discard(f.path)}
+                        busy={busyOp === 'stage' || busyOp === 'unstage'}
                       />
                     ))}
                   </>
@@ -689,15 +856,16 @@ export function GitPanel() {
             display: 'flex', flexDirection: 'column', gap: 6,
           }}>
             <textarea
+              data-testid="git-commit-message"
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               onKeyDown={(e) => {
                 if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                   e.preventDefault();
-                  commit();
+                  if (canCommit) void commit();
                 }
               }}
-              placeholder="Mesaj commit… (Ctrl+Enter pentru commit)"
+              placeholder={t('sourceControl.commitPlaceholder')}
               rows={2}
               style={{
                 background: 'var(--caval-surface)', border: '1px solid var(--caval-border)',
@@ -710,28 +878,29 @@ export function GitPanel() {
               onBlur={(e)  => { e.target.style.borderColor = 'var(--caval-border)'; }}
             />
             <button
-              onClick={commit}
-              disabled={opLoading || stagedFiles.length === 0 || !commitMessage.trim()}
+              data-testid="git-commit"
+              onClick={() => void commit()}
+              disabled={!canCommit}
               style={{
                 padding: '6px 0', borderRadius: 6, border: 'none',
-                background: stagedFiles.length > 0 && commitMessage.trim()
+                background: canCommit
                   ? 'var(--caval-accent)' : 'rgba(255,255,255,0.07)',
-                color: stagedFiles.length > 0 && commitMessage.trim()
+                color: canCommit
                   ? '#0E0E0F' : 'var(--caval-text-muted)',
-                fontWeight: 600, fontSize: 12.5, cursor: 'pointer',
-                opacity: opLoading ? 0.6 : 1,
+                fontWeight: 600, fontSize: 12.5, cursor: canCommit ? 'pointer' : 'not-allowed',
+                opacity: busyOp === 'commit' ? 0.6 : 1,
                 transition: 'all 0.15s',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               }}
             >
-              {opLoading ? (
-                <span style={{ animation: 'caval-blink 0.8s infinite' }}>Se procesează…</span>
+              {busyOp === 'commit' ? (
+                <span style={{ animation: 'caval-blink 0.8s infinite' }}>{t('sourceControl.committing')}</span>
               ) : (
                 <>
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <circle cx="8" cy="8" r="3" /><path d="M8 1v4M8 11v4M1 8h4M11 8h4" />
                   </svg>
-                  Commit {stagedFiles.length > 0 ? `(${stagedFiles.length})` : ''}
+                  {t('sourceControl.commit')}{stagedFiles.length > 0 ? ` (${stagedFiles.length})` : ''}
                 </>
               )}
             </button>
@@ -744,7 +913,7 @@ export function GitPanel() {
         <div style={{ flex: 1, overflowY: 'auto' }} className="ai-messages-scroll">
           {commits.length === 0 ? (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--caval-text-muted)', fontSize: 12 }}>
-              Niciun commit în istoric.
+              {t('sourceControl.noHistory')}
             </div>
           ) : (
             commits.map((c) => <CommitRow key={c.hash} commit={c} />)
@@ -813,15 +982,18 @@ function GitIcon() {
 }
 
 function EmptyState({
-  icon, title, desc, action,
+  icon, title, desc, action, alert,
 }: {
   icon: React.ReactNode;
   title: string;
   desc: string;
   action?: { label: string; onClick: () => void };
+  alert?: string | null;
 }) {
   return (
-    <div style={{
+    <div
+      data-testid="git-empty"
+      style={{
       flex: 1, height: '100%',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       gap: 10, padding: 24, textAlign: 'center',
@@ -829,6 +1001,11 @@ function EmptyState({
       <div style={{ opacity: 0.4 }}>{icon}</div>
       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--caval-text)' }}>{title}</div>
       <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', lineHeight: 1.5 }}>{desc}</div>
+      {alert && (
+        <div data-testid="git-error" role="alert" style={{ fontSize: 12, color: '#F47067' }}>
+          {alert}
+        </div>
+      )}
       {action && (
         <button
           onClick={action.onClick}

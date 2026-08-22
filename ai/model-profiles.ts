@@ -1,4 +1,5 @@
 import type { ModelCapability, ModelDescriptor, RoutingIntent } from "./types";
+import { OLLAMA_CHAT_URL } from "../src/shared/local-ai-contract";
 
 export type ModelProviderId = "poolside" | "openrouter" | "nvidia" | "north" | "open_source";
 export type ModelSpeed = "slow" | "balanced" | "fast" | "ultra_fast";
@@ -6,14 +7,7 @@ export type ModelCost = "local" | "low" | "medium" | "high" | "premium";
 export type ModelLatency = "low" | "medium" | "high";
 export type ModelSpecialization = "coding" | "reasoning" | "debugging" | "tool_use" | "autocomplete" | "planning";
 
-const readProcessEnv = (key: string): string | undefined => {
-  if (typeof process !== "undefined" && process.env?.[key]) {
-    return process.env[key];
-  }
-  return undefined;
-};
-
-const OLLAMA_ENDPOINT = readProcessEnv("OLLAMA_BASE_URL") ?? "http://localhost:11434/api/chat";
+const OLLAMA_ENDPOINT = OLLAMA_CHAT_URL;
 
 export interface ModelProfile extends ModelDescriptor {
   provider: ModelProviderId;

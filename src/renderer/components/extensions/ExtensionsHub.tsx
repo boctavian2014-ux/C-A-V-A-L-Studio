@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { MCPPanel } from '../mcp/MCPPanel';
 import { VsCodeExtensionsPanel } from '../../../../marketplace/client/ui/vscode-extensions-panel';
 import { marketplaceStore } from '../../../../marketplace/client/state/marketplace-store';
@@ -58,6 +59,7 @@ const MARKETPLACE_STYLES = `
 `;
 
 export function ExtensionsHub() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<ExtensionsTab>('marketplace');
   const [installed, setInstalled] = useState<InstalledExtension[]>([]);
   const projectPath = useEditorStore((s) => s.projectPath);
@@ -116,7 +118,7 @@ export function ExtensionsHub() {
               cursor: 'pointer',
             }}
           >
-            {id === 'marketplace' ? 'Extensions' : 'MCP'}
+            {id === 'marketplace' ? t('marketplace.extensions') : t('marketplace.mcp')}
           </button>
         ))}
       </div>
@@ -127,7 +129,7 @@ export function ExtensionsHub() {
           <div style={{ padding: 8 }}>
             {installed.length > 0 && (
               <section style={{ marginBottom: 16 }}>
-                <h2 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>Instalate</h2>
+                <h2 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>{t('marketplace.installed')}</h2>
                 <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {installed.map((ext) => (
                     <li
@@ -155,7 +157,7 @@ export function ExtensionsHub() {
 
             {!projectPath && (
               <p style={{ fontSize: 11, color: 'var(--caval-text-muted)', marginBottom: 10 }}>
-                Deschide un folder de proiect pentru a instala extensii în <code>.cavalo/extensions</code>.
+                {t('marketplace.openFolderHint')}
               </p>
             )}
 

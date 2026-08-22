@@ -100,8 +100,8 @@ describe("Electron main IPC integration", () => {
       vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
     );
 
-    const { registerModelHandlers } = await import("../../src/main/model-handlers");
-    const { registerPreloadHandlers } = await import("../../src/main/preload-handlers");
+    const { registerModelHandlers } = await import("../../src/main/model-handlers.js");
+    const { registerPreloadHandlers } = await import("../../src/main/preload-handlers.js");
     registerModelHandlers();
     registerPreloadHandlers(() => "/tmp/caval-workspace");
   }, 30_000);

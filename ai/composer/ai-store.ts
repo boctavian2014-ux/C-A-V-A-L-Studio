@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AIMessage, ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { isByokModel, hasOpenRouterKey, checkModelReadiness } from '../models/model-readiness';
+import { isByokModel, checkModelReadiness } from '../models/model-readiness';
 import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
@@ -17,6 +17,7 @@ import {
   formatContextSearchResults,
   resolveMentionFiles,
   shouldAttachProjectContext,
+  looksLikeFileCreationPrompt,
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
@@ -40,9 +41,14 @@ import {
 import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { useAiWorkCanvasStore } from '../../src/renderer/store/ai-work-canvas-store';
 import {
   bootstrapRoboticsDesktopProject,
 } from '../../src/renderer/components/engineering/bootstrap-robotics-project';
+import {
+  ensureDesktopProject,
+  projectNameFromPrompt,
+} from '../../src/renderer/hooks/useOpenWorkspace';
 import { useOutputStore } from '../../src/renderer/store/output-store';
 import { parseProblemsFromOutput } from '../../src/renderer/store/parse-problems';
 import { useProblemsStore } from '../../src/renderer/store/problems-store';
@@ -69,7 +75,19 @@ import {
   formatEngineeringContextForCoding,
 } from '../engineering/engineering-handoff';
 import { applyScaffoldToWorkspace, parseScaffoldFiles } from './scaffold-apply';
-import { parseStreamingScaffold } from './scaffold-parser';
+import {
+  applyFallbackScaffold,
+  buildFallbackScaffoldTimelineEvent,
+  FALLBACK_SCAFFOLD_TOAST,
+  FALLBACK_RUNNABLE_TOAST,
+  workspaceHasRunnableWebProject,
+} from './fallback-scaffold';
+import { useLiveAiEditsStore } from './live-ai-edits-store';
+import { parseStreamingScaffold, peekStreamingScaffoldPath } from './scaffold-parser';
+import {
+  buildUniversalWebContext,
+  mergeProjectContextWithWebContext,
+} from '../tools/auto-web-context';
 import {
   buildFashionMatchingAssistantReply,
   detectFashionArchetype,
@@ -94,6 +112,12 @@ import {
 import { DEFAULT_REASONING_LAYER_CONFIG } from './multi-agent/types';
 import type { PipelineRecapMeta } from './multi-agent/types';
 import { showWorkbenchToast } from '../../src/renderer/commands/workbench-toast';
+import { tActive } from '../i18n/active-locale';
+import type { IdeContextMode, IdeContextPayload } from '../../src/shared/ai-context-contract';
+import type { TimelineEvent } from '../../src/shared/ai-timeline-contract';
+import { sanitizeTimelineEvent } from '../../src/shared/ai-timeline-contract';
+import { collectRendererIdeContext } from './ide-context-collect';
+import { readLiveEditorSelection } from '../../src/renderer/ai/explain-selection';
 
 export interface ChatAttachment {
   id: string;
@@ -116,6 +140,19 @@ export interface ChatMessage {
   reasoning?: string;
   reasoningExpanded?: boolean;
   writtenFiles?: string[];
+  /** Pas 7a.4 — restored written_files rows (id for historical Revert). */
+  historicalWrittenFiles?: Array<{
+    id: string;
+    filePath: string;
+    messageId?: string;
+    createdAt?: number;
+  }>;
+  /** Pas 6.4 — proposed chat applies awaiting Accept. */
+  proposedWrites?: import('../../src/shared/ai-chat-apply-contract').ProposedWrite[];
+  proposeStageKey?: string;
+  /** Pas 5.4 — unified activity timeline for this assistant message. */
+  timelineEvents?: TimelineEvent[];
+  timelineExpanded?: boolean;
   multiAgentStatus?: string;
   multiAgentSteps?: MultiAgentStepRecord[];
   reasoningBrief?: ReasoningBrief;
@@ -157,6 +194,8 @@ export interface ChatThread {
   workspacePath?: string | null;
   /** Hidden from Arena chat bar; messages retained in localStorage. */
   archived?: boolean;
+  /** Pas 5.2 — per-thread IDE context toggle; default enabled. */
+  ideContextMode?: IdeContextMode;
 }
 
 /** Mark one thread archived; optionally persist current messages into it. */
@@ -227,9 +266,13 @@ interface CavalWindow {
           mentions?: string[];
           attachments?: Array<{ path: string; name: string; content: string }>;
         };
+        /** Pas 5.2 — omit when per-thread toggle is OFF. */
+        ideContext?: IdeContextPayload;
         scaffoldMode?: boolean;
         skipMultiAgent?: boolean;
         strictReview?: boolean;
+        conversationId?: string;
+        assistantMessageId?: string;
       },
       onChunk: (chunk: CavalStreamChunk) => void
     ) => () => void;
@@ -268,7 +311,7 @@ interface CavalWindow {
     ) => () => void;
     contextSearch?: (input: { query: string; limit?: number }) => Promise<{ ok: boolean; results?: Array<Record<string, unknown>> }>;
     workspaceOpen?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
-    workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string }>;
+    workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
     mcpEnsureReady?: () => Promise<{ ok: boolean; servers?: unknown[] }>;
     getWorkspaceBootstrap?: (workspaceRoot: string) => Promise<{ ok: boolean; bootstrap?: string }>;
     zlPrepare?: (signals: {
@@ -476,6 +519,9 @@ interface AIStore {
   prepareInFlight: boolean;
   includeMode: IncludeMode;
   setIncludeMode: (mode: IncludeMode) => void;
+  /** Active thread's IDE context mode (default enabled). */
+  ideContextMode: IdeContextMode;
+  setIdeContextMode: (mode: IdeContextMode) => void;
   strictReview: boolean;
   setStrictReview: (enabled: boolean) => void;
   modeSwitchNotice: string | null;
@@ -521,7 +567,7 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createThread(title = 'Chat nou', workspacePath: string | null = null): ChatThread {
+function createThread(title = tActive('ai.panel.newChat'), workspacePath: string | null = null): ChatThread {
   const id = generateId();
   return {
     id,
@@ -530,6 +576,7 @@ function createThread(title = 'Chat nou', workspacePath: string | null = null): 
     createdAt: Date.now(),
     updatedAt: Date.now(),
     workspacePath,
+    ideContextMode: 'enabled',
   };
 }
 
@@ -712,6 +759,7 @@ export const useAIStore = create<AIStore>()(
       modelLabels: {},
       activeResolvedModel: null,
       includeMode: 'project',
+      ideContextMode: 'enabled',
       strictReview: true,
       modeSwitchNotice: null,
       attachedFiles: [],
@@ -746,6 +794,14 @@ export const useAIStore = create<AIStore>()(
       },
       clearModeSwitchNotice: () => set({ modeSwitchNotice: null }),
       setIncludeMode: (mode) => set({ includeMode: mode }),
+      setIdeContextMode: (mode) => {
+        set((s) => ({
+          ideContextMode: mode,
+          threads: s.threads.map((t) =>
+            t.id === s.activeThreadId ? { ...t, ideContextMode: mode, updatedAt: Date.now() } : t
+          ),
+        }));
+      },
       setStrictReview: (enabled) => set({ strictReview: enabled }),
 
       addAttachments: async (paths) => {
@@ -851,6 +907,7 @@ export const useAIStore = create<AIStore>()(
             threads: [thread, ...threads],
             activeThreadId: thread.id,
             messages: [],
+            ideContextMode: thread.ideContextMode ?? 'enabled',
           };
         });
       },
@@ -891,6 +948,7 @@ export const useAIStore = create<AIStore>()(
               threads: [thread, ...threads],
               activeThreadId: thread.id,
               messages: [],
+              ideContextMode: thread.ideContextMode ?? 'enabled',
             };
           }
 
@@ -900,6 +958,7 @@ export const useAIStore = create<AIStore>()(
               threads,
               activeThreadId: existing.id,
               messages: existing.messages,
+              ideContextMode: existing.ideContextMode ?? 'enabled',
             };
           }
 
@@ -908,6 +967,7 @@ export const useAIStore = create<AIStore>()(
             threads: [thread, ...threads],
             activeThreadId: thread.id,
             messages: [],
+            ideContextMode: thread.ideContextMode ?? 'enabled',
           };
         });
       },
@@ -915,7 +975,11 @@ export const useAIStore = create<AIStore>()(
       selectThread: (id) => {
         const thread = get().threads.find((t) => t.id === id);
         if (!thread) return;
-        set({ activeThreadId: id, messages: thread.messages });
+        set({
+          activeThreadId: id,
+          messages: thread.messages,
+          ideContextMode: thread.ideContextMode ?? 'enabled',
+        });
       },
 
       deleteThread: (id) => {
@@ -995,36 +1059,88 @@ export const useAIStore = create<AIStore>()(
         ) {
           deliveryWaveIndex = 0;
           agenticRepairWave = 0;
+          useLiveAiEditsStore.getState().clearAll();
         }
 
-        const editorState = useEditorStore.getState();
-        const boundWorkspace = editorState.projectPath;
+        let editorState = useEditorStore.getState();
+        let boundWorkspace = editorState.projectPath;
 
-        // Desktop DIY folders are created only from Robotics (plan success / software handoff).
-        if (isAgenticPipelineMode(get().agentMode) && !boundWorkspace?.trim()) {
-          const userMsg: ChatMessage = {
-            id: generateId(),
-            role: 'user',
-            content: userText,
-            timestamp: Date.now(),
-          };
-          const assistantMsg: ChatMessage = {
-            id: generateId(),
-            role: 'assistant',
-            content: '',
-            error: 'Deschide un folder (File → Open Folder) înainte de modul Agentic.',
-            timestamp: Date.now(),
-          };
-          const nextMessages = [...get().messages, userMsg, assistantMsg];
-          set((s) => ({
-            messages: nextMessages,
-            threads: s.threads.map((t) =>
-              t.id === s.activeThreadId
-                ? { ...t, messages: nextMessages, updatedAt: Date.now() }
-                : t
-            ),
-          }));
-          return;
+        // Code / Agentic / Debug / fashion scaffolds: auto-create Desktop (fallback Downloads).
+        // Never invent a folder from SCAFFOLD_CONTINUE / repair system messages.
+        const isSystemContinue =
+          isScaffoldContinueRequest(userText) ||
+          isDeliveryContinueRequest(userText) ||
+          isAgenticRepairRequest(userText) ||
+          isArenaContinueRequest(userText);
+
+        if (
+          (modeSupportsFileApply(get().agentMode) ||
+            isFashionMatchingEngineRequest(userText)) &&
+          !boundWorkspace?.trim()
+        ) {
+          if (isSystemContinue) {
+            const userMsg: ChatMessage = {
+              id: generateId(),
+              role: 'user',
+              content: userText,
+              timestamp: Date.now(),
+            };
+            const assistantMsg: ChatMessage = {
+              id: generateId(),
+              role: 'assistant',
+              content: '',
+              error:
+                'Workspace lipsă — redeschide folderul de proiect înainte de continuare (SCAFFOLD_CONTINUE).',
+              timestamp: Date.now(),
+            };
+            const nextMessages = [...get().messages, userMsg, assistantMsg];
+            set((s) => ({
+              messages: nextMessages,
+              threads: s.threads.map((t) =>
+                t.id === s.activeThreadId
+                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
+                  : t
+              ),
+            }));
+            return;
+          }
+          const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+          if (!ensured.ok || !ensured.path) {
+            const userMsg: ChatMessage = {
+              id: generateId(),
+              role: 'user',
+              content: userText,
+              timestamp: Date.now(),
+            };
+            const assistantMsg: ChatMessage = {
+              id: generateId(),
+              role: 'assistant',
+              content: '',
+              error:
+                ensured.error ??
+                'Nu am putut crea un folder pe Desktop sau în Downloads. Deschide un folder manual.',
+              timestamp: Date.now(),
+            };
+            const nextMessages = [...get().messages, userMsg, assistantMsg];
+            set((s) => ({
+              messages: nextMessages,
+              threads: s.threads.map((t) =>
+                t.id === s.activeThreadId
+                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
+                  : t
+              ),
+            }));
+            return;
+          }
+          editorState = useEditorStore.getState();
+          boundWorkspace = ensured.path;
+          if (ensured.created) {
+            const where =
+              ensured.location === 'downloads' ? 'Downloads' : 'Desktop';
+            showWorkbenchToast(
+              tActive('toast.projectCreated', { where, path: ensured.path })
+            );
+          }
         }
 
         let {
@@ -1175,10 +1291,12 @@ export const useAIStore = create<AIStore>()(
           ...attachmentsSnapshot.map((f) => f.name),
         ];
         const uniqueMentions = [...new Set(mentionPaths)];
+        const liveSelection = readLiveEditorSelection();
         const attachProject = shouldAttachProjectContext(apiPrompt, includeMode, {
           hasMentions: uniqueMentions.length > 0,
           hasAttachments: attachmentsSnapshot.length > 0,
           hasProjectPath: Boolean(editorState.projectPath),
+          hasActiveSelection: Boolean(liveSelection?.text?.trim()),
         });
 
         const updateAssistant = (patch: Partial<ChatMessage>) => {
@@ -1294,8 +1412,15 @@ export const useAIStore = create<AIStore>()(
         const syncLiveEditorPreview = (buffer: string) => {
           if (!modeSupportsFileApply(agentMode)) return;
           const live = parseStreamingScaffold(buffer);
-          if (!live?.content.trim()) return;
-          useEditorStore.getState().updateAiPreview(live.path, live.content);
+          if (live?.content.trim()) {
+            useLiveAiEditsStore.getState().beginEdit(live.path);
+            useLiveAiEditsStore.getState().progressEdit(live.path, live.content);
+            return;
+          }
+          const peekPath = peekStreamingScaffoldPath(buffer);
+          if (peekPath) {
+            useLiveAiEditsStore.getState().beginEdit(peekPath);
+          }
         };
 
         const openWrittenFile = async (relativePath: string): Promise<boolean> => {
@@ -1341,20 +1466,43 @@ export const useAIStore = create<AIStore>()(
           }
 
           const diff = detectDiff(finalContent, tabPath ?? null);
+          const earlyDiskWrites = [
+            ...new Set([
+              ...(extra?.writtenFiles ?? []),
+              ...toolWrittenPaths,
+              ...pipelineWrittenFiles,
+            ]),
+          ];
           updateAssistant({
             content: finalContent,
             isStreaming: false,
             diff: diff ?? undefined,
             reasoningExpanded: false,
             ...extra,
+            // Keep file list on the message even before async scaffold apply finishes.
+            ...(extra?.proposedWrites?.length
+              ? {}
+              : earlyDiskWrites.length
+                ? { writtenFiles: earlyDiskWrites }
+                : {}),
           });
           set({ isStreaming: false });
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
-          const skipScaffold = !appliesScaffold || !projectPath || extra?.error;
+          const skipScaffold =
+            !appliesScaffold ||
+            !projectPath ||
+            extra?.error ||
+            Boolean(extra?.proposedWrites?.length);
           const blockOnDiff = Boolean(diff);
-          if (skipScaffold || blockOnDiff) return;
+          if (skipScaffold || blockOnDiff) {
+            // Tool/pipeline writes already on disk — mark live strip done; keep until next chat.
+            for (const f of earlyDiskWrites) {
+              useLiveAiEditsStore.getState().completeEdit(f);
+            }
+            return;
+          }
 
           void (async () => {
             try {
@@ -1367,17 +1515,30 @@ export const useAIStore = create<AIStore>()(
               : [...new Set([...toolWrittenPaths, ...pipelineWrittenFiles])];
 
             let scaffoldErrors: string[] = [];
+            let scaffoldParsed = 0;
+            let scaffoldSkipped = 0;
             if (pipelineWrittenFiles.length === 0) {
               const parsed = parseScaffoldFiles(parseSource);
+              scaffoldParsed = parsed.length;
               if (parsed.length > 0) {
+                for (const f of parsed) {
+                  useLiveAiEditsStore.getState().beginEdit(f.path);
+                }
                 const applied = await applyScaffoldToWorkspace(projectPath, parsed);
                 writtenFiles = [...writtenFiles, ...applied.written];
                 scaffoldErrors = applied.errors;
+                scaffoldSkipped = applied.skipped;
+                for (const w of applied.written) {
+                  useLiveAiEditsStore.getState().completeEdit(w);
+                }
+                for (const err of applied.errors) {
+                  const path = err.split(':')[0]?.trim();
+                  if (path) useLiveAiEditsStore.getState().failEdit(path);
+                }
               }
             }
             writtenFiles = [...new Set(writtenFiles)];
             await useEditorStore.getState().refreshTree();
-
             const recapText = msgForParse?.recap ?? capturedRecapMeta?.pendingIssues?.join(' ');
             const gate = capturedRecapMeta?.completionGate;
             const fullDelivery: FullDeliveryConfig =
@@ -1448,12 +1609,10 @@ export const useAIStore = create<AIStore>()(
 
             if (writtenFiles.length === 0) {
               useEditorStore.getState().closeAiPreview();
-              const hadReasoningPlan = Boolean(
-                reasoningWithFences || msgForParse?.reasoning?.trim() || capturedReasoningBrief
-              );
+              // Retry AI emission only when fences existed but apply failed.
               if (
-                isAgenticPipelineMode(agentMode) &&
-                hadReasoningPlan &&
+                scaffoldParsed > 0 &&
+                modeSupportsFileApply(agentMode) &&
                 fullDelivery.autonomousFinish &&
                 canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
                 !isSessionStale()
@@ -1466,14 +1625,75 @@ export const useAIStore = create<AIStore>()(
                 void get().sendMessage(buildScaffoldContinueUserMessage(planContext));
                 return;
               }
-              updateAssistant({
-                error: hadReasoningPlan
-                  ? `AI a planificat fără fișiere valide (\`\`\`lang:path\`\`\`). Reformulează promptul sau deschide un folder.${scaffoldErrors.length ? `\n${scaffoldErrors[0]}` : ''}`
-                  : `Niciun fișier scris în workspace. Deschide un folder sau retrimite promptul.${scaffoldErrors.length ? `\n${scaffoldErrors[0]}` : ''}`,
+
+              const fallback = await applyFallbackScaffold(projectPath, {
+                projectName: workspaceFolderTitle(projectPath),
               });
-              return;
+              if (fallback.written.length > 0) {
+                writtenFiles = [
+                  ...fallback.written.filter((f) => f !== 'src/App.tsx'),
+                  ...(fallback.written.includes('src/App.tsx') ? ['src/App.tsx'] : []),
+                ];
+                showWorkbenchToast(FALLBACK_SCAFFOLD_TOAST);
+                const prevTl =
+                  get().messages.find((m) => m.id === assistantMsgId)?.timelineEvents ?? [];
+                updateAssistant({
+                  error: undefined,
+                  content: FALLBACK_SCAFFOLD_TOAST,
+                  writtenFiles,
+                  timelineEvents: [...prevTl, buildFallbackScaffoldTimelineEvent()],
+                  timelineExpanded: true,
+                });
+                await useEditorStore.getState().refreshTree();
+              } else {
+                const hadReasoningPlan = Boolean(
+                  reasoningWithFences ||
+                    msgForParse?.reasoning?.trim() ||
+                    capturedReasoningBrief
+                );
+                const expectsDelivery =
+                  looksLikeFileCreationPrompt(userText) ||
+                  hadReasoningPlan ||
+                  scaffoldParsed > 0 ||
+                  isScaffoldContinueRequest(userText);
+                if (!expectsDelivery) {
+                  return;
+                }
+                const detail =
+                  fallback.errors[0] ||
+                  scaffoldErrors[0] ||
+                  (scaffoldParsed > 0 && scaffoldSkipped === scaffoldParsed
+                    ? 'Blocurile de cod au fost filtrate (path invalid / fragment / junk).'
+                    : scaffoldParsed === 0
+                      ? 'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc.'
+                      : '');
+                updateAssistant({
+                  error: hadReasoningPlan
+                    ? `AI a planificat, dar nu a scris fișiere valide în workspace.${detail ? `\n${detail}` : ''}\nReformulează promptul (cere explicit fișiere cu path) sau retrimite.`
+                    : `Niciun fișier scris în workspace (folder: ${workspaceFolderTitle(projectPath)}).${detail ? `\n${detail}` : ''}\nRetrimite promptul sau cere „creează fișierele în proiect”.`,
+                });
+                return;
+              }
             }
+
+            // AI wrote sources but forgot package.json / scripts.dev → make Preview runnable.
+            if (
+              writtenFiles.length > 0 &&
+              !(await workspaceHasRunnableWebProject(projectPath))
+            ) {
+              const filled = await applyFallbackScaffold(projectPath, {
+                projectName: workspaceFolderTitle(projectPath),
+              });
+              if (filled.written.length > 0) {
+                writtenFiles = [...new Set([...writtenFiles, ...filled.written])];
+                showWorkbenchToast(FALLBACK_RUNNABLE_TOAST);
+              }
+            }
+
             const lastFile = writtenFiles[writtenFiles.length - 1]!;
+            for (const f of writtenFiles) {
+              useLiveAiEditsStore.getState().completeEdit(f);
+            }
             const opened = await openWrittenFile(lastFile);
             if (opened) {
               useEditorStore.getState().closeAiPreview();
@@ -1591,19 +1811,29 @@ export const useAIStore = create<AIStore>()(
         }
 
         if (isFashionMatchingEngineRequest(userText) && !editorState.projectPath) {
-          finish(
-            'Deschide un folder de proiect (**File → Open Folder**) apoi retrimite promptul. Fără folder nu pot crea `fashion-matching-engine/`.',
-            { error: 'projectPath lipsă' }
-          );
-          return;
+          const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+          if (!ensured.ok || !ensured.path) {
+            finish(
+              ensured.error ??
+                'Nu am putut crea un folder pe Desktop/Downloads pentru fashion-matching-engine.',
+              { error: 'projectPath lipsă' }
+            );
+            return;
+          }
+          editorState = useEditorStore.getState();
         }
 
         if (isAgenticPipelineMode(agentMode) && !editorState.projectPath && !fashionSeeded) {
-          finish(
-            'Deschide un folder (**File → Open Folder**) — fără proiect deschis nu pot crea fișiere.',
-            { error: 'projectPath lipsă' }
-          );
-          return;
+          const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+          if (!ensured.ok || !ensured.path) {
+            finish(
+              ensured.error ??
+                'Nu am putut crea un folder pe Desktop sau în Downloads — fără proiect nu pot crea fișiere.',
+              { error: 'projectPath lipsă' }
+            );
+            return;
+          }
+          editorState = useEditorStore.getState();
         }
 
         if (fashionSeeded) {
@@ -1623,6 +1853,34 @@ export const useAIStore = create<AIStore>()(
               streamCleanup?.();
               streamCleanup = null;
             }
+            return;
+          }
+          if (chunk.type === 'timeline' && chunk.event) {
+            const event = sanitizeTimelineEvent(chunk.event);
+            const prev = get().messages.find((m) => m.id === assistantMsgId);
+            if (!prev) return;
+            if (chunk.streamId && prev.streamId && chunk.streamId !== prev.streamId) return;
+            const existing = prev.timelineEvents ?? [];
+            if (existing.some((e) => e.id === event.id)) return;
+            const patch: Partial<ChatMessage> = {
+              timelineEvents: [...existing, event],
+              timelineExpanded: true,
+            };
+            if (event.type === 'file_write' && event.filePath) {
+              const files = [...(prev.writtenFiles ?? [])];
+              if (!files.includes(event.filePath)) {
+                files.push(event.filePath);
+                patch.writtenFiles = files;
+              }
+              useLiveAiEditsStore.getState().beginEdit(event.filePath);
+              useLiveAiEditsStore.getState().completeEdit(event.filePath);
+            } else if (
+              (event.type === 'tool_call' || event.type === 'tool_result') &&
+              event.filePath
+            ) {
+              useLiveAiEditsStore.getState().beginEdit(event.filePath);
+            }
+            updateAssistant(patch);
             return;
           }
           if (chunk.type === 'reasoning' && chunk.reasoningDelta) {
@@ -1672,15 +1930,24 @@ export const useAIStore = create<AIStore>()(
             updateAssistant({ resolvedModel: chunk.resolvedModel });
             set({ activeResolvedModel: chunk.resolvedModel });
           }
-          if (chunk.type === 'tool' && chunk.toolName === 'write_file' && chunk.toolStatus === 'done') {
+          if (chunk.type === 'tool' && chunk.toolName === 'write_file') {
             if (isSessionStale()) return;
             const relPath =
               chunk.toolWrittenPath ??
               chunk.toolDetail?.match(/"path"\s*:\s*"([^"]+)"/)?.[1];
             if (relPath) {
-              toolWrittenPaths.push(relPath);
-              void openWrittenFile(relPath);
-              void useEditorStore.getState().refreshTree();
+              useLiveAiEditsStore.getState().beginEdit(relPath);
+              if (chunk.toolStatus === 'done') {
+                toolWrittenPaths.push(relPath);
+                useLiveAiEditsStore.getState().completeEdit(relPath);
+                void openWrittenFile(relPath);
+                void useEditorStore.getState().refreshTree();
+                const prevFiles =
+                  get().messages.find((m) => m.id === assistantMsgId)?.writtenFiles ?? [];
+                if (!prevFiles.includes(relPath)) {
+                  updateAssistant({ writtenFiles: [...prevFiles, relPath] });
+                }
+              }
             }
           }
           if (chunk.type === 'delta' && chunk.delta) {
@@ -1748,9 +2015,22 @@ export const useAIStore = create<AIStore>()(
             if (chunk.writtenFiles?.length) {
               pipelineWrittenFiles = chunk.writtenFiles;
             }
+            const proposedWrites = chunk.proposedWrites ?? [];
+            const proposeStageKey = chunk.proposeStageKey;
+            if (proposedWrites.length) {
+              useLiveAiEditsStore.getState().setProposed(proposedWrites);
+            }
+            if (pipelineWrittenFiles.length) {
+              for (const f of pipelineWrittenFiles) {
+                useLiveAiEditsStore.getState().completeEdit(f);
+              }
+            }
             updateAssistant({
               isStreaming: false,
               ...(pipelineWrittenFiles.length ? { writtenFiles: pipelineWrittenFiles } : {}),
+              ...(proposedWrites.length
+                ? { proposedWrites, proposeStageKey, writtenFiles: [] }
+                : {}),
             });
             const finalSteps = markAllActivityDone(
               get().messages.find((m) => m.id === assistantMsgId)?.activitySteps ??
@@ -1769,6 +2049,9 @@ export const useAIStore = create<AIStore>()(
                 resolvedModel: resolved,
                 activitySteps: finalSteps,
                 reasoningBrief: capturedReasoningBrief,
+                ...(proposedWrites.length
+                  ? { proposedWrites, proposeStageKey, writtenFiles: [] as string[] }
+                  : {}),
               },
               activeTabPath
             );
@@ -1805,6 +2088,8 @@ export const useAIStore = create<AIStore>()(
               mode: agentMode === 'ask' ? 'ask' : agentMode,
               streamId,
               workspaceRoot: boundWorkspace ?? undefined,
+              conversationId: get().activeThreadId,
+              assistantMessageId: assistantMsgId,
               skipMultiAgent: !isAgenticPipelineMode(agentMode),
               messages: contextMessages.map((m) => ({
                 role: m.role,
@@ -1821,6 +2106,12 @@ export const useAIStore = create<AIStore>()(
                   content: f.content.slice(0, 16_000),
                 })),
               },
+              ...(get().ideContextMode !== 'disabled'
+                ? (() => {
+                    const ideContext = collectRendererIdeContext();
+                    return ideContext ? { ideContext } : {};
+                  })()
+                : {}),
               scaffoldMode,
               strictReview: isAgenticPipelineMode(agentMode) ? strictReview : undefined,
             },
@@ -1833,7 +2124,14 @@ export const useAIStore = create<AIStore>()(
         };
 
         if (editorState.projectPath) {
-          await caval?.workspaceSync?.(editorState.projectPath);
+          const syncRes = await caval?.workspaceSync?.(editorState.projectPath);
+          if (syncRes && syncRes.ok === false) {
+            finish(
+              `Nu pot lega workspace-ul: ${syncRes.error ?? 'sync eșuat'}.\nDeschide din nou folderul (File → Open Folder).`,
+              { error: 'workspace-sync-failed' }
+            );
+            return;
+          }
           void caval?.mcpEnsureReady?.();
         }
 
@@ -1846,18 +2144,7 @@ export const useAIStore = create<AIStore>()(
           uniqueMentions.length === 0 &&
           attachmentsSnapshot.length === 0;
 
-        const scaffoldMode =
-          modeSupportsFileApply(agentMode) &&
-          (fashionSeeded ||
-            attachmentsSnapshot.some((f) => f.path.startsWith('engineering://')) ||
-            /\bSCAFFOLD\b/i.test(apiPrompt) ||
-            isScaffoldContinueRequest(apiPrompt) ||
-            (isAgenticPipelineMode(agentMode) &&
-              (isDeliveryContinueRequest(apiPrompt) || isAgenticRepairRequest(apiPrompt))));
-
-        if (isAgenticPipelineMode(agentMode) && editorState.projectPath) {
-          useEditorStore.getState().showAiPreview('generating.ts', '// AI scrie cod…\n');
-        }
+        const scaffoldMode = modeSupportsFileApply(agentMode);
 
         if (isFastChat) {
           const contextMessages = buildFastChatMessages(
@@ -1919,6 +2206,16 @@ export const useAIStore = create<AIStore>()(
         assertSendNotAborted(sendSignal);
         projectContext = mergeProjectContextWithBootstrap(projectContext, workspaceBootstrap);
 
+        // Silent universal software context (category + platform + 2026 trends). No UI.
+        try {
+          const webCtx = buildUniversalWebContext(apiPrompt || userText, {
+            force: modeSupportsFileApply(agentMode),
+          });
+          projectContext = mergeProjectContextWithWebContext(projectContext, webCtx);
+        } catch {
+          /* ignore detection failures */
+        }
+
         const mentionFiles =
           uniqueMentions.length > 0 && caval?.fs?.readFile
             ? await resolveMentionFiles(
@@ -1930,7 +2227,7 @@ export const useAIStore = create<AIStore>()(
 
         assertSendNotAborted(sendSignal);
 
-        const editorSelection = useEditorStore.getState().editorSelection;
+        const editorSelection = liveSelection ?? useEditorStore.getState().editorSelection;
         const selectionText = editorSelection?.text?.trim() || undefined;
 
         assertSendNotAborted(sendSignal);
@@ -1943,7 +2240,14 @@ export const useAIStore = create<AIStore>()(
             selection: selectionText,
             fileTree: attachProject && !isAgenticPipelineMode(agentMode) ? editorState.fileTree : [],
             projectPath: editorState.projectPath,
-            includeMode: selectionText && includeMode === 'selection' ? 'selection' : attachProject ? includeMode : 'file',
+            includeMode:
+              selectionText && includeMode === 'selection'
+                ? 'selection'
+                : attachProject
+                  ? includeMode === 'selection'
+                    ? 'project'
+                    : includeMode
+                  : 'file',
             skipActiveFile: !attachProject,
             projectContext,
             mentions: uniqueMentions,
@@ -2002,7 +2306,8 @@ export const useAIStore = create<AIStore>()(
         streamCleanup = null;
         activeStreamId = null;
         pendingStreamId = null;
-        useEditorStore.getState().closeAiPreview();
+        useLiveAiEditsStore.getState().clearAll();
+        useAiWorkCanvasStore.getState().onStreamEnd();
         set((s) => {
           const messages = s.messages.map((m) =>
             m.isStreaming ? finalizeStoppedAssistantMessage(m) : m
@@ -2015,9 +2320,10 @@ export const useAIStore = create<AIStore>()(
       },
 
       clearChat: () => {
+        useLiveAiEditsStore.getState().clearAll();
         set((s) => {
           const updatedThreads = s.threads.map((t) =>
-            t.id === s.activeThreadId ? { ...t, messages: [], title: 'Chat nou' } : t
+            t.id === s.activeThreadId ? { ...t, messages: [], title: tActive('ai.panel.newChat') } : t
           );
           return { messages: [], threads: updatedThreads };
         });
@@ -2269,20 +2575,29 @@ export const useAIStore = create<AIStore>()(
         if (state.includeMode === 'file') {
           state.includeMode = 'project';
         }
-        if (state.selectedModel === 'caval-auto/free') {
+        // Keep caval-auto/free as default for users without cloud keys.
+        if (
+          state.selectedModel === 'caval-auto/balanced' ||
+          state.selectedModel === 'caval-auto/frontier'
+        ) {
           void getCaval()?.secretsGet?.().then((res) => {
-            const secrets: Record<string, string> = {};
-            for (const [key, isSet] of Object.entries(res?.configured ?? {})) {
-              if (isSet) secrets[key] = '__configured__';
-            }
-            if (hasOpenRouterKey(undefined, secrets)) {
-              useAIStore.setState({ selectedModel: 'caval-auto/balanced' });
+            if (!res?.configured?.OPENROUTER_API_KEY) {
+              useAIStore.setState({ selectedModel: 'caval-auto/free' });
             }
           });
         }
         state.threads = migrateThreadsOnRehydrate(state.threads, state.activeThreadId);
+        state.threads = state.threads.map((t) => ({
+          ...t,
+          ideContextMode: t.ideContextMode === 'disabled' ? 'disabled' : 'enabled',
+        }));
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
-        if (thread) state.messages = thread.messages;
+        if (thread) {
+          state.messages = thread.messages;
+          state.ideContextMode = thread.ideContextMode ?? 'enabled';
+        } else {
+          state.ideContextMode = 'enabled';
+        }
         state.isStreaming = false;
         state.messages = state.messages.map((m) =>
           m.isStreaming ? { ...m, isStreaming: false } : m

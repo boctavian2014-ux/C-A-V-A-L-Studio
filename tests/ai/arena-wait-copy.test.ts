@@ -81,7 +81,7 @@ describe('arena-wait-copy', () => {
   it('fallback when phase undefined', () => {
     const msg = getWaitMessage(undefined, 0);
     expect(msg.length).toBeGreaterThan(5);
-    expect(msg).toMatch(/CAVALLO|Pipeline|Procesez|Loading/i);
+    expect(msg).toMatch(/CAVAL|Pipeline|Procesez|Loading|rulează/i);
   });
 
   it('activePhaseFromSteps returns last active step', () => {

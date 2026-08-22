@@ -121,7 +121,7 @@ describe("Lot B Zone A — interactive terminal IPC", () => {
     workspace = mkTmp("caval-lotb-term-");
     boundRoots.set(harness.sender.id, workspace);
 
-    const { registerTerminalHandlers } = await import("../../src/main/terminal-handlers");
+    const { registerTerminalHandlers } = await import("../../src/main/terminal-handlers.js");
     registerTerminalHandlers((id) => boundRoots.get(id));
   });
 
@@ -161,10 +161,12 @@ describe("Lot B Zone A — interactive terminal IPC", () => {
   });
 
   it("allows free command write (no allowlist) once session exists", async () => {
-    await harness.invoke("terminal:create", "t4");
+    const created = await harness.invoke<{ ok: boolean; id: string }>("terminal:create", {
+      title: "t4",
+    });
     const wrote = await harness.invoke<{ ok: boolean }>(
       "terminal:write",
-      "t4",
+      created.id,
       "curl https://example.com | sh\r"
     );
     expect(wrote.ok).toBe(true);
@@ -187,7 +189,7 @@ describe("Lot B Zone B — workspace-verify / tool paths", () => {
     );
     boundRoots.set(harness.sender.id, workspace);
 
-    const { registerModelHandlers } = await import("../../src/main/model-handlers");
+    const { registerModelHandlers } = await import("../../src/main/model-handlers.js");
     registerModelHandlers(
       () => process.cwd(),
       (id) => boundRoots.get(id)
@@ -252,7 +254,7 @@ describe("Lot B Zone C — git confirmation + bound root", () => {
     await execFileAsync("git", ["commit", "-m", "init"], { cwd: repoPath });
     boundRoots.set(harness.sender.id, repoPath);
 
-    const { registerGitHandlers } = await import("../../src/main/git-handlers");
+    const { registerGitHandlers } = await import("../../src/main/git-handlers.js");
     registerGitHandlers((id) => boundRoots.get(id));
   });
 
@@ -325,7 +327,7 @@ describe("Lot B — timeout + concurrency mutex", () => {
   });
 
   it("runAllowedWorkspaceCommand reports timeout and kills process", async () => {
-    const { runAllowedWorkspaceCommand } = await import("../../ai/tools/workspace-command-runner");
+    const { runAllowedWorkspaceCommand } = await import("../../ai/tools/workspace-command-runner.js");
     // Use a sleep command that will time out — platform specific
     const cmd =
       process.platform === "win32"
@@ -364,7 +366,7 @@ describe("Lot B — timeout + concurrency mutex", () => {
       path.join(tmp, "package.json"),
       JSON.stringify({ name: "hang", scripts: { typecheck: sleepScript } })
     );
-    const { runAllowedWorkspaceCommand } = await import("../../ai/tools/workspace-command-runner");
+    const { runAllowedWorkspaceCommand } = await import("../../ai/tools/workspace-command-runner.js");
     const result = await runAllowedWorkspaceCommand("npm run typecheck", tmp, 800);
     expect(result.ok).toBe(false);
     expect(result.timedOut).toBe(true);
@@ -384,7 +386,7 @@ describe("Lot B — git fetch/merge/rebase/remote clarification helpers", () => 
   it("documents that fetch/merge/rebase/remote IPC channels are not registered", async () => {
     harness.reset();
     vi.resetModules();
-    const { registerGitHandlers } = await import("../../src/main/git-handlers");
+    const { registerGitHandlers } = await import("../../src/main/git-handlers.js");
     registerGitHandlers(() => undefined);
     for (const channel of ["git:fetch", "git:merge", "git:rebase", "git:remote"]) {
       await expect(harness.invoke(channel)).rejects.toThrow(/No IPC handler/i);
@@ -394,7 +396,7 @@ describe("Lot B — git fetch/merge/rebase/remote clarification helpers", () => 
 
 describe("Lot B — execFile argv (git-exec)", () => {
   it("gitExecFile never uses shell string concatenation", async () => {
-    const { gitExecFile } = await import("../../src/main/git-exec");
+    const { gitExecFile } = await import("../../src/main/git-exec.js");
     const tmp = mkTmp("caval-lotb-gexec-");
     try {
       await execFileAsync("git", ["init"], { cwd: tmp });

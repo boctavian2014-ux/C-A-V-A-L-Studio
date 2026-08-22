@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { notifyWorkspaceChanged } from './workspace-bridge';
+import { useAiWorkCanvasStore } from './ai-work-canvas-store';
 
 // ──────────────────────────────────────────────
 //  Types
@@ -30,6 +31,8 @@ export interface EditorSelection {
   path: string;
   startLine: number;
   endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 interface EditorStore {
@@ -47,7 +50,7 @@ interface EditorStore {
   createUntitledTab: () => void;
   closeActiveTab: () => void;
   closeTab: (id: string) => void;
-  setActiveTab: (id: string) => void;
+  setActiveTab: (id: string, options?: { byUser?: boolean }) => void;
   updateTabContent: (id: string, content: string) => void;
   saveTab: (id: string) => Promise<void>;
   saveViewState: (id: string, viewState: unknown) => void;
@@ -198,7 +201,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     });
   },
 
-  setActiveTab: (id) => set({ activeTabId: id }),
+  setActiveTab: (id, options) => {
+    if (options?.byUser) {
+      useAiWorkCanvasStore.getState().setFollowAi(false);
+    }
+    set({ activeTabId: id });
+  },
 
   updateTabContent: (id, content) => {
     set((state) => ({
@@ -219,6 +227,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           t.id === id ? { ...t, isDirty: false } : t
         ),
       }));
+      document.dispatchEvent(
+        new CustomEvent("caval:file-saved", { detail: { path: tab.path } })
+      );
     }
   },
 

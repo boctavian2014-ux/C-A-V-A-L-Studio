@@ -1,11 +1,11 @@
-// ──────────────────────────────────────────────
-//  CAVALLO — emblema brand (neon horse, fundal transparent)
-// ──────────────────────────────────────────────
+// Shared brand marks for the CAVAL wordmark across light/dark surfaces.
 
 import React from 'react';
 import { Cavalo3DIcon } from './Cavalo3DIcon';
-import cavaloSplashUrl from '../../../../assets/cavalo-splash.png';
-import cavaloNeonHorseUrl from '../../../../assets/cavalo-neon-horse.png';
+import { useCavalTheme } from '../../../../themes/theme-provider';
+import cavalWordmarkDarkUrl from '../../../../assets/icons/caval-wordmark-white.png';
+import cavalWordmarkLightUrl from '../../../../assets/icons/caval-wordmark-black.png';
+import cavalStudioHeroUrl from '../../../../assets/icons/caval-studio-hero.png';
 
 const NEON_LOGO_STYLE: React.CSSProperties = {
   display: 'block',
@@ -19,7 +19,34 @@ const NEON_LOGO_STYLE: React.CSSProperties = {
   ].join(' '),
 };
 
-/** Logo oficial CAVALLO — cal neon, fundal transparent. */
+function useBrandLogoUrl(): string {
+  const { mode } = useCavalTheme();
+  return mode === 'light' ? cavalWordmarkLightUrl : cavalWordmarkDarkUrl;
+}
+
+function CavalBrandImage({
+  width,
+  height,
+  glowFilter,
+}: {
+  width: number;
+  height: number;
+  glowFilter?: string;
+}) {
+  const brandLogoUrl = useBrandLogoUrl();
+  return (
+    <img
+      src={brandLogoUrl}
+      width={width}
+      height={height}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      style={glowFilter ? { ...NEON_LOGO_STYLE, width, height, filter: glowFilter } : { ...NEON_LOGO_STYLE, width, height }}
+    />
+  );
+}
+
 export function CavaloHorseMark({
   size = 48,
   glowFilter,
@@ -27,17 +54,9 @@ export function CavaloHorseMark({
   size?: number;
   glowFilter?: string;
 }) {
-  return (
-    <img
-      src={cavaloNeonHorseUrl}
-      width={size}
-      height={size}
-      alt=""
-      aria-hidden="true"
-      draggable={false}
-      style={glowFilter ? { ...NEON_LOGO_STYLE, filter: glowFilter } : NEON_LOGO_STYLE}
-    />
-  );
+  const width = Math.round(size * 3.2);
+  const height = size;
+  return <CavalBrandImage width={width} height={height} glowFilter={glowFilter} />;
 }
 
 /** AI panel mark — 3D icon with cyan glow. */
@@ -46,21 +65,9 @@ export function CavaloAiMark({ size = 48 }: { size?: number }) {
 }
 
 export function CavaloSplashMark({ size = 48 }: { size?: number }) {
-  return (
-    <img
-      src={cavaloSplashUrl}
-      width={size}
-      height={size}
-      alt=""
-      aria-hidden="true"
-      draggable={false}
-      style={{
-        display: 'block',
-        objectFit: 'contain',
-        flexShrink: 0,
-      }}
-    />
-  );
+  const width = Math.round(size * 3.2);
+  const height = size;
+  return <CavalBrandImage width={width} height={height} />;
 }
 
 /** @deprecated Use CavaloHorseMark — same asset. */
@@ -108,22 +115,51 @@ export function CavaloNeonFrame({
 }
 
 export function CavaloLogo({ height = 24 }: { height?: number }) {
+  const width = Math.round(height * 3.2);
+  return <CavalBrandImage width={width} height={height} />;
+}
+
+const HERO_ASPECT = 486 / 680;
+
+/** Full CAVAL STUDIO mark for empty/home screens. */
+export function CavalStudioHero({ size = 240 }: { size?: number }) {
+  const width = size;
+  const height = Math.round(size * HERO_ASPECT);
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: height * 0.35 }}>
-      <CavaloHorseMark size={height} />
-      <span
+    <div
+      style={{
+        position: 'relative',
+        width,
+        height,
+        flexShrink: 0,
+      }}
+    >
+      <div
+        aria-hidden
         style={{
-          fontFamily: "'Sora', sans-serif",
-          fontWeight: 800,
-          fontSize: height * 0.62,
-          letterSpacing: '0.10em',
-          color: '#D8DEE6',
-          textShadow: '0 0 6px rgba(0,224,255,0.45)',
-          lineHeight: 1,
+          position: 'absolute',
+          inset: '8% 16% 22%',
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(0,224,255,0.18) 0%, rgba(0,224,255,0.05) 42%, transparent 72%)',
+          pointerEvents: 'none',
         }}
-      >
-        CAVALLO
-      </span>
-    </span>
+      />
+      <img
+        src={cavalStudioHeroUrl}
+        width={width}
+        height={height}
+        alt="CAVAL STUDIO"
+        draggable={false}
+        style={{
+          position: 'relative',
+          display: 'block',
+          width,
+          height,
+          objectFit: 'contain',
+          background: 'transparent',
+          filter: 'drop-shadow(0 10px 28px rgba(0, 224, 255, 0.22))',
+        }}
+      />
+    </div>
   );
 }

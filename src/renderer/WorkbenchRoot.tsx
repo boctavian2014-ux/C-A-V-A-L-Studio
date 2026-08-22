@@ -23,23 +23,33 @@ import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPanel } from './components/search/SearchPanel';
 import { ExtensionsHub } from './components/extensions/ExtensionsHub';
 import { QuickOpen } from './components/navigation/QuickOpen';
+import { WorkspaceSearch } from './components/search/WorkspaceSearch';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsOverlay } from './components/navigation/ShortcutsOverlay';
 import { ReferencesOverlay, type ReferenceHit } from './components/navigation/ReferencesOverlay';
+import { QuickFixDiffPreview } from './components/editor/QuickFixDiffPreview';
+import { RefactorDiffPreview } from './components/editor/RefactorDiffPreview';
+import { ExplainSelectionPanel } from './components/editor/ExplainSelectionPanel';
 import { buildWorkbenchCommands } from './commands/command-registry';
 import { handleMenuCommand, type MenuCommandContext } from './commands/menu-command-router';
 import { showWorkbenchToast } from './commands/workbench-toast';
+import { tActive } from '../../ai/i18n/active-locale';
+import { useTranslation } from '../../ai/i18n/useTranslation';
 import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
+import { ConnectionStatusIndicator } from './components/workbench/ConnectionStatusIndicator';
+import { useAiWorkCanvasController } from './hooks/use-ai-work-canvas';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
 import {
-  IconExplorer, IconSearch, IconGit, IconMarketplace,
-  IconSparkle, IconSettings,
+  IconGit,
+  IconSparkle,
 } from './components/brand/CavaloIcons';
-
-type ActivityTab = 'explorer' | 'search' | 'git' | 'extensions' | 'settings';
+import { ActivityBar, ACTIVITY_BAR_WIDTH, type ActivityTab } from './components/sidebar/ActivityBar';
+import { PreviewContentPanel } from './components/preview/PreviewContentPanel';
+import { PreviewStatusSync } from './components/preview/PreviewStatusSync';
+import { usePreviewStore } from './store/preview-store';
 
 // ──────────────────────────────────────────────
 //  Layout squeeze helpers
@@ -98,226 +108,6 @@ function EditorSqueezeBanner({ onCollapseSidebar, onCloseAi }: { onCollapseSideb
 }
 
 // ──────────────────────────────────────────────
-//  Activity Bar
-// ──────────────────────────────────────────────
-
-/** 3D PNG icons include a rounded black tile — render larger than line SVG icons. */
-const ACTIVITY_BAR_WIDTH = 48;
-const ACTIVITY_BTN = 36;
-const ACTIVITY_ICON = 26;
-
-function ActivityBar({
-  active,
-  onChange,
-  aiPanelOpen,
-  onToggleAI,
-  gitChangesCount,
-  onOpenAccount,
-}: {
-  active: ActivityTab;
-  onChange: (tab: ActivityTab) => void;
-  aiPanelOpen: boolean;
-  onToggleAI: () => void;
-  gitChangesCount: number;
-  onOpenAccount: () => void;
-}) {
-  const ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
-    {
-      id: 'explorer', title: 'Explorer (Ctrl+Shift+E)',
-      icon: <IconExplorer size={ACTIVITY_ICON} />,
-    },
-    {
-      id: 'search', title: 'Căutare (Ctrl+Shift+F)',
-      icon: <IconSearch size={ACTIVITY_ICON} />,
-    },
-    {
-      id: 'git', title: 'Source Control (Ctrl+Shift+G)',
-      icon: (
-        <div style={{ position: 'relative' }}>
-          <IconGit size={ACTIVITY_ICON} />
-          {/* Badge număr fișiere modificate */}
-          {gitChangesCount > 0 && (
-            <span style={{
-              position: 'absolute', top: -4, right: -5,
-              background: '#E2C08D', color: '#0E0E0F',
-              fontSize: 8, fontWeight: 700, lineHeight: 1,
-              padding: '1px 3px', borderRadius: 99,
-              minWidth: 12, textAlign: 'center',
-            }}>
-              {gitChangesCount > 99 ? '99+' : gitChangesCount}
-            </span>
-          )}
-        </div>
-      ),
-    },
-    {
-      id: 'extensions', title: 'Extensions (Ctrl+Shift+X)',
-      icon: <IconMarketplace size={ACTIVITY_ICON} />,
-    },
-  ];
-
-  // Butonul Settings e separat (jos), tracked separat
-  const isSettingsActive = active === 'settings';
-
-  return (
-    <div
-      className="glass-panel"
-      style={{
-      width: ACTIVITY_BAR_WIDTH,
-      borderRight: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
-      borderTop: 'none',
-      borderBottom: 'none',
-      borderLeft: 'none',
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', padding: '10px 0', gap: 4,
-      flexShrink: 0,
-      zIndex: 20,
-    }}>
-      {ITEMS.map((item) => (
-        <button
-          key={item.id}
-          title={item.title}
-          onClick={() => onChange(item.id)}
-          style={{
-            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-            border: active === item.id ? '1px solid rgba(0,224,255,0.3)' : 'none',
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: active === item.id ? 'rgba(255,255,255,0.1)' : 'transparent',
-            color: active === item.id ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-            boxShadow: active === item.id ? '0 0 12px rgba(0,224,255,0.15)' : 'none',
-            transition: 'all 0.15s',
-            position: 'relative',
-          }}
-          onMouseEnter={(e) => {
-            if (active !== item.id) {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-              e.currentTarget.style.color = 'var(--caval-text)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (active !== item.id) {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--caval-text-muted)';
-            }
-          }}
-        >
-          {item.icon}
-          {/* Indicator stânga pentru tab activ */}
-          {active === item.id && (
-            <span style={{
-              position: 'absolute', left: 0, top: 6, bottom: 6,
-              width: 3, borderRadius: '0 2px 2px 0',
-              background: 'var(--caval-accent)',
-              boxShadow: '0 0 8px var(--caval-accent)',
-            }} />
-          )}
-        </button>
-      ))}
-
-      {/* Separator */}
-      <div style={{ width: 20, height: 1, background: 'var(--caval-glass-border, rgba(255,255,255,0.08))', margin: '4px 0' }} />
-
-      {/* Buton AI Panel — special, cu glow cyan când activ */}
-      <button
-        title="AI Panel Caval (Ctrl+Shift+A)"
-        onClick={onToggleAI}
-        style={{
-          width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-          border: aiPanelOpen ? '1px solid var(--caval-accent)' : 'none',
-          cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: aiPanelOpen
-            ? 'rgba(255,255,255,0.1)'
-            : 'transparent',
-          color: aiPanelOpen ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-          boxShadow: aiPanelOpen ? '0 0 12px rgba(0,224,255,0.2)' : 'none',
-          transition: 'all 0.15s',
-          position: 'relative',
-        }}
-        onMouseEnter={(e) => {
-          if (!aiPanelOpen) {
-            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-            e.currentTarget.style.color = 'var(--caval-text)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!aiPanelOpen) {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = 'var(--caval-text-muted)';
-          }
-        }}
-      >
-        <IconSparkle size={ACTIVITY_ICON} />
-        {/* Punct indicator glow când AI e activ */}
-        {aiPanelOpen && (
-          <span className="glow-accent" style={{
-            position: 'absolute', top: 3, right: 3,
-            width: 5, height: 5, borderRadius: '50%',
-            background: 'var(--caval-accent)',
-          }} />
-        )}
-      </button>
-
-      {/* Bottom icons */}
-      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-        <button
-          title="Setări Caval (Ctrl+,)"
-          onClick={() => onChange('settings')}
-          style={{
-            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: 8,
-            border: isSettingsActive ? '1px solid var(--caval-accent)' : 'none',
-            background: isSettingsActive ? 'rgba(255,255,255,0.1)' : 'transparent',
-            color: isSettingsActive ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.15s', position: 'relative',
-          }}
-          onMouseEnter={(e) => {
-            if (!isSettingsActive) {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-              e.currentTarget.style.color = 'var(--caval-text)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isSettingsActive) {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--caval-text-muted)';
-            }
-          }}
-        >
-          <IconSettings size={ACTIVITY_ICON} />
-          {/* Indicator activ stânga */}
-          {isSettingsActive && (
-            <span style={{
-              position: 'absolute', left: 0, top: 6, bottom: 6,
-              width: 3, borderRadius: '0 2px 2px 0',
-              background: 'var(--caval-accent)',
-            }} />
-          )}
-        </button>
-        <button
-          title="Cont & credite"
-          onClick={onOpenAccount}
-          style={{
-            width: ACTIVITY_BTN, height: ACTIVITY_BTN, borderRadius: '50%', border: 'none',
-            background: 'rgba(212,168,87,0.15)', color: '#D4A857',
-            cursor: 'pointer', fontSize: 13, fontWeight: 700,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          OB
-        </button>
-        <div
-          className="glass-status-dot glow-emerald"
-          title="Railway & MCP"
-          aria-label="Status conexiune"
-        />
-      </div>
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────
 //  Status Bar
 // ──────────────────────────────────────────────
 
@@ -355,14 +145,17 @@ function SidebarShell({
 }
 
 function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggleAI: () => void }) {
+  const { t } = useTranslation();
   const { tabs, activeTabId } = useEditorStore();
-  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const { isRepo, branch } = useGitStore();
   const errorCount = useProblemsStore((s) => s.errorCount());
   const warningCount = useProblemsStore((s) => s.warningCount());
 
   return (
-    <div style={{
+    <div
+      data-testid="workbench-status-bar"
+      style={{
       height: 22,
       background: 'var(--caval-surface)',
       borderTop: '1px solid var(--caval-border)',
@@ -371,28 +164,33 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
       fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
       color: 'var(--caval-text-muted)', flexShrink: 0,
     }}>
-      <StatusItem>
-        <IconGit size={11} strokeWidth={1.8} />
-        {isRepo ? branch || '—' : 'fără git'}
-      </StatusItem>
       <StatusItem
         onClick={() => document.dispatchEvent(new CustomEvent('caval:terminal-panel-tab', { detail: { tab: 'problems' } }))}
         style={{ cursor: 'pointer' }}
+        aria-label={t('statusBar.problemsSummary', { errors: errorCount, warnings: warningCount })}
       >
-        {errorCount === 0 ? '✓' : '✕'} {errorCount} erori &nbsp;⚠ {warningCount}
+        {errorCount === 0 ? '✓' : '✕'} {errorCount} {t('statusBar.errors')} &nbsp;⚠ {warningCount}
+      </StatusItem>
+      <StatusItem title={t('statusBar.connectionUnavailableTooltip')} style={{ gap: 6 }}>
+        <ConnectionStatusIndicator />
+      </StatusItem>
+      <StatusItem>
+        <IconGit size={11} strokeWidth={1.8} />
+        {isRepo ? branch || '—' : t('statusBar.noGit')}
       </StatusItem>
 
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
         {activeTab && (
           <>
             <StatusItem>{activeTab.language}</StatusItem>
-            <StatusItem>UTF-8</StatusItem>
+            <StatusItem>{t('statusBar.encoding')}</StatusItem>
           </>
         )}
         {/* Buton AI în status bar — toggle rapid */}
         <button
           onClick={onToggleAI}
-          title="Toggle AI Panel (Ctrl+Shift+A)"
+          title={t('statusBar.aiToggleTitle')}
+          aria-label={t('statusBar.aiToggleTitle')}
           style={{
             background: aiPanelOpen ? 'rgba(0,224,255,0.12)' : 'transparent',
             border: aiPanelOpen ? '1px solid var(--caval-accent)' : 'none',
@@ -404,7 +202,7 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
           }}
         >
           <IconSparkle size={10} strokeWidth={2} />
-          {aiPanelOpen ? 'AI activ' : 'AI'}
+          {aiPanelOpen ? t('statusBar.aiToggleActive') : t('statusBar.aiToggle')}
         </button>
       </div>
     </div>
@@ -452,11 +250,15 @@ function RoboticsCadStage() {
 // ──────────────────────────────────────────────
 
 export function WorkbenchRoot() {
+  const { t } = useTranslation();
+  useAiWorkCanvasController();
   const [activeActivity, setActiveActivity] = React.useState<ActivityTab>('explorer');
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);
+  const previewPanelOpen = usePreviewStore((s) => s.previewPanelOpen);
   const [engineeringOpen, setEngineeringOpen] = React.useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = React.useState(false);
+  const [workspaceSearchVisible, setWorkspaceSearchVisible] = React.useState(false);
   const [paletteVisible, setPaletteVisible] = React.useState(false);
   const [shortcutsVisible, setShortcutsVisible] = React.useState(false);
   const [referencesVisible, setReferencesVisible] = React.useState(false);
@@ -572,7 +374,14 @@ export function WorkbenchRoot() {
     toggleSidebar,
     setActiveActivity: setActiveActivity,
     setSidebarOpen,
-    openQuickOpen: () => setQuickOpenVisible(true),
+    openQuickOpen: () => {
+      setWorkspaceSearchVisible(false);
+      setQuickOpenVisible(true);
+    },
+    openWorkspaceSearch: () => {
+      setQuickOpenVisible(false);
+      setWorkspaceSearchVisible(true);
+    },
     saveActiveTab: () => {
       const tabId = useEditorStore.getState().activeTabId;
       if (tabId) void saveTab(tabId);
@@ -611,7 +420,14 @@ export function WorkbenchRoot() {
         toggleSidebar,
         setActiveActivity: setActiveActivity,
         setSidebarOpen,
-        openQuickOpen: () => setQuickOpenVisible(true),
+        openQuickOpen: () => {
+          setWorkspaceSearchVisible(false);
+          setQuickOpenVisible(true);
+        },
+        openWorkspaceSearch: () => {
+          setQuickOpenVisible(false);
+          setWorkspaceSearchVisible(true);
+        },
         saveActiveTab: () => {
           const tabId = useEditorStore.getState().activeTabId;
           if (tabId) void saveTab(tabId);
@@ -659,7 +475,7 @@ export function WorkbenchRoot() {
         const files = res.completion?.writtenFiles;
         if (!res.ok || !files?.length) return;
         showWorkbenchToast(
-          `Ultimul run Arena s-a terminat — ${files.length} fișier(e) scrise pe disc.`,
+          tActive('toast.arenaCompleted', { count: files.length }),
           6000
         );
         const last = files[files.length - 1];
@@ -716,6 +532,8 @@ export function WorkbenchRoot() {
 
     const offFolder = caval.onFolderOpened((folder) => {
       setProjectPath(folder.path);
+      // Re-bind main-process workspace root (File → Open Folder already binds; sync is idempotent).
+      void window.caval.workspaceSync?.(folder.path);
       void window.caval.fs.readTree(folder.path).then((tree) => setFileTree(tree));
       void useGitStore.getState().refresh();
       useAIStore.getState().setIncludeMode('project');
@@ -732,6 +550,13 @@ export function WorkbenchRoot() {
       offFile?.();
     };
   }, [setProjectPath, setFileTree, openFile]);
+
+  // Keep main-process sandbox root bound whenever renderer has a projectPath.
+  useEffect(() => {
+    const root = projectPath?.trim();
+    if (!root) return;
+    void window.caval?.workspaceSync?.(root);
+  }, [projectPath]);
 
   // Keyboard shortcuts globale
   useEffect(() => {
@@ -760,7 +585,15 @@ export function WorkbenchRoot() {
       // Ctrl+P → Quick Open (not Ctrl+Shift+P)
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
+        setWorkspaceSearchVisible(false);
         setQuickOpenVisible(true);
+      }
+
+      // Ctrl+T → Search workspace symbols (index)
+      if (ctrl && !e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        setQuickOpenVisible(false);
+        setWorkspaceSearchVisible(true);
       }
 
       // Ctrl+Shift+P → Command Palette
@@ -839,6 +672,7 @@ export function WorkbenchRoot() {
 
   return (
     <CavalThemeProvider defaultMode="dark">
+      <PreviewStatusSync />
       {/* CSS global pentru markdown + code blocks din AIPanel */}
       <style>{`
         /* ── Markdown renderer stiluri ── */
@@ -924,15 +758,20 @@ export function WorkbenchRoot() {
           50% { opacity: 1; }
         }
         .caval-stream-text {
-          font-family: inherit;
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          font-size: 10px;
+          line-height: 1.42;
+          letter-spacing: 0.055em;
+          font-weight: 400;
+          color: rgba(186, 230, 253, 0.58);
         }
         .caval-stream-cursor {
           display: inline-block;
-          width: 2px;
-          height: 0.9em;
+          width: 1px;
+          height: 0.85em;
           margin-left: 1px;
           vertical-align: -0.05em;
-          background: var(--caval-accent);
+          background: rgba(0, 224, 255, 0.55);
           animation: cursor-blink 0.9s step-end infinite;
           flex-shrink: 0;
         }
@@ -973,6 +812,7 @@ export function WorkbenchRoot() {
           onToggleEngineering={toggleEngineering}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={toggleSidebar}
+          onOpenAccount={openAccountSettings}
         />
 
         {/* File tabs — ascunse în modul Robotics AI dedicat */}
@@ -989,7 +829,8 @@ export function WorkbenchRoot() {
                 aiPanelOpen
                 onToggleAI={() => undefined}
                 gitChangesCount={gitChangesCount}
-                onOpenAccount={openAccountSettings}
+                engineeringOpen={engineeringOpen}
+                onToggleEngineering={toggleEngineering}
               />
 
               {sidebarOpen && activeActivity === 'explorer' && (
@@ -1044,7 +885,8 @@ export function WorkbenchRoot() {
             aiPanelOpen={aiPanelOpen}
             onToggleAI={toggleAI}
             gitChangesCount={gitChangesCount}
-            onOpenAccount={openAccountSettings}
+            engineeringOpen={engineeringOpen}
+            onToggleEngineering={toggleEngineering}
           />
 
           {/* Primary sidebar — Cursor order */}
@@ -1076,7 +918,7 @@ export function WorkbenchRoot() {
             </SidebarShell>
           )}
 
-          {/* Editor + Terminal */}
+          {/* Editor + Terminal (+ Preview content from activity bar) */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, position: 'relative' }}>
             {editorSqueezed && (
               <EditorSqueezeBanner
@@ -1084,28 +926,52 @@ export function WorkbenchRoot() {
                 onCloseAi={() => setAiPanelOpen(false)}
               />
             )}
-            <Suspense
-              fallback={
+            <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <Suspense
+                  fallback={
+                    <div
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--caval-text-muted, #8a95a6)',
+                        fontSize: 13,
+                      }}
+                    >
+                      {t('loading.editor')}
+                    </div>
+                  }
+                >
+                  <MonacoEditor />
+                </Suspense>
+              </div>
+              {previewPanelOpen && (
                 <div
+                  className="content-area preview-content-host"
+                  data-testid="preview-content-host"
                   style={{
-                    flex: 1,
+                    width: 'min(480px, 42%)',
+                    flexShrink: 0,
+                    minWidth: 280,
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--caval-text-muted, #8a95a6)',
-                    fontSize: 13,
+                    flexDirection: 'column',
+                    overflow: 'hidden',
                   }}
                 >
-                  Loading editor…
+                  <PreviewContentPanel />
                 </div>
-              }
-            >
-              <MonacoEditor />
-            </Suspense>
+              )}
+            </div>
             <TerminalPanel />
           </div>
 
           <QuickOpen open={quickOpenVisible} onClose={() => setQuickOpenVisible(false)} />
+          <WorkspaceSearch
+            open={workspaceSearchVisible}
+            onClose={() => setWorkspaceSearchVisible(false)}
+          />
           <CommandPalette
             open={paletteVisible}
             commands={workbenchCommands}
@@ -1128,6 +994,9 @@ export function WorkbenchRoot() {
               setReferencesVisible(false);
             }}
           />
+          <QuickFixDiffPreview />
+          <RefactorDiffPreview />
+          <ExplainSelectionPanel />
 
           {/* AI Panel — dreapta, 340px, ascundibil */}
           {aiPanelOpen && (

@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import { CavaloHorseMark } from '../brand/CavaloHorseMark';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import { CavalStudioHero } from '../brand/CavaloHorseMark';
 import { GitHubMark } from '../brand/GitHubMark';
 import { useOpenWorkspace } from '../../hooks/useOpenWorkspace';
 import { useCavalTheme } from '../../../../themes/theme-provider';
+import type { GitApi } from '../../../shared/git-contract';
 import {
   handleWelcomeCloneKeyDown,
   toggleWelcomeRecentList,
-  WELCOME_NO_RECENT_PROJECTS,
-  WELCOME_RECENT_PROJECTS_LABEL,
 } from './welcome-workspace-utils';
 
 interface RecentEntry {
@@ -41,6 +41,7 @@ function RecentProjectsIcon({ size = 20 }: { size?: number }) {
 }
 
 export function WelcomeWorkspacePanel() {
+  const { t } = useTranslation();
   const { theme } = useCavalTheme();
   const { openWorkspace } = useOpenWorkspace();
   const [repoUrl, setRepoUrl] = useState('');
@@ -74,15 +75,16 @@ export function WelcomeWorkspacePanel() {
   const handleClone = useCallback(async () => {
     const url = repoUrl.trim();
     if (!url) {
-      setError('Introdu un URL GitHub');
+      setError(t('welcome.needUrl'));
       return;
     }
     setCloning(true);
     setError(null);
     try {
-      const result = await window.caval.git.clone({ url });
-      if (!result.ok || !result.path) {
-        setError(result.error ?? 'Clone eșuat');
+      const git = window.caval.git as unknown as GitApi;
+      const result = await git.clone(url);
+      if (!result.path) {
+        setError(t('welcome.cloneFailed'));
         return;
       }
       await openWorkspace(result.path, 'clone');
@@ -94,7 +96,7 @@ export function WelcomeWorkspacePanel() {
     } finally {
       setCloning(false);
     }
-  }, [loadRecent, openWorkspace, repoUrl]);
+  }, [loadRecent, openWorkspace, repoUrl, t]);
 
   const handleRemoveRecent = useCallback(
     async (entryPath: string) => {
@@ -147,13 +149,22 @@ export function WelcomeWorkspacePanel() {
         justifyContent: 'center',
         background: '#0D1117',
         flexDirection: 'column',
-        gap: 16,
+        gap: 20,
         color: theme.colors.textMuted,
         userSelect: 'none',
-        padding: 24,
+        padding: '28px 24px 28px',
       }}
     >
-      <CavaloHorseMark size={88} />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '4px 10px 0',
+        }}
+      >
+        <CavalStudioHero size={280} />
+      </div>
 
       <div style={{ fontSize: 13, textAlign: 'center', lineHeight: 1.6, maxWidth: 520, width: '100%' }}>
         <div
@@ -164,13 +175,13 @@ export function WelcomeWorkspacePanel() {
             justifyContent: 'center',
             gap: 16,
             maxWidth: 460,
-            margin: '0 auto',
+            margin: '4px auto 0',
           }}
         >
           <button
             type="button"
             aria-expanded={showRecentList}
-            aria-label={WELCOME_RECENT_PROJECTS_LABEL}
+            aria-label={t('welcome.recentProjects')}
             onClick={() => setShowRecentList((current) => toggleWelcomeRecentList(current))}
             style={{ ...actionButtonStyle, marginRight: 'auto' }}
             onMouseEnter={(e) => setActionHover(e.currentTarget, true)}
@@ -179,11 +190,11 @@ export function WelcomeWorkspacePanel() {
             onBlur={(e) => setActionHover(e.currentTarget, false)}
           >
             <RecentProjectsIcon size={20} />
-            <span style={actionLabelStyle}>{WELCOME_RECENT_PROJECTS_LABEL}</span>
+            <span style={actionLabelStyle}>{t('welcome.recentProjects')}</span>
           </button>
           <button
             type="button"
-            aria-label="Clonează de pe GitHub"
+            aria-label={t('welcome.cloneAria')}
             aria-expanded={showCloneInput}
             disabled={cloning}
             onClick={revealCloneInput}
@@ -247,7 +258,7 @@ export function WelcomeWorkspacePanel() {
 
         {cloning && (
           <div style={{ fontSize: 12, color: '#00E0FF', marginTop: 8, marginBottom: 8 }}>
-            Se clonează repository-ul…
+            {t('welcome.cloning')}
           </div>
         )}
 
@@ -271,7 +282,7 @@ export function WelcomeWorkspacePanel() {
                   margin: '0 0 8px',
                 }}
               >
-                {WELCOME_NO_RECENT_PROJECTS}
+                {t('welcome.noRecent')}
               </p>
             )}
             {recent.length > 0 && (
@@ -310,7 +321,7 @@ export function WelcomeWorkspacePanel() {
                     </button>
                     <button
                       type="button"
-                      aria-label="Elimină din recente"
+                      aria-label={t('welcome.removeRecent')}
                       onClick={() => void handleRemoveRecent(entry.path)}
                       style={{
                         background: 'transparent',

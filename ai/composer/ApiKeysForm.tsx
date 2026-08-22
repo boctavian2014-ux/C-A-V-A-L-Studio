@@ -7,6 +7,9 @@ import {
   filterNonEmptySecretsPatch,
 } from '../models/api-secrets';
 import { formatCadDualHealthOneLine } from '../engineering/cad-dual-health';
+import { OLLAMA_LOOPBACK_URL, toProviderStatus, type LocalAiStatus } from '../../src/shared/local-ai-contract';
+import { OllamaProviderRow } from './AiProvidersPanel';
+import { useTranslation } from '../i18n/useTranslation';
 
 const KEY_FIELDS: Array<{ key: keyof ApiKeys; label: string; placeholder: string; hint?: string }> = [
   { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', hint: 'Claude Opus, Claude Sonnet' },
@@ -106,12 +109,13 @@ type PersistResult = {
 };
 
 export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProps) {
+  const { t } = useTranslation();
   const { apiKeys, setApiKey } = useAIStore();
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [providerDraft, setProviderDraft] = useState<Record<string, string>>({});
   const [providerSaved, setProviderSaved] = useState<Record<string, boolean>>({});
   const [openRouterDraft, setOpenRouterDraft] = useState('');
-  const [ollamaUrlDraft, setOllamaUrlDraft] = useState('http://localhost:11434');
+  const [ollamaUrlDraft, setOllamaUrlDraft] = useState<string>(OLLAMA_LOOPBACK_URL);
   const [openRouterSaved, setOpenRouterSaved] = useState(false);
   const [byokSaved, setByokSaved] = useState<Record<string, boolean>>({});
   const [healthChecking, setHealthChecking] = useState(false);
@@ -123,6 +127,19 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
   const [saveMessage, setSaveMessage] = useState<{ kind: 'ok' | 'err' | 'info'; text: string } | null>(
     null
   );
+  const [localAiStatus, setLocalAiStatus] = useState<LocalAiStatus | null>(null);
+
+  const refreshLocalAiStatus = async () => {
+    try {
+      const res = await window.caval.localAiStatus?.();
+      if (res?.ok && res.status) {
+        setLocalAiStatus(res.status);
+        if (res.status.configuredUrl) setOllamaUrlDraft(res.status.configuredUrl);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
 
   const refreshConfiguredBadges = async (): Promise<Record<string, boolean>> => {
     const res = await window.caval.secretsGet?.();
@@ -150,7 +167,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     void Promise.all([
       window.caval.settingsLoad?.(),
       window.caval.secretsGet?.(),
-    ]).then(([settingsRes, secretsRes]) => {
+    ]).then(([_settingsRes, secretsRes]) => {
       const configured = secretsRes?.configured ?? {};
       setOpenRouterDraft('');
       setOpenRouterSaved(Boolean(configured.OPENROUTER_API_KEY));
@@ -159,7 +176,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         openai: Boolean(configured.OPENAI_API_KEY),
         google: Boolean(configured.GOOGLE_API_KEY),
       });
-      setOllamaUrlDraft(settingsRes?.settings?.[OLLAMA_URL_SETTING] ?? 'http://localhost:11434');
+      setOllamaUrlDraft(OLLAMA_LOOPBACK_URL);
       const providerInitial: Record<string, string> = {};
       const saved: Record<string, boolean> = {};
       for (const { secretKey } of PROVIDER_SECRET_FIELDS) {
@@ -177,6 +194,7 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         },
       });
     });
+    void refreshLocalAiStatus();
   }, []);
 
   const buildFullSecretsPatch = (): Record<string, string> => {
@@ -251,8 +269,8 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
     }
   };
 
-  const saveOllamaUrl = async (value: string) => {
-    const trimmed = value.trim() || 'http://localhost:11434';
+  const saveOllamaUrl = async (_value?: string) => {
+    const trimmed = OLLAMA_LOOPBACK_URL;
     const settingsRes = await window.caval.settingsLoad?.();
     const settings = { ...(settingsRes?.settings ?? {}), [OLLAMA_URL_SETTING]: trimmed };
     await window.caval.settingsSave?.(settings);
@@ -418,16 +436,59 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
           Ollama URL
         </label>
         <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', marginBottom: 4 }}>
-          Modele locale: qwen2.5-coder:7b, llama3.1:8b, etc.
+          {t('ai.keys.localModelsHint')}
         </div>
         <input
           type="text"
           value={ollamaUrlDraft}
-          placeholder="http://localhost:11434"
+          placeholder={OLLAMA_LOOPBACK_URL}
+          readOnly
+          title="Ollama is loopback-only (127.0.0.1)"
           onChange={(e) => setOllamaUrlDraft(e.target.value)}
           onBlur={() => void saveOllamaUrl(ollamaUrlDraft)}
           style={inputStyle}
         />
+      </div>
+
+      <div
+        style={{
+          padding: '10px 12px',
+          borderRadius: 8,
+          background: 'var(--caval-bg)',
+          border: '1px solid var(--caval-border)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--caval-text)' }}>{t('ai.keys.localAiFree')}</div>
+          <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', marginTop: 2, lineHeight: 1.45 }}>
+            {t('ai.keys.localAiInstallHint')}
+          </div>
+        </div>
+        <OllamaProviderRow
+          status={localAiStatus}
+          providerStatus={localAiStatus ? toProviderStatus(localAiStatus) : 'not-installed'}
+          onStatusMaybeChanged={() => void refreshLocalAiStatus()}
+        />
+        {localAiStatus && (
+          <div style={{ fontSize: 10.5, color: 'var(--caval-text-muted)', lineHeight: 1.5 }}>
+            Runtime: {localAiStatus.installed ? 'instalat' : 'lipsește'}
+            {' · '}
+            Serviciu: {localAiStatus.running ? 'rulează' : 'oprit'}
+            {' · '}
+            Model implicit: {localAiStatus.defaultModelReady ? 'gata' : 'nedescărcat'}
+            {localAiStatus.models.length ? (
+              <>
+                <br />
+                Modele locale: {localAiStatus.models.join(', ')}
+              </>
+            ) : null}
+            <br />
+            {localAiStatus.policy}
+          </div>
+        )}
       </div>
 
       {KEY_FIELDS.map(({ key, label, placeholder, hint }) => {

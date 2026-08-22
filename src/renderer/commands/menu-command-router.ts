@@ -5,6 +5,7 @@ import { MONACO_ACTIONS, triggerMonacoAction } from '../store/editor-command-sto
 import { useEditorStore } from '../store/editor-store';
 import { useSettingsStore } from '../store/settings-store';
 import { useAIStore } from '../../../ai/composer/ai-store';
+import { tActive } from '../../../ai/i18n/active-locale';
 import {
   dispatchTerminalNew,
   dispatchTerminalPanelTab,
@@ -28,7 +29,7 @@ type Handler = (ctx: MenuCommandContext) => void | Promise<void>;
 
 const comingSoon = (label: string): Handler => () => {
   console.warn(`[menu] Not implemented: ${label}`);
-  showWorkbenchToast(`În curând: ${label}`);
+  showWorkbenchToast(tActive('toast.comingSoon', { label }));
 };
 
 const handlers: Record<MenuCommandId, Handler> = {
@@ -114,7 +115,7 @@ const handlers: Record<MenuCommandId, Handler> = {
   'switch-editor': comingSoon('Switch Editor'),
   'switch-group': comingSoon('Switch Group'),
   'go-to-file': (ctx) => ctx.openQuickOpen(),
-  'go-to-symbol-workspace': comingSoon('Go to Symbol in Workspace'),
+  'go-to-symbol-workspace': (ctx) => ctx.openWorkspaceSearch(),
   'go-to-symbol-editor': () => { triggerMonacoAction(MONACO_ACTIONS.goToSymbolEditor); },
   'go-to-definition': async (ctx) => { await ctx.openDefinition(); },
   'go-to-declaration': () => { triggerMonacoAction(MONACO_ACTIONS.goToDefinition); },
@@ -135,12 +136,12 @@ const handlers: Record<MenuCommandId, Handler> = {
   'next-problem': () => {
     const problem = useProblemsStore.getState().focusNext();
     if (problem) revealProblem(problem, useEditorStore.getState().projectPath);
-    else showWorkbenchToast('Nu există probleme');
+    else showWorkbenchToast(tActive('toast.noProblems'));
   },
   'previous-problem': () => {
     const problem = useProblemsStore.getState().focusPrevious();
     if (problem) revealProblem(problem, useEditorStore.getState().projectPath);
-    else showWorkbenchToast('Nu există probleme');
+    else showWorkbenchToast(tActive('toast.noProblems'));
   },
   'next-change': comingSoon('Next Change'),
   'previous-change': comingSoon('Previous Change'),
@@ -171,7 +172,7 @@ const handlers: Record<MenuCommandId, Handler> = {
   'run-selected-text': () => {
     const sel = useEditorStore.getState().editorSelection;
     if (!sel?.text) {
-      showWorkbenchToast('Selectează text pentru a rula');
+      showWorkbenchToast(tActive('toast.selectTextToRun'));
       return;
     }
     dispatchRunInTerminal(sel.text);
@@ -187,7 +188,7 @@ const handlers: Record<MenuCommandId, Handler> = {
   'editor-playground': comingSoon('Editor Playground'),
   accessibility: comingSoon('Accessibility Features'),
   feedback: () => {
-    showWorkbenchToast('Feedback: deschide Issues pe GitHub pentru Cavallo Studio.');
+    showWorkbenchToast(tActive('toast.feedback'));
   },
   license: (ctx) => {
     ctx.setActiveActivity('settings');
@@ -195,12 +196,12 @@ const handlers: Record<MenuCommandId, Handler> = {
     useSettingsStore.getState().setActiveSection('about');
   },
   'process-explorer': comingSoon('Process Explorer'),
-  'check-updates': () => showWorkbenchToast('Ești pe ultima versiune locală.'),
+  'check-updates': () => showWorkbenchToast(tActive('toast.upToDate')),
   about: (ctx) => {
     ctx.setActiveActivity('settings');
     ctx.setSidebarOpen(true);
     useSettingsStore.getState().setActiveSection('about');
-    showWorkbenchToast('CAVALLO™ — © "Dev AI" EOOD');
+    showWorkbenchToast(tActive('toast.about'));
   },
 };
 
@@ -211,7 +212,7 @@ export function handleMenuCommand(command: string, ctx: MenuCommandContext): voi
     return;
   }
   console.warn(`[menu] Unknown command: ${command}`);
-  showWorkbenchToast(`Comandă necunoscută: ${command}`);
+  showWorkbenchToast(tActive('toast.unknownCommand', { command }));
 }
 
 export function getMenuCommandHandlers(): Record<MenuCommandId, Handler> {

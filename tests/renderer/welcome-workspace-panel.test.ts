@@ -43,8 +43,8 @@ describe('welcome-workspace-utils', () => {
     expect(() => handleWelcomeCloneKeyDown('Enter', {})).not.toThrow();
   });
 
-  it('exposes the Romanian recent-projects labels', () => {
-    expect(WELCOME_RECENT_PROJECTS_LABEL).toBe('proiecte recente');
-    expect(WELCOME_NO_RECENT_PROJECTS).toBe('Niciun proiect recent');
+  it('exposes recent-projects label constants (i18n catalog is source of truth in UI)', () => {
+    expect(WELCOME_RECENT_PROJECTS_LABEL).toBe('Recent projects');
+    expect(WELCOME_NO_RECENT_PROJECTS).toBe('No recent projects');
   });
 });

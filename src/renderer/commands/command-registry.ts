@@ -1,4 +1,5 @@
 import {
+  dispatchTerminalAiPalette,
   dispatchTerminalNew,
   dispatchTerminalPanelTab,
   dispatchTerminalToggle,
@@ -12,6 +13,7 @@ export interface WorkbenchCommandContext {
   setActiveActivity: (tab: WorkbenchActivity) => void;
   setSidebarOpen: (open: boolean) => void;
   openQuickOpen: () => void;
+  openWorkspaceSearch: () => void;
   saveActiveTab: () => void;
   openFolder: () => Promise<void>;
   runWorkspaceVerify: () => Promise<void>;
@@ -73,6 +75,14 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       run: () => ctx.openQuickOpen(),
     },
     {
+      id: 'nav:workspace-search',
+      label: 'Search Workspace Symbols',
+      category: 'Navigation',
+      shortcut: 'Ctrl+T',
+      keywords: ['symbol', 'search', 'goto', 'index', 'import', 'export'],
+      run: () => ctx.openWorkspaceSearch(),
+    },
+    {
       id: 'view:shortcuts',
       label: 'View: Keyboard Shortcuts',
       category: 'View',
@@ -101,6 +111,28 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       run: () => dispatchTerminalToggle(),
     },
     {
+      id: 'terminal:ai-explain',
+      label: 'Terminal: Explain with AI',
+      category: 'Terminal',
+      shortcut: 'Ctrl+Shift+E',
+      keywords: ['explain', 'ai', 'terminal', 'output'],
+      run: () => {
+        dispatchTerminalPanelTab('terminal');
+        dispatchTerminalAiPalette('explain');
+      },
+    },
+    {
+      id: 'terminal:ai-suggest-fix',
+      label: 'Terminal: Suggest fix with AI',
+      category: 'Terminal',
+      shortcut: 'Ctrl+Shift+F',
+      keywords: ['suggest', 'fix', 'ai', 'terminal', 'error'],
+      run: () => {
+        dispatchTerminalPanelTab('terminal');
+        dispatchTerminalAiPalette('suggest-fix');
+      },
+    },
+    {
       id: 'view:output',
       label: 'View: Output',
       category: 'View',
@@ -116,11 +148,40 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       run: () => dispatchTerminalPanelTab('problems'),
     },
     {
+      id: 'view:tasks',
+      label: 'View: Tasks',
+      category: 'View',
+      keywords: ['tasks', 'npm', 'scripts', 'run'],
+      run: () => dispatchTerminalPanelTab('tasks'),
+    },
+    {
       id: 'view:toggle-sidebar',
       label: 'View: Toggle Sidebar',
       category: 'View',
       shortcut: 'Ctrl+B',
       run: () => ctx.toggleSidebar(),
+    },
+    {
+      id: 'preview:open-web',
+      label: 'Preview: Open Web',
+      category: 'Preview',
+      keywords: ['preview', 'web', 'run', 'dev', 'browser'],
+      run: () => {
+        ctx.setActiveActivity('explorer');
+        ctx.setSidebarOpen(true);
+        void window.caval?.preview?.start('web');
+      },
+    },
+    {
+      id: 'preview:open-mobile',
+      label: 'Preview: Open Mobile',
+      category: 'Preview',
+      keywords: ['preview', 'mobile', 'expo', 'run'],
+      run: () => {
+        ctx.setActiveActivity('explorer');
+        ctx.setSidebarOpen(true);
+        void window.caval?.preview?.start('mobile');
+      },
     },
     {
       id: 'run:tests',

@@ -4,6 +4,7 @@ import { useSettingsStore, type SettingsSection } from '../../store/settings-sto
 import { useEditorStore } from '../../store/editor-store';
 import { useAIStore } from '../../../../ai/composer/ai-store';
 import { ApiKeysForm } from '../../../../ai/composer/ApiKeysForm';
+import { AiProvidersPanel } from '../../../../ai/composer/AiProvidersPanel';
 import { CavaloHorseMark } from '../brand/CavaloHorseMark';
 import {
   PUBLISHER_ADDRESS_LINES,
@@ -17,11 +18,20 @@ import {
 } from '../../../shared/publisher-legal';
 import { formatCadDualHealth } from '../../../../ai/engineering/cad-dual-health';
 import { ProjectHealthPanel } from '../health/ProjectHealthPanel';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import {
+  createTranslator,
+  LOCALE_NATIVE_LABELS,
+  SUPPORTED_LOCALES,
+  type AppLocale,
+} from '../../../../ai/i18n/index';
+import type { MessageKey } from '../../../../ai/i18n/locales/en';
+import { showWorkbenchToast } from '../../commands/workbench-toast';
 
-const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
+const NAV_ITEMS: { id: SettingsSection; labelKey: MessageKey; icon: React.ReactNode }[] = [
   {
     id: 'general',
-    label: 'General',
+    labelKey: 'settings.nav.general',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="12" r="3" />
@@ -31,7 +41,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'editor',
-    label: 'Editor',
+    labelKey: 'settings.nav.editor',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <polyline points="16 18 22 12 16 6" strokeLinecap="round" strokeLinejoin="round" />
@@ -41,7 +51,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'ai',
-    label: 'AI & Chei API',
+    labelKey: 'settings.nav.ai',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z" strokeLinejoin="round" />
@@ -51,7 +61,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'arena',
-    label: 'Coding Arena',
+    labelKey: 'settings.nav.arena',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M4 6h16M4 12h10M4 18h16" strokeLinecap="round" />
@@ -60,7 +70,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'cad-cloud',
-    label: 'Robotics & CAD',
+    labelKey: 'settings.nav.cad',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M12 2L2 7l10 5 10-5-10-5z" strokeLinejoin="round" />
@@ -70,7 +80,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'health',
-    label: 'Project Health',
+    labelKey: 'settings.nav.health',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path d="M22 12h-4l-3 9L9 3l-3 9H2" strokeLinecap="round" strokeLinejoin="round" />
@@ -79,7 +89,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'shortcuts',
-    label: 'Scurtături',
+    labelKey: 'settings.nav.shortcuts',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <rect x="2" y="4" width="20" height="16" rx="2" />
@@ -89,7 +99,7 @@ const NAV_ITEMS: { id: SettingsSection; label: string; icon: React.ReactNode }[]
   },
   {
     id: 'about',
-    label: 'Despre CAVALLO',
+    labelKey: 'settings.nav.about',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <circle cx="12" cy="12" r="10" />
@@ -253,6 +263,7 @@ function InfoBox({ children }: { children: React.ReactNode }) {
 function SectionGeneral() {
   const { app, updateApp } = useSettingsStore();
   const { mode, setMode } = useCavalTheme();
+  const { t, locale, setLocale } = useTranslation();
 
   const setTheme = (theme: 'dark' | 'light') => {
     updateApp({ theme });
@@ -265,25 +276,30 @@ function SectionGeneral() {
 
   return (
     <>
-      <Section title="Aspect">
-        <Row label="Temă" desc="Dark sau light pentru întreaga aplicație">
+      <Section title={t('settings.appearance')}>
+        <Row label={t('settings.theme')} desc={t('settings.themeDesc')}>
           <Select
             value={app.theme}
             onChange={setTheme}
             options={[
-              { value: 'dark', label: 'Dark' },
-              { value: 'light', label: 'Light' },
+              { value: 'dark', label: t('settings.theme.dark') },
+              { value: 'light', label: t('settings.theme.light') },
             ]}
           />
         </Row>
-        <Row label="Limbă" desc="Interfață (i18n în curs)">
+        <Row label={t('settings.displayLanguage')} desc={t('settings.displayLanguageHint')}>
           <Select
-            value={app.language}
-            onChange={(v) => updateApp({ language: v })}
-            options={[
-              { value: 'ro', label: 'Română' },
-              { value: 'en', label: 'English' },
-            ]}
+            value={locale}
+            onChange={(v) => {
+              const next = v as AppLocale;
+              void setLocale(next).then(() => {
+                showWorkbenchToast(createTranslator(next)('settings.localeChanged'));
+              });
+            }}
+            options={SUPPORTED_LOCALES.map((id) => ({
+              value: id,
+              label: LOCALE_NATIVE_LABELS[id],
+            }))}
           />
         </Row>
       </Section>
@@ -293,28 +309,29 @@ function SectionGeneral() {
 
 function SectionEditor() {
   const { app, updateApp } = useSettingsStore();
+  const { t } = useTranslation();
 
   return (
     <>
-      <Section title="Monaco Editor">
-        <Row label="Font size" desc="Dimensiunea fontului în editor">
+      <Section title={t('settings.editor.title')}>
+        <Row label={t('settings.editor.fontSize')} desc={t('settings.editor.fontSizeDesc')}>
           <NumberInput value={app.fontSize} onChange={(v) => updateApp({ fontSize: v })} min={8} max={32} />
         </Row>
-        <Row label="Tab size">
+        <Row label={t('settings.editor.tabSize')}>
           <Select
             value={String(app.tabSize) as '2' | '4' | '8'}
             onChange={(v) => updateApp({ tabSize: parseInt(v, 10) })}
             options={[
-              { value: '2', label: '2 spații' },
-              { value: '4', label: '4 spații' },
-              { value: '8', label: '8 spații' },
+              { value: '2', label: t('settings.editor.spaces', { count: 2 }) },
+              { value: '4', label: t('settings.editor.spaces', { count: 4 }) },
+              { value: '8', label: t('settings.editor.spaces', { count: 8 }) },
             ]}
           />
         </Row>
-        <Row label="Word wrap" desc="Înfășoară liniile lungi">
+        <Row label={t('settings.editor.wordWrap')} desc={t('settings.editor.wordWrapDesc')}>
           <Toggle value={app.wordWrap} onChange={(v) => updateApp({ wordWrap: v })} />
         </Row>
-        <Row label="Minimap" desc="Harta minimă din dreapta editorului">
+        <Row label={t('settings.editor.minimap')} desc={t('settings.editor.minimapDesc')}>
           <Toggle value={app.minimap} onChange={(v) => updateApp({ minimap: v })} />
         </Row>
       </Section>
@@ -323,44 +340,46 @@ function SectionEditor() {
 }
 
 function SectionAi() {
+  const { t } = useTranslation();
   return (
-    <Section title="Provideri & chei API">
-      <ApiKeysForm showSaveButton />
-    </Section>
+    <>
+      <Section title={t('settings.ai.providersSection')}>
+        <AiProvidersPanel />
+      </Section>
+      <Section title={t('settings.ai.legacySection')}>
+        <ApiKeysForm showSaveButton />
+      </Section>
+    </>
   );
 }
 
 function SectionArena() {
   const { strictReview, setStrictReview } = useAIStore();
   const projectPath = useEditorStore((s) => s.projectPath);
+  const { t } = useTranslation();
 
   return (
     <>
-      <Section title="Pipeline agentic">
+      <Section title={t('settings.arena.pipeline')}>
         <Row
-          label="Review strict"
-          desc="Pipeline complet multi-agent; dezactivat = fast pipeline când e permis în caval.jsonc"
+          label={t('settings.arena.strictReview')}
+          desc={t('settings.arena.strictReviewDesc')}
         >
           <Toggle value={strictReview} onChange={setStrictReview} />
         </Row>
       </Section>
 
-      <Section title="Sesiune chat">
+      <Section title={t('settings.arena.chatSession')}>
         <InfoBox>
-          Un singur chat activ per folder deschis. Click „Chat nou” arhivează conversația curentă;
-          istoricul rămâne local, dar nu apare ca tab-uri vechi.
+          {t('settings.arena.chatSessionHint')}
         </InfoBox>
       </Section>
 
-      <Section title="Config avansat">
+      <Section title={t('settings.arena.advanced')}>
         <InfoBox>
-          Modele implicite per mod (Ask, Code, Agentic, Plan, Debug), multi-agent, MCP și zero-latency
-          se configurează în <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>caval.jsonc</code>
-          {projectPath ? (
-            <> din rădăcina proiectului deschis.</>
-          ) : (
-            <> — deschide un folder de proiect.</>
-          )}
+          {projectPath
+            ? t('settings.arena.advancedHintOpen')
+            : t('settings.arena.advancedHintClosed')}
         </InfoBox>
       </Section>
     </>
@@ -368,6 +387,7 @@ function SectionArena() {
 }
 
 function SectionCadCloud() {
+  const { t } = useTranslation();
   const [apiUrl, setApiUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [healthMsg, setHealthMsg] = useState<string | null>(null);
@@ -440,7 +460,7 @@ function SectionCadCloud() {
 
     if (!health) {
       setHealthTone('err');
-      setHealthMsg('CAD API indisponibil în aplicație.');
+      setHealthMsg(t('settings.cad.unavailable'));
       return;
     }
 
@@ -467,17 +487,17 @@ function SectionCadCloud() {
 
   return (
     <div>
-      <Section title="Server CAD cloud">
+      <Section title={t('settings.cad.server')}>
         <p style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.5, margin: '0 0 10px' }}>
-          Generarea STL 3D pentru Robotics rulează pe serverul cloud (OpenSCAD în Docker).
-          {cloudOnly ? ' Mod cloud-only activ.' : ''}
+          {t('settings.cad.serverDesc')}
+          {cloudOnly ? ` ${t('settings.cad.cloudOnly')}` : ''}
         </p>
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>URL API CAD</div>
+          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>{t('settings.cad.apiUrl')}</div>
           <Input value={apiUrl} onChange={setApiUrl} placeholder="https://xxx.up.railway.app" mono />
         </div>
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Cheie API CAD (opțional)</div>
+          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>{t('settings.cad.apiKey')}</div>
           <Input value={apiKey} onChange={setApiKey} placeholder="CAD_API_KEY" type="password" mono />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -489,7 +509,7 @@ function SectionCadCloud() {
               background: 'transparent', color: 'var(--caval-text)', fontSize: 12, cursor: 'pointer',
             }}
           >
-            Salvează
+            {t('settings.cad.save')}
           </button>
           <button
             type="button"
@@ -501,7 +521,7 @@ function SectionCadCloud() {
               fontSize: 12, fontWeight: 600, cursor: testing ? 'wait' : 'pointer',
             }}
           >
-            {testing ? 'Testez…' : 'Testează conexiunea'}
+            {testing ? t('settings.cad.testing') : t('settings.cad.test')}
           </button>
         </div>
         {healthMsg && (
@@ -514,47 +534,49 @@ function SectionCadCloud() {
         )}
       </Section>
 
-      <Section title="Chei conexe (local)">
+      <Section title={t('settings.cad.relatedKeys')}>
         <InfoBox>
-          Local — PiAPI Trellis: {piapiOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          {piapiOk ? t('settings.cad.piapiOk') : t('settings.cad.piapiMissing')}
           {' · '}
-          Meshy (fallback): {meshyOk ? 'configurat ✓' : 'opțional'}
+          {meshyOk ? t('settings.cad.meshyOk') : t('settings.cad.meshyOptional')}
           <br />
-          Local — OpenRouter: {openRouterOk ? 'configurat ✓' : 'neconfigurat — setează în AI & Chei API'}
+          {openRouterOk ? t('settings.cad.openRouterOk') : t('settings.cad.openRouterMissing')}
           <br />
-          Cloud (/health) arată doar variabilele Railway. Apasă „Testează conexiunea” pentru Local vs Cloud.
+          {t('settings.cad.cloudHealthHint')}
         </InfoBox>
       </Section>
     </div>
   );
 }
 
-const SHORTCUTS = [
-  { action: 'Toggle panou AI', keys: ['Ctrl', 'Shift', 'A'] },
-  { action: 'Command Palette', keys: ['Ctrl', 'Shift', 'P'] },
-  { action: 'Quick Open fișier', keys: ['Ctrl', 'P'] },
-  { action: 'Toggle Explorer', keys: ['Ctrl', 'Shift', 'E'] },
-  { action: 'Toggle Git', keys: ['Ctrl', 'Shift', 'G'] },
-  { action: 'Setări', keys: ['Ctrl', ','] },
-  { action: 'Salvează fișier', keys: ['Ctrl', 'S'] },
-  { action: 'Deschide folder', keys: ['Ctrl', 'O'] },
-  { action: 'Caută în proiect', keys: ['Ctrl', 'Shift', 'F'] },
-  { action: 'Commit rapid (Git)', keys: ['Ctrl', 'Enter'] },
+const SHORTCUT_DEFS: { actionKey: MessageKey; keys: string[] }[] = [
+  { actionKey: 'settings.shortcuts.toggleAi', keys: ['Ctrl', 'Shift', 'A'] },
+  { actionKey: 'settings.shortcuts.commandPalette', keys: ['Ctrl', 'Shift', 'P'] },
+  { actionKey: 'settings.shortcuts.quickOpen', keys: ['Ctrl', 'P'] },
+  { actionKey: 'settings.shortcuts.workspaceSymbols', keys: ['Ctrl', 'T'] },
+  { actionKey: 'settings.shortcuts.toggleExplorer', keys: ['Ctrl', 'Shift', 'E'] },
+  { actionKey: 'settings.shortcuts.toggleGit', keys: ['Ctrl', 'Shift', 'G'] },
+  { actionKey: 'settings.shortcuts.settings', keys: ['Ctrl', ','] },
+  { actionKey: 'settings.shortcuts.saveFile', keys: ['Ctrl', 'S'] },
+  { actionKey: 'settings.shortcuts.openFolder', keys: ['Ctrl', 'O'] },
+  { actionKey: 'settings.shortcuts.searchProject', keys: ['Ctrl', 'Shift', 'F'] },
+  { actionKey: 'settings.shortcuts.quickCommit', keys: ['Ctrl', 'Enter'] },
 ];
 
 function SectionShortcuts() {
+  const { t } = useTranslation();
   return (
-    <Section title="Scurtături tastatură">
+    <Section title={t('settings.shortcuts.title')}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {SHORTCUTS.map(({ action, keys }) => (
+        {SHORTCUT_DEFS.map(({ actionKey, keys }) => (
           <div
-            key={action}
+            key={actionKey}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
             }}
           >
-            <span style={{ fontSize: 12, color: 'var(--caval-text)' }}>{action}</span>
+            <span style={{ fontSize: 12, color: 'var(--caval-text)' }}>{t(actionKey)}</span>
             <div style={{ display: 'flex', gap: 4 }}>
               {keys.map((k) => (
                 <kbd key={k} style={{
@@ -579,6 +601,7 @@ function SectionHealth() {
 }
 
 function SectionAbout() {
+  const { t } = useTranslation();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{
@@ -591,19 +614,18 @@ function SectionAbout() {
         <CavaloHorseMark size={52} />
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--caval-text)', letterSpacing: '0.06em' }}>
-            CAVALLO™
+            {t('settings.about.brand')}
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)', marginTop: 2 }}>
-            Version 0.1.0 · Build 2026.07
+            {t('settings.about.version', { version: '0.1.0', build: '2026.07' })}
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', lineHeight: 1.6, maxWidth: 300 }}>
-          IDE pentru dezvoltatori — Monaco Editor, Coding Arena cu pipeline agentic,
-          OpenRouter multi-model, Robotics CAD și Git integrat.
+          {t('settings.about.tagline')}
         </div>
       </div>
 
-      <Section title="Copyright & trademark">
+      <Section title={t('settings.about.copyright')}>
         <div style={{
           fontSize: 12, color: 'var(--caval-text)', lineHeight: 1.55,
           display: 'flex', flexDirection: 'column', gap: 8,
@@ -614,7 +636,7 @@ function SectionAbout() {
         </div>
       </Section>
 
-      <Section title="Publisher">
+      <Section title={t('settings.about.publisher')}>
         <div style={{
           fontSize: 12, color: 'var(--caval-text)', lineHeight: 1.55,
           display: 'flex', flexDirection: 'column', gap: 4,
@@ -634,16 +656,16 @@ function SectionAbout() {
         </div>
       </Section>
 
-      <Section title="Stack">
-        {[
-          ['Runtime', 'Electron + Node.js'],
-          ['UI', 'React + TypeScript'],
-          ['Editor', 'Monaco Editor'],
-          ['AI', 'OpenRouter · Ollama · BYOK'],
-          ['Engineering', 'CAD cloud · OpenSCAD · TRELLIS / Meshy'],
-          ['Git', 'Integrat în workbench'],
-        ].map(([k, v]) => (
-          <Row key={k} label={k}>
+      <Section title={t('settings.about.stack')}>
+        {([
+          ['settings.about.stack.runtime', 'Electron + Node.js'],
+          ['settings.about.stack.ui', 'React + TypeScript'],
+          ['settings.about.stack.editor', 'Monaco Editor'],
+          ['settings.about.stack.ai', 'OpenRouter · Ollama · BYOK'],
+          ['settings.about.stack.engineering', 'CAD cloud · OpenSCAD · TRELLIS / Meshy'],
+          ['settings.about.stack.git', t('settings.about.stack.gitValue')],
+        ] as const).map(([k, v]) => (
+          <Row key={k} label={t(k)}>
             <span style={{ fontSize: 11, color: 'var(--caval-text-muted)' }}>{v}</span>
           </Row>
         ))}
@@ -654,6 +676,12 @@ function SectionAbout() {
 
 export function SettingsPanel({ onClose }: { onClose?: () => void }) {
   const { activeSection, setActiveSection } = useSettingsStore();
+  const { t } = useTranslation();
+
+  const navItems = NAV_ITEMS.map((item) => ({
+    ...item,
+    label: t(item.labelKey),
+  }));
 
   const renderContent = () => {
     switch (activeSection) {
@@ -669,7 +697,7 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
     }
   };
 
-  const currentNav = NAV_ITEMS.find((n) => n.id === activeSection);
+  const currentNav = navItems.find((n) => n.id === activeSection);
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--caval-bg)' }}>
@@ -684,9 +712,9 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
           borderBottom: '1px solid var(--caval-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--caval-text)' }}>Setări</span>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--caval-text)' }}>{t('nav.settings')}</span>
           {onClose && (
-            <button type="button" onClick={onClose} style={{
+            <button type="button" onClick={onClose} title={t('common.close')} aria-label={t('common.close')} style={{
               width: 20, height: 20, border: 'none', background: 'none',
               color: 'var(--caval-text-muted)', cursor: 'pointer', fontSize: 15,
             }}>×</button>
@@ -694,7 +722,7 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
         </div>
 
         <div style={{ overflowY: 'auto', flex: 1, padding: '6px 6px' }}>
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <button
               key={item.id}
               type="button"

@@ -1,8 +1,9 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import "xterm/css/xterm.css";
+import "@xterm/xterm/css/xterm.css";
 import "./styles/glass.css";
 import { WorkbenchRoot } from "./WorkbenchRoot";
+import { I18nProvider } from "../../ai/i18n/I18nProvider";
 
 class WorkbenchErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -28,7 +29,7 @@ class WorkbenchErrorBoundary extends React.Component<
           color: "#F5F7FA",
           fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
         }}>
-          <h1 style={{ margin: "0 0 12px", fontSize: 18 }}>CAVALLO Studio — eroare UI</h1>
+          <h1 style={{ margin: "0 0 12px", fontSize: 18 }}>CAVAL Studio — eroare UI</h1>
           <button
             type="button"
             onClick={() => window.location.reload()}
@@ -72,7 +73,9 @@ if (rootElement) {
   });
   createRoot(rootElement).render(
     <WorkbenchErrorBoundary>
-      <WorkbenchRoot />
+      <I18nProvider>
+        <WorkbenchRoot />
+      </I18nProvider>
     </WorkbenchErrorBoundary>
   );
 } else {

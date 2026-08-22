@@ -10,7 +10,7 @@ describe("pipelineEventBus", () => {
     pipelineEventBus.emit({ type: "pipeline.start", timestamp: Date.now() });
     expect(events).toEqual(["pipeline.start"]);
     unsubscribe();
-    pipelineEventBus.emit({ type: "pipeline.end", timestamp: Date.now() });
+    pipelineEventBus.emit({ type: "pipeline.finish", timestamp: Date.now() });
     expect(events).toEqual(["pipeline.start"]);
   });
 });

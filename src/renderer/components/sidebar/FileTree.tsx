@@ -5,6 +5,7 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
 import { IconFolder } from '../brand/CavaloIcons';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -53,25 +54,26 @@ interface ContextMenuState {
 
 function ContextMenu({ state, onClose }: { state: ContextMenuState; onClose: () => void }) {
   const { refreshTree } = useEditorStore();
+  const { t } = useTranslation();
 
   const handle = async (action: string) => {
     onClose();
     if (action === 'reveal') {
       await window.caval.fs.reveal(state.node.path);
     } else if (action === 'delete') {
-      if (confirm(`Ștergi "${state.node.name}"?`)) {
+      if (confirm(t('explorer.confirmDelete', { name: state.node.name }))) {
         await window.caval.fs.delete(state.node.path);
         await refreshTree();
       }
     } else if (action === 'newFile' && state.node.type === 'directory') {
-      const name = prompt('Nume fișier nou:');
+      const name = prompt(t('explorer.newFilePrompt'));
       if (name) {
         const newPath = `${state.node.path}/${name}`.replace(/\\/g, '/');
         await window.caval.fs.createFile(newPath);
         await refreshTree();
       }
     } else if (action === 'newDir' && state.node.type === 'directory') {
-      const name = prompt('Nume director nou:');
+      const name = prompt(t('explorer.newFolderPrompt'));
       if (name) {
         const newPath = `${state.node.path}/${name}`.replace(/\\/g, '/');
         await window.caval.fs.createDir(newPath);
@@ -91,14 +93,14 @@ function ContextMenu({ state, onClose }: { state: ContextMenuState; onClose: () 
     >
       {state.node.type === 'directory' && (
         <>
-          <MenuItem label="Fișier nou" onClick={() => handle('newFile')} />
-          <MenuItem label="Director nou" onClick={() => handle('newDir')} />
+          <MenuItem label={t('explorer.newFile')} onClick={() => handle('newFile')} />
+          <MenuItem label={t('explorer.newFolder')} onClick={() => handle('newDir')} />
           <div style={{ height: 1, background: 'var(--caval-border)', margin: '4px 0' }} />
         </>
       )}
-      <MenuItem label="Deschide în Explorer" onClick={() => handle('reveal')} />
+      <MenuItem label={t('explorer.reveal')} onClick={() => handle('reveal')} />
       <div style={{ height: 1, background: 'var(--caval-border)', margin: '4px 0' }} />
-      <MenuItem label="Șterge" onClick={() => handle('delete')} danger />
+      <MenuItem label={t('explorer.delete')} onClick={() => handle('delete')} danger />
     </div>
   );
 }
@@ -217,6 +219,7 @@ function TreeNode({
 export function FileTree({ onClose }: { onClose?: () => void }) {
   const { fileTree, projectPath, refreshTree } = useEditorStore();
   const { theme } = useCavalTheme();
+  const { t } = useTranslation();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const { pickAndOpenFolder } = useOpenWorkspace();
@@ -230,10 +233,13 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
     setContextMenu({ x: e.clientX, y: e.clientY, node });
   };
 
-  const projectName = projectPath?.split(/[/\\]/).pop() ?? 'Fără proiect';
+  const projectName = projectPath?.split(/[/\\]/).pop() ?? t('explorer.noProject');
 
   return (
-    <div style={{
+    <div
+      className="explorer-panel"
+      data-testid="explorer-root"
+      style={{
       width: 240,
       background: theme.colors.surface,
       borderRight: `1px solid ${theme.colors.border}`,
@@ -255,33 +261,36 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
           {projectName}
         </span>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <IconBtn title="Deschide folder" onClick={handleOpenFolder}>
+          <IconBtn title={t('common.openFolder')} onClick={handleOpenFolder}>
             <Cavalo3DIcon name="home" size={18} />
           </IconBtn>
-          <IconBtn title="Reîmprospătează" onClick={refreshTree}>
+          <IconBtn title={t('explorer.refresh')} onClick={refreshTree}>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M2 8a6 6 0 106-6H5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
               <path d="M3 5l2-3-2-0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
             </svg>
           </IconBtn>
-          {onClose && <SidebarCloseButton onClick={onClose} />}
+          {onClose && <SidebarCloseButton onClick={onClose} title={t('common.close')} />}
         </div>
       </div>
 
       {/* Tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}
         onClick={() => contextMenu && setContextMenu(null)}
+        className="explorer-panel"
+        data-testid="explorer-panel"
       >
         {fileTree.length === 0 ? (
           <div style={{
             padding: '24px 16px', textAlign: 'center',
             color: theme.colors.textMuted, fontSize: 12, lineHeight: 1.6,
-          }}>
+          }} data-testid="explorer-empty-state">
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
               <Cavalo3DIcon name="home" size={44} />
             </div>
-            <div>Deschide un folder</div>
-            <div>pentru a începe</div>
+            <p style={{ margin: 0 }}>
+              {projectPath ? t('explorer.openFolderHint') : t('explorer.empty')}
+            </p>
             <button
               onClick={handleOpenFolder}
               style={{
@@ -291,7 +300,7 @@ export function FileTree({ onClose }: { onClose?: () => void }) {
                 cursor: 'pointer', fontWeight: 600,
               }}
             >
-              Deschide proiect
+              {t('common.openFolder')}
             </button>
           </div>
         ) : (

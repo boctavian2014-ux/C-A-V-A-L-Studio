@@ -7,7 +7,8 @@ import { modelProfiles, getModelProfile, type ModelProfile } from "../model-prof
 import type { RoutingIntent } from "../types";
 import type { AutoTierId, ModelSelectionId } from "./model-catalog";
 import { isAutoTier } from "./model-catalog";
-import { getOllamaBaseUrl, isOllamaReachable } from "./ollama-client";
+import { isOllamaReachable } from "./ollama-client";
+import { OLLAMA_TAGS_URL } from "../../src/shared/local-ai-contract";
 
 import { hasOpenRouterKey } from "./model-readiness";
 
@@ -19,8 +20,6 @@ export interface ResolvedModel {
   reason: string;
 }
 
-const OLLAMA_TAGS_URL = getOllamaBaseUrl();
-
 let installedOllamaModels: string[] | null = null;
 let ollamaFetchedAt = 0;
 const OLLAMA_CACHE_MS = 30_000;
@@ -30,10 +29,10 @@ async function getInstalledOllamaModels(): Promise<string[]> {
     return installedOllamaModels;
   }
   try {
-    const res = await fetch(`${OLLAMA_TAGS_URL}/api/tags`);
+    const res = await fetch(OLLAMA_TAGS_URL);
     if (!res.ok) return installedOllamaModels ?? [];
     const json = (await res.json()) as { models?: Array<{ name: string }> };
-    installedOllamaModels = (json.models ?? []).map((m) => m.name.split(":")[0] === m.name ? m.name : m.name);
+    installedOllamaModels = (json.models ?? []).map((m) => m.name);
     ollamaFetchedAt = Date.now();
     return installedOllamaModels;
   } catch {
@@ -66,6 +65,21 @@ function sortForAutoFree(profiles: ModelProfile[]): ModelProfile[] {
     const bRank = bi === -1 ? 99 : bi;
     return aRank - bRank || b.defaultScore - a.defaultScore;
   });
+}
+
+async function resolveLocalOllama(tier: AutoTierId): Promise<ResolvedModel | null> {
+  const reachable = await isOllamaReachable();
+  if (!reachable) return null;
+  const installed = await getInstalledOllamaModels();
+  const ranked = rankLocalFree(installed);
+  const best = ranked[0];
+  if (!best) return null;
+  return {
+    selectionId: tier,
+    modelId: best.id,
+    provider: "open_source",
+    reason: `Auto ${tier.split("/")[1]}: ${best.id} (local Ollama)`,
+  };
 }
 
 function rankLocalFree(installed: string[]): ModelProfile[] {
@@ -127,29 +141,22 @@ export async function resolveAutoModel(
 ): Promise<ResolvedModel> {
   const router = new ModelRouter();
 
-  if (tier === "caval-auto/free") {
-    if (hasOpenRouterKey()) {
+  if (tier === "caval-auto/free" || !hasOpenRouterKey()) {
+    const local = await resolveLocalOllama(tier);
+    if (local) return local;
+    if (tier === "caval-auto/free" && hasOpenRouterKey()) {
       return {
         selectionId: tier,
         modelId: "stepfun-step-3-7-flash",
         provider: "openrouter",
-        reason: "Auto Free: OpenRouter activ — StepFun Flash (rapid, cloud)",
+        reason: "Auto Free: Ollama indisponibil — fallback OpenRouter",
       };
     }
-    const installed = await getInstalledOllamaModels();
-    const ranked = rankLocalFree(installed);
-    const [best] = ranked;
-    const modelId = best?.id ?? "qwen2.5-coder:7b";
-    const reachable = await isOllamaReachable();
     return {
       selectionId: tier,
-      modelId,
+      modelId: "qwen2.5-coder:7b",
       provider: "open_source",
-      reason: !reachable
-        ? "Auto Free: Ollama nu răspunde — va încerca qwen2.5-coder:7b"
-        : installed.length > 0
-          ? `Auto Free: ${modelId} (instalat local)`
-          : `Auto Free: ${modelId} (fallback — rulează ollama pull ${modelId})`,
+      reason: "Auto: Ollama nu răspunde — activează Local AI din Settings",
     };
   }
 

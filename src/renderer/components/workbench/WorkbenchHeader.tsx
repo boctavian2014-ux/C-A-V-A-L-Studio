@@ -1,13 +1,16 @@
 import React from 'react';
 import { SidebarToggleButton } from './SidebarCloseButton';
 import { CavaloLogo } from '../brand/CavaloHorseMark';
+import { IconAccount } from '../brand/CavaloIcons';
 import { dispatchTerminalNew, dispatchTerminalToggle } from '../../terminal/terminal-events';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
 export interface WorkbenchHeaderProps {
   engineeringOpen: boolean;
   onToggleEngineering: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  onOpenAccount: () => void;
 }
 
 export function WorkbenchHeader({
@@ -15,7 +18,10 @@ export function WorkbenchHeader({
   onToggleEngineering,
   sidebarOpen,
   onToggleSidebar,
+  onOpenAccount,
 }: WorkbenchHeaderProps) {
+  const { t } = useTranslation();
+
   return (
     <header
       className="glass-panel"
@@ -23,11 +29,11 @@ export function WorkbenchHeader({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 12,
-        padding: '0 12px',
-        minHeight: 38,
+        gap: 14,
+        padding: '0 14px 0 12px',
+        minHeight: 46,
         borderBottom: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
-        borderTop: '2px solid var(--caval-accent)',
+        borderTop: 'none',
         borderLeft: 'none',
         borderRight: 'none',
         color: 'var(--caval-text-muted)',
@@ -40,23 +46,24 @@ export function WorkbenchHeader({
         style={{
           display: 'flex',
           alignItems: 'center',
+          paddingTop: 2,
           minWidth: 0,
           flex: 1,
         }}
       >
-        <CavaloLogo height={24} />
+        <CavaloLogo height={28} />
       </div>
 
       <nav
-        aria-label="Workbench toolbar"
-        style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}
+        aria-label={t('workbench.toolbarAria')}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
       >
         <SidebarToggleButton sidebarOpen={sidebarOpen} onClick={onToggleSidebar} />
         <button
           type="button"
           className="glass-panel-interactive"
-          title="Terminal nou (Ctrl+Shift+`)"
-          aria-label="Terminal nou"
+          title={t('workbench.newTerminalTitle')}
+          aria-label={t('terminal.newShort')}
           onClick={() => dispatchTerminalNew()}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -82,8 +89,8 @@ export function WorkbenchHeader({
         <button
           type="button"
           className={engineeringOpen ? 'glow-accent' : 'glass-panel-interactive'}
-          title="Robotics AI ULTRA"
-          aria-label="Robotics AI ULTRA"
+          title={t('workbench.roboticsAi')}
+          aria-label={t('workbench.roboticsAi')}
           aria-pressed={engineeringOpen}
           onClick={onToggleEngineering}
           style={{
@@ -107,7 +114,34 @@ export function WorkbenchHeader({
             <rect x="3" y="8" width="18" height="12" rx="2" />
             <path d="M7 8V5a2 2 0 012-2h6a2 2 0 012 2v3" />
           </svg>
-          Robotics AI
+          {t('workbench.roboticsAi')}
+        </button>
+        <button
+          type="button"
+          className="glass-panel-interactive"
+          title={t('activity.accountCredits')}
+          aria-label={t('activity.accountCredits')}
+          data-testid="header-account-credits"
+          onClick={onOpenAccount}
+          style={{
+            position: 'relative',
+            height: 30,
+            minWidth: 30,
+            padding: '0 8px',
+            borderRadius: 8,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            color: 'var(--caval-text-muted)',
+            fontSize: 10,
+            fontWeight: 600,
+          }}
+        >
+          <IconAccount size={18} />
         </button>
       </nav>
     </header>

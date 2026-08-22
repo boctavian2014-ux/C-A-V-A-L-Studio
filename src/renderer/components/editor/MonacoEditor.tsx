@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import '../../monaco-setup';
 import Editor, { useMonaco, type OnMount, type OnChange } from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
@@ -9,7 +9,21 @@ import { useCavalTheme } from '../../../../themes/theme-provider';
 import { EngineeringCadPreview } from '../engineering/EngineeringCadPreview';
 import { useEngineeringCadStore } from '../../store/engineering-cad-store';
 import { registerMonacoEditor } from '../../store/editor-command-store';
+import { useProblemsStore } from '../../store/problems-store';
+import { provideGatedInlineCompletion } from '../../ai/inline-completion-provider';
 import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
+import { AiWorkCanvas } from './AiWorkCanvas';
+import { AiEditorHeader } from './AiEditorHeader';
+import { FeatureFirstUseTip } from '../ai/FeatureFirstUseTip';
+import { hasSeenFeature, markFeatureSeen } from '../../store/onboarding-store';
+import {
+  computeLiveDiffLines,
+  tabPathMatchesLiveEdit,
+  useLiveAiEditsStore,
+} from '../../../../ai/composer/live-ai-edits-store';
+import { ensureLiveAiEditStyles } from '../../../../ai/composer/live-ai-edit-styles';
+import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import { useAiWorkCanvasStore } from '../../store/ai-work-canvas-store';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -113,6 +127,19 @@ const EDITOR_OPTIONS: MonacoType.editor.IStandaloneEditorConstructionOptions = {
 // ──────────────────────────────────────────────
 
 export function MonacoEditor() {
+  const { t } = useTranslation();
+  const [inlineTipActive, setInlineTipActive] = useState(false);
+  const [monacoMounted, setMonacoMounted] = useState(false);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+
+  useEffect(() => {
+    const onShown = () => {
+      if (!hasSeenFeature('inline')) setInlineTipActive(true);
+    };
+    window.addEventListener('caval:inline-suggestion-shown', onShown);
+    return () => window.removeEventListener('caval:inline-suggestion-shown', onShown);
+  }, []);
+
   const monaco = useMonaco();
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
   const { theme } = useCavalTheme();
@@ -120,6 +147,7 @@ export function MonacoEditor() {
   const {
     tabs,
     activeTabId,
+    projectPath,
     updateTabContent,
     saveTab,
     saveViewState,
@@ -130,6 +158,27 @@ export function MonacoEditor() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const isStreaming = useAIStore((s) => s.isStreaming);
   const isAiLive = Boolean(activeTab?.isAiPreview);
+  const liveEdits = useLiveAiEditsStore((s) => s.edits);
+  const editorLoadErrorPath = useAiWorkCanvasStore((s) => s.editorLoadErrorPath);
+  const setEditorLoadErrorPath = useAiWorkCanvasStore((s) => s.setEditorLoadErrorPath);
+  const liveDecoIds = useRef<string[]>([]);
+
+  useEffect(() => {
+    setMonacoMounted(false);
+    setLoadTimedOut(false);
+    setEditorLoadErrorPath(null);
+    const timer = window.setTimeout(() => {
+      setLoadTimedOut(true);
+      if (activeTab?.path) {
+        setEditorLoadErrorPath(activeTab.path);
+      }
+    }, 12000);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, setEditorLoadErrorPath, activeTab?.path]);
+
+  useEffect(() => {
+    ensureLiveAiEditStyles();
+  }, []);
 
   // Scroll la final când AI scrie live în preview
   useEffect(() => {
@@ -139,6 +188,55 @@ export function MonacoEditor() {
     const lastLine = model.getLineCount();
     editorRef.current.revealLine(lastLine);
   }, [activeTab?.content, isAiLive]);
+
+  // Live inline diff decorations (green/red/yellow) while AI edits this file
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !activeTab || !monaco) return;
+
+    const match = Object.values(liveEdits).find((e) =>
+      tabPathMatchesLiveEdit(activeTab.path, e.path, projectPath)
+    );
+
+    const clear = () => {
+      liveDecoIds.current = editor.deltaDecorations(liveDecoIds.current, []);
+    };
+
+    if (!match || match.status !== 'writing') {
+      clear();
+      return;
+    }
+
+    const previous = match.previousContent ?? '';
+    const next = match.content ?? activeTab.content;
+    const lines = computeLiveDiffLines(previous, next);
+    const nextDecos: MonacoType.editor.IModelDeltaDecoration[] = lines.map((row) => {
+      const className =
+        row.kind === 'added'
+          ? 'caval-ai-line-added'
+          : row.kind === 'removed'
+            ? 'caval-ai-line-removed'
+            : 'caval-ai-line-modified';
+      const gutter =
+        row.kind === 'added'
+          ? 'caval-ai-gutter-added'
+          : row.kind === 'removed'
+            ? 'caval-ai-gutter-removed'
+            : 'caval-ai-gutter-modified';
+      return {
+        range: new monaco.Range(row.lineNumber, 1, row.lineNumber, 1),
+        options: {
+          isWholeLine: true,
+          className,
+          linesDecorationsClassName: gutter,
+        },
+      };
+    });
+    liveDecoIds.current = editor.deltaDecorations(liveDecoIds.current, nextDecos);
+    return () => {
+      clear();
+    };
+  }, [activeTab, liveEdits, projectPath, isAiLive, monaco]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -217,6 +315,9 @@ export function MonacoEditor() {
 
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
+    setMonacoMounted(true);
+    setLoadTimedOut(false);
+    setEditorLoadErrorPath(null);
     registerMonacoEditor(editor);
 
     const monacoApi = monaco as typeof MonacoType;
@@ -237,6 +338,9 @@ export function MonacoEditor() {
       const tab = tabs.find((t) => t.id === tabId);
       if (!model || !sel || sel.isEmpty() || !tab) {
         setEditorSelection(null);
+        if (useAIStore.getState().includeMode === 'selection') {
+          useAIStore.getState().setIncludeMode('project');
+        }
         return;
       }
       const text = model.getValueInRange(sel).trim();
@@ -249,6 +353,8 @@ export function MonacoEditor() {
         path: tab.path,
         startLine: sel.startLineNumber,
         endLine: sel.endLineNumber,
+        startColumn: sel.startColumn,
+        endColumn: sel.endColumn,
       });
       const word = model.getWordAtPosition({
         lineNumber: sel.positionLineNumber,
@@ -271,39 +377,215 @@ export function MonacoEditor() {
 
     const lang = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId)?.language ?? 'typescript';
     const provider = monacoApi.languages.registerInlineCompletionsProvider(lang, {
-      provideInlineCompletions: async (model, position) => {
-        const textUntil = model.getValueInRange({
-          startLineNumber: Math.max(1, position.lineNumber - 20),
-          startColumn: 1,
-          endLineNumber: position.lineNumber,
-          endColumn: position.column,
-        });
-        const caval = (window as unknown as {
-          caval?: { autocomplete?: (i: { prefix: string; filePath: string; language: string }) => Promise<{ suggestion?: string }> };
-        }).caval;
+      provideInlineCompletions: async (model, position, _context, token) => {
+        if (token.isCancellationRequested) return { items: [] };
         const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId);
-        const result = await caval?.autocomplete?.({
-          prefix: textUntil,
-          filePath: tab?.path ?? 'untitled.ts',
-          language: tab?.language ?? 'typescript',
+        const filePath = tab?.path ?? 'untitled.ts';
+        const language = tab?.language ?? 'typescript';
+        const gated = await provideGatedInlineCompletion({
+          fullText: model.getValue(),
+          lineNumber: position.lineNumber,
+          column: position.column,
+          filePath,
+          language,
+          token,
+          fetch: async (input) => {
+            const caval = window.caval as {
+              autocomplete?: (i: {
+                prefix: string;
+                filePath: string;
+                language: string;
+              }) => Promise<{ ok?: boolean; suggestion?: string }>;
+            };
+            return caval.autocomplete?.(input);
+          },
         });
-        const suggestion = result?.suggestion?.trim();
-        if (!suggestion) return { items: [] };
+        if (!gated.suggestion || token.isCancellationRequested) {
+          return { items: [] };
+        }
+        if (!hasSeenFeature('inline')) {
+          try {
+            window.dispatchEvent(new CustomEvent('caval:inline-suggestion-shown'));
+          } catch {
+            /* ignore */
+          }
+        }
         return {
-          items: [{
-            insertText: suggestion,
-            range: new monacoApi.Range(position.lineNumber, position.column, position.lineNumber, position.column),
-          }],
+          items: [
+            {
+              insertText: gated.suggestion,
+              range: new monacoApi.Range(
+                position.lineNumber,
+                position.column,
+                position.lineNumber,
+                position.column
+              ),
+              // Side-effect only on explicit Tab/accept — ghost text does not write.
+              command: {
+                id: 'caval.inlineCompletion.accept',
+                title: 'Inline completion accepted',
+                arguments: [filePath],
+              },
+            },
+          ],
         };
       },
       disposeInlineCompletions: () => undefined,
     });
 
+    const inlineAcceptCmd = monacoApi.editor.registerCommand(
+      'caval.inlineCompletion.accept',
+      (_accessor, filePathArg) => {
+        const filePath = typeof filePathArg === 'string' ? filePathArg : '';
+        if (!filePath) return;
+        markFeatureSeen('inline');
+        void import('../../ai/inline-completion-timeline.js').then(async (m) => {
+          const { timelineEvents, success } = await m.emitEditorFileWriteTimeline({
+            filePath,
+            detail: 'inline completion accepted',
+          });
+          if (success && timelineEvents.length) {
+            m.publishInlineCompletionAcceptToChat({ filePath, timelineEvents });
+          }
+        });
+      }
+    );
+
+    const hoverProvider = monacoApi.languages.registerHoverProvider(lang, {
+      provideHover: async (model, position, token) => {
+        const word = model.getWordAtPosition(position);
+        if (!word?.word || token.isCancellationRequested) return null;
+        const tab = useEditorStore.getState().tabs.find(
+          (t) => t.id === useEditorStore.getState().activeTabId
+        );
+        const filePath = tab?.path ?? 'untitled.ts';
+        const explained = await import('../../ai/explain-client.js').then((m) =>
+          m.explainSymbolWithDebounce({
+            filePath,
+            symbol: word.word,
+            language: tab?.language ?? 'typescript',
+            token,
+          })
+        );
+        if (!explained || token.isCancellationRequested) return null;
+        return {
+          range: new monacoApi.Range(
+            position.lineNumber,
+            word.startColumn,
+            position.lineNumber,
+            word.endColumn
+          ),
+          contents: [
+            { value: '**AI Explain**' },
+            { value: explained.explanation },
+          ],
+        };
+      },
+    });
+
+    const explainSelectionAction = editor.addAction({
+      id: 'caval.explainSelection',
+      label: 'Explain with AI',
+      keybindings: [monacoApi.KeyMod.CtrlCmd | monacoApi.KeyMod.Shift | monacoApi.KeyCode.KeyE],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.6,
+      run: () => {
+        void import('../../ai/explain-controller.js').then((m) => m.startExplainForSelection());
+      },
+    });
+
+    const refactorSelectionAction = editor.addAction({
+      id: 'caval.refactorSelection',
+      label: 'Refactor with AI',
+      keybindings: [monacoApi.KeyMod.CtrlCmd | monacoApi.KeyMod.Shift | monacoApi.KeyCode.KeyR],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.65,
+      run: () => {
+        void import('../../ai/refactor-controller.js').then((m) =>
+          m.startRefactorFromSelection('custom')
+        );
+      },
+    });
+
+    const codeActionProvider = monacoApi.languages.registerCodeActionProvider(
+      ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
+      {
+        provideCodeActions: (
+          _model: MonacoType.editor.ITextModel,
+          range: MonacoType.Range
+        ) => {
+          const tab = useEditorStore.getState().tabs.find(
+            (t) => t.id === useEditorStore.getState().activeTabId
+          );
+          if (!tab) return { actions: [], dispose: () => undefined };
+
+          const problems = useProblemsStore.getState().problems;
+          const tabRel = tab.path.replace(/\\/g, '/');
+          const hit = problems.find((p) => {
+            const pf = p.file.replace(/\\/g, '/');
+            const sameFile =
+              tabRel.endsWith(pf) ||
+              pf.endsWith(tabRel.split('/').slice(-2).join('/')) ||
+              tabRel.includes(pf);
+            if (!sameFile) return false;
+            if (p.severity !== 'error' && p.severity !== 'warning') return false;
+            return p.line >= range.startLineNumber - 2 && p.line <= range.endLineNumber + 2;
+          });
+          if (!hit) return { actions: [], dispose: () => undefined };
+
+          return {
+            actions: [
+              {
+                title: 'Fix with AI',
+                kind: 'quickfix',
+                diagnostics: [],
+                isPreferred: true,
+                command: {
+                  id: 'caval.quickFixAi',
+                  title: 'Fix with AI',
+                  arguments: [hit],
+                },
+              },
+            ],
+            dispose: () => undefined,
+          };
+        },
+      }
+    );
+
+    const cmd = monacoApi.editor.registerCommand('caval.quickFixAi', (_accessor, problemEntry) => {
+      void import('../../ai/quick-fix-controller.js').then(async (m) => {
+        const entry = problemEntry as {
+          file: string;
+          line: number;
+          col: number;
+          message: string;
+          severity: string;
+          source?: string;
+        };
+        await m.startQuickFixForProblem({
+          id: `monaco-${entry.file}:${entry.line}`,
+          file: entry.file,
+          line: entry.line,
+          column: entry.col,
+          severity: entry.severity === 'warning' ? 'warning' : 'error',
+          source: (entry.source as 'typescript' | 'eslint' | 'caval') || 'caval',
+          message: entry.message.replace(/\s*\([^)]*\)\s*$/, ''),
+        });
+      });
+    });
+
     editor.onDidDispose(() => {
       provider.dispose();
+      codeActionProvider.dispose();
+      cmd.dispose();
+      inlineAcceptCmd.dispose();
+      hoverProvider.dispose();
+      explainSelectionAction.dispose();
+      refactorSelectionAction.dispose();
       registerMonacoEditor(null);
     });
-  }, [monaco, saveTab]);
+  }, [monaco, saveTab, setEditorLoadErrorPath]);
 
   useEffect(() => {
     const onRevealLine = (e: Event) => {
@@ -347,33 +629,36 @@ export function MonacoEditor() {
     if (cadStlUrl) {
       return <EngineeringCadPreview />;
     }
+    if (isStreaming) {
+      return <AiWorkCanvas />;
+    }
     return <WelcomeWorkspacePanel />;
   }
 
+  const writingMatch = Object.values(liveEdits).find(
+    (e) =>
+      (e.status === 'writing' || e.status === 'waiting') &&
+      tabPathMatchesLiveEdit(activeTab.path, e.path, projectPath)
+  );
+  const showAiHeader = isAiLive || Boolean(writingMatch) || (isStreaming && isAiLive);
+  const headerRelativePath = isAiLive
+    ? activeTab.path.replace(/^preview:\/\//, '')
+    : writingMatch?.path ?? activeTab.path.replace(/^preview:\/\//, '');
+
+  const showEditorLoadError = loadTimedOut && !monacoMounted;
+
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      {isAiLive && (
-        <div style={{
-          padding: '6px 16px',
-          borderBottom: `1px solid rgba(0,224,255,0.25)`,
-          background: 'linear-gradient(90deg, rgba(0,224,255,0.12), rgba(124,58,237,0.08))',
-          fontSize: 11.5,
-          color: '#00E0FF',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontFamily: "'Inter', sans-serif",
-        }}>
-          <span style={{
-            width: 7, height: 7, borderRadius: '50%',
-            background: isStreaming ? '#00E0FF' : '#2FBF71',
-            boxShadow: isStreaming ? '0 0 8px #00E0FF' : 'none',
-            animation: isStreaming ? 'pulseTech 1.2s ease-in-out infinite' : 'none',
-          }} />
-          {isStreaming ? 'AI scrie cod live' : 'Previzualizare generare AI'}
-          <span style={{ color: 'var(--caval-text-muted)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5 }}>
-            {activeTab.path.replace(/^preview:\/\//, '')}
-          </span>
+      {showAiHeader ? (
+        <AiEditorHeader relativePath={headerRelativePath} isStreaming={isStreaming} />
+      ) : null}
+      {inlineTipActive && (
+        <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--caval-border)' }}>
+          <FeatureFirstUseTip
+            feature="inline"
+            active={inlineTipActive}
+            onDismiss={() => setInlineTipActive(false)}
+          />
         </div>
       )}
       {/* Breadcrumb */}
@@ -398,12 +683,59 @@ export function MonacoEditor() {
           <span style={{
             marginLeft: 6, width: 6, height: 6, borderRadius: '50%',
             background: '#F59E0B', display: 'inline-block',
-          }} title="Modificări nesalvate" />
+          }} title={t('editor.unsavedChanges')} />
         )}
       </div>
 
       {/* Editor */}
+      {showEditorLoadError ? (
+        <div
+          data-testid="editor-load-error"
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+            background: '#0D1117',
+            color: 'var(--caval-text-muted)',
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 12,
+            padding: 24,
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            {t('workCanvas.loadError', {
+              path: (editorLoadErrorPath ?? activeTab.path).replace(/^preview:\/\//, ''),
+            })}
+          </p>
+          <button
+            type="button"
+            data-testid="editor-load-retry"
+            onClick={() => {
+              setLoadTimedOut(false);
+              setMonacoMounted(false);
+              setEditorLoadErrorPath(null);
+            }}
+            style={{
+              height: 30,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: '1px solid rgba(0,224,255,0.35)',
+              background: 'rgba(0,224,255,0.08)',
+              color: '#00E0FF',
+              cursor: 'pointer',
+              fontSize: 11,
+              fontWeight: 600,
+            }}
+          >
+            {t('common.retry')}
+          </button>
+        </div>
+      ) : (
       <Editor
+        key={activeTabId}
         height="100%"
         language={activeTab.language}
         value={activeTab.content}
@@ -424,10 +756,11 @@ export function MonacoEditor() {
             background: '#0D1117', color: '#3B4658', fontFamily: 'JetBrains Mono, monospace',
             fontSize: 12,
           }}>
-            Se încarcă editorul...
+            {t('loading.editor')}
           </div>
         }
       />
+      )}
     </div>
   );
 }

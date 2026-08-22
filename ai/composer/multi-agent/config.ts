@@ -76,6 +76,14 @@ export function loadReasoningConfig(workspaceRoot?: string) {
   return loadMultiAgentConfig(workspaceRoot).reasoningLayer;
 }
 
+/** Agentic tool-loop runtime unless pipeline is explicitly configured. */
+export function usesAgenticToolRuntime(
+  config?: Pick<MultiAgentConfig, 'agenticRuntime'>
+): boolean {
+  const runtime = config?.agenticRuntime ?? loadMultiAgentConfig().agenticRuntime;
+  return runtime !== 'pipeline';
+}
+
 /** UI "Review strict" forces merge + supervisor (disables fastPipeline). */
 export function applyMultiAgentOverrides(
   config: MultiAgentConfig,
@@ -91,15 +99,17 @@ export function applyMultiAgentOverrides(
   return next;
 }
 
+/** Skip the extra Model Orchestrator LLM call — heuristic mix is enough. */
+export function shouldSkipModelOrchLlm(config?: { fastPipeline?: boolean }): boolean {
+  return config?.fastPipeline !== false;
+}
+
 /** Long multi-module prompts get full pipeline + context synthesis. */
 export function classifyArenaPromptComplexity(message: string): 'simple' | 'complex' {
   const lines = message.split('\n').filter((l) => l.trim()).length;
-  const isComplex =
-    message.length > 600 ||
-    lines >= 8 ||
-    (/\b(module|frontend|backend|dashboard|scraper|api|docker|deploy|forexebug|seap)\b/i.test(message) &&
-      lines >= 4);
-  return isComplex ? 'complex' : 'simple';
+  const hasEnterpriseKeywords =
+    /\b(forexebug|seap|scraper|docker|deploy|kubernetes|dashboard)\b/i.test(message);
+  return hasEnterpriseKeywords && lines >= 8 ? 'complex' : 'simple';
 }
 
 /** Long multi-module prompts get full pipeline + context synthesis. */
@@ -136,6 +146,7 @@ export function shouldUseMultiAgentPipeline(
   if (opts?.userBoundWorkspace === false) return false;
   const cfg = config ?? loadMultiAgentConfig(workspaceRoot);
   if (!cfg.enabled) return false;
+  if (usesAgenticToolRuntime(cfg)) return false;
   if (isPartialRunRequest(message)) return false;
   return true;
 }
