@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 
-import { resolveBundledWorkerPath } from "../../src/main/resolve-worker-path";
+import { tryResolveBundledWorkerPath } from "../../src/main/resolve-worker-path";
 import type { PipelineEvent } from "../../components/ui/logicflow/types";
 import { pipelineEventBus } from "../../components/ui/logicflow/logicflow-pipeline-emitter";
 import { ModelRouter } from "../model-router";
@@ -28,7 +28,8 @@ export interface PreloadStatus {
 export interface PreloadManagerOptions {
   maxConcurrentForeground?: number;
   maxConcurrentBackground?: number;
-  workerPath?: string;
+  /** Bundled worker path; null skips Worker construction (e.g. CI before build). */
+  workerPath?: string | null;
   enableWorker?: boolean;
 }
 
@@ -37,7 +38,7 @@ const OLLAMA_BASE = getOllamaLoopbackUrl();
 const DEFAULT_OPTIONS: Required<PreloadManagerOptions> = {
   maxConcurrentForeground: 2,
   maxConcurrentBackground: 2,
-  workerPath: resolveBundledWorkerPath("preload-worker.js"),
+  workerPath: tryResolveBundledWorkerPath("preload-worker.js"),
   enableWorker: true,
 };
 
@@ -213,14 +214,30 @@ export class PreloadManager {
   }
 
   async shutdown(): Promise<void> {
+    await this.dispose();
+  }
+
+  /** Terminate worker and clear pending state so nothing is left open at teardown. */
+  async dispose(): Promise<void> {
     this.cancelAll();
     this.pipelineUnsub?.();
     this.pipelineUnsub = null;
 
-    if (this.worker) {
-      this.postToWorker({ type: "shutdown" });
-      await this.worker.terminate().catch(() => undefined);
-      this.worker = null;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+
+    for (const pending of this.pendingWorkerRequests.values()) {
+      pending.reject(new Error("Preload manager disposed"));
+    }
+    this.pendingWorkerRequests.clear();
+
+    const worker = this.worker;
+    this.worker = null;
+    this.workerReady = false;
+    if (worker) {
+      await worker.terminate().catch(() => undefined);
     }
   }
 
@@ -521,8 +538,14 @@ export class PreloadManager {
   private initWorker(): void {
     if (!this.options.enableWorker) return;
 
+    const workerPath = this.options.workerPath;
+    if (!workerPath) {
+      this.workerReady = false;
+      return;
+    }
+
     try {
-      this.worker = new Worker(this.options.workerPath, {
+      this.worker = new Worker(workerPath, {
         workerData: { workerId: "caval-preload" },
       });
 
@@ -545,12 +568,20 @@ export class PreloadManager {
 
       this.worker.on("error", (error: Error) => {
         this.workerReady = false;
+        const failed = this.worker;
+        this.worker = null;
+        void failed?.terminate().catch(() => undefined);
+        for (const pending of this.pendingWorkerRequests.values()) {
+          pending.reject(error);
+        }
+        this.pendingWorkerRequests.clear();
         preloadEventBus.emit({
           type: "preload.worker.error",
           message: error.message,
         });
       });
     } catch (error) {
+      this.worker = null;
       this.workerReady = false;
       preloadEventBus.emit({
         type: "preload.worker.error",
@@ -591,5 +622,5 @@ export class PreloadManager {
 }
 
 export const preloadManager = new PreloadManager({
-  workerPath: resolveBundledWorkerPath("preload-worker.js"),
+  workerPath: tryResolveBundledWorkerPath("preload-worker.js"),
 });
