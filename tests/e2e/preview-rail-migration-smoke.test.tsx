@@ -62,7 +62,8 @@ function AppShell() {
         aiPanelOpen={false}
         onToggleAI={() => undefined}
         gitChangesCount={0}
-        onOpenAccount={() => undefined}
+        engineeringOpen={false}
+        onToggleEngineering={() => undefined}
       />
       <div className="explorer-panel">
         <FileTree />

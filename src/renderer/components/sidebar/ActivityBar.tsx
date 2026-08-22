@@ -7,6 +7,7 @@ import {
   IconMarketplace,
   IconSparkle,
   IconSettings,
+  IconEngineering,
 } from "../brand/CavaloIcons";
 import { usePreviewStore } from "../../store/preview-store";
 import { useEditorStore } from "../../store/editor-store";
@@ -31,6 +32,23 @@ function getPreviewApi() {
   }
 }
 
+function ActivityBarSeparator() {
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      data-testid="activity-bar-separator"
+      style={{
+        width: 28,
+        height: 1,
+        background: "rgba(255,255,255,0.07)",
+        margin: "2px 0",
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
 function ActivityBarItem({
   title,
   active,
@@ -40,6 +58,7 @@ function ActivityBarItem({
   statusDot,
   testId,
   statusLabel,
+  badgeAriaLabel,
 }: {
   title: string;
   active: boolean;
@@ -49,6 +68,7 @@ function ActivityBarItem({
   statusDot?: boolean;
   testId?: string;
   statusLabel?: (title: string, status: PreviewStatus) => string;
+  badgeAriaLabel?: string;
 }) {
   const tooltip =
     status && statusLabel
@@ -70,20 +90,20 @@ function ActivityBarItem({
       data-testid={testId}
       onClick={onClick}
       aria-pressed={active}
+      aria-current={active ? "page" : undefined}
       className={`activity-bar-item${active ? " active" : ""}`}
       style={{
         width: ACTIVITY_BTN,
         height: ACTIVITY_BTN,
         borderRadius: 8,
-        border: active ? "1px solid rgba(0,224,255,0.3)" : "none",
+        border: "none",
         cursor: "pointer",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: active ? "rgba(255,255,255,0.1)" : "transparent",
+        background: active ? "rgba(0,224,255,0.08)" : "transparent",
         color: active ? "var(--caval-accent)" : "var(--caval-text-muted)",
-        boxShadow: active ? "0 0 12px rgba(0,224,255,0.15)" : "none",
-        transition: "all 0.15s",
+        transition: "background 0.15s, color 0.15s",
         position: "relative",
       }}
       onMouseEnter={(e) => {
@@ -102,15 +122,16 @@ function ActivityBarItem({
       {children}
       {active && (
         <span
+          aria-hidden
           style={{
             position: "absolute",
             left: 0,
-            top: 6,
-            bottom: 6,
-            width: 3,
+            top: 8,
+            bottom: 8,
+            width: 2,
             borderRadius: "0 2px 2px 0",
             background: "var(--caval-accent)",
-            boxShadow: "0 0 8px var(--caval-accent)",
+            boxShadow: "0 0 6px rgba(0,224,255,0.45)",
           }}
         />
       )}
@@ -118,6 +139,8 @@ function ActivityBarItem({
         <span
           className="status-badge status-badge--muted"
           data-testid={`${testId}-badge-muted`}
+          aria-label={badgeAriaLabel ?? `${title} — not configured`}
+          role="img"
           style={{
             position: "absolute",
             bottom: 2,
@@ -140,6 +163,7 @@ function ActivityBarItem({
         <span
           className="status-badge status-badge--live"
           data-testid={`${testId}-badge-live`}
+          aria-hidden
           style={{
             position: "absolute",
             bottom: 2,
@@ -155,6 +179,7 @@ function ActivityBarItem({
         <span
           className="glow-accent"
           data-testid={`${testId}-status-dot`}
+          aria-hidden
           style={{
             position: "absolute",
             top: 3,
@@ -199,14 +224,16 @@ export function ActivityBar({
   aiPanelOpen,
   onToggleAI,
   gitChangesCount,
-  onOpenAccount,
+  engineeringOpen,
+  onToggleEngineering,
 }: {
   active: ActivityTab;
   onChange: (tab: ActivityTab) => void;
   aiPanelOpen: boolean;
   onToggleAI: () => void;
   gitChangesCount: number;
-  onOpenAccount: () => void;
+  engineeringOpen: boolean;
+  onToggleEngineering: () => void;
 }) {
   const { t } = useTranslation();
   const activePreview = usePreviewStore((s) => s.activePreview);
@@ -221,7 +248,10 @@ export function ActivityBar({
     return title;
   };
 
-  const ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
+  const badgeNotConfigured = (title: string) =>
+    t("activity.badge.notConfigured", { title });
+
+  const MAIN_ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
     {
       id: "explorer",
       title: t("nav.explorerShortcut"),
@@ -240,6 +270,8 @@ export function ActivityBar({
           <IconGit size={ACTIVITY_ICON} />
           {gitChangesCount > 0 && (
             <span
+              aria-label={t("activity.badge.gitChanges", { count: gitChangesCount })}
+              role="status"
               style={{
                 position: "absolute",
                 top: -4,
@@ -283,14 +315,14 @@ export function ActivityBar({
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        padding: "10px 0",
+        padding: "10px 0 8px",
         gap: 4,
         flexShrink: 0,
         zIndex: 20,
         height: "100%",
       }}
     >
-      {ITEMS.map((item) => (
+      {MAIN_ITEMS.map((item) => (
         <ActivityBarItem
           key={item.id}
           title={item.title}
@@ -302,29 +334,7 @@ export function ActivityBar({
         </ActivityBarItem>
       ))}
 
-      <div className="activity-bar-spacer" style={{ flex: 1, minHeight: 8 }} />
-
-      <ActivityBarItem
-        title={t("preview.webPreview")}
-        active={previewPanelOpen && activePreview === "web"}
-        status={previewStatus.web}
-        statusLabel={statusLabel}
-        onClick={() => togglePreviewFromRail("web")}
-        testId="activity-preview-web"
-      >
-        <img src={webSidebarIcon} alt="" width={ACTIVITY_ICON} height={ACTIVITY_ICON} />
-      </ActivityBarItem>
-
-      <ActivityBarItem
-        title={t("preview.mobilePreview")}
-        active={previewPanelOpen && activePreview === "mobile"}
-        status={previewStatus.mobile}
-        statusLabel={statusLabel}
-        onClick={() => togglePreviewFromRail("mobile")}
-        testId="activity-preview-mobile"
-      >
-        <img src={mobileSidebarIcon} alt="" width={ACTIVITY_ICON} height={ACTIVITY_ICON} />
-      </ActivityBarItem>
+      <ActivityBarSeparator />
 
       <ActivityBarItem
         title={t("nav.aiShortcut")}
@@ -338,50 +348,51 @@ export function ActivityBar({
         </span>
       </ActivityBarItem>
 
-      <div
-        style={{
-          marginTop: 6,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 6,
-        }}
+      <ActivityBarItem
+        title={t("preview.webPreview")}
+        active={previewPanelOpen && activePreview === "web"}
+        status={previewStatus.web}
+        statusLabel={statusLabel}
+        badgeAriaLabel={badgeNotConfigured(t("preview.webPreview"))}
+        onClick={() => togglePreviewFromRail("web")}
+        testId="activity-preview-web"
       >
-        <ActivityBarItem
-          title={t("nav.settingsShortcut")}
-          active={isSettingsActive}
-          onClick={() => onChange("settings")}
-          testId="activity-settings"
-        >
-          <IconSettings size={ACTIVITY_ICON} />
-        </ActivityBarItem>
-        <button
-          type="button"
-          title={t("activity.accountCredits")}
-          onClick={onOpenAccount}
-          style={{
-            width: ACTIVITY_BTN,
-            height: ACTIVITY_BTN,
-            borderRadius: "50%",
-            border: "none",
-            background: "rgba(212,168,87,0.15)",
-            color: "#D4A857",
-            cursor: "pointer",
-            fontSize: 13,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          OB
-        </button>
-        <div
-          className="glass-status-dot glow-emerald"
-          title="Railway & MCP"
-          aria-label={t("activity.connectionStatus")}
-        />
-      </div>
+        <img src={webSidebarIcon} alt="" width={ACTIVITY_ICON} height={ACTIVITY_ICON} />
+      </ActivityBarItem>
+
+      <ActivityBarItem
+        title={t("preview.mobilePreview")}
+        active={previewPanelOpen && activePreview === "mobile"}
+        status={previewStatus.mobile}
+        statusLabel={statusLabel}
+        badgeAriaLabel={badgeNotConfigured(t("preview.mobilePreview"))}
+        onClick={() => togglePreviewFromRail("mobile")}
+        testId="activity-preview-mobile"
+      >
+        <img src={mobileSidebarIcon} alt="" width={ACTIVITY_ICON} height={ACTIVITY_ICON} />
+      </ActivityBarItem>
+
+      <ActivityBarItem
+        title={t("nav.engineeringShortcut")}
+        active={engineeringOpen}
+        onClick={onToggleEngineering}
+        testId="activity-engineering"
+      >
+        <IconEngineering size={ACTIVITY_ICON} />
+      </ActivityBarItem>
+
+      <div className="activity-bar-spacer" style={{ flex: 1, minHeight: 8 }} />
+
+      <ActivityBarSeparator />
+
+      <ActivityBarItem
+        title={t("nav.settingsShortcut")}
+        active={isSettingsActive}
+        onClick={() => onChange("settings")}
+        testId="activity-settings"
+      >
+        <IconSettings size={ACTIVITY_ICON} />
+      </ActivityBarItem>
     </div>
   );
 }

@@ -58,7 +58,7 @@ describe("ActivityBar — web/mobile preview icons", () => {
     vi.restoreAllMocks();
   });
 
-  function renderBar() {
+  function renderBar(overrides?: Partial<React.ComponentProps<typeof ActivityBar>>) {
     const result = mount(
       <ActivityBar
         active="explorer"
@@ -66,7 +66,9 @@ describe("ActivityBar — web/mobile preview icons", () => {
         aiPanelOpen={false}
         onToggleAI={() => undefined}
         gitChangesCount={0}
-        onOpenAccount={() => undefined}
+        engineeringOpen={false}
+        onToggleEngineering={() => undefined}
+        {...overrides}
       />
     );
     mounted = result;
@@ -79,17 +81,17 @@ describe("ActivityBar — web/mobile preview icons", () => {
     expect(container.querySelector('[title^="Mobile Preview"]')).toBeTruthy();
   });
 
-  it("places Web/Mobile icons before AI icon in DOM order", () => {
+  it("places AI icon before Web/Mobile preview in DOM order", () => {
     const { container } = renderBar();
     const items = Array.from(container.querySelectorAll("button"));
+    const aiIdx = items.findIndex((el) => el.getAttribute("data-testid") === "activity-ai");
     const webIdx = items.findIndex((el) => el.getAttribute("data-testid") === "activity-preview-web");
     const mobileIdx = items.findIndex(
       (el) => el.getAttribute("data-testid") === "activity-preview-mobile"
     );
-    const aiIdx = items.findIndex((el) => el.getAttribute("data-testid") === "activity-ai");
-    expect(webIdx).toBeGreaterThan(-1);
+    expect(aiIdx).toBeGreaterThan(-1);
+    expect(webIdx).toBeGreaterThan(aiIdx);
     expect(mobileIdx).toBeGreaterThan(webIdx);
-    expect(aiIdx).toBeGreaterThan(mobileIdx);
   });
 
   it("shows not-configured badge when preview is not configured", () => {

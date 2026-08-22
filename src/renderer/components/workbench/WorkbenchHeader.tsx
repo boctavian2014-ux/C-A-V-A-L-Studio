@@ -9,6 +9,7 @@ export interface WorkbenchHeaderProps {
   onToggleEngineering: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  onOpenAccount: () => void;
 }
 
 export function WorkbenchHeader({
@@ -16,6 +17,7 @@ export function WorkbenchHeader({
   onToggleEngineering,
   sidebarOpen,
   onToggleSidebar,
+  onOpenAccount,
 }: WorkbenchHeaderProps) {
   const { t } = useTranslation();
 
@@ -112,6 +114,33 @@ export function WorkbenchHeader({
             <path d="M7 8V5a2 2 0 012-2h6a2 2 0 012 2v3" />
           </svg>
           {t('workbench.roboticsAi')}
+        </button>
+        <button
+          type="button"
+          className="glass-panel-interactive"
+          title={t('activity.accountCredits')}
+          aria-label={t('activity.accountCredits')}
+          data-testid="header-account-credits"
+          onClick={onOpenAccount}
+          style={{
+            height: 30,
+            minWidth: 30,
+            padding: '0 8px',
+            borderRadius: 8,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 5,
+            background: 'rgba(212,168,87,0.12)',
+            border: '1px solid rgba(212,168,87,0.25)',
+            color: '#D4A857',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+          }}
+        >
+          OB
         </button>
       </nav>
     </header>

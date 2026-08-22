@@ -88,7 +88,8 @@ describe("i18n UI foundation", () => {
             aiPanelOpen={false}
             onToggleAI={() => undefined}
             gitChangesCount={0}
-            onOpenAccount={() => undefined}
+            engineeringOpen={false}
+            onToggleEngineering={() => undefined}
           />
           <SettingsPanel />
           <LocaleProbe />
@@ -198,7 +199,8 @@ describe("i18n UI foundation", () => {
             aiPanelOpen={false}
             onToggleAI={() => undefined}
             gitChangesCount={0}
-            onOpenAccount={() => undefined}
+            engineeringOpen={false}
+            onToggleEngineering={() => undefined}
           />
           <SettingsPanel />
         </>,

@@ -13,6 +13,7 @@ export const en = {
   "nav.marketplaceShortcut": "Marketplace (Ctrl+Shift+X)",
   "nav.aiShortcut": "AI Panel (Ctrl+Shift+A)",
   "nav.settingsShortcut": "Settings (Ctrl+,)",
+  "nav.engineeringShortcut": "Engineering / Robotics AI",
 
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -137,6 +138,8 @@ export const en = {
   "activity.status.running": "{{title}} — Running",
   "activity.status.starting": "{{title}} — Starting",
   "activity.status.failed": "{{title}} — Failed",
+  "activity.badge.notConfigured": "{{title}} — needs setup",
+  "activity.badge.gitChanges": "{{count}} uncommitted changes",
 
   "confirm.deleteFile": "Delete \"{{name}}\"?",
   "dialog.deleteConversation": "Delete this conversation and its timeline history?",
@@ -497,6 +500,7 @@ export const en = {
   "ai.toolbar.quickActions": "Quick actions",
   "ai.toolbar.fixBug": "Fix a bug",
   "ai.toolbar.explainCode": "Explain code",
+  "ai.toolbar.explainNeedsSelection": "Select code in the editor first",
   "ai.toolbar.refactor": "Refactor",
   "ai.toolbar.previewApp": "Preview my app",
   "ai.toolbar.toolsInfo": "What tools does AI have access to?",
@@ -765,11 +769,19 @@ export const en = {
   "activity.accountCredits": "Account & credits",
   "activity.connectionStatus": "Connection status",
 
+  "statusBar.connected": "Connected",
+  "statusBar.disconnected": "Disconnected",
+  "statusBar.connectionTooltip": "Railway & MCP",
+  "statusBar.noGit": "no git",
+  "statusBar.errors": "errors",
+  "statusBar.problemsSummary": "{{errors}} errors, {{warnings}} warnings",
+
   "workbench.toolbarAria": "Workbench toolbar",
   "workbench.roboticsAi": "Robotics AI",
   "workbench.roboticsAiUltra": "Robotics AI ULTRA",
   "workbench.newTerminalTitle": "New terminal (Ctrl+Shift+`)",
 
+  "editor.explainFailed": "Explain failed",
   "editor.explainAria": "AI explain",
   "editor.explainTitle": "AI Explain",
   "editor.explainingSelection": "Explaining selection…",

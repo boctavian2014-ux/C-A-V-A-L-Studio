@@ -15,6 +15,7 @@ export const ro = {
   "nav.marketplaceShortcut": "Marketplace (Ctrl+Shift+X)",
   "nav.aiShortcut": "Panou AI (Ctrl+Shift+A)",
   "nav.settingsShortcut": "Setări (Ctrl+,)",
+  "nav.engineeringShortcut": "Engineering / Robotics AI",
 
   "common.save": "Salvează",
   "common.cancel": "Anulează",
@@ -139,6 +140,8 @@ export const ro = {
   "activity.status.running": "{{title}} — Rulează",
   "activity.status.starting": "{{title}} — Pornire",
   "activity.status.failed": "{{title}} — Eșuat",
+  "activity.badge.notConfigured": "{{title}} — necesită configurare",
+  "activity.badge.gitChanges": "{{count}} modificări necomise",
 
   "confirm.deleteFile": "Ștergi \"{{name}}\"?",
   "dialog.deleteConversation": "Ștergi această conversație și istoricul timeline?",
@@ -498,6 +501,7 @@ export const ro = {
   "ai.toolbar.quickActions": "Acțiuni rapide",
   "ai.toolbar.fixBug": "Repară o eroare",
   "ai.toolbar.explainCode": "Explică cod",
+  "ai.toolbar.explainNeedsSelection": "Selectează cod în editor mai întâi",
   "ai.toolbar.refactor": "Refactor",
   "ai.toolbar.previewApp": "Previzualizează aplicația",
   "ai.toolbar.toolsInfo": "La ce unelte are acces AI-ul?",
@@ -765,6 +769,13 @@ export const ro = {
   "activity.accountCredits": "Cont & credite",
   "activity.connectionStatus": "Status conexiune",
 
+  "statusBar.connected": "Conectat",
+  "statusBar.disconnected": "Deconectat",
+  "statusBar.connectionTooltip": "Railway & MCP",
+  "statusBar.noGit": "fără git",
+  "statusBar.errors": "erori",
+  "statusBar.problemsSummary": "{{errors}} erori, {{warnings}} avertismente",
+
   "workbench.toolbarAria": "Bară workbench",
   "workbench.roboticsAi": "Robotics AI",
   "workbench.roboticsAiUltra": "Robotics AI ULTRA",
@@ -773,6 +784,7 @@ export const ro = {
   "editor.explainAria": "Explicare AI",
   "editor.explainTitle": "AI Explain",
   "editor.explainingSelection": "Se explică selecția…",
+  "editor.explainFailed": "Explicarea a eșuat",
   "editor.unsavedChanges": "Modificări nesalvate",
   "editor.quickFixAria": "Previzualizare quick fix AI",
   "editor.quickFixTitle": "Fix with AI — previzualizare diff",

@@ -37,6 +37,7 @@ import { tActive } from '../../ai/i18n/active-locale';
 import { useTranslation } from '../../ai/i18n/useTranslation';
 import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
+import { ConnectionStatusIndicator } from './components/workbench/ConnectionStatusIndicator';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
@@ -143,14 +144,17 @@ function SidebarShell({
 }
 
 function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggleAI: () => void }) {
+  const { t } = useTranslation();
   const { tabs, activeTabId } = useEditorStore();
-  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const { isRepo, branch } = useGitStore();
   const errorCount = useProblemsStore((s) => s.errorCount());
   const warningCount = useProblemsStore((s) => s.warningCount());
 
   return (
-    <div style={{
+    <div
+      data-testid="workbench-status-bar"
+      style={{
       height: 22,
       background: 'var(--caval-surface)',
       borderTop: '1px solid var(--caval-border)',
@@ -161,13 +165,17 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
     }}>
       <StatusItem>
         <IconGit size={11} strokeWidth={1.8} />
-        {isRepo ? branch || '—' : 'fără git'}
+        {isRepo ? branch || '—' : t('statusBar.noGit')}
       </StatusItem>
       <StatusItem
         onClick={() => document.dispatchEvent(new CustomEvent('caval:terminal-panel-tab', { detail: { tab: 'problems' } }))}
         style={{ cursor: 'pointer' }}
+        aria-label={t('statusBar.problemsSummary', { errors: errorCount, warnings: warningCount })}
       >
-        {errorCount === 0 ? '✓' : '✕'} {errorCount} erori &nbsp;⚠ {warningCount}
+        {errorCount === 0 ? '✓' : '✕'} {errorCount} {t('statusBar.errors')} &nbsp;⚠ {warningCount}
+      </StatusItem>
+      <StatusItem title={t('statusBar.connectionTooltip')} style={{ gap: 6 }}>
+        <ConnectionStatusIndicator />
       </StatusItem>
 
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
@@ -801,6 +809,7 @@ export function WorkbenchRoot() {
           onToggleEngineering={toggleEngineering}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={toggleSidebar}
+          onOpenAccount={openAccountSettings}
         />
 
         {/* File tabs — ascunse în modul Robotics AI dedicat */}
@@ -817,7 +826,8 @@ export function WorkbenchRoot() {
                 aiPanelOpen
                 onToggleAI={() => undefined}
                 gitChangesCount={gitChangesCount}
-                onOpenAccount={openAccountSettings}
+                engineeringOpen={engineeringOpen}
+                onToggleEngineering={toggleEngineering}
               />
 
               {sidebarOpen && activeActivity === 'explorer' && (
@@ -872,7 +882,8 @@ export function WorkbenchRoot() {
             aiPanelOpen={aiPanelOpen}
             onToggleAI={toggleAI}
             gitChangesCount={gitChangesCount}
-            onOpenAccount={openAccountSettings}
+            engineeringOpen={engineeringOpen}
+            onToggleEngineering={toggleEngineering}
           />
 
           {/* Primary sidebar — Cursor order */}
