@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 
-import { resolveBundledWorkerPath } from "../../../src/main/resolve-worker-path";
+import { tryResolveBundledWorkerPath } from "../../../src/main/resolve-worker-path";
 import { compareTasks } from "./parallel-priority";
 import type {
   ParallelSchedulerStats,
@@ -28,21 +28,26 @@ export class ParallelScheduler {
   private readonly queue: PendingTask[] = [];
   private readonly pending = new Map<string, PendingTask>();
   private readonly cancelledTokens = new Set<string>();
+  private inlineDraining = false;
   private completed = 0;
   private failed = 0;
 
   constructor(
     workerCount = Math.min(8, Math.max(4, Math.ceil((globalThis.navigator?.hardwareConcurrency ?? 4) / 2))),
-    private readonly workerPath = resolveBundledWorkerPath("parallel-worker.js")
+    workerPath: string | null = tryResolveBundledWorkerPath("parallel-worker.js")
   ) {
+    if (!workerPath) {
+      return;
+    }
+
     try {
       for (let index = 0; index < workerCount; index += 1) {
-        this.workers.push(this.createWorker(index));
+        this.workers.push(this.createWorker(workerPath, index));
       }
     } catch (error) {
       // Never block Electron window boot on a bad worker path (e.g. relative __dirname from webpack).
       console.error(
-        `${PARALLEL_LOG_PREFIX} worker pool init failed (${this.workerPath}):`,
+        `${PARALLEL_LOG_PREFIX} worker pool init failed (${workerPath}):`,
         error instanceof Error ? error.message : error
       );
     }
@@ -81,14 +86,19 @@ export class ParallelScheduler {
   }
 
   async shutdown(): Promise<void> {
+    await this.dispose();
+  }
+
+  async dispose(): Promise<void> {
     await Promise.all(this.workers.map((slot) => slot.worker.terminate().catch(() => 0)));
     this.workers.length = 0;
     this.queue.length = 0;
     this.pending.clear();
+    this.inlineDraining = false;
   }
 
-  private createWorker(index: number): WorkerSlot {
-    const worker = new Worker(this.workerPath, { workerData: { index } });
+  private createWorker(workerPath: string, index: number): WorkerSlot {
+    const worker = new Worker(workerPath, { workerData: { index } });
     const slot: WorkerSlot = { worker, busy: false };
 
     worker.on("message", (response: ParallelWorkerResponse) => {
@@ -118,6 +128,11 @@ export class ParallelScheduler {
   }
 
   private drain(): void {
+    if (this.workers.length === 0) {
+      void this.drainInline();
+      return;
+    }
+
     for (const slot of this.workers) {
       if (slot.busy) continue;
       const next = this.nextTask();
@@ -130,6 +145,34 @@ export class ParallelScheduler {
       this.pending.set(requestId, next);
       slot.worker.postMessage(request);
     }
+  }
+
+  private async drainInline(): Promise<void> {
+    if (this.inlineDraining) return;
+    this.inlineDraining = true;
+
+    try {
+      while (this.queue.length > 0) {
+        const next = this.nextTask();
+        if (!next) break;
+        const result = this.runInlineTask(next.task);
+        if (result.status === "failed") this.failed += 1;
+        else this.completed += 1;
+        next.resolve(result);
+      }
+    } finally {
+      this.inlineDraining = false;
+    }
+  }
+
+  private runInlineTask(task: ParallelTaskInput): ParallelTaskResult {
+    return {
+      taskId: task.taskId,
+      type: task.type,
+      status: "failed",
+      durationMs: 0,
+      error: "Parallel worker bundle unavailable",
+    };
   }
 
   private nextTask(): PendingTask | undefined {
