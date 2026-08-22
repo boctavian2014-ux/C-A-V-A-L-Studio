@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewContentPanel } from "../../src/renderer/components/preview/PreviewContentPanel";
+import { useEditorStore } from "../../src/renderer/store/editor-store";
 import { usePreviewStore } from "../../src/renderer/store/preview-store";
 import type {
   PreviewApi,
@@ -75,6 +76,7 @@ describe("PreviewContentPanel", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     document.body.innerHTML = "";
+    useEditorStore.setState({ projectPath: "/tmp/caval-preview-test" });
     usePreviewStore.setState({
       activePreview: "web",
       previewUrl: null,

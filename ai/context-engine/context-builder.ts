@@ -153,11 +153,20 @@ Mobile app rapid (când întreabă):
 export function shouldAttachProjectContext(
   userMessage: string,
   includeMode: ContextOptions['includeMode'],
-  opts?: { hasMentions?: boolean; hasAttachments?: boolean; hasProjectPath?: boolean }
+  opts?: {
+    hasMentions?: boolean;
+    hasAttachments?: boolean;
+    hasProjectPath?: boolean;
+    /** When false, stale `selection` includeMode still attaches workspace + active file */
+    hasActiveSelection?: boolean;
+  }
 ): boolean {
+  const effectiveIncludeMode =
+    includeMode === 'selection' && !opts?.hasActiveSelection ? 'project' : includeMode;
+
   // Folder deschis → context proiect mereu (indiferent de includeMode vechi din localStorage)
-  if (opts?.hasProjectPath && includeMode !== 'selection') return true;
-  if (includeMode !== 'project') return false;
+  if (opts?.hasProjectPath && effectiveIncludeMode !== 'selection') return true;
+  if (effectiveIncludeMode !== 'project') return false;
   if (opts?.hasMentions || opts?.hasAttachments) return true;
   if (parseMentions(userMessage).length > 0) return true;
 
@@ -169,6 +178,15 @@ export function shouldAttachProjectContext(
     if (!codeHints.test(t) && !pathHints.test(t)) return false;
   }
   return true;
+}
+
+/** Prompts that expect ```lang:path``` scaffold delivery — not plain Q&A on open files */
+export function looksLikeFileCreationPrompt(userMessage: string): boolean {
+  const t = userMessage.trim();
+  if (t.length < 3) return false;
+  return /\b(creeaz[ăa]|genereaz[ăa]|scrie|implementeaz[ăa]|construie[șs]te|build|create|scaffold|landing|from scratch|proiect nou|app complet|toate fi[șs]ierele|fi[șs]ierele în proiect)\b/i.test(
+    t
+  );
 }
 
 export function buildContextMessages(
