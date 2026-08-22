@@ -302,10 +302,12 @@ export function MultiAgentTimeline({
       <style>{`
         .arena-horse-wait-mark img {
           animation: cavalo-gallop 1.4s ease-in-out infinite;
+          will-change: transform;
+          transform: translateZ(0);
         }
         @keyframes cavalo-gallop {
-          0%, 100% { transform: scale(0.92) translateY(0); }
-          50% { transform: scale(1) translateY(-3px); }
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-2px); }
         }
       `}</style>
       <style>{`

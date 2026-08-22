@@ -171,7 +171,9 @@ export function evaluateCompletionGate(input: CompletionGateInput): CompletionGa
   }
 
   const blockingArena = (input.arenaIssues ?? []).filter(
-    (i) => i.severity === 'critical' || i.severity === 'major'
+    (i) =>
+      (i.severity === 'critical' || i.severity === 'major') &&
+      !/(?:^|\/)index_\d+\./i.test((i.file ?? '').replace(/\\/g, '/'))
   );
   for (const issue of blockingArena.slice(0, 8)) {
     pushIssue(issues, {

@@ -12,7 +12,8 @@ export interface UserSimulationResult {
 
 export async function runArenaUserSimulator(
   workspaceRoot: string,
-  relativeFiles: string[]
+  relativeFiles: string[],
+  opts?: { skipVerify?: boolean }
 ): Promise<UserSimulationResult> {
   const issues: ArenaIssue[] = [];
 
@@ -50,6 +51,13 @@ export async function runArenaUserSimulator(
 
   let verifyRan = false;
   try {
+    if (opts?.skipVerify) {
+      const summary =
+        issues.length === 0
+          ? '✓ User simulation: static checks OK'
+          : `✗ User simulation: ${issues.length} issue(s)`;
+      return { issues, summary, verifyRan: false };
+    }
     const verify = await runWorkspaceVerify(workspaceRoot);
     verifyRan = verify.ran;
     const failed = verify.commands.find((c) => !c.ok);

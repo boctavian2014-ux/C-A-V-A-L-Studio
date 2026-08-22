@@ -66,15 +66,17 @@ export function ChatReasoningBlock({
       </button>
       {showExpanded && (
         <div
+          className={isStreaming ? 'caval-stream-text' : undefined}
           style={{
             padding: '0 10px 8px',
-            fontSize: 11.5,
-            lineHeight: 1.55,
-            color: 'var(--caval-text-muted)',
+            fontSize: isStreaming ? 10 : 11.5,
+            lineHeight: isStreaming ? 1.42 : 1.55,
+            letterSpacing: isStreaming ? '0.055em' : undefined,
+            color: isStreaming ? 'rgba(186, 230, 253, 0.58)' : 'var(--caval-text-muted)',
             whiteSpace: 'pre-wrap',
             maxHeight: 220,
             overflowY: 'auto',
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
           }}
         >
           {reasoning}

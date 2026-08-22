@@ -83,7 +83,7 @@ import {
   workspaceHasRunnableWebProject,
 } from './fallback-scaffold';
 import { useLiveAiEditsStore } from './live-ai-edits-store';
-import { parseStreamingScaffold } from './scaffold-parser';
+import { parseStreamingScaffold, peekStreamingScaffoldPath } from './scaffold-parser';
 import {
   buildUniversalWebContext,
   mergeProjectContextWithWebContext,
@@ -1412,9 +1412,15 @@ export const useAIStore = create<AIStore>()(
         const syncLiveEditorPreview = (buffer: string) => {
           if (!modeSupportsFileApply(agentMode)) return;
           const live = parseStreamingScaffold(buffer);
-          if (!live?.content.trim()) return;
-          useLiveAiEditsStore.getState().beginEdit(live.path);
-          useLiveAiEditsStore.getState().progressEdit(live.path, live.content);
+          if (live?.content.trim()) {
+            useLiveAiEditsStore.getState().beginEdit(live.path);
+            useLiveAiEditsStore.getState().progressEdit(live.path, live.content);
+            return;
+          }
+          const peekPath = peekStreamingScaffoldPath(buffer);
+          if (peekPath) {
+            useLiveAiEditsStore.getState().beginEdit(peekPath);
+          }
         };
 
         const openWrittenFile = async (relativePath: string): Promise<boolean> => {
@@ -1460,12 +1466,25 @@ export const useAIStore = create<AIStore>()(
           }
 
           const diff = detectDiff(finalContent, tabPath ?? null);
+          const earlyDiskWrites = [
+            ...new Set([
+              ...(extra?.writtenFiles ?? []),
+              ...toolWrittenPaths,
+              ...pipelineWrittenFiles,
+            ]),
+          ];
           updateAssistant({
             content: finalContent,
             isStreaming: false,
             diff: diff ?? undefined,
             reasoningExpanded: false,
             ...extra,
+            // Keep file list on the message even before async scaffold apply finishes.
+            ...(extra?.proposedWrites?.length
+              ? {}
+              : earlyDiskWrites.length
+                ? { writtenFiles: earlyDiskWrites }
+                : {}),
           });
           set({ isStreaming: false });
 
@@ -1477,7 +1496,13 @@ export const useAIStore = create<AIStore>()(
             extra?.error ||
             Boolean(extra?.proposedWrites?.length);
           const blockOnDiff = Boolean(diff);
-          if (skipScaffold || blockOnDiff) return;
+          if (skipScaffold || blockOnDiff) {
+            // Tool/pipeline writes already on disk — mark live strip done; keep until next chat.
+            for (const f of earlyDiskWrites) {
+              useLiveAiEditsStore.getState().completeEdit(f);
+            }
+            return;
+          }
 
           void (async () => {
             try {
@@ -1849,6 +1874,11 @@ export const useAIStore = create<AIStore>()(
               }
               useLiveAiEditsStore.getState().beginEdit(event.filePath);
               useLiveAiEditsStore.getState().completeEdit(event.filePath);
+            } else if (
+              (event.type === 'tool_call' || event.type === 'tool_result') &&
+              event.filePath
+            ) {
+              useLiveAiEditsStore.getState().beginEdit(event.filePath);
             }
             updateAssistant(patch);
             return;
@@ -1900,15 +1930,24 @@ export const useAIStore = create<AIStore>()(
             updateAssistant({ resolvedModel: chunk.resolvedModel });
             set({ activeResolvedModel: chunk.resolvedModel });
           }
-          if (chunk.type === 'tool' && chunk.toolName === 'write_file' && chunk.toolStatus === 'done') {
+          if (chunk.type === 'tool' && chunk.toolName === 'write_file') {
             if (isSessionStale()) return;
             const relPath =
               chunk.toolWrittenPath ??
               chunk.toolDetail?.match(/"path"\s*:\s*"([^"]+)"/)?.[1];
             if (relPath) {
-              toolWrittenPaths.push(relPath);
-              void openWrittenFile(relPath);
-              void useEditorStore.getState().refreshTree();
+              useLiveAiEditsStore.getState().beginEdit(relPath);
+              if (chunk.toolStatus === 'done') {
+                toolWrittenPaths.push(relPath);
+                useLiveAiEditsStore.getState().completeEdit(relPath);
+                void openWrittenFile(relPath);
+                void useEditorStore.getState().refreshTree();
+                const prevFiles =
+                  get().messages.find((m) => m.id === assistantMsgId)?.writtenFiles ?? [];
+                if (!prevFiles.includes(relPath)) {
+                  updateAssistant({ writtenFiles: [...prevFiles, relPath] });
+                }
+              }
             }
           }
           if (chunk.type === 'delta' && chunk.delta) {

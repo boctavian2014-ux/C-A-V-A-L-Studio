@@ -19,10 +19,10 @@ export interface RecoveryPattern {
 }
 
 export const DEFAULT_RECOVERY_PATTERNS: RecoveryPattern[] = [
-  {
-    pattern: 'junk zero-latency in user workspace',
-    fix: 'Delete src/zero-latency/, restore package.json name to project (not zero-latency-composer), use fashion-fullstack archetype.',
-  },
+    {
+      pattern: 'junk zero-latency in user workspace',
+      fix: 'Delete src/zero-latency/, restore package.json name to the user project (not zero-latency-composer).',
+    },
   {
     pattern: 'placeholder spam files',
     fix: 'Delete src/fileN.txt and src/main_N.sh placeholders; emit only real modules from architect plan.',
@@ -140,13 +140,26 @@ export class PipelineMemoryEngine {
         .slice(0, 3)
         .map((i) => i.message)
         .join('; ');
+      const fashionHint =
+        lf.archetype === 'fashion-fullstack' &&
+        (/\b(fashion|haine|matching-engine)\b/i.test(lf.userMessage ?? '') ||
+          lf.issues.some((i) => /fashion-matching/i.test(i.message)))
+          ? ` Use archetype ${lf.archetype} —`
+          : ' —';
       hints.push(
-        `Previous failure (${lf.runId}): ${issueSummary}. Use archetype ${lf.archetype ?? 'n/a'} — never Cavallo-internal paths in user workspace.`
+        `Previous failure (${lf.runId}): ${issueSummary}.${fashionHint} never Cavallo-internal paths in user workspace.`
       );
     }
-    if (this.record.recoveryPatterns?.length) {
-      const top = this.record.recoveryPatterns[0]!;
-      hints.push(`Recovery hint: ${top.pattern} → ${top.fix}`);
+    if (
+      this.record.lastFailure?.archetype === 'fashion-fullstack' &&
+      this.record.recoveryPatterns?.length
+    ) {
+      const fashionPattern = this.record.recoveryPatterns.find((p) =>
+        p.pattern.toLowerCase().includes('fashion')
+      );
+      if (fashionPattern) {
+        hints.push(`Recovery hint: ${fashionPattern.pattern} → ${fashionPattern.fix}`);
+      }
     }
     if (this.record.projectArchetype) {
       hints.push(`Project archetype: ${this.record.projectArchetype}`);

@@ -300,10 +300,10 @@ const PHASE_MESSAGES: Record<MultiAgentPhase, string[]> = {
 };
 
 const DEFAULT_MESSAGES = [
-  'CAVALLO aleargă — nu e blocat, gândește profund',
+  'CAVAL rulează — nu e blocat, gândește profund',
   'Pipeline activ. Respiră. Situația e sub control (aprox.)',
   'Nu e lag, e dramă tehnică în desfășurare',
-  'Procesez cu eleganță ecvină și zero pană de cai',
+  'Procesez elegant și țintit, fără zgomot inutil',
   'Agenții sunt pe treabă. Tu poți clipi',
   'Conectez modelele. WiFi-ul supraviețuiește',
   'Încă puțin. Rome, apps și prompt-uri bune iau timp',
@@ -452,7 +452,7 @@ const DEFAULT_CONTEXT_TEMPLATES = [
   'Pipeline pe {project} — {model} pe fir',
   '{project}: încă puțin, apoi vezi diferența',
   'Context live: {project} / {file}',
-  'CAVALLO pe {project}. {files} fișiere deja pe disc',
+  'CAVAL pe {project}. {files} fișiere deja pe disc',
 ];
 
 export function shortenWaitLabel(

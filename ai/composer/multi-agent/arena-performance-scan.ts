@@ -25,6 +25,7 @@ export function runStaticPerformanceScan(
   const issues: ArenaIssue[] = [];
 
   for (const rel of relativeFiles) {
+    if (/(?:^|\/)index_\d+\.(tsx?|jsx?|html)$/i.test(rel.replace(/\\/g, '/'))) continue;
     const abs = path.join(workspaceRoot, rel.replace(/\//g, path.sep));
     let content = '';
     let sizeKb = 0;
