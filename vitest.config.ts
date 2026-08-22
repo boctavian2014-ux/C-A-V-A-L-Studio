@@ -123,5 +123,8 @@ export default defineConfig({
     testTimeout: 15_000,
     // Match testTimeout: first vi.resetModules()+handler import is cold, not hung.
     hookTimeout: 15_000,
+    // DIAGNOSTIC for #16 (do not merge as permanent fix): isolate Tinypool
+    // ERR_IPC_CHANNEL_CLOSED on Linux CI by forcing forks pool.
+    pool: "forks",
   },
 });
