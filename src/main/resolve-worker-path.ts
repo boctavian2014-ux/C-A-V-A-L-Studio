@@ -14,12 +14,14 @@ function dirLooksLikeMainBundle(dir: string): boolean {
  * Prefer runtime __dirname when it points at a real bundle dir; never keep a
  * webpack-baked relative source path like "src\\main".
  */
-function resolveMainBundleDir(): string {
+function resolveMainBundleDir(): string | null {
   const fromDirname =
     typeof __dirname === "string" && path.isAbsolute(__dirname) ? __dirname : null;
 
   const candidates: string[] = [];
-  if (fromDirname) candidates.push(fromDirname);
+  if (fromDirname && dirLooksLikeMainBundle(fromDirname)) {
+    candidates.push(fromDirname);
+  }
   candidates.push(path.resolve(process.cwd(), "dist", "main"));
 
   const execDir = path.dirname(process.execPath);
@@ -32,16 +34,22 @@ function resolveMainBundleDir(): string {
     if (dirLooksLikeMainBundle(candidate)) return candidate;
   }
 
-  return fromDirname ?? path.resolve(process.cwd(), "dist", "main");
+  return null;
+}
+
+function normalizeWorkerFileName(name: string): string {
+  return name.endsWith(".js") ? name : `${name}.js`;
 }
 
 /**
- * Resolve a webpack-emitted worker next to the main process bundle.
- * Worker threads cannot execute from inside app.asar — prefer asar.unpacked.
+ * Resolve a bundled worker only when the webpack output file exists.
+ * Returns null when no bundle is present (e.g. CI before build).
  */
-export function resolveBundledWorkerPath(workerFileName: string): string {
-  const name = workerFileName.endsWith(".js") ? workerFileName : `${workerFileName}.js`;
+export function tryResolveBundledWorkerPath(workerFileName: string): string | null {
+  const name = normalizeWorkerFileName(workerFileName);
   const baseDir = resolveMainBundleDir();
+  if (!baseDir) return null;
+
   const candidates = [
     path.join(baseDir, name),
     path.join(baseDir, "..", "main", name),
@@ -58,6 +66,16 @@ export function resolveBundledWorkerPath(workerFileName: string): string {
     if (fs.existsSync(candidate)) return candidate;
   }
 
-  // Last resort: still return an absolute path so Worker errors stay actionable.
-  return path.resolve(candidates[0]);
+  return null;
+}
+
+/**
+ * Resolve a webpack-emitted worker next to the main process bundle.
+ * Worker threads cannot execute from inside app.asar — prefer asar.unpacked.
+ * Falls back to dist/main when the bundle is not built yet (legacy callers).
+ */
+export function resolveBundledWorkerPath(workerFileName: string): string {
+  const resolved = tryResolveBundledWorkerPath(workerFileName);
+  if (resolved) return resolved;
+  return path.resolve(process.cwd(), "dist", "main", normalizeWorkerFileName(workerFileName));
 }

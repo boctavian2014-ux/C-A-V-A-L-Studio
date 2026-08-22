@@ -1,17 +1,60 @@
-import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveBundledWorkerPath } from "../../src/main/resolve-worker-path";
+import { resolveBundledWorkerPath, tryResolveBundledWorkerPath } from "../../src/main/resolve-worker-path";
 
 describe("resolveBundledWorkerPath", () => {
-  it("returns an absolute path ending with the worker file name", () => {
-    const resolved = resolveBundledWorkerPath("parallel-worker.js");
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns an absolute existing path ending with the worker file name when bundled", () => {
+    const resolved = tryResolveBundledWorkerPath("parallel-worker.js");
+    if (!resolved) {
+      expect(fs.existsSync(path.resolve(process.cwd(), "dist", "main", "parallel-worker.js"))).toBe(
+        false
+      );
+      return;
+    }
+
     expect(path.isAbsolute(resolved)).toBe(true);
     expect(resolved.endsWith("parallel-worker.js")).toBe(true);
-    // Must not be the bare webpack-baked relative source path.
-    expect(resolved === path.join("src", "main", "parallel-worker.js")).toBe(false);
+    expect(fs.existsSync(resolved)).toBe(true);
+    expect(resolved.includes(`${path.sep}src${path.sep}main${path.sep}`)).toBe(false);
+  });
+
+  it("returns null when no bundled worker file exists", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "caval-no-bundle-"));
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      vi.resetModules();
+      const { tryResolveBundledWorkerPath: resolveWithoutBundle } = await import(
+        "../../src/main/resolve-worker-path"
+      );
+      expect(resolveWithoutBundle("parallel-worker.js")).toBeNull();
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it("never resolves to src/main/parallel-worker.js when bundle markers are absent", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "caval-no-bundle-src-"));
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      vi.resetModules();
+      const { tryResolveBundledWorkerPath: resolveWithoutBundle, resolveBundledWorkerPath: legacyResolve } =
+        await import("../../src/main/resolve-worker-path");
+      expect(resolveWithoutBundle("parallel-worker.js")).toBeNull();
+      expect(legacyResolve("parallel-worker.js").includes(`${path.sep}src${path.sep}main${path.sep}`)).toBe(
+        false
+      );
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it("prefers asar.unpacked when present", () => {
@@ -22,8 +65,6 @@ describe("resolveBundledWorkerPath", () => {
     fs.mkdirSync(unpackedDir, { recursive: true });
     fs.writeFileSync(path.join(unpackedDir, "preload-worker.js"), "// ok");
 
-    // Simulate resolve when __dirname is inside asar by temporarily monkey-patching
-    // via evaluating the same replace logic used in production.
     const asarCandidate = path.join(asarDir, "preload-worker.js");
     const unpacked = asarCandidate.replace(
       `${path.sep}app.asar${path.sep}`,

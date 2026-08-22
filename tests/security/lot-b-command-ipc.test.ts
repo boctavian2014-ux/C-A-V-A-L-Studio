@@ -175,6 +175,8 @@ describe("Lot B Zone A — interactive terminal IPC", () => {
 
 describe("Lot B Zone B — workspace-verify / tool paths", () => {
   let workspace: string;
+  let parallelWorkerErrors: string[] = [];
+  let restoreWarn: (() => void) | undefined;
 
   beforeEach(async () => {
     harness.reset();
@@ -182,6 +184,18 @@ describe("Lot B Zone B — workspace-verify / tool paths", () => {
     boundRoots.clear();
     toolSandboxRun.mockClear();
     workspaceCommandMutex.clear();
+    parallelWorkerErrors = [];
+    const originalWarn = console.warn;
+    restoreWarn = () => {
+      console.warn = originalWarn;
+    };
+    console.warn = (...args: unknown[]) => {
+      const line = args.map(String).join(" ");
+      if (/\[CONTEXT:PARALLEL\] worker error/i.test(line)) {
+        parallelWorkerErrors.push(line);
+      }
+      originalWarn(...args);
+    };
     workspace = mkTmp("caval-lotb-verify-");
     fs.writeFileSync(
       path.join(workspace, "package.json"),
@@ -194,9 +208,12 @@ describe("Lot B Zone B — workspace-verify / tool paths", () => {
       () => process.cwd(),
       (id) => boundRoots.get(id)
     );
+    expect(parallelWorkerErrors).toEqual([]);
   });
 
   afterEach(() => {
+    restoreWarn?.();
+    restoreWarn = undefined;
     fs.rmSync(workspace, { recursive: true, force: true });
     workspaceCommandMutex.clear();
   });
