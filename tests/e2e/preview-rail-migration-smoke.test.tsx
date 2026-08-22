@@ -123,7 +123,7 @@ describe("Preview rail migration smoke", () => {
     usePreviewStore.getState().clearPreview();
   });
 
-  it("Explorer has zero preview references while ActivityBar exposes both", () => {
+  it("Explorer has zero preview references while ActivityBar exposes Preview", () => {
     const result = mount(<AppShell />);
     mounted = result;
     const explorer = result.container.querySelector(".explorer-panel");
@@ -131,16 +131,15 @@ describe("Preview rail migration smoke", () => {
     expect(explorer?.textContent).not.toMatch(/Open Web/i);
 
     const rail = result.container.querySelector(".activity-bar");
-    expect(rail?.querySelector('[data-testid="activity-preview-web"]')).toBeTruthy();
-    expect(rail?.querySelector('[data-testid="activity-preview-mobile"]')).toBeTruthy();
+    expect(rail?.querySelector('[data-testid="activity-preview"]')).toBeTruthy();
   });
 
-  it("full flow: click Web in rail -> content panel shows web preview state", async () => {
+  it("full flow: click Preview in rail -> content panel shows web preview state", async () => {
     const result = mount(<AppShell />);
     mounted = result;
     act(() => {
       result.container
-        .querySelector('[data-testid="activity-preview-web"]')
+        .querySelector('[data-testid="activity-preview"]')
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await act(async () => {

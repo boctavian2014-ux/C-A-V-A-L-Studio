@@ -6,23 +6,23 @@ import {
   IconGit,
   IconMarketplace,
   IconSparkle,
-  IconSettings,
+  IconSettingsNeutral,
   IconEngineering,
+  IconPreview,
 } from "../brand/CavaloIcons";
 import { usePreviewStore } from "../../store/preview-store";
 import { useEditorStore } from "../../store/editor-store";
 import type { PreviewStatus, PreviewTarget } from "../../../shared/preview-contract";
 import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
-import webSidebarIcon from "../../../../assets/icons/3d/png_256/WEB SIDEBAR.png";
-import mobileSidebarIcon from "../../../../assets/icons/3d/png_256/MOBILE SIDEBAR.png";
-
 export type ActivityTab = "explorer" | "search" | "git" | "extensions" | "settings";
 
-/** 3D PNG icons include a rounded black tile — render larger than line SVG icons. */
 export const ACTIVITY_BAR_WIDTH = 48;
-const ACTIVITY_BTN = 36;
-const ACTIVITY_ICON = 26;
+const ACTIVITY_BTN = 38;
+const ACTIVITY_ICON = 24;
+const GROUP_GAP = 8;
+const SEPARATOR_MARGIN = 18;
+const BADGE_SIZE = 7;
 
 function getPreviewApi() {
   try {
@@ -30,6 +30,17 @@ function getPreviewApi() {
   } catch {
     return null;
   }
+}
+
+export function mergePreviewRailStatus(
+  web: PreviewStatus,
+  mobile: PreviewStatus
+): PreviewStatus {
+  if (web === "running" || mobile === "running") return "running";
+  if (web === "starting" || mobile === "starting") return "starting";
+  if (web === "failed" || mobile === "failed") return "failed";
+  if (web === "not-configured" || mobile === "not-configured") return "not-configured";
+  return "stopped";
 }
 
 function ActivityBarSeparator() {
@@ -41,9 +52,53 @@ function ActivityBarSeparator() {
       style={{
         width: 28,
         height: 1,
-        background: "rgba(255,255,255,0.07)",
-        margin: "2px 0",
+        background: "rgba(255,255,255,0.06)",
+        margin: `${SEPARATOR_MARGIN}px 0`,
         flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function ActivityBarGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: GROUP_GAP,
+        width: "100%",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function TopRightBadge({
+  color,
+  ariaLabel,
+  testId,
+}: {
+  color: string;
+  ariaLabel?: string;
+  testId?: string;
+}) {
+  return (
+    <span
+      data-testid={testId}
+      aria-label={ariaLabel}
+      role={ariaLabel ? "status" : undefined}
+      style={{
+        position: "absolute",
+        top: 4,
+        right: 4,
+        width: BADGE_SIZE,
+        height: BADGE_SIZE,
+        borderRadius: "50%",
+        background: color,
+        boxShadow: "0 0 0 1px rgba(14,14,15,0.9)",
       }}
     />
   );
@@ -55,21 +110,26 @@ function ActivityBarItem({
   onClick,
   children,
   status,
-  statusDot,
   testId,
   statusLabel,
   badgeAriaLabel,
+  variant = "default",
+  showBadge,
+  badgeColor,
 }: {
   title: string;
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
   status?: PreviewStatus;
-  statusDot?: boolean;
   testId?: string;
   statusLabel?: (title: string, status: PreviewStatus) => string;
   badgeAriaLabel?: string;
+  variant?: "default" | "neutral";
+  showBadge?: boolean;
+  badgeColor?: string;
 }) {
+  const accentActive = variant === "default";
   const tooltip =
     status && statusLabel
       ? statusLabel(title, status)
@@ -82,6 +142,10 @@ function ActivityBarItem({
             : status === "failed"
               ? `${title} — Failed`
               : title;
+
+  const activeBg = accentActive ? "rgba(0,224,255,0.08)" : "rgba(255,255,255,0.1)";
+  const activeColor = accentActive ? "var(--caval-accent)" : "var(--caval-text)";
+  const stripeColor = accentActive ? "var(--caval-accent)" : "rgba(255,255,255,0.45)";
 
   return (
     <button
@@ -101,10 +165,11 @@ function ActivityBarItem({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: active ? "rgba(0,224,255,0.08)" : "transparent",
-        color: active ? "var(--caval-accent)" : "var(--caval-text-muted)",
+        background: active ? activeBg : "transparent",
+        color: active ? activeColor : "var(--caval-text-muted)",
         transition: "background 0.15s, color 0.15s",
         position: "relative",
+        flexShrink: 0,
       }}
       onMouseEnter={(e) => {
         if (!active) {
@@ -130,67 +195,24 @@ function ActivityBarItem({
             bottom: 8,
             width: 2,
             borderRadius: "0 2px 2px 0",
-            background: "var(--caval-accent)",
-            boxShadow: "0 0 6px rgba(0,224,255,0.45)",
+            background: stripeColor,
+            boxShadow: accentActive ? "0 0 6px rgba(0,224,255,0.35)" : undefined,
           }}
         />
       )}
       {status === "not-configured" && (
-        <span
-          className="status-badge status-badge--muted"
-          data-testid={`${testId}-badge-muted`}
-          aria-label={badgeAriaLabel ?? `${title} — not configured`}
-          role="img"
-          style={{
-            position: "absolute",
-            bottom: 2,
-            right: 2,
-            width: 12,
-            height: 12,
-            borderRadius: "50%",
-            background: "#E2C08D",
-            color: "#0E0E0F",
-            fontSize: 8,
-            fontWeight: 700,
-            lineHeight: "12px",
-            textAlign: "center",
-          }}
-        >
-          !
-        </span>
+        <TopRightBadge
+          color="#E2C08D"
+          testId={`${testId}-badge-muted`}
+          ariaLabel={badgeAriaLabel}
+        />
       )}
       {status === "running" && (
-        <span
-          className="status-badge status-badge--live"
-          data-testid={`${testId}-badge-live`}
-          aria-hidden
-          style={{
-            position: "absolute",
-            bottom: 2,
-            right: 2,
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: "#22C55E",
-          }}
-        />
+        <TopRightBadge color="#22C55E" testId={`${testId}-badge-live`} />
       )}
-      {statusDot && (
-        <span
-          className="glow-accent"
-          data-testid={`${testId}-status-dot`}
-          aria-hidden
-          style={{
-            position: "absolute",
-            top: 3,
-            right: 3,
-            width: 5,
-            height: 5,
-            borderRadius: "50%",
-            background: "var(--caval-accent)",
-          }}
-        />
-      )}
+      {showBadge && badgeColor ? (
+        <TopRightBadge color={badgeColor} ariaLabel={badgeAriaLabel} testId={`${testId}-badge`} />
+      ) : null}
     </button>
   );
 }
@@ -248,8 +270,16 @@ export function ActivityBar({
     return title;
   };
 
-  const badgeNotConfigured = (title: string) =>
-    t("activity.badge.notConfigured", { title });
+  const mergedPreviewStatus = mergePreviewRailStatus(
+    previewStatus.web,
+    previewStatus.mobile
+  );
+
+  const previewTarget: PreviewTarget = activePreview ?? "web";
+  const gitTitle =
+    gitChangesCount > 0
+      ? `${t("nav.sourceControlShortcut")} · ${t("activity.badge.gitChanges", { count: gitChangesCount })}`
+      : t("nav.sourceControlShortcut");
 
   const MAIN_ITEMS: { id: ActivityTab; title: string; icon: React.ReactNode }[] = [
     {
@@ -264,34 +294,8 @@ export function ActivityBar({
     },
     {
       id: "git",
-      title: t("nav.sourceControlShortcut"),
-      icon: (
-        <div style={{ position: "relative" }}>
-          <IconGit size={ACTIVITY_ICON} />
-          {gitChangesCount > 0 && (
-            <span
-              aria-label={t("activity.badge.gitChanges", { count: gitChangesCount })}
-              role="status"
-              style={{
-                position: "absolute",
-                top: -4,
-                right: -5,
-                background: "#E2C08D",
-                color: "#0E0E0F",
-                fontSize: 8,
-                fontWeight: 700,
-                lineHeight: 1,
-                padding: "1px 3px",
-                borderRadius: 99,
-                minWidth: 12,
-                textAlign: "center",
-              }}
-            >
-              {gitChangesCount > 99 ? "99+" : gitChangesCount}
-            </span>
-          )}
-        </div>
-      ),
+      title: gitTitle,
+      icon: <IconGit size={ACTIVITY_ICON} />,
     },
     {
       id: "extensions",
@@ -299,8 +303,6 @@ export function ActivityBar({
       icon: <IconMarketplace size={ACTIVITY_ICON} />,
     },
   ];
-
-  const isSettingsActive = active === "settings";
 
   return (
     <div
@@ -316,70 +318,67 @@ export function ActivityBar({
         flexDirection: "column",
         alignItems: "center",
         padding: "10px 0 8px",
-        gap: 4,
         flexShrink: 0,
         zIndex: 20,
         height: "100%",
       }}
     >
-      {MAIN_ITEMS.map((item) => (
-        <ActivityBarItem
-          key={item.id}
-          title={item.title}
-          active={active === item.id}
-          onClick={() => onChange(item.id)}
-          testId={`activity-${item.id}`}
-        >
-          {item.icon}
-        </ActivityBarItem>
-      ))}
+      <ActivityBarGroup>
+        {MAIN_ITEMS.map((item) => (
+          <ActivityBarItem
+            key={item.id}
+            title={item.title}
+            active={active === item.id}
+            onClick={() => onChange(item.id)}
+            testId={`activity-${item.id}`}
+            showBadge={item.id === "git" && gitChangesCount > 0}
+            badgeColor="#E2C08D"
+            badgeAriaLabel={
+              item.id === "git" && gitChangesCount > 0
+                ? t("activity.badge.gitChanges", { count: gitChangesCount })
+                : undefined
+            }
+          >
+            {item.icon}
+          </ActivityBarItem>
+        ))}
+      </ActivityBarGroup>
 
       <ActivityBarSeparator />
 
-      <ActivityBarItem
-        title={t("nav.aiShortcut")}
-        active={aiPanelOpen}
-        statusDot={aiPanelOpen}
-        onClick={onToggleAI}
-        testId="activity-ai"
-      >
-        <span data-icon="ai">
-          <IconSparkle size={ACTIVITY_ICON} />
-        </span>
-      </ActivityBarItem>
+      <ActivityBarGroup>
+        <ActivityBarItem
+          title={t("nav.codingArenaShortcut")}
+          active={aiPanelOpen}
+          onClick={onToggleAI}
+          testId="activity-ai"
+        >
+          <span data-icon="ai">
+            <IconSparkle size={ACTIVITY_ICON} />
+          </span>
+        </ActivityBarItem>
 
-      <ActivityBarItem
-        title={t("preview.webPreview")}
-        active={previewPanelOpen && activePreview === "web"}
-        status={previewStatus.web}
-        statusLabel={statusLabel}
-        badgeAriaLabel={badgeNotConfigured(t("preview.webPreview"))}
-        onClick={() => togglePreviewFromRail("web")}
-        testId="activity-preview-web"
-      >
-        <img src={webSidebarIcon} alt="" width={ACTIVITY_ICON} height={ACTIVITY_ICON} />
-      </ActivityBarItem>
+        <ActivityBarItem
+          title={t("nav.previewShortcut")}
+          active={previewPanelOpen}
+          status={mergedPreviewStatus}
+          statusLabel={statusLabel}
+          badgeAriaLabel={t("activity.badge.notConfigured", { title: t("nav.preview") })}
+          onClick={() => togglePreviewFromRail(previewTarget)}
+          testId="activity-preview"
+        >
+          <IconPreview size={ACTIVITY_ICON} />
+        </ActivityBarItem>
 
-      <ActivityBarItem
-        title={t("preview.mobilePreview")}
-        active={previewPanelOpen && activePreview === "mobile"}
-        status={previewStatus.mobile}
-        statusLabel={statusLabel}
-        badgeAriaLabel={badgeNotConfigured(t("preview.mobilePreview"))}
-        onClick={() => togglePreviewFromRail("mobile")}
-        testId="activity-preview-mobile"
-      >
-        <img src={mobileSidebarIcon} alt="" width={ACTIVITY_ICON} height={ACTIVITY_ICON} />
-      </ActivityBarItem>
-
-      <ActivityBarItem
-        title={t("nav.engineeringShortcut")}
-        active={engineeringOpen}
-        onClick={onToggleEngineering}
-        testId="activity-engineering"
-      >
-        <IconEngineering size={ACTIVITY_ICON} />
-      </ActivityBarItem>
+        <ActivityBarItem
+          title={t("nav.engineeringShortcut")}
+          active={engineeringOpen}
+          onClick={onToggleEngineering}
+          testId="activity-engineering"
+        >
+          <IconEngineering size={ACTIVITY_ICON} />
+        </ActivityBarItem>
+      </ActivityBarGroup>
 
       <div className="activity-bar-spacer" style={{ flex: 1, minHeight: 8 }} />
 
@@ -387,11 +386,12 @@ export function ActivityBar({
 
       <ActivityBarItem
         title={t("nav.settingsShortcut")}
-        active={isSettingsActive}
+        active={active === "settings"}
+        variant="neutral"
         onClick={() => onChange("settings")}
         testId="activity-settings"
       >
-        <IconSettings size={ACTIVITY_ICON} />
+        <IconSettingsNeutral size={ACTIVITY_ICON} />
       </ActivityBarItem>
     </div>
   );

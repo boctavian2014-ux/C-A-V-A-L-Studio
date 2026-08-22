@@ -19,13 +19,13 @@ describe("sidebar preview mount (rail migration)", () => {
     expect(source).not.toContain("PreviewLauncherPanel");
   });
 
-  it("ActivityBar imports WEB/MOBILE SIDEBAR icons", () => {
+  it("ActivityBar imports preview rail assets", () => {
     const source = fs.readFileSync(
       path.join(__dirname, "../../../../src/renderer/components/sidebar/ActivityBar.tsx"),
       "utf8"
     );
-    expect(source).toContain("WEB SIDEBAR.jpg");
-    expect(source).toContain("MOBILE SIDEBAR.jpg");
+    expect(source).toContain("IconPreview");
     expect(source).toContain("usePreviewStore");
+    expect(source).toContain("activity-preview");
   });
 });

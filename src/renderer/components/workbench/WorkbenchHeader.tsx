@@ -1,6 +1,7 @@
 import React from 'react';
 import { SidebarToggleButton } from './SidebarCloseButton';
 import { CavaloLogo } from '../brand/CavaloHorseMark';
+import { IconGlobe } from '../brand/CavaloIcons';
 import { dispatchTerminalNew, dispatchTerminalToggle } from '../../terminal/terminal-events';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
@@ -123,6 +124,7 @@ export function WorkbenchHeader({
           data-testid="header-account-credits"
           onClick={onOpenAccount}
           style={{
+            position: 'relative',
             height: 30,
             minWidth: 30,
             padding: '0 8px',
@@ -131,16 +133,15 @@ export function WorkbenchHeader({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 5,
-            background: 'rgba(212,168,87,0.12)',
-            border: '1px solid rgba(212,168,87,0.25)',
-            color: '#D4A857',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.02em',
+            gap: 6,
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            color: 'var(--caval-text-muted)',
+            fontSize: 10,
+            fontWeight: 600,
           }}
         >
-          OB
+          <IconGlobe size={18} />
         </button>
       </nav>
     </header>

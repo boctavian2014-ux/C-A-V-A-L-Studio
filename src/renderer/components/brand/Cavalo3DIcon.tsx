@@ -14,6 +14,10 @@ import iconStats256 from '../../../../assets/icons/3d/png_256/icon_stats.png';
 import iconTrading256 from '../../../../assets/icons/3d/png_256/icon_trading.png';
 import iconVideo256 from '../../../../assets/icons/3d/png_256/icon_video.png';
 import iconWallet256 from '../../../../assets/icons/3d/png_256/icon_wallet.png';
+import iconPreviewRail256 from '../../../../assets/icons/3d/png_256/icon_preview_rail.png';
+import iconSettingsNeutral256 from '../../../../assets/icons/3d/png_256/icon_settings_neutral.png';
+import iconGlobeAccount256 from '../../../../assets/icons/3d/png_256/icon_globe_account.png';
+import iconEngineering256 from '../../../../assets/icons/3d/png_256/icon_engineering.png';
 
 // ── 1024px tier (large marks, settings logo) ──
 import iconLogoHorse1024 from '../../../../assets/icons/3d/png_1024/icon_logo_horse.png';
@@ -29,6 +33,10 @@ import iconStats1024 from '../../../../assets/icons/3d/png_1024/icon_stats.png';
 import iconTrading1024 from '../../../../assets/icons/3d/png_1024/icon_trading.png';
 import iconVideo1024 from '../../../../assets/icons/3d/png_1024/icon_video.png';
 import iconWallet1024 from '../../../../assets/icons/3d/png_1024/icon_wallet.png';
+import iconPreviewRail1024 from '../../../../assets/icons/3d/png_1024/icon_preview_rail.png';
+import iconSettingsNeutral1024 from '../../../../assets/icons/3d/png_1024/icon_settings_neutral.png';
+import iconGlobeAccount1024 from '../../../../assets/icons/3d/png_1024/icon_globe_account.png';
+import iconEngineering1024 from '../../../../assets/icons/3d/png_1024/icon_engineering.png';
 
 export type Cavalo3DIconName =
   | 'logo_horse'
@@ -43,7 +51,11 @@ export type Cavalo3DIconName =
   | 'stats'
   | 'trading'
   | 'video'
-  | 'wallet';
+  | 'wallet'
+  | 'preview_rail'
+  | 'settings_neutral'
+  | 'globe_account'
+  | 'engineering';
 
 const ICONS_256: Record<Cavalo3DIconName, string> = {
   logo_horse: iconLogoHorse256,
@@ -59,6 +71,10 @@ const ICONS_256: Record<Cavalo3DIconName, string> = {
   trading: iconTrading256,
   video: iconVideo256,
   wallet: iconWallet256,
+  preview_rail: iconPreviewRail256,
+  settings_neutral: iconSettingsNeutral256,
+  globe_account: iconGlobeAccount256,
+  engineering: iconEngineering256,
 };
 
 const ICONS_1024: Record<Cavalo3DIconName, string> = {
@@ -75,6 +91,10 @@ const ICONS_1024: Record<Cavalo3DIconName, string> = {
   trading: iconTrading1024,
   video: iconVideo1024,
   wallet: iconWallet1024,
+  preview_rail: iconPreviewRail1024,
+  settings_neutral: iconSettingsNeutral1024,
+  globe_account: iconGlobeAccount1024,
+  engineering: iconEngineering1024,
 };
 
 export function cavalo3DIconUrl(name: Cavalo3DIconName, size = 24): string {

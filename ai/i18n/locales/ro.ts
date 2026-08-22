@@ -14,6 +14,8 @@ export const ro = {
   "nav.sourceControlShortcut": "Control sursă (Ctrl+Shift+G)",
   "nav.marketplaceShortcut": "Marketplace (Ctrl+Shift+X)",
   "nav.aiShortcut": "Panou AI (Ctrl+Shift+A)",
+  "nav.codingArenaShortcut": "Coding Arena (Ctrl+Shift+A)",
+  "nav.previewShortcut": "Preview (Ctrl+Shift+P)",
   "nav.settingsShortcut": "Setări (Ctrl+,)",
   "nav.engineeringShortcut": "Engineering / Robotics AI",
 

@@ -1,6 +1,6 @@
 // ──────────────────────────────────────────────
-//  CAVALLO — set unitar de iconițe UI
-//  3D PNG glossy pentru activity bar; SVG pentru Git + Engineering.
+//  CAVAL — set unitar de iconițe UI
+//  3D PNG glossy pentru activity bar; SVG pentru Git + toolbar line icons.
 //
 //  Folosire:
 //    import { IconExplorer, IconSearch } from '../brand/CavaloIcons';
@@ -71,21 +71,28 @@ export function IconMarketplace(p: IconProps) {
 }
 
 export function IconEngineering(p: IconProps) {
-  return (
-    <Svg {...p} label="Robotics AI">
-      <rect x="7" y="7" width="10" height="10" rx="2.4" />
-      <circle cx="12" cy="12" r="2.2" />
-      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
-    </Svg>
-  );
+  return <PngIcon {...p} name="engineering" label="Robotics AI" />;
+}
+
+export function IconPreview(p: IconProps) {
+  return <PngIcon {...p} name="preview_rail" label="Preview" />;
 }
 
 export function IconSparkle(p: IconProps) {
-  return <PngIcon {...p} name="ai" label="CAVALLO AI" />;
+  return <PngIcon {...p} name="ai" label="CAVAL AI" />;
 }
 
 export function IconSettings(p: IconProps) {
   return <PngIcon {...p} name="settings" label="Setări" />;
+}
+
+/** Neutral gray gear for activity bar — avoids purple “active feature” look. */
+export function IconSettingsNeutral(p: IconProps) {
+  return <PngIcon {...p} name="settings_neutral" label="Setări" />;
+}
+
+export function IconGlobe(p: IconProps) {
+  return <PngIcon {...p} name="globe_account" label="Account" />;
 }
 
 export function IconAccount(p: IconProps) {
@@ -129,7 +136,7 @@ export function IconBuild(p: IconProps) {
   );
 }
 
-/** Folder line icon — file tree, toolbar (CAVALLO style, not Windows). */
+/** Folder line icon — file tree, toolbar (CAVAL style, not Windows). */
 export function IconFolder(p: IconProps & { open?: boolean }) {
   const { open, size = 18, strokeWidth = 1.6 } = p;
   return (

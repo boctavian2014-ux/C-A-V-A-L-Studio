@@ -47,7 +47,7 @@ describe("ActivityBar layout", () => {
       activePreview: null,
       previewUrl: null,
       previewPanelOpen: false,
-      previewStatus: { web: "idle", mobile: "idle" },
+      previewStatus: { web: "stopped", mobile: "stopped" },
     });
   });
 
@@ -93,13 +93,13 @@ describe("ActivityBar layout", () => {
     );
     const extIdx = ids.indexOf("activity-extensions");
     const aiIdx = ids.indexOf("activity-ai");
-    const webIdx = ids.indexOf("activity-preview-web");
+    const previewIdx = ids.indexOf("activity-preview");
     const engIdx = ids.indexOf("activity-engineering");
     const settingsIdx = ids.indexOf("activity-settings");
 
     expect(aiIdx).toBeGreaterThan(extIdx);
-    expect(webIdx).toBeGreaterThan(aiIdx);
-    expect(engIdx).toBeGreaterThan(webIdx);
+    expect(previewIdx).toBeGreaterThan(aiIdx);
+    expect(engIdx).toBeGreaterThan(previewIdx);
     expect(settingsIdx).toBeGreaterThan(engIdx);
   });
 
@@ -113,7 +113,7 @@ describe("ActivityBar layout", () => {
 
   it("does not render account or connection controls in the activity bar", () => {
     const { container } = renderBar();
-    expect(container.textContent).not.toContain("OB");
+    expect(container.querySelector('[data-testid="header-account-credits"]')).toBeNull();
     expect(container.querySelector(".glass-status-dot")).toBeNull();
   });
 });

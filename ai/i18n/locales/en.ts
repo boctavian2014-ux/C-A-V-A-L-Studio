@@ -12,6 +12,8 @@ export const en = {
   "nav.sourceControlShortcut": "Source Control (Ctrl+Shift+G)",
   "nav.marketplaceShortcut": "Marketplace (Ctrl+Shift+X)",
   "nav.aiShortcut": "AI Panel (Ctrl+Shift+A)",
+  "nav.codingArenaShortcut": "Coding Arena (Ctrl+Shift+A)",
+  "nav.previewShortcut": "Preview (Ctrl+Shift+P)",
   "nav.settingsShortcut": "Settings (Ctrl+,)",
   "nav.engineeringShortcut": "Engineering / Robotics AI",
 
