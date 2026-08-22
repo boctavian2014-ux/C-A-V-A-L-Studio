@@ -175,8 +175,11 @@ describe.skipIf(!hasGit)("M4 unified smoke (one workspace)", () => {
       const starting = await preview.start("web", root);
       expect(starting.status).toBe("starting");
       child.emitStdout("VITE v5.0.0  ready in 80 ms\n  Local: http://localhost:5173/\n");
+      for (let i = 0; i < 400 && preview.getState("web").status !== "running"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       expect(preview.getState("web").status).toBe("running");
-      expect(String(openUrlFn.mock.calls[0]?.[0])).toMatch(/localhost:5173/);
+      expect(String(openUrlFn.mock.calls[0]?.[0])).toMatch(/127\.0\.0\.1:5173/);
 
       const pty = createEchoPty();
       const spawnSyncFn = vi.fn();

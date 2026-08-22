@@ -320,6 +320,9 @@ describe.skipIf(!hasGit)("M5 AI unified smoke (one workspace)", () => {
       );
       expect(previewResult.success).toBe(true);
       child.emitStdout("VITE ready\n  Local: http://localhost:5173/\n");
+      for (let i = 0; i < 400 && preview.getState("web").status !== "running"; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       expect(preview.getState("web").status).toBe("running");
 
       // Redaction on tool output

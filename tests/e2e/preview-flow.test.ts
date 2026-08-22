@@ -144,6 +144,17 @@ describe("Preview flow", () => {
     return { launcher, spawnFn, child, openUrlFn };
   }
 
+  async function waitForRunning(
+    launcher: ReturnType<typeof createPreviewLauncherForTests>,
+    target: "web" | "mobile" = "web"
+  ) {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (launcher.getState(target).status === "running") return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   it("opens web preview for a Vite project via detection", async () => {
     const root = workspace("vite");
     writeVite(root);
@@ -159,9 +170,10 @@ describe("Preview flow", () => {
     expect(spawnInvocation(spawnFn)).toMatch(/\bdev\b/);
 
     child.emitStdout("VITE v5.0.0  ready in 120 ms\n  Local: http://localhost:5173/\n");
+    await waitForRunning(launcher, "web");
     expect(launcher.getState("web").status).toBe("running");
     expect(openUrlFn).toHaveBeenCalled();
-    expect(String(openUrlFn.mock.calls[0]?.[0])).toMatch(/localhost:5173/);
+    expect(String(openUrlFn.mock.calls[0]?.[0])).toMatch(/127\.0\.0\.1:5173/);
     expect(launcher.getLogs("web").some((line) => line.line.includes("VITE"))).toBe(true);
 
     const stopped = await launcher.stop("web");
@@ -182,6 +194,7 @@ describe("Preview flow", () => {
     expect(spawnInvocation(spawnFn)).toMatch(/start/i);
 
     child.emitStdout("Metro waiting on exp://127.0.0.1:8081\n");
+    await waitForRunning(launcher, "mobile");
     const running = launcher.getState("mobile");
     expect(running.status).toBe("running");
     expect(running.url).toBe("exp://127.0.0.1:8081");
@@ -208,6 +221,7 @@ describe("Preview flow", () => {
     expect(spawnInvocation(spawnFn)).not.toMatch(/\bdev\b/);
 
     child.emitStdout("ready\n");
+    await waitForRunning(launcher, "web");
     expect(String(openUrlFn.mock.calls[0]?.[0])).toMatch(/localhost:5173/);
   });
 

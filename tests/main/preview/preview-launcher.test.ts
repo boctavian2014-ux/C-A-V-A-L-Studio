@@ -124,6 +124,19 @@ describe("preview-launcher", () => {
     return { launcher, spawnFn, child, getSpawnOptions: () => capturedSpawnOptions };
   }
 
+  async function waitForStatus(
+    launcher: ReturnType<typeof createPreviewLauncherForTests>,
+    status: string,
+    target: "web" | "mobile" = "web",
+    timeoutMs = 10_000
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (launcher.getState(target).status === status) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   it("redactPreviewSecrets removes secret patterns", () => {
     const input =
       "sk-or-v1-abc123token openRouterApiKey=\"secret\" meshApiKey: 'x' piapiApiKey=val ghp_abcdefghijklmnopqrstuvwxyz Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.sig";
@@ -145,12 +158,60 @@ describe("preview-launcher", () => {
     expect(state.lastError).toMatch(/No preview command detected/i);
   });
 
+  it("falls back to detection when config cwd directory is missing", async () => {
+    const root = workspace("missing-cwd");
+    writeViteProject(root);
+    fs.writeFileSync(
+      path.join(root, "caval.jsonc"),
+      JSON.stringify({
+        preview: {
+          web: {
+            enabled: true,
+            cwd: "does-not-exist",
+            command: "npm run dev",
+            url: "http://localhost:5173",
+          },
+        },
+      }),
+      "utf8"
+    );
+    const { launcher, spawnFn } = createHarness();
+    const state = await launcher.start("web", root);
+    expect(state.status).toBe("starting");
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns not-configured for mobile when stub cwd is missing and no Expo app", async () => {
+    const root = workspace("mobile-stub-cwd");
+    writeViteProject(root);
+    fs.writeFileSync(
+      path.join(root, "caval.jsonc"),
+      JSON.stringify({
+        preview: {
+          mobile: {
+            enabled: true,
+            cwd: "mobile-app",
+            command: "npx expo start",
+            url: "exp://127.0.0.1:8081",
+          },
+        },
+      }),
+      "utf8"
+    );
+    const { launcher, spawnFn } = createHarness();
+    const state = await launcher.start("mobile", root);
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(state.status).toBe("not-configured");
+    expect(state.lastError).toMatch(/No preview command detected/i);
+  });
+
   it("does not spawn duplicate processes when already running", async () => {
     const root = workspace("running");
     writeViteProject(root);
     const { launcher, spawnFn, child } = createHarness();
     const first = await launcher.start("web", root);
-    child.emitStdout("ready on http://127.0.0.1:5173\n");
+    child.emitStdout("  Local: http://localhost:5173/\n");
+    await waitForStatus(launcher, "running");
     const second = await launcher.start("web", root);
     expect(spawnFn).toHaveBeenCalledTimes(1);
     expect(first.status).toBe("starting");
@@ -177,7 +238,7 @@ describe("preview-launcher", () => {
     await launcher.start("web", root);
     await launcher.restart("web", root);
     expect(spawnFn).toHaveBeenCalledTimes(2);
-    expect(launcher.getState("web").status).toBe("starting");
+    expect(["starting", "running"]).toContain(launcher.getState("web").status);
   });
 
   it("shutdownAll stops every active preview process", async () => {
@@ -230,5 +291,53 @@ describe("preview-launcher", () => {
     const { launcher, getSpawnOptions } = createHarness();
     await launcher.start("web", root);
     expect(getSpawnOptions()).toEqual(expect.objectContaining({ shell: false }));
+  });
+
+  it("marks web preview failed when process exits before ready", async () => {
+    const root = workspace("exit-before-ready");
+    writeViteProject(root);
+    const child = createFakeChild();
+    const spawnFn = vi.fn(() => child as unknown as ReturnType<PreviewSpawn>);
+    const launcher = createPreviewLauncherForTests({
+      spawnFn,
+      healthCheckFn: async () => false,
+      readyTimeoutMs: 60_000,
+    });
+    await launcher.start("web", root);
+    child.emitExit(1);
+    await waitForStatus(launcher, "failed");
+    expect(launcher.getState("web").status).toBe("failed");
+    expect(launcher.getState("web").lastError).toMatch(/before preview was ready/i);
+  });
+
+  it("updates web preview URL from dynamic Vite port output", async () => {
+    const root = workspace("dynamic-port");
+    writeViteProject(root);
+    const { launcher, child } = createHarness();
+    await launcher.start("web", root);
+    child.emitStdout("  Local: http://localhost:5177/\n");
+    await waitForStatus(launcher, "running");
+    expect(launcher.getState("web").url).toBe("http://127.0.0.1:5177");
+  });
+
+  it("waits for HTTP health check before marking web preview running", async () => {
+    const root = workspace("health-check");
+    writeViteProject(root);
+    const child = createFakeChild();
+    let allowReady = false;
+    const healthCheckFn = vi.fn(async () => allowReady);
+    const spawnFn = vi.fn(() => child as unknown as ReturnType<PreviewSpawn>);
+    const healthLauncher = createPreviewLauncherForTests({
+      spawnFn,
+      healthCheckFn,
+      readyTimeoutMs: 5_000,
+    });
+    await healthLauncher.start("web", root);
+    expect(healthLauncher.getState("web").status).toBe("starting");
+    allowReady = true;
+    child.emitStdout("  Local: http://localhost:5173/\n");
+    await waitForStatus(healthLauncher, "running");
+    expect(healthCheckFn).toHaveBeenCalled();
+    expect(healthLauncher.getState("web").status).toBe("running");
   });
 });

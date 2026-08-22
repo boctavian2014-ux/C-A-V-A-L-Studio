@@ -76,6 +76,14 @@ export function loadReasoningConfig(workspaceRoot?: string) {
   return loadMultiAgentConfig(workspaceRoot).reasoningLayer;
 }
 
+/** Agentic tool-loop runtime unless pipeline is explicitly configured. */
+export function usesAgenticToolRuntime(
+  config?: Pick<MultiAgentConfig, 'agenticRuntime'>
+): boolean {
+  const runtime = config?.agenticRuntime ?? loadMultiAgentConfig().agenticRuntime;
+  return runtime !== 'pipeline';
+}
+
 /** UI "Review strict" forces merge + supervisor (disables fastPipeline). */
 export function applyMultiAgentOverrides(
   config: MultiAgentConfig,
@@ -136,6 +144,7 @@ export function shouldUseMultiAgentPipeline(
   if (opts?.userBoundWorkspace === false) return false;
   const cfg = config ?? loadMultiAgentConfig(workspaceRoot);
   if (!cfg.enabled) return false;
+  if (usesAgenticToolRuntime(cfg)) return false;
   if (isPartialRunRequest(message)) return false;
   return true;
 }
