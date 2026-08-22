@@ -755,6 +755,22 @@ export const en = {
   "ai.files.viewAll": "View all {{count}} files",
   "ai.files.createdCount": "Created {{count}} files",
 
+  "workCanvas.title": "Building your project",
+  "workCanvas.hint": "Open the Coding Arena to follow progress",
+  "workCanvas.step.preparing": "Preparing workspace",
+  "workCanvas.step.creating": "Creating files",
+  "workCanvas.step.writing": "Writing code",
+  "workCanvas.step.writingPath": "Writing {{path}}",
+  "workCanvas.step.preview": "Starting preview when ready",
+  "workCanvas.header.title": "AI is writing",
+  "workCanvas.header.writing": "Writing…",
+  "workCanvas.header.preview": "Preview",
+  "workCanvas.header.openFile": "Open file",
+  "workCanvas.header.followOn": "Follow AI: On",
+  "workCanvas.header.followOff": "Follow AI: Off",
+  "workCanvas.header.stop": "Stop",
+  "workCanvas.loadError": "Could not open {{path}}",
+
   "ai.details.show": "Details",
   "ai.details.hide": "Hide details",
 

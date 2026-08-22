@@ -72,7 +72,7 @@ function Tab({
     <div
       ref={tabRef}
       data-testid={isAiEditing ? 'editor-tab-ai-editing' : 'editor-tab'}
-      onClick={() => setActiveTab(tab.id)}
+      onClick={() => setActiveTab(tab.id, { byUser: true })}
       onMouseDown={handleMiddleClick}
       onDoubleClick={handleDoubleClick}
       title={`${isAiEditing ? 'AI editează · ' : ''}${tab.isAiPreview ? 'Generare AI live · ' : ''}${tab.path}${tab.isDirty ? ' · Nesalvat' : ''}`}

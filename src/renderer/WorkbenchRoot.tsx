@@ -38,6 +38,7 @@ import { useTranslation } from '../../ai/i18n/useTranslation';
 import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
 import { ConnectionStatusIndicator } from './components/workbench/ConnectionStatusIndicator';
+import { useAiWorkCanvasController } from './hooks/use-ai-work-canvas';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
@@ -249,6 +250,7 @@ function RoboticsCadStage() {
 
 export function WorkbenchRoot() {
   const { t } = useTranslation();
+  useAiWorkCanvasController();
   const [activeActivity, setActiveActivity] = React.useState<ActivityTab>('explorer');
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);

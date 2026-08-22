@@ -12,6 +12,8 @@ import { registerMonacoEditor } from '../../store/editor-command-store';
 import { useProblemsStore } from '../../store/problems-store';
 import { provideGatedInlineCompletion } from '../../ai/inline-completion-provider';
 import { WelcomeWorkspacePanel } from '../workbench/WelcomeWorkspacePanel';
+import { AiWorkCanvas } from './AiWorkCanvas';
+import { AiEditorHeader } from './AiEditorHeader';
 import { FeatureFirstUseTip } from '../ai/FeatureFirstUseTip';
 import { hasSeenFeature, markFeatureSeen } from '../../store/onboarding-store';
 import {
@@ -21,6 +23,7 @@ import {
 } from '../../../../ai/composer/live-ai-edits-store';
 import { ensureLiveAiEditStyles } from '../../../../ai/composer/live-ai-edit-styles';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import { useAiWorkCanvasStore } from '../../store/ai-work-canvas-store';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -126,6 +129,8 @@ const EDITOR_OPTIONS: MonacoType.editor.IStandaloneEditorConstructionOptions = {
 export function MonacoEditor() {
   const { t } = useTranslation();
   const [inlineTipActive, setInlineTipActive] = useState(false);
+  const [monacoMounted, setMonacoMounted] = useState(false);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
 
   useEffect(() => {
     const onShown = () => {
@@ -154,7 +159,22 @@ export function MonacoEditor() {
   const isStreaming = useAIStore((s) => s.isStreaming);
   const isAiLive = Boolean(activeTab?.isAiPreview);
   const liveEdits = useLiveAiEditsStore((s) => s.edits);
+  const editorLoadErrorPath = useAiWorkCanvasStore((s) => s.editorLoadErrorPath);
+  const setEditorLoadErrorPath = useAiWorkCanvasStore((s) => s.setEditorLoadErrorPath);
   const liveDecoIds = useRef<string[]>([]);
+
+  useEffect(() => {
+    setMonacoMounted(false);
+    setLoadTimedOut(false);
+    setEditorLoadErrorPath(null);
+    const timer = window.setTimeout(() => {
+      setLoadTimedOut(true);
+      if (activeTab?.path) {
+        setEditorLoadErrorPath(activeTab.path);
+      }
+    }, 12000);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, setEditorLoadErrorPath, activeTab?.path]);
 
   useEffect(() => {
     ensureLiveAiEditStyles();
@@ -295,6 +315,9 @@ export function MonacoEditor() {
 
   const handleMount: OnMount = useCallback((editor) => {
     editorRef.current = editor;
+    setMonacoMounted(true);
+    setLoadTimedOut(false);
+    setEditorLoadErrorPath(null);
     registerMonacoEditor(editor);
 
     const monacoApi = monaco as typeof MonacoType;
@@ -315,6 +338,9 @@ export function MonacoEditor() {
       const tab = tabs.find((t) => t.id === tabId);
       if (!model || !sel || sel.isEmpty() || !tab) {
         setEditorSelection(null);
+        if (useAIStore.getState().includeMode === 'selection') {
+          useAIStore.getState().setIncludeMode('project');
+        }
         return;
       }
       const text = model.getValueInRange(sel).trim();
@@ -559,7 +585,7 @@ export function MonacoEditor() {
       refactorSelectionAction.dispose();
       registerMonacoEditor(null);
     });
-  }, [monaco, saveTab]);
+  }, [monaco, saveTab, setEditorLoadErrorPath]);
 
   useEffect(() => {
     const onRevealLine = (e: Event) => {
@@ -603,35 +629,29 @@ export function MonacoEditor() {
     if (cadStlUrl) {
       return <EngineeringCadPreview />;
     }
+    if (isStreaming) {
+      return <AiWorkCanvas />;
+    }
     return <WelcomeWorkspacePanel />;
   }
 
+  const writingMatch = Object.values(liveEdits).find(
+    (e) =>
+      (e.status === 'writing' || e.status === 'waiting') &&
+      tabPathMatchesLiveEdit(activeTab.path, e.path, projectPath)
+  );
+  const showAiHeader = isAiLive || Boolean(writingMatch) || (isStreaming && isAiLive);
+  const headerRelativePath = isAiLive
+    ? activeTab.path.replace(/^preview:\/\//, '')
+    : writingMatch?.path ?? activeTab.path.replace(/^preview:\/\//, '');
+
+  const showEditorLoadError = loadTimedOut && !monacoMounted;
+
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      {isAiLive && (
-        <div style={{
-          padding: '6px 16px',
-          borderBottom: `1px solid rgba(0,224,255,0.25)`,
-          background: 'linear-gradient(90deg, rgba(0,224,255,0.12), rgba(124,58,237,0.08))',
-          fontSize: 11.5,
-          color: '#00E0FF',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontFamily: "'Inter', sans-serif",
-        }}>
-          <span style={{
-            width: 7, height: 7, borderRadius: '50%',
-            background: isStreaming ? '#00E0FF' : '#2FBF71',
-            boxShadow: isStreaming ? '0 0 8px #00E0FF' : 'none',
-            animation: isStreaming ? 'pulseTech 1.2s ease-in-out infinite' : 'none',
-          }} />
-          {isStreaming ? 'AI scrie cod live' : 'Previzualizare generare AI'}
-          <span style={{ color: 'var(--caval-text-muted)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5 }}>
-            {activeTab.path.replace(/^preview:\/\//, '')}
-          </span>
-        </div>
-      )}
+      {showAiHeader ? (
+        <AiEditorHeader relativePath={headerRelativePath} isStreaming={isStreaming} />
+      ) : null}
       {inlineTipActive && (
         <div style={{ padding: '6px 16px', borderBottom: '1px solid var(--caval-border)' }}>
           <FeatureFirstUseTip
@@ -668,7 +688,54 @@ export function MonacoEditor() {
       </div>
 
       {/* Editor */}
+      {showEditorLoadError ? (
+        <div
+          data-testid="editor-load-error"
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+            background: '#0D1117',
+            color: 'var(--caval-text-muted)',
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 12,
+            padding: 24,
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            {t('workCanvas.loadError', {
+              path: (editorLoadErrorPath ?? activeTab.path).replace(/^preview:\/\//, ''),
+            })}
+          </p>
+          <button
+            type="button"
+            data-testid="editor-load-retry"
+            onClick={() => {
+              setLoadTimedOut(false);
+              setMonacoMounted(false);
+              setEditorLoadErrorPath(null);
+            }}
+            style={{
+              height: 30,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: '1px solid rgba(0,224,255,0.35)',
+              background: 'rgba(0,224,255,0.08)',
+              color: '#00E0FF',
+              cursor: 'pointer',
+              fontSize: 11,
+              fontWeight: 600,
+            }}
+          >
+            {t('common.retry')}
+          </button>
+        </div>
+      ) : (
       <Editor
+        key={activeTabId}
         height="100%"
         language={activeTab.language}
         value={activeTab.content}
@@ -693,6 +760,7 @@ export function MonacoEditor() {
           </div>
         }
       />
+      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   formatContextSearchResults,
   resolveMentionFiles,
   shouldAttachProjectContext,
+  looksLikeFileCreationPrompt,
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
@@ -40,6 +41,7 @@ import {
 import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { useAiWorkCanvasStore } from '../../src/renderer/store/ai-work-canvas-store';
 import {
   bootstrapRoboticsDesktopProject,
 } from '../../src/renderer/components/engineering/bootstrap-robotics-project';
@@ -115,6 +117,7 @@ import type { IdeContextMode, IdeContextPayload } from '../../src/shared/ai-cont
 import type { TimelineEvent } from '../../src/shared/ai-timeline-contract';
 import { sanitizeTimelineEvent } from '../../src/shared/ai-timeline-contract';
 import { collectRendererIdeContext } from './ide-context-collect';
+import { readLiveEditorSelection } from '../../src/renderer/ai/explain-selection';
 
 export interface ChatAttachment {
   id: string;
@@ -1288,10 +1291,12 @@ export const useAIStore = create<AIStore>()(
           ...attachmentsSnapshot.map((f) => f.name),
         ];
         const uniqueMentions = [...new Set(mentionPaths)];
+        const liveSelection = readLiveEditorSelection();
         const attachProject = shouldAttachProjectContext(apiPrompt, includeMode, {
           hasMentions: uniqueMentions.length > 0,
           hasAttachments: attachmentsSnapshot.length > 0,
           hasProjectPath: Boolean(editorState.projectPath),
+          hasActiveSelection: Boolean(liveSelection?.text?.trim()),
         });
 
         const updateAssistant = (patch: Partial<ChatMessage>) => {
@@ -1410,7 +1415,6 @@ export const useAIStore = create<AIStore>()(
           if (!live?.content.trim()) return;
           useLiveAiEditsStore.getState().beginEdit(live.path);
           useLiveAiEditsStore.getState().progressEdit(live.path, live.content);
-          useEditorStore.getState().updateAiPreview(live.path, live.content);
         };
 
         const openWrittenFile = async (relativePath: string): Promise<boolean> => {
@@ -1622,6 +1626,14 @@ export const useAIStore = create<AIStore>()(
                     msgForParse?.reasoning?.trim() ||
                     capturedReasoningBrief
                 );
+                const expectsDelivery =
+                  looksLikeFileCreationPrompt(userText) ||
+                  hadReasoningPlan ||
+                  scaffoldParsed > 0 ||
+                  isScaffoldContinueRequest(userText);
+                if (!expectsDelivery) {
+                  return;
+                }
                 const detail =
                   fallback.errors[0] ||
                   scaffoldErrors[0] ||
@@ -2095,10 +2107,6 @@ export const useAIStore = create<AIStore>()(
 
         const scaffoldMode = modeSupportsFileApply(agentMode);
 
-        if (isAgenticPipelineMode(agentMode) && editorState.projectPath) {
-          useEditorStore.getState().showAiPreview('generating.ts', '// AI scrie cod…\n');
-        }
-
         if (isFastChat) {
           const contextMessages = buildFastChatMessages(
             apiPrompt,
@@ -2180,7 +2188,7 @@ export const useAIStore = create<AIStore>()(
 
         assertSendNotAborted(sendSignal);
 
-        const editorSelection = useEditorStore.getState().editorSelection;
+        const editorSelection = liveSelection ?? useEditorStore.getState().editorSelection;
         const selectionText = editorSelection?.text?.trim() || undefined;
 
         assertSendNotAborted(sendSignal);
@@ -2193,7 +2201,14 @@ export const useAIStore = create<AIStore>()(
             selection: selectionText,
             fileTree: attachProject && !isAgenticPipelineMode(agentMode) ? editorState.fileTree : [],
             projectPath: editorState.projectPath,
-            includeMode: selectionText && includeMode === 'selection' ? 'selection' : attachProject ? includeMode : 'file',
+            includeMode:
+              selectionText && includeMode === 'selection'
+                ? 'selection'
+                : attachProject
+                  ? includeMode === 'selection'
+                    ? 'project'
+                    : includeMode
+                  : 'file',
             skipActiveFile: !attachProject,
             projectContext,
             mentions: uniqueMentions,
@@ -2252,8 +2267,8 @@ export const useAIStore = create<AIStore>()(
         streamCleanup = null;
         activeStreamId = null;
         pendingStreamId = null;
-        useEditorStore.getState().closeAiPreview();
         useLiveAiEditsStore.getState().clearAll();
+        useAiWorkCanvasStore.getState().onStreamEnd();
         set((s) => {
           const messages = s.messages.map((m) =>
             m.isStreaming ? finalizeStoppedAssistantMessage(m) : m

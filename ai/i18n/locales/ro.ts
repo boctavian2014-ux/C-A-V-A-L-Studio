@@ -755,6 +755,22 @@ export const ro = {
   "ai.files.viewAll": "Vezi toate cele {{count}} fișiere",
   "ai.files.createdCount": "Au fost create {{count}} fișiere",
 
+  "workCanvas.title": "Se construiește proiectul",
+  "workCanvas.hint": "Deschide Coding Arena pentru a urmări progresul",
+  "workCanvas.step.preparing": "Pregătire workspace",
+  "workCanvas.step.creating": "Se creează fișiere",
+  "workCanvas.step.writing": "Se scrie cod",
+  "workCanvas.step.writingPath": "Se scrie {{path}}",
+  "workCanvas.step.preview": "Se pornește previzualizarea când e gata",
+  "workCanvas.header.title": "AI scrie cod",
+  "workCanvas.header.writing": "Se scrie…",
+  "workCanvas.header.preview": "Previzualizare",
+  "workCanvas.header.openFile": "Deschide fișier",
+  "workCanvas.header.followOn": "Urmărește AI: Da",
+  "workCanvas.header.followOff": "Urmărește AI: Nu",
+  "workCanvas.header.stop": "Stop",
+  "workCanvas.loadError": "Nu s-a putut deschide {{path}}",
+
   "ai.details.show": "Detalii",
   "ai.details.hide": "Ascunde detaliile",
 
