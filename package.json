@@ -138,5 +138,8 @@
     "xterm-addon-web-links": "^0.9.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
+  },
+  "overrides": {
+    "tinypool": "1.0.2"
   }
 }
