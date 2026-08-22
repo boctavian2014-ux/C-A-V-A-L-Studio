@@ -91,8 +91,10 @@ function escHtml(s: string): string {
 // ──────────────────────────────────────────────
 
 function DiffBlock({ message }: { message: ChatMessage }) {
+  const { t } = useTranslation();
   const { applyDiff, rejectDiff, rollbackDiff } = useAIStore();
   const diff = message.diff!;
+  const fileName = diff.filePath.split(/[/\\]/).pop() ?? diff.filePath;
 
   if (diff.applied) {
     return (
@@ -102,7 +104,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
         fontSize: 11.5, color: 'var(--caval-success)',
         display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        <span style={{ flex: 1 }}>✓ Modificări aplicate în {diff.filePath.split(/[/\\]/).pop()}</span>
+        <span style={{ flex: 1 }}>{t('ai.diff.applied', { file: fileName })}</span>
         {diff.previousContent != null && (
           <button
             type="button"
@@ -113,7 +115,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
               color: 'var(--caval-success)', fontSize: 11, cursor: 'pointer',
             }}
           >
-            ↩ Anulează
+            {t('ai.diff.undo')}
           </button>
         )}
       </div>
@@ -158,7 +160,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
             fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
           }}
         >
-          ✓ Aplică
+          ✓ {t('ai.diff.apply')}
         </button>
         <button
           onClick={() => rejectDiff(message.id)}
@@ -168,7 +170,7 @@ function DiffBlock({ message }: { message: ChatMessage }) {
             color: 'var(--caval-text-muted)', fontSize: 11.5, cursor: 'pointer',
           }}
         >
-          ✕ Respinge
+          {t('ai.diff.reject')}
         </button>
       </div>
     </div>
@@ -409,11 +411,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const effectiveModelId = message.resolvedModel ?? message.model ?? '';
   const modelLabel = arenaMode
     ? resolvedLabel
-      ? `Agentic · ${resolvedLabel}`
-      : 'Agentic · multi-model'
+      ? t('ai.chat.agenticWithModel', { model: resolvedLabel })
+      : t('ai.chat.agenticMultiModel')
     : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
-      : resolvedLabel ?? selectionLabel ?? 'Model';
+      : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
 
   const displayText = arenaMode
     ? message.reasoningBrief || message.recap
@@ -460,7 +462,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     }}>
       {/* Label */}
       <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em', paddingLeft: 2 }}>
-        {isUser ? 'Tu' : (
+        {isUser ? t('ai.chat.userLabel') : (
           <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--caval-accent)', display: 'inline-block', flexShrink: 0 }} />
             <span>{modelLabel}</span>
@@ -783,6 +785,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
   const [input, setInput] = useState('');
   const [preloadHint, setPreloadHint] = useState('');
   const [readinessHint, setReadinessHint] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   useEffect(() => {
     ensurePipelineVerifyListener();
@@ -1191,8 +1194,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         <div
           data-testid="ai-history-list"
           style={{
-            maxHeight: 132,
-            overflowY: 'auto',
+            maxHeight: historyExpanded ? 132 : undefined,
+            overflowY: historyExpanded ? 'auto' : 'hidden',
             borderBottom: `1px solid ${theme.colors.border}`,
             flexShrink: 0,
             padding: `4px ${PANEL_PAD_X}px 6px`,
@@ -1204,15 +1207,41 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
               color: 'var(--caval-text-muted)',
-              marginBottom: 4,
+              marginBottom: historyExpanded ? 4 : 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 6,
             }}
           >
-            <span>History {historyLoading ? '…' : ''}</span>
-            {exportConversationId ? (
+            <button
+              type="button"
+              data-testid="ai-history-toggle"
+              aria-expanded={historyExpanded}
+              title={historyExpanded ? t('ai.history.collapse') : t('ai.history.expand')}
+              onClick={() => setHistoryExpanded((open) => !open)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'inherit',
+                cursor: 'pointer',
+                padding: 0,
+                font: 'inherit',
+                letterSpacing: 'inherit',
+                textTransform: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span>
+                {historyExpanded
+                  ? `${t('ai.history.title')}${historyLoading ? ' …' : ''}`
+                  : t('ai.history.count', { count: historyConversations.length })}
+              </span>
+              <span aria-hidden="true" style={{ fontSize: 8 }}>{historyExpanded ? '▴' : '▾'}</span>
+            </button>
+            {historyExpanded && exportConversationId ? (
               <span data-testid="ai-history-export-actions" style={{ display: 'flex', gap: 4 }}>
                 <button
                   type="button"
@@ -1257,22 +1286,24 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
               </span>
             ) : null}
           </div>
-          {historyConversations.length === 0 && !historyLoading ? (
-            <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
-              {t('ai.history.empty')}
-            </div>
-          ) : (
-            <HistoryList
-              conversations={historyConversations}
-              activeId={activeHistoryId}
-              hasMore={historyHasMore}
-              loadingMore={historyLoadingMore}
-              onSelect={(id) => void openHistoryConversation(id)}
-              onDelete={(id) => {
-                void deleteHistoryConversation(id).then(() => refreshHistory());
-              }}
-              onLoadMore={() => void loadMoreHistory()}
-            />
+          {historyExpanded && (
+            historyConversations.length === 0 && !historyLoading ? (
+              <div style={{ fontSize: 10, color: 'var(--caval-text-muted)' }}>
+                {t('ai.history.empty')}
+              </div>
+            ) : (
+              <HistoryList
+                conversations={historyConversations}
+                activeId={activeHistoryId}
+                hasMore={historyHasMore}
+                loadingMore={historyLoadingMore}
+                onSelect={(id) => void openHistoryConversation(id)}
+                onDelete={(id) => {
+                  void deleteHistoryConversation(id).then(() => refreshHistory());
+                }}
+                onLoadMore={() => void loadMoreHistory()}
+              />
+            )
           )}
         </div>
       )}
@@ -1419,13 +1450,13 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                 </svg>
               </IconBtn>
               <IconBtn
-                title="Refresh modele OpenRouter"
+                title={t('ai.panel.refreshModels')}
                 onClick={() => void refreshCatalog()}
               >
                 <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span>
               </IconBtn>
               {onOpenComposer && (
-                <IconBtn title="Deschide Composer (multi-file)" onClick={onOpenComposer}>
+                <IconBtn title={t('ai.panel.openComposer')} onClick={onOpenComposer}>
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
                     <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
                   </svg>
@@ -1452,7 +1483,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
                       animation: isPrepareReady ? 'none' : 'dot-bounce 1.2s ease-in-out infinite',
                     }}
                   />
-                  {isPrepareReady ? 'Pregătit' : 'Pregătesc…'}
+                  {isPrepareReady ? t('ai.panel.prepareReady') : t('ai.panel.prepareBusy')}
                   {preloadHint && (
                     <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
                   )}

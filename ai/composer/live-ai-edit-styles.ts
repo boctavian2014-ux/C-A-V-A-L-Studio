@@ -53,26 +53,43 @@ export function ensureLiveAiEditStyles(): void {
   gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--caval-border);
-  background: var(--caval-surface);
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
   color: var(--caval-text);
   font-size: 11.5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, background 0.15s;
 }
 .caval-ai-file-card:hover {
-  border-color: rgba(0, 224, 255, 0.35);
+  border-color: rgba(0, 224, 255, 0.28);
+  background: rgba(255, 255, 255, 0.02);
 }
 .caval-ai-file-card--active {
-  border-color: rgba(0, 224, 255, 0.55);
-  box-shadow: 0 0 0 1px rgba(0, 224, 255, 0.2);
+  border-color: rgba(0, 224, 255, 0.45);
+  border-bottom-color: var(--caval-accent);
+  background: rgba(0, 224, 255, 0.04);
+  box-shadow: none;
 }
 .caval-ai-file-card--writing {
-  border-color: rgba(0, 224, 255, 0.4);
-  background: rgba(0, 224, 255, 0.04);
+  border-color: rgba(0, 224, 255, 0.32);
+  background: rgba(0, 224, 255, 0.03);
+}
+[data-testid="live-ai-file-cards"] > div:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+[data-testid="live-ai-file-cards"] {
+  position: relative;
 }
 .caval-ai-file-card-icon {
   width: 22px;

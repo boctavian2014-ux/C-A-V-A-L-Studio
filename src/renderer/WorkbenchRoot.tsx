@@ -164,10 +164,6 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
       fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5,
       color: 'var(--caval-text-muted)', flexShrink: 0,
     }}>
-      <StatusItem>
-        <IconGit size={11} strokeWidth={1.8} />
-        {isRepo ? branch || '—' : t('statusBar.noGit')}
-      </StatusItem>
       <StatusItem
         onClick={() => document.dispatchEvent(new CustomEvent('caval:terminal-panel-tab', { detail: { tab: 'problems' } }))}
         style={{ cursor: 'pointer' }}
@@ -175,21 +171,26 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
       >
         {errorCount === 0 ? '✓' : '✕'} {errorCount} {t('statusBar.errors')} &nbsp;⚠ {warningCount}
       </StatusItem>
-      <StatusItem title={t('statusBar.connectionTooltip')} style={{ gap: 6 }}>
+      <StatusItem title={t('statusBar.connectionUnavailableTooltip')} style={{ gap: 6 }}>
         <ConnectionStatusIndicator />
+      </StatusItem>
+      <StatusItem>
+        <IconGit size={11} strokeWidth={1.8} />
+        {isRepo ? branch || '—' : t('statusBar.noGit')}
       </StatusItem>
 
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
         {activeTab && (
           <>
             <StatusItem>{activeTab.language}</StatusItem>
-            <StatusItem>UTF-8</StatusItem>
+            <StatusItem>{t('statusBar.encoding')}</StatusItem>
           </>
         )}
         {/* Buton AI în status bar — toggle rapid */}
         <button
           onClick={onToggleAI}
-          title="Toggle AI Panel (Ctrl+Shift+A)"
+          title={t('statusBar.aiToggleTitle')}
+          aria-label={t('statusBar.aiToggleTitle')}
           style={{
             background: aiPanelOpen ? 'rgba(0,224,255,0.12)' : 'transparent',
             border: aiPanelOpen ? '1px solid var(--caval-accent)' : 'none',
@@ -201,7 +202,7 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
           }}
         >
           <IconSparkle size={10} strokeWidth={2} />
-          {aiPanelOpen ? 'AI activ' : 'AI'}
+          {aiPanelOpen ? t('statusBar.aiToggleActive') : t('statusBar.aiToggle')}
         </button>
       </div>
     </div>

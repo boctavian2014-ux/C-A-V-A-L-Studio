@@ -129,18 +129,19 @@ function ActivityBarItem({
   showBadge?: boolean;
   badgeColor?: string;
 }) {
+  const { t } = useTranslation();
   const accentActive = variant === "default";
   const tooltip =
     status && statusLabel
       ? statusLabel(title, status)
       : status === "not-configured"
-        ? `${title} — Not configured`
+        ? t("activity.status.notConfigured", { title })
         : status === "running"
-          ? `${title} — Running`
+          ? t("activity.status.running", { title })
           : status === "starting"
-            ? `${title} — Starting`
+            ? t("activity.status.starting", { title })
             : status === "failed"
-              ? `${title} — Failed`
+              ? t("activity.status.failed", { title })
               : title;
 
   const activeBg = accentActive ? "rgba(0,224,255,0.08)" : "rgba(255,255,255,0.1)";
@@ -359,7 +360,7 @@ export function ActivityBar({
         </ActivityBarItem>
 
         <ActivityBarItem
-          title={t("nav.previewShortcut")}
+          title={t("nav.preview")}
           active={previewPanelOpen}
           status={mergedPreviewStatus}
           statusLabel={statusLabel}

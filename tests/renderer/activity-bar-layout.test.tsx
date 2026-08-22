@@ -119,11 +119,12 @@ describe("ActivityBar layout", () => {
 });
 
 describe("ConnectionStatusIndicator", () => {
-  it("renders with accessible connected label", () => {
+  it("renders with accessible unavailable label", () => {
     const { container, unmount } = mount(<ConnectionStatusIndicator />);
     const dot = container.querySelector('[data-testid="statusbar-connection-indicator"]');
     expect(dot).toBeTruthy();
-    expect(dot?.getAttribute("aria-label")).toMatch(/Connected|Conectat/i);
+    expect(dot?.getAttribute("aria-label")).toMatch(/unavailable|indisponibil/i);
+    expect(dot?.getAttribute("data-connection-state")).toBe("unknown");
     unmount();
   });
 });

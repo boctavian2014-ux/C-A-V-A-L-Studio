@@ -1,7 +1,7 @@
 import React from 'react';
 import { SidebarToggleButton } from './SidebarCloseButton';
 import { CavaloLogo } from '../brand/CavaloHorseMark';
-import { IconGlobe } from '../brand/CavaloIcons';
+import { IconAccount } from '../brand/CavaloIcons';
 import { dispatchTerminalNew, dispatchTerminalToggle } from '../../terminal/terminal-events';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
 
@@ -33,7 +33,7 @@ export function WorkbenchHeader({
         padding: '0 14px 0 12px',
         minHeight: 46,
         borderBottom: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
-        borderTop: '2px solid var(--caval-accent)',
+        borderTop: 'none',
         borderLeft: 'none',
         borderRight: 'none',
         color: 'var(--caval-text-muted)',
@@ -56,7 +56,7 @@ export function WorkbenchHeader({
 
       <nav
         aria-label={t('workbench.toolbarAria')}
-        style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
       >
         <SidebarToggleButton sidebarOpen={sidebarOpen} onClick={onToggleSidebar} />
         <button
@@ -89,8 +89,8 @@ export function WorkbenchHeader({
         <button
           type="button"
           className={engineeringOpen ? 'glow-accent' : 'glass-panel-interactive'}
-          title={t('workbench.roboticsAiUltra')}
-          aria-label={t('workbench.roboticsAiUltra')}
+          title={t('workbench.roboticsAi')}
+          aria-label={t('workbench.roboticsAi')}
           aria-pressed={engineeringOpen}
           onClick={onToggleEngineering}
           style={{
@@ -141,7 +141,7 @@ export function WorkbenchHeader({
             fontWeight: 600,
           }}
         >
-          <IconGlobe size={18} />
+          <IconAccount size={18} />
         </button>
       </nav>
     </header>
