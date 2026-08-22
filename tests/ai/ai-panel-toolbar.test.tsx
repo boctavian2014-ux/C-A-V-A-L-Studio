@@ -58,6 +58,11 @@ vi.mock("../../ai/i18n/useTranslation", () => ({
   }),
 }));
 
+vi.mock("../../src/renderer/ai/explain-controller", () => ({
+  startExplainForSelection: vi.fn(async () => undefined),
+}));
+
+import { startExplainForSelection } from "../../src/renderer/ai/explain-controller";
 import { AiPanelToolbar } from "../../ai/composer/AiPanelToolbar";
 
 function mount(ui: ReactElement) {
@@ -103,6 +108,7 @@ describe("AiPanelToolbar", () => {
     setIncludeMode.mockReset();
     runWorkspaceVerifyAndReport.mockReset();
     runBuildAndReport.mockReset();
+    vi.mocked(startExplainForSelection).mockReset();
   });
 
   afterEach(() => {
@@ -205,7 +211,7 @@ describe("AiPanelToolbar", () => {
     expect(onStartChat).toHaveBeenCalledWith("Fix the errors in my current file");
   });
 
-  it("quick action explain shows hint instead of starting chat", () => {
+  it("quick action explain runs explain controller instead of chat", () => {
     const { container, unmount } = mount(
       <AiPanelToolbar isStreaming={false} onStartChat={onStartChat} />
     );
@@ -221,8 +227,7 @@ describe("AiPanelToolbar", () => {
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(onStartChat).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="ai-toolbar-action-hint"]')?.textContent).toMatch(
-      /Explain/i
-    );
+    expect(startExplainForSelection).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="ai-toolbar-action-hint"]')).toBeNull();
   });
 });

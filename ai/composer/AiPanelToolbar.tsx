@@ -5,6 +5,7 @@ import { ChatModeSelect } from "./ChatModeSelect";
 import { AI_ONBOARDING_SUGGESTIONS } from "./AIOnboarding";
 import { AiToolsInfoContent } from "./AiToolsInfoContent";
 import { useTranslation } from "../i18n/useTranslation";
+import { startExplainForSelection } from "../../src/renderer/ai/explain-controller";
 
 function ToolbarIconBtn({
   title,
@@ -98,12 +99,17 @@ export function AiPanelToolbar({
     const suggestion = AI_ONBOARDING_SUGGESTIONS.find((s) => s.id === id);
     if (!suggestion) return;
     setQuickOpen(false);
+    if (id === "explain") {
+      setActionHint(null);
+      void startExplainForSelection();
+      return;
+    }
     if (suggestion.prompt) {
       setActionHint(null);
       onStartChat(suggestion.prompt);
       return;
     }
-    setActionHint(suggestion.hint ?? t("ai.toolbar.explainCode"));
+    setActionHint(suggestion.hint ?? t("ai.toolbar.quickActions"));
   };
 
   const verifyDisabled = verifyInFlight !== "none" || !projectPath || isStreaming;
