@@ -725,8 +725,21 @@ interface CavalBridge {
     result: "valid" | "invalid" | "unreachable";
     error?: string;
   }>;
-  settingsLoad?: () => Promise<{ ok: boolean; settings?: Record<string, string> }>;
-  settingsSave?: (settings: Record<string, string>) => Promise<{ ok: boolean; error?: string }>;
+  settingsLoad?: () => Promise<{
+    ok: boolean;
+    settings?: Record<string, string>;
+    cadConnection?: import("../shared/cad-connection-settings-contract").CadConnectionSettingsSnapshot;
+  }>;
+  settingsSave?: (
+    settings: Record<string, string> & {
+      cadApiUrlAction?: "clear";
+    }
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    cadConnection?: import("../shared/cad-connection-settings-contract").CadConnectionSettingsSnapshot;
+    settings?: Record<string, string>;
+  }>;
   locale?: {
     get: () => Promise<{
       ok: boolean;

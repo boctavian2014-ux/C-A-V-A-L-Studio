@@ -110,7 +110,6 @@ function abortSubmit(): void {
 async function loadCadCredentials(): Promise<{
   openRouterConfigured: boolean;
   meshConfigured: boolean;
-  cadApiUrl?: string;
 }> {
   const caval = window.caval;
   const [settingsResult, secretsResult, health] = await Promise.all([
@@ -139,7 +138,6 @@ async function loadCadCredentials(): Promise<{
       configured.MESHY_API_KEY === true ||
       settings['mesh.configured'] === 'true' ||
       settings['trellis.configured'] === 'true',
-    cadApiUrl: settings['cad.apiUrl'],
   };
 }
 

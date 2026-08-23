@@ -26,6 +26,7 @@ import {
   type AppLocale,
 } from '../../../../ai/i18n/index';
 import type { MessageKey } from '../../../../ai/i18n/locales/en';
+import type { CadConnectionSettingsSnapshot, CadConnectionSource } from '../../../shared/cad-connection-settings-contract';
 import { showWorkbenchToast } from '../../commands/workbench-toast';
 
 const NAV_ITEMS: { id: SettingsSection; labelKey: MessageKey; icon: React.ReactNode }[] = [
@@ -386,27 +387,55 @@ function SectionArena() {
   );
 }
 
+function cadSourceLabel(source: CadConnectionSource, t: ReturnType<typeof createTranslator>): string {
+  switch (source) {
+    case 'env':
+      return t('settings.cad.sourceEnv');
+    case 'user':
+      return t('settings.cad.sourceUser');
+    case 'default':
+      return t('settings.cad.sourceDefault');
+    default:
+      return t('settings.cad.sourceNone');
+  }
+}
+
 function SectionCadCloud() {
   const { t } = useTranslation();
-  const [apiUrl, setApiUrl] = useState('');
+  const [cadConnection, setCadConnection] = useState<CadConnectionSettingsSnapshot>({
+    configured: false,
+    source: 'none',
+  });
+  const [editing, setEditing] = useState(false);
+  const [draftUrl, setDraftUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [healthMsg, setHealthMsg] = useState<string | null>(null);
   const [healthTone, setHealthTone] = useState<'ok' | 'warn' | 'err'>('err');
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [cloudOnly, setCloudOnly] = useState(true);
   const [meshyOk, setMeshyOk] = useState(false);
   const [piapiOk, setPiapiOk] = useState(false);
   const [openRouterOk, setOpenRouterOk] = useState(false);
 
+  const envLocked = cadConnection.source === 'env';
+
+  const refreshCadConnection = async () => {
+    const settingsRes = await window.caval.settingsLoad?.();
+    if (settingsRes?.cadConnection) {
+      setCadConnection(settingsRes.cadConnection);
+    }
+    return settingsRes;
+  };
+
   useEffect(() => {
     void (async () => {
       const [settingsRes, secretsRes] = await Promise.all([
-        window.caval.settingsLoad?.(),
+        refreshCadConnection(),
         window.caval.secretsGet?.(),
       ]);
       const s = settingsRes?.settings ?? {};
-      setApiUrl(s['cad.apiUrl'] ?? '');
-      setApiKey(''); // write-only; never reload plaintext CAD key into renderer
+      setApiKey('');
       const configured = secretsRes?.configured ?? {};
       setMeshyOk(
         Boolean(configured.MESHY_API_KEY) || s['mesh.configured'] === 'true'
@@ -424,60 +453,91 @@ function SectionCadCloud() {
     })();
   }, []);
 
-  const saveSettings = async () => {
-    const res = await window.caval.settingsLoad?.();
-    const prev = res?.settings ?? {};
-    // URL only via settings-save — API keys go through secrets-set exclusively.
-    await window.caval.settingsSave?.({
-      ...Object.fromEntries(
-        Object.entries(prev).filter(
-          ([k]) => !/\.apiKey$/i.test(k) && !/api[_-]?key|token|secret/i.test(k)
-        )
-      ),
-      'cad.apiUrl': apiUrl.trim(),
-    });
+  const saveCustomConnection = async (): Promise<boolean> => {
+    if (!draftUrl.trim()) return false;
+    setSaving(true);
+    try {
+      const res = await window.caval.settingsSave?.({ 'cad.apiUrl': draftUrl.trim() });
+      if (!res?.ok) {
+        showWorkbenchToast(res?.error ?? t('settings.cad.saveFailed'));
+        return false;
+      }
+      if (res.cadConnection) setCadConnection(res.cadConnection);
+      setDraftUrl('');
+      setEditing(false);
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeCustomConnection = async () => {
+    setSaving(true);
+    try {
+      const res = await window.caval.settingsSave?.({ cadApiUrlAction: 'clear' });
+      if (!res?.ok) {
+        showWorkbenchToast(res?.error ?? t('settings.cad.saveFailed'));
+        return;
+      }
+      if (res.cadConnection) setCadConnection(res.cadConnection);
+      setEditing(false);
+      setDraftUrl('');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveApiKey = async () => {
     if (apiKey.trim()) {
       await window.caval.secretsSet?.({ CAD_API_KEY: apiKey.trim() });
-      setApiKey(''); // wipe plaintext from React state immediately after save
+      setApiKey('');
     }
   };
 
   const testConnection = async () => {
     setTesting(true);
     setHealthMsg(null);
-    await saveSettings();
-    const [secretsRes, health] = await Promise.all([
-      window.caval.secretsGet?.(),
-      window.caval.cad?.health?.(),
-    ]);
-    setTesting(false);
-    const configured = secretsRes?.configured ?? {};
-    const localOpenRouter = Boolean(configured.OPENROUTER_API_KEY) || openRouterOk;
-    const localPiapi =
-      Boolean(configured.PIAPI_API_KEY) ||
-      Boolean(configured.TRELLIS_API_KEY) ||
-      piapiOk;
+    try {
+      if (editing && draftUrl.trim()) {
+        const saved = await saveCustomConnection();
+        if (!saved) return;
+      } else {
+        await saveApiKey();
+      }
+      const [secretsRes, health] = await Promise.all([
+        window.caval.secretsGet?.(),
+        window.caval.cad?.health?.(),
+      ]);
+      const configured = secretsRes?.configured ?? {};
+      const localOpenRouter = Boolean(configured.OPENROUTER_API_KEY) || openRouterOk;
+      const localPiapi =
+        Boolean(configured.PIAPI_API_KEY) ||
+        Boolean(configured.TRELLIS_API_KEY) ||
+        piapiOk;
 
-    if (!health) {
-      setHealthTone('err');
-      setHealthMsg(t('settings.cad.unavailable'));
-      return;
+      if (!health) {
+        setHealthTone('err');
+        setHealthMsg(t('settings.cad.unavailable'));
+        return;
+      }
+
+      const dual = formatCadDualHealth({
+        localOpenRouter,
+        localPiapi,
+        cloudOk: Boolean(health.ok),
+        cloudOpenRouter: health.openRouterConfigured,
+        cloudPiapi: health.piapiConfigured,
+        openscadInstalled: health.openscadInstalled,
+      });
+      setHealthTone(dual.tone);
+      const extras = [
+        health.meshWorkerConfigured ? 'Worker ✓' : null,
+        health.meshyConfigured ? 'Meshy ✓' : null,
+      ].filter(Boolean);
+      setHealthMsg(extras.length ? `${dual.text}\n${extras.join(' · ')}` : dual.text);
+    } finally {
+      setTesting(false);
     }
-
-    const dual = formatCadDualHealth({
-      localOpenRouter,
-      localPiapi,
-      cloudOk: Boolean(health.ok),
-      cloudOpenRouter: health.openRouterConfigured,
-      cloudPiapi: health.piapiConfigured,
-      openscadInstalled: health.openscadInstalled,
-    });
-    setHealthTone(dual.tone);
-    const extras = [
-      health.meshWorkerConfigured ? 'Worker ✓' : null,
-      health.meshyConfigured ? 'Meshy ✓' : null,
-    ].filter(Boolean);
-    setHealthMsg(extras.length ? `${dual.text}\n${extras.join(' · ')}` : dual.text);
   };
 
   const healthColor =
@@ -490,38 +550,131 @@ function SectionCadCloud() {
           {t('settings.cad.serverDesc')}
           {cloudOnly ? ` ${t('settings.cad.cloudOnly')}` : ''}
         </p>
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>{t('settings.cad.apiUrl')}</div>
-          <Input value={apiUrl} onChange={setApiUrl} placeholder="https://xxx.up.railway.app" mono />
-        </div>
+
+        {!editing ? (
+          <>
+            <div style={{
+              marginBottom: 10, padding: '10px 12px', borderRadius: 8,
+              border: '1px solid var(--caval-border)', background: 'rgba(255,255,255,0.02)',
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                {cadConnection.configured
+                  ? t('settings.cad.connectionConfigured')
+                  : t('settings.cad.connectionNotConfigured')}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>
+                {t('settings.cad.connectionSource')}: {cadSourceLabel(cadConnection.source, t)}
+              </div>
+              {envLocked ? (
+                <div style={{ fontSize: 11, color: 'var(--caval-text-muted)', marginTop: 6 }}>
+                  {t('settings.cad.envManaged')}
+                </div>
+              ) : null}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              {!envLocked ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(true);
+                    setDraftUrl('');
+                  }}
+                  style={{
+                    padding: '8px 12px', borderRadius: 6, border: '1px solid var(--caval-border)',
+                    background: 'transparent', color: 'var(--caval-text)', fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  {t('settings.cad.changeConnection')}
+                </button>
+              ) : null}
+              {cadConnection.source === 'user' ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void removeCustomConnection()}
+                  style={{
+                    padding: '8px 12px', borderRadius: 6, border: '1px solid var(--caval-border)',
+                    background: 'transparent', color: 'var(--caval-text-muted)', fontSize: 12,
+                    cursor: saving ? 'wait' : 'pointer',
+                  }}
+                >
+                  {t('settings.cad.removeCustom')}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void testConnection()}
+                disabled={testing}
+                style={{
+                  padding: '8px 12px', borderRadius: 6, border: 'none',
+                  background: 'var(--caval-accent)', color: '#0E0E0F',
+                  fontSize: 12, fontWeight: 600, cursor: testing ? 'wait' : 'pointer',
+                }}
+              >
+                {testing ? t('settings.cad.testing') : t('settings.cad.test')}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>
+                {t('settings.cad.newUrlLabel')}
+              </div>
+              <Input
+                value={draftUrl}
+                onChange={setDraftUrl}
+                placeholder={t('settings.cad.newUrlPlaceholder')}
+                mono
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <button
+                type="button"
+                disabled={saving || !draftUrl.trim()}
+                onClick={() => void saveCustomConnection()}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 6, border: 'none',
+                  background: 'var(--caval-accent)', color: '#0E0E0F',
+                  fontSize: 12, fontWeight: 600, cursor: saving ? 'wait' : 'pointer',
+                }}
+              >
+                {saving ? t('settings.cad.saving') : t('settings.cad.saveConnection')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(false);
+                  setDraftUrl('');
+                }}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 6, border: '1px solid var(--caval-border)',
+                  background: 'transparent', color: 'var(--caval-text)', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                {t('settings.cad.cancelEdit')}
+              </button>
+            </div>
+          </>
+        )}
+
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>{t('settings.cad.apiKey')}</div>
           <Input value={apiKey} onChange={setApiKey} placeholder="CAD_API_KEY" type="password" mono />
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button
-            type="button"
-            onClick={() => void saveSettings()}
-            style={{
-              flex: 1, padding: '8px 0', borderRadius: 6, border: '1px solid var(--caval-border)',
-              background: 'transparent', color: 'var(--caval-text)', fontSize: 12, cursor: 'pointer',
-            }}
-          >
-            {t('settings.cad.save')}
-          </button>
-          <button
-            type="button"
-            onClick={() => void testConnection()}
-            disabled={testing || !apiUrl.trim()}
-            style={{
-              flex: 1, padding: '8px 0', borderRadius: 6, border: 'none',
-              background: 'var(--caval-accent)', color: '#0E0E0F',
-              fontSize: 12, fontWeight: 600, cursor: testing ? 'wait' : 'pointer',
-            }}
-          >
-            {testing ? t('settings.cad.testing') : t('settings.cad.test')}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => void saveApiKey()}
+          disabled={!apiKey.trim()}
+          style={{
+            width: '100%', padding: '8px 0', borderRadius: 6, border: '1px solid var(--caval-border)',
+            background: 'transparent', color: 'var(--caval-text)', fontSize: 12,
+            cursor: apiKey.trim() ? 'pointer' : 'default', marginBottom: 8,
+          }}
+        >
+          {t('settings.cad.saveApiKey')}
+        </button>
+
         {healthMsg && (
           <div style={{
             marginTop: 10, fontSize: 11, lineHeight: 1.45, whiteSpace: 'pre-wrap',

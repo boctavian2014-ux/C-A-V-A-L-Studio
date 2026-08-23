@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { CadHealthSnapshot } from "../shared/cad-health-contract";
+import type { CadConnectionSettingsSnapshot } from "../shared/cad-connection-settings-contract";
+import {
+  CAD_API_URL_CLEAR_ACTION,
+  CAD_API_URL_CLEAR_VALUE,
+} from "../shared/cad-connection-settings-contract";
 import type { ConnectionHealthSnapshot } from "../shared/connection-health-contract";
 import { gitApi } from "./preload-git";
 import { problemsApi } from "./preload-problems";
@@ -821,9 +826,21 @@ contextBridge.exposeInMainWorld("caval", {
     }>,
   chatPrepare: (input: CavalChatPrepareRequest) =>
     ipcRenderer.invoke("caval:chat-prepare", input) as Promise<CavalChatPrepareResult>,
-  settingsSave: (settings: Record<string, string>) =>
-    ipcRenderer.invoke("caval:settings-save", settings) as Promise<{ ok: boolean }>,
-  settingsLoad: () => ipcRenderer.invoke("caval:settings-load") as Promise<{ ok: boolean; settings?: Record<string, string> }>,
+  settingsSave: (
+    settings: Record<string, string> & { [CAD_API_URL_CLEAR_ACTION]?: typeof CAD_API_URL_CLEAR_VALUE }
+  ) =>
+    ipcRenderer.invoke("caval:settings-save", settings) as Promise<{
+      ok: boolean;
+      error?: string;
+      cadConnection?: CadConnectionSettingsSnapshot;
+      settings?: Record<string, string>;
+    }>,
+  settingsLoad: () =>
+    ipcRenderer.invoke("caval:settings-load") as Promise<{
+      ok: boolean;
+      settings?: Record<string, string>;
+      cadConnection?: CadConnectionSettingsSnapshot;
+    }>,
   locale: {
     get: () =>
       ipcRenderer.invoke("caval:locale-get") as Promise<{
