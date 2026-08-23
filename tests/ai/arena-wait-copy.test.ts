@@ -4,6 +4,8 @@ import {
   getWaitMessagesForPhase,
   getWaitGlowFilter,
   getWaitGlowBoxShadow,
+  getCompletionGlowFilter,
+  getCompletionGlowBoxShadow,
   resolveWaitPhase,
   activePhaseFromSteps,
   createWaitMessagePicker,
@@ -62,7 +64,11 @@ describe('arena-wait-copy', () => {
   });
 
   afterEach(() => {
-    sessionStorage.removeItem(__testOnly.SESSION_KEY);
+    try {
+      sessionStorage?.removeItem?.(__testOnly.SESSION_KEY);
+    } catch {
+      /* sessionStorage unavailable in this case */
+    }
     vi.unstubAllGlobals();
   });
 
@@ -214,6 +220,61 @@ describe('arena-wait-copy', () => {
       expect(exclude.has(msg)).toBe(false);
     }
   });
+
+  it('picker still yields copy when sessionStorage is unavailable', () => {
+    vi.stubGlobal('sessionStorage', undefined);
+    const picker = createWaitMessagePicker('compose');
+    const msg = picker.next();
+    expect(msg.length).toBeGreaterThan(5);
+    expect(getWaitMessagesForPhase('compose')).toContain(msg);
+  });
+
+  it('picker still yields copy when sessionStorage get/set throws', () => {
+    vi.stubGlobal('sessionStorage', {
+      get length() {
+        return 0;
+      },
+      clear() {},
+      getItem() {
+        throw new Error('blocked');
+      },
+      key() {
+        return null;
+      },
+      removeItem() {},
+      setItem() {
+        throw new Error('quota');
+      },
+    });
+    const picker = createWaitMessagePicker('security');
+    const first = picker.next();
+    const second = picker.next();
+    expect(first.length).toBeGreaterThan(5);
+    expect(second).not.toBe(first);
+    expect(getWaitMessagesForPhase('security')).toContain(first);
+  });
+
+  it('resolveWaitPhase handles missing, empty, and unknown labels', () => {
+    expect(resolveWaitPhase(undefined, undefined)).toBeUndefined();
+    expect(resolveWaitPhase([], '')).toBeUndefined();
+    expect(resolveWaitPhase(undefined, '??? totally-unknown-status ???')).toBeUndefined();
+    expect(resolveWaitPhase(undefined, 'Security scan running')).toBe('security');
+    expect(resolveWaitPhase(undefined, 'Performance budget')).toBe('performance');
+  });
+
+  it('completion glow uses success colors and review glow uses amber', () => {
+    expect(getCompletionGlowFilter(false)).toContain('16, 185, 129');
+    expect(getCompletionGlowFilter(false)).toContain('hue-rotate(75deg)');
+    expect(getCompletionGlowBoxShadow(false)).toContain('16, 185, 129');
+
+    expect(getCompletionGlowFilter(true)).toContain('245, 158, 11');
+    expect(getCompletionGlowFilter(true)).toContain('hue-rotate(25deg)');
+    expect(getCompletionGlowBoxShadow(true)).toContain('245, 158, 11');
+
+    expect(getWaitGlowFilter('security')).toContain('239, 68, 68');
+    expect(getWaitGlowFilter('performance')).toContain('16, 185, 129');
+    expect(getWaitGlowBoxShadow('security')).not.toBe(getWaitGlowBoxShadow('performance'));
+  });
 });
 
 describe('arena-wait contextual messages', () => {
@@ -223,7 +284,11 @@ describe('arena-wait contextual messages', () => {
   });
 
   afterEach(() => {
-    sessionStorage.removeItem(__testOnly.SESSION_KEY);
+    try {
+      sessionStorage?.removeItem?.(__testOnly.SESSION_KEY);
+    } catch {
+      /* sessionStorage unavailable in this case */
+    }
     vi.unstubAllGlobals();
   });
 
@@ -259,6 +324,14 @@ describe('arena-wait contextual messages', () => {
     // Shuffle-bag can put contextual lines anywhere in the first cycle — exhaust the pool.
     const firstCycle = Array.from({ length: pool.length }, () => picker.next());
     expect(firstCycle.some((m) => m.includes('caval-shop'))).toBe(true);
+  });
+
+  it('incomplete template context skips unfilled lines and keeps generic copy', () => {
+    const generic = getWaitMessagesForPhase('compose');
+    const pool = buildContextualPool('compose', { project: 'demo-app' });
+    expect(pool.some((m) => generic.includes(m))).toBe(true);
+    expect(pool.every((m) => !m.includes('{file}') && !m.includes('{task}'))).toBe(true);
+    expect(pool.some((m) => m.includes('demo-app'))).toBe(true);
   });
 
   it('buildWaitSceneContext maps steps and modules', () => {
