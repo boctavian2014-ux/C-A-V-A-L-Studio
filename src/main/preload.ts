@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { ConnectionHealthSnapshot } from "../shared/connection-health-contract";
 import { gitApi } from "./preload-git";
 import { problemsApi } from "./preload-problems";
 import { tasksApi } from "./preload-tasks";
@@ -970,6 +971,8 @@ contextBridge.exposeInMainWorld("caval", {
       result: "valid" | "invalid" | "unreachable";
       error?: string;
     }>,
+  connectionHealth: () =>
+    ipcRenderer.invoke("caval:connection-health") as Promise<ConnectionHealthSnapshot>,
   mcpList: () =>
     ipcRenderer.invoke("caval:mcp-list") as Promise<{
       ok: boolean;
