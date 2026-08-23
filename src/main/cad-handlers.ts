@@ -11,7 +11,6 @@ import { tryInstallOpenScad } from "../../engineering/cad-server/openscad-instal
 import { assertTrustedSender } from "./ipc-trust";
 import { assertStlBase64Size, assertTextContentSize, IPC_CONTENT_LIMITS } from "./path-security";
 import { findForbiddenSecretField } from "../shared/secrets-metadata";
-import { redactSensitiveText } from "../shared/command-output-redaction";
 import {
   NETWORK_GUARD_DEFAULTS,
   STL_CONTENT_TYPES,
@@ -37,6 +36,10 @@ import {
 } from "./cad-workspace-lock";
 import type { BoundWorkspaceRootGetter } from "./bound-workspace";
 import { mapCadHealthSnapshot } from "../shared/cad-health-contract";
+import {
+  mapCadHttpFailure,
+  mapCadTransportError,
+} from "../shared/cad-transport-error";
 
 let resolvedBaseUrl: string | null = null;
 
@@ -125,11 +128,6 @@ export async function resolveCadBaseUrl(): Promise<string> {
   resolvedBaseUrl = local;
   return local;
 }
-
-const cadFetchHint = (base: string): string =>
-  isCadCloudOnly()
-    ? `Server CAD cloud (${base}). Verifică URL-ul în Setări → CAD Cloud.`
-    : `CAD API (${base}). Setează cad.apiUrl sau rulează: npm run cad:serve`;
 
 const cadAuthHeaders = (cavalId?: string): Record<string, string> => {
   const headers: Record<string, string> = { "content-type": "application/json" };
@@ -286,15 +284,8 @@ const ensurePiapiCompatibleCad = async (hasPiapiKey: boolean): Promise<"local" |
   return "cloud-legacy";
 };
 
-const mapFetchError = async (error: unknown): Promise<{ ok: false; error: string }> => {
-  const message = error instanceof Error ? error.message : String(error);
-  const base = await resolveCadBaseUrl();
-  const hint =
-    message === "fetch failed"
-      ? `${message} — nu pot accesa ${cadFetchHint(base)}`
-      : message;
-  return { ok: false, error: hint };
-};
+const mapFetchError = (error: unknown): { ok: false; error: string } =>
+  mapCadTransportError(error, { cloudOnly: isCadCloudOnly() });
 
 /** Shared by IPC cancel + unified cancelOperation (once per jobId). */
 export async function cancelCadJobRemote(
@@ -319,7 +310,7 @@ export async function cancelCadJobRemote(
       return {
         ok: false,
         jobId,
-        error: json.error ?? `CAD cancel error (${status})`,
+        error: mapCadHttpFailure(status, "cancel"),
         remoteCancel: "failed",
       };
     }
@@ -330,7 +321,7 @@ export async function cancelCadJobRemote(
       remoteCancel: "ok",
     };
   } catch (error) {
-    const mapped = await mapFetchError(error);
+    const mapped = mapFetchError(error);
     return { ok: false, jobId, error: mapped.error, remoteCancel: "failed" };
   }
 }
@@ -507,7 +498,7 @@ export const registerCadHandlers = (
         releaseFailed("failed");
         return {
           ok: false,
-          error: redactSensitiveText(json.error ?? `CAD API error (${status})`),
+          error: mapCadHttpFailure(status, "job"),
           operationId,
         };
       }
@@ -566,7 +557,7 @@ export const registerCadHandlers = (
             releaseFailed("failed");
             return {
               ok: false,
-              error: redactSensitiveText(retry.json.error ?? `CAD API error (${retry.status})`),
+              error: mapCadHttpFailure(retry.status, "job"),
               operationId,
             };
           }
@@ -575,7 +566,7 @@ export const registerCadHandlers = (
         }
       }
       releaseFailed("failed");
-      return { ...(await mapFetchError(error)), operationId };
+      return { ...mapFetchError(error), operationId };
     }
   });
 
@@ -597,7 +588,7 @@ export const registerCadHandlers = (
           { method: "GET", cavalId: resolveCavalId(cavalId) }
         );
         if (!ok) {
-          return { ok: false, error: json.error ?? `CAD API error (${status})` };
+          return { ok: false, error: mapCadHttpFailure(status, "job") };
         }
         const remoteStatus = String((json as { status?: string }).status ?? "");
         if (remoteStatus === "done") {
@@ -609,7 +600,7 @@ export const registerCadHandlers = (
         }
         return json;
       } catch (error) {
-        return await mapFetchError(error);
+        return mapFetchError(error);
       }
     }
   );
@@ -731,11 +722,11 @@ export const registerCadHandlers = (
           { method: "GET", cavalId: resolveCavalId(payload.cavalId) }
         );
         if (!ok) {
-          return { ok: false, error: json.error ?? `CAD logs error (${status})` };
+          return { ok: false, error: mapCadHttpFailure(status, "logs") };
         }
         return json;
       } catch (error) {
-        return await mapFetchError(error);
+        return mapFetchError(error);
       }
     }
   );
@@ -797,16 +788,12 @@ export const registerCadHandlers = (
       if (!ok) {
         return {
           ok: false,
-          error: redactSensitiveText(json.error ?? `CAD plan error (${status})`),
+          error: mapCadHttpFailure(status, "plan"),
         };
       }
       return json;
     } catch (error) {
-      const mapped = await mapFetchError(error);
-      if (mapped && typeof mapped === "object" && "error" in mapped && typeof mapped.error === "string") {
-        return { ...mapped, error: redactSensitiveText(mapped.error) };
-      }
-      return mapped;
+      return mapFetchError(error);
     }
   });
 
