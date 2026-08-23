@@ -200,6 +200,10 @@ describe("ConnectionStatusIndicator", () => {
     expect(problems).toBeGreaterThan(-1);
     expect(connection).toBeGreaterThan(problems);
     expect(branch).toBeGreaterThan(connection);
+
+    const connectionItem = src.slice(Math.max(0, connection - 160), connection);
+    expect(connectionItem).not.toContain("connectionUnavailableTooltip");
+    expect(connectionItem).not.toMatch(/title=\{t\(/);
   });
 });
 
