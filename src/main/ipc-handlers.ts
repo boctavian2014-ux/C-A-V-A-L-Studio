@@ -6,7 +6,15 @@ import {
   assertTextContentSize,
   requireSandboxedWorkspacePath,
 } from "./path-security";
-import { parseIpcInput, fsPathSchema, fsReadFileSchema, fsRenameSchema, fsWriteFileSchema } from "./ipc-schemas";
+import { readWorkspaceFileRelative } from "./workspace-file-read";
+import type { WorkspaceFileReadResult } from "../shared/workspace-file-read-contract";
+import {
+  parseIpcInput,
+  fsPathSchema,
+  fsReadFileSchema,
+  fsRenameSchema,
+  fsWriteFileSchema,
+} from "./ipc-schemas";
 import { recordAudit, persistAuditLog } from "./audit-log";
 import { assertTrustedSender } from "./ipc-trust";
 
@@ -90,20 +98,25 @@ ipcMain.handle("fs:readTree", async (event, dirPath: string) => {
   return readDirTree(target, target);
 });
 
-/** Citește conținutul unui fișier text */
-ipcMain.handle("fs:readFile", async (event, filePath: string) => {
+/** Citește conținutul unui fișier text (cale relativă la workspace). */
+ipcMain.handle("fs:readFile", async (event, filePath: string): Promise<WorkspaceFileReadResult> => {
   assertTrustedSender(event);
   try {
     const { filePath: validated } = parseIpcInput(fsReadFileSchema, { filePath });
-    const target = sandboxedPath(event, validated);
-    const content = fs.readFileSync(target, "utf-8");
-    assertTextContentSize(content, "file content");
-    auditFs("fs:readFile", event.sender.id, target, true);
-    return { ok: true, content };
+    const root = workspaceForSender.get(event.sender.id);
+    const result = readWorkspaceFileRelative(root, validated);
+    auditFs(
+      "fs:readFile",
+      event.sender.id,
+      validated,
+      result.ok,
+      result.ok ? undefined : result.code
+    );
+    return result;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     auditFs("fs:readFile", event.sender.id, filePath, false, message);
-    return { ok: false, error: message };
+    return readWorkspaceFileRelative(undefined, filePath);
   }
 });
 

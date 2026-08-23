@@ -42,6 +42,8 @@ import {
 import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
 import { assertRendererChatAllowed } from '../safety/renderer-chat-guard';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
+import { toWorkspaceRelativePath } from '../../src/renderer/utils/workspace-path';
+import type { WorkspaceFileReadResult } from '../../src/shared/workspace-file-read-contract';
 import { useAiWorkCanvasStore } from '../../src/renderer/store/ai-work-canvas-store';
 import {
   bootstrapRoboticsDesktopProject,
@@ -406,7 +408,7 @@ interface CavalWindow {
     }>;
     fs?: {
       pickFiles?: () => Promise<string[] | null>;
-      readFile?: (filePath: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
+      readFile?: (filePath: string) => Promise<WorkspaceFileReadResult>;
       writeFile?: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
     };
   };
@@ -842,19 +844,25 @@ export const useAIStore = create<AIStore>()(
 
         for (const filePath of paths) {
           if (existing.has(filePath)) continue;
+          const projectPath = useEditorStore.getState().projectPath;
+          const relative = toWorkspaceRelativePath(projectPath, filePath);
+          if (!relative) continue;
+
           let content = '';
           try {
-            const result = await caval?.fs?.readFile?.(filePath);
+            const result = await caval?.fs?.readFile?.(relative);
             if (result?.ok && result.content != null) {
               content = result.content;
+            } else {
+              continue;
             }
           } catch {
-            content = '';
+            continue;
           }
           added.push({
             id: generateId(),
-            path: filePath,
-            name: attachmentName(filePath),
+            path: relative,
+            name: attachmentName(relative),
             content,
           });
         }
@@ -1082,6 +1090,7 @@ export const useAIStore = create<AIStore>()(
           get().stopStreaming();
           return;
         }
+
         if (
           !isDeliveryContinueRequest(userText) &&
           !isScaffoldContinueRequest(userText) &&
@@ -2265,10 +2274,13 @@ export const useAIStore = create<AIStore>()(
 
         if (activeTab?.path && activeTab.isDirty && caval?.fs?.readFile) {
           try {
-            const fresh = await caval.fs.readFile(activeTab.path);
-            assertSendNotAborted(sendSignal);
-            if (fresh.ok && fresh.content != null) {
-              activeTab = { ...activeTab, content: fresh.content };
+            const rel = toWorkspaceRelativePath(editorState.projectPath, activeTab.path);
+            if (rel) {
+              const fresh = await caval.fs.readFile(rel);
+              assertSendNotAborted(sendSignal);
+              if (fresh.ok && fresh.content != null) {
+                activeTab = { ...activeTab, content: fresh.content };
+              }
             }
           } catch { /* ignore */ }
         }

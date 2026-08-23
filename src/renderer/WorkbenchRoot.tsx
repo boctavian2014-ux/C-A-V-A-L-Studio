@@ -530,15 +530,22 @@ export function WorkbenchRoot() {
     const caval = window.caval;
     if (!caval?.onFolderOpened) return;
 
-    const offFolder = caval.onFolderOpened((folder) => {
+    const offFolder = caval.onFolderOpened(async (folder) => {
       setProjectPath(folder.path);
-      // Re-bind main-process workspace root (File → Open Folder already binds; sync is idempotent).
-      void window.caval.workspaceSync?.(folder.path);
-      void window.caval.fs.readTree(folder.path).then((tree) => setFileTree(tree));
+      await window.caval.workspaceSync?.(folder.path);
+      const tree = await window.caval.fs.readTree(folder.path);
+      setFileTree(tree);
       void useGitStore.getState().refresh();
       useAIStore.getState().setIncludeMode('project');
       const first = folder.files?.[0];
-      if (first?.path) void openFile(first.path);
+      if (first?.path) {
+        const rel = first.label?.trim() || undefined;
+        if (rel) {
+          void openFile(rel);
+        } else {
+          void openFile(first.path);
+        }
+      }
     });
 
     const offFile = caval.onFileOpened?.((file) => {

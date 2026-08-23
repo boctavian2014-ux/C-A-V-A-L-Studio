@@ -121,16 +121,16 @@ export function resolveSandboxedWorkspacePath(
     throw new Error("Path outside workspace");
   }
 
+  const boundRoot = normalizeWorkspaceRoot(workspaceRoot);
+
   let realRoot: string;
   try {
-    realRoot = fs.realpathSync(normalizeWorkspaceRoot(workspaceRoot));
+    realRoot = fs.realpathSync(boundRoot);
   } catch {
     throw new Error("No workspace open");
   }
 
-  const candidate = path.isAbsolute(relativeOrAbsolute)
-    ? path.resolve(relativeOrAbsolute)
-    : path.resolve(realRoot, relativeOrAbsolute);
+  const candidate = remapCandidateUnderBoundRoot(boundRoot, realRoot, relativeOrAbsolute);
 
   // Fast logical reject before touching realpath (covers `..` and foreign absolutes).
   assertPathInWorkspace(realRoot, candidate);
@@ -140,6 +140,68 @@ export function resolveSandboxedWorkspacePath(
     throw new Error("Path outside workspace");
   }
   return realTarget;
+}
+
+/** Map bound-root absolutes (junctions) onto realRoot + relative segment. */
+function remapCandidateUnderBoundRoot(
+  boundRoot: string,
+  realRoot: string,
+  relativeOrAbsolute: string
+): string {
+  if (path.isAbsolute(relativeOrAbsolute)) {
+    const abs = path.resolve(relativeOrAbsolute);
+    const relFromBound = path.relative(boundRoot, abs);
+    if (!relFromBound.startsWith("..") && !path.isAbsolute(relFromBound)) {
+      return path.resolve(realRoot, relFromBound);
+    }
+    return abs;
+  }
+  return path.resolve(realRoot, relativeOrAbsolute);
+}
+
+const URL_LIKE_PATH = /^https?:\/\//i;
+
+/**
+ * Renderer must send workspace-relative paths only (no drive letters / leading sep).
+ */
+export function assertWorkspaceRelativeInput(relativePath: string): string {
+  const trimmed = relativePath.trim();
+  if (!trimmed) {
+    throw new Error("Path outside workspace");
+  }
+  if (URL_LIKE_PATH.test(trimmed) || /^file:\/\//i.test(trimmed)) {
+    throw new Error("Path outside workspace");
+  }
+  if (path.isAbsolute(trimmed)) {
+    throw new Error("Path outside workspace");
+  }
+  const normalized = path.normalize(trimmed.replace(/\\/g, "/"));
+  const segments = normalized.split(/[/\\]/);
+  if (segments.some((seg) => seg === "..")) {
+    throw new Error("Path outside workspace");
+  }
+  return normalized;
+}
+
+export function languageFromRelativePath(relativePath: string): string {
+  const ext = path.extname(relativePath).slice(1).toLowerCase();
+  const map: Record<string, string> = {
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    json: "json",
+    md: "markdown",
+    css: "css",
+    html: "html",
+    py: "python",
+    go: "go",
+    rs: "rust",
+    java: "java",
+    yaml: "yaml",
+    yml: "yaml",
+  };
+  return map[ext] ?? "plaintext";
 }
 
 export function requireSandboxedWorkspacePath(

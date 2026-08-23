@@ -40,11 +40,26 @@ describe("ipc-handlers path security", () => {
     await fs.promises.rm(outside, { recursive: true, force: true });
   });
 
-  it("fs:readFile allows files inside workspace", async () => {
-    const target = path.join(workspace, "inside.txt");
-    const res = await harness.invoke<{ ok: boolean; content?: string }>("fs:readFile", target);
+  it("fs:readFile allows relative paths inside workspace", async () => {
+    const res = await harness.invoke<{ ok: boolean; content?: string; path?: string; language?: string }>(
+      "fs:readFile",
+      "inside.txt"
+    );
     expect(res.ok).toBe(true);
     expect(res.content).toBe("secret");
+    expect(res.path).toBe("inside.txt");
+    expect(res.language).toBe("plaintext");
+  });
+
+  it("fs:readFile rejects absolute renderer paths", async () => {
+    const target = path.join(workspace, "inside.txt");
+    const res = await harness.invoke<{ ok: boolean; code?: string; message?: string }>(
+      "fs:readFile",
+      target
+    );
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe("OUTSIDE_WORKSPACE");
+    expect(JSON.stringify(res)).not.toContain(workspace);
   });
 
   it("fs:writeFile blocks path traversal outside workspace", async () => {

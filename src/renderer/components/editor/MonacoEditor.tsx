@@ -161,6 +161,8 @@ export function MonacoEditor() {
   const liveEdits = useLiveAiEditsStore((s) => s.edits);
   const editorLoadErrorPath = useAiWorkCanvasStore((s) => s.editorLoadErrorPath);
   const setEditorLoadErrorPath = useAiWorkCanvasStore((s) => s.setEditorLoadErrorPath);
+  const editorFileReadError = useAiWorkCanvasStore((s) => s.editorFileReadError);
+  const clearEditorFileReadError = useAiWorkCanvasStore((s) => s.clearEditorFileReadError);
   const liveDecoIds = useRef<string[]>([]);
 
   useEffect(() => {
@@ -645,7 +647,8 @@ export function MonacoEditor() {
     ? activeTab.path.replace(/^preview:\/\//, '')
     : writingMatch?.path ?? activeTab.path.replace(/^preview:\/\//, '');
 
-  const showEditorLoadError = loadTimedOut && !monacoMounted;
+  const showFileReadError = Boolean(editorFileReadError);
+  const showEditorLoadError = !showFileReadError && loadTimedOut && !monacoMounted;
 
   return (
     <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -688,7 +691,46 @@ export function MonacoEditor() {
       </div>
 
       {/* Editor */}
-      {showEditorLoadError ? (
+      {showFileReadError && editorFileReadError ? (
+        <div
+          data-testid="editor-file-read-error"
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+            background: '#0D1117',
+            color: 'var(--caval-text-muted)',
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 12,
+            padding: 24,
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            {t('workCanvas.fileReadError', { path: editorFileReadError.relativePath })}
+          </p>
+          <button
+            type="button"
+            data-testid="editor-file-read-retry"
+            onClick={() => {
+              clearEditorFileReadError();
+              void useEditorStore.getState().openFile(editorFileReadError.relativePath);
+            }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: 'transparent',
+              color: 'var(--caval-text)',
+              cursor: 'pointer',
+            }}
+          >
+            {t('workCanvas.retryOpen')}
+          </button>
+        </div>
+      ) : showEditorLoadError ? (
         <div
           data-testid="editor-load-error"
           style={{

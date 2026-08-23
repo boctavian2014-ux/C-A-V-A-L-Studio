@@ -7,6 +7,14 @@ import path from "node:path";
 import type { ContextEngineApi } from "../../context-engine/api";
 import { AI_TOOL_DEFINITIONS, isAiToolName, type AiToolName } from "../../src/shared/ai-tools-contract";
 import { executeAiTool } from "../../src/main/ai/ai-tools-executor";
+import {
+  WORKSPACE_FILE_READ_FAILURE_RO,
+  WORKSPACE_FILE_READ_SAFE_MESSAGE,
+} from "../../src/shared/workspace-file-read-contract";
+import {
+  assertWorkspaceRelativeInput,
+  requireSandboxedWorkspacePath,
+} from "../../src/main/path-security";
 import { runAllowedWorkspaceCommand } from "./workspace-command-runner";
 import { runTerminalCommand } from "../../src/main/terminal-bridge";
 import {
@@ -190,19 +198,22 @@ export class ToolRegistry {
   }
 
   private resolvePath(relative: string): string {
-    const resolved = path.isAbsolute(relative) ? relative : path.join(this.workspaceRoot, relative);
-    if (!resolved.startsWith(path.resolve(this.workspaceRoot))) {
-      throw new Error("Path outside workspace");
-    }
-    return resolved;
+    const rel = assertWorkspaceRelativeInput(relative);
+    return requireSandboxedWorkspacePath(this.workspaceRoot, rel);
   }
 
   private async readFile(filePath: string): Promise<ToolResult> {
     try {
-      const content = await fs.readFile(this.resolvePath(filePath), "utf8");
-      return { ok: true, output: { path: filePath, content } };
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      const rel = assertWorkspaceRelativeInput(String(filePath ?? ""));
+      const target = requireSandboxedWorkspacePath(this.workspaceRoot, rel);
+      const stat = await fs.stat(target);
+      if (!stat.isFile()) {
+        return { ok: false, error: WORKSPACE_FILE_READ_SAFE_MESSAGE };
+      }
+      const content = await fs.readFile(target, "utf8");
+      return { ok: true, output: { path: rel.replace(/\\/g, "/"), content } };
+    } catch {
+      return { ok: false, error: WORKSPACE_FILE_READ_FAILURE_RO };
     }
   }
 
