@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import type { IpcMainInvokeEvent } from "electron";
 
+import { isUrlLikeWorkspacePath } from "../shared/workspace-discovery-contract";
 import { normalizeWorkspaceRoot } from "./path-security";
 
 export type BoundWorkspaceRootGetter = (senderId: number) => string | undefined;
@@ -33,6 +34,9 @@ export function requireBoundWorkspaceRootFromEvent(
 export function resolveBindableWorkspaceDirectory(folderPath: unknown): string {
   if (typeof folderPath !== "string" || !folderPath.trim()) {
     throw new Error("Invalid folder path");
+  }
+  if (isUrlLikeWorkspacePath(folderPath)) {
+    throw new Error("Workspace path must be a local directory, not a URL");
   }
   const root = normalizeWorkspaceRoot(folderPath);
   let stat: fs.Stats;

@@ -800,6 +800,9 @@ interface CavalBridge {
     options?: { source?: 'folder' | 'clone' }
   ) => Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>;
   workspaceSync?: (folderPath: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  workspaceDiscover?: (options?: {
+    runVerify?: boolean;
+  }) => Promise<import("../shared/workspace-discovery-contract").WorkspaceDiscoverySnapshot>;
   workspace?: {
     listRecent: () => Promise<{
       ok: boolean;
