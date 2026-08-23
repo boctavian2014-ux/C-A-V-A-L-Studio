@@ -1,4 +1,8 @@
 # Temporary diagnostic workflow. Do not merge. Delete after isolation results.
+#
+# GitHub only indexes workflow_dispatch from the default branch (404 otherwise).
+# pull_request on this diagnostic branch is the unblock so the three isolation
+# commands run on Ubuntu without merging this file to main.
 name: Isolate Vitest (diagnostic)
 
 on:
@@ -8,6 +12,7 @@ on:
         description: Must begin exactly with "npx vitest run tests/"
         required: true
         type: string
+  pull_request:
 
 permissions:
   contents: read
@@ -15,9 +20,12 @@ permissions:
 jobs:
   isolate:
     name: isolate
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    steps:
+    env:
+      TEST_COMMAND: ${{ inputs.test_command }}
+    steps: &isolate-steps
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -46,8 +54,6 @@ jobs:
 
       - name: Run isolation command
         id: isolate_run
-        env:
-          TEST_COMMAND: ${{ inputs.test_command }}
         run: |
           python3 - <<'PY'
           import os
@@ -93,6 +99,23 @@ jobs:
         run: |
           echo "isolate_run.outcome=${{ steps.isolate_run.outcome }}"
           echo "isolate_run.conclusion=${{ steps.isolate_run.conclusion }}"
+          echo "TEST_COMMAND=${TEST_COMMAND}"
           echo "--- ps -ef ---"
           ps -ef || true
           echo "--- end ps ---"
+
+  isolate_pr:
+    name: ${{ matrix.test_command }}
+    if: github.event_name == 'pull_request' && github.head_ref == 'diagnose/vitest4-sqlite-linux-2026-08-23'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        test_command:
+          - npx vitest run tests/main/db/ai-persistence.test.ts
+          - npx vitest run tests/main/electron-ipc.integration.test.ts
+          - npx vitest run tests/main/db/ai-persistence.test.ts tests/main/electron-ipc.integration.test.ts
+    env:
+      TEST_COMMAND: ${{ matrix.test_command }}
+    steps: *isolate-steps
