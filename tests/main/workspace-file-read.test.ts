@@ -32,15 +32,27 @@ describe("workspace-file-read", () => {
     harness.reset();
   });
 
-  it("reads README.md from a Windows-style workspace path", () => {
-    const winRoot = workspace.replace(/\//g, "\\");
-    const result = readWorkspaceFileRelative(normalizeWorkspaceRoot(winRoot), "README.md");
+  it.skipIf(process.platform !== "win32")(
+    "reads README.md from a Windows-style workspace path",
+    () => {
+      const winRoot = workspace.replace(/\//g, "\\");
+      const result = readWorkspaceFileRelative(normalizeWorkspaceRoot(winRoot), "README.md");
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.path).toBe("README.md");
+        expect(result.content).toContain("# Demo");
+        expect(result.language).toBe("markdown");
+        expect(JSON.stringify(result)).not.toContain(winRoot);
+      }
+    }
+  );
+
+  it("reads README.md from a normalized workspace root on any platform", () => {
+    const result = readWorkspaceFileRelative(normalizeWorkspaceRoot(workspace), "README.md");
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.path).toBe("README.md");
       expect(result.content).toContain("# Demo");
-      expect(result.language).toBe("markdown");
-      expect(JSON.stringify(result)).not.toContain(winRoot);
     }
   });
 
