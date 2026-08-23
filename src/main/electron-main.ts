@@ -46,7 +46,18 @@ import { registerWorkspaceSearchHandlers } from "./workspace/workspace-search-ha
 import { workspaceIndexService } from "./workspace/workspace-index-service";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
-import { registerCadHandlers, resetCadBaseUrlCache } from "./cad-handlers";
+import { registerCadHandlers } from "./cad-handlers";
+import {
+  applyCadConnectionSave,
+  applyCadConnectionToEnv,
+  buildRendererSettingsMap,
+  initCadConnectionBootEnv,
+  type CadSettingsSaveInput,
+} from "./cad-connection-settings";
+import {
+  CAD_API_URL_CLEAR_ACTION,
+  CAD_URL_SETTING_KEY,
+} from "../shared/cad-connection-settings-contract";
 import { registerRoboticsLibraryHandlers } from "./robotics-library-handlers";
 import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
 import {
@@ -61,6 +72,8 @@ import { LOCALE_SETTING_KEY } from "../shared/i18n-contract";
 import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
 import { setMcpSecretsProvider } from "../../ai/tools/tool-runtime";
 import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
+
+initCadConnectionBootEnv();
 import { registerSchematicHandlers } from "./schematic-handlers";
 import { preloadCoreModels, preloadForContext } from "../../ai/models/model-preload";
 import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
@@ -71,7 +84,6 @@ import {
   SETTINGS_FORBIDDEN_SECRET_KEYS,
 } from "../shared/secrets-metadata";
 import { inferPreloadContext } from "../../ai/models/infer-context";
-import { validateCadApiUrl, validateCadApiUrlSync } from "./network-guard";
 import "./ipc-handlers";
 import { registerSearchHandlers } from "./search-handlers";
 import { registerDebugHandlers } from "./debug-handlers";
@@ -1256,15 +1268,7 @@ const applySettingsToEnv = (settings: Record<string, string>): void => {
     }
   }
   process.env.OLLAMA_BASE_URL = OLLAMA_CHAT_URL;
-  if (settings["cad.apiUrl"]?.trim()) {
-    const validated = validateCadApiUrlSync(settings["cad.apiUrl"].trim());
-    if (validated.ok) {
-      process.env.CAD_API_URL = validated.normalized;
-      resetCadBaseUrlCache();
-    } else {
-      console.warn("[settings] rejecting cad.apiUrl:", validated.error);
-    }
-  }
+  applyCadConnectionToEnv(settings);
   // Meshy / OpenRouter / CAD keys live only in secrets → applyStoredSecretsToEnv.
   if (settings["caval.cloud.apiKey"]?.trim()) {
     process.env.CAVAL_CLOUD_API_KEY = settings["caval.cloud.apiKey"].trim();
@@ -1276,7 +1280,7 @@ const loadPersistedAppSettings = (): void => {
   applySettingsToEnv(persistedAppSettings);
 };
 
-ipcMain.handle("caval:settings-save", async (event, settings: Record<string, string>) => {
+ipcMain.handle("caval:settings-save", async (event, settings: CadSettingsSaveInput) => {
   try {
     assertTrustedSender(event);
   } catch (error) {
@@ -1287,6 +1291,12 @@ ipcMain.handle("caval:settings-save", async (event, settings: Record<string, str
   }
   const incoming = { ...(settings ?? {}) };
   for (const key of Object.keys(incoming)) {
+    if (
+      key === CAD_URL_SETTING_KEY ||
+      key === CAD_API_URL_CLEAR_ACTION
+    ) {
+      continue;
+    }
     if (
       (SETTINGS_FORBIDDEN_SECRET_KEYS as readonly string[]).includes(key) ||
       /\.apiKey$/i.test(key) ||
@@ -1299,16 +1309,22 @@ ipcMain.handle("caval:settings-save", async (event, settings: Record<string, str
       };
     }
   }
-  if (incoming["cad.apiUrl"]?.trim()) {
-    const validated = await validateCadApiUrl(incoming["cad.apiUrl"].trim());
-    if (!validated.ok) {
-      return {
-        ok: false,
-        error: `Invalid cad.apiUrl: ${validated.error}`,
-      };
-    }
-    incoming["cad.apiUrl"] = validated.normalized;
+  const cadPatch: CadSettingsSaveInput = {};
+  if (incoming[CAD_URL_SETTING_KEY] !== undefined) {
+    cadPatch[CAD_URL_SETTING_KEY] = incoming[CAD_URL_SETTING_KEY];
   }
+  if (incoming[CAD_API_URL_CLEAR_ACTION] !== undefined) {
+    cadPatch[CAD_API_URL_CLEAR_ACTION] = incoming[CAD_API_URL_CLEAR_ACTION];
+  }
+  const cadSave = await applyCadConnectionSave({
+    incoming: cadPatch,
+    persisted: persistedAppSettings,
+  });
+  if (!cadSave.ok) {
+    return { ok: false, error: cadSave.error };
+  }
+  delete incoming[CAD_URL_SETTING_KEY];
+  delete incoming[CAD_API_URL_CLEAR_ACTION];
   if (incoming["ollama.url"] !== undefined) {
     incoming["ollama.url"] = getOllamaLoopbackUrl();
   }
@@ -1319,45 +1335,38 @@ ipcMain.handle("caval:settings-save", async (event, settings: Record<string, str
     }
     incoming[LOCALE_SETTING_KEY] = localeResult.locale;
   }
-  const merged = { ...persistedAppSettings, ...incoming };
+  const merged = { ...cadSave.merged, ...incoming };
   writePersistedAppSettings(merged);
-  const forRenderer = { ...merged };
-  for (const key of SETTINGS_SENSITIVE_KEYS) {
-    delete forRenderer[key];
-  }
   const secrets = normalizeSecretsMap(readApiSecrets());
   const configured = buildSecretsConfiguredMap(secrets);
-  forRenderer["openrouter.configured"] = configured.OPENROUTER_API_KEY ? "true" : "false";
-  forRenderer["mesh.configured"] = configured.MESHY_API_KEY ? "true" : "false";
-  forRenderer["trellis.configured"] =
-    configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false";
-  forRenderer["cad.configured"] = configured.CAD_API_KEY ? "true" : "false";
+  const extras: Record<string, string> = {
+    "openrouter.configured": configured.OPENROUTER_API_KEY ? "true" : "false",
+    "mesh.configured": configured.MESHY_API_KEY ? "true" : "false",
+    "trellis.configured":
+      configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false",
+    "cad.configured": configured.CAD_API_KEY ? "true" : "false",
+  };
+  const { settings: forRenderer, cadConnection } = buildRendererSettingsMap(merged, extras);
   appSettings.set(event.sender.id, forRenderer);
   applySettingsToEnv(merged);
-  return { ok: true };
+  return { ok: true, cadConnection, settings: forRenderer };
 });
 
 ipcMain.handle("caval:settings-load", (event) => {
   persistedAppSettings = readPersistedAppSettings();
   const secrets = normalizeSecretsMap(readApiSecrets());
   const configured = buildSecretsConfiguredMap(secrets);
-  const settings = { ...persistedAppSettings };
-  // Never inject API key values — only configured flags for the renderer.
-  delete settings["openrouter.apiKey"];
-  delete settings["mesh.apiKey"];
-  delete settings["cad.apiKey"];
-  settings["openrouter.configured"] = configured.OPENROUTER_API_KEY ? "true" : "false";
-  settings["mesh.configured"] = configured.MESHY_API_KEY ? "true" : "false";
-  settings["trellis.configured"] =
-    configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false";
-  settings["cad.configured"] = configured.CAD_API_KEY ? "true" : "false";
-  applyCadCloudEnvDefaults();
-  if (!settings["cad.apiUrl"] && process.env.CAD_API_URL) {
-    settings["cad.apiUrl"] = process.env.CAD_API_URL;
-  }
+  const extras: Record<string, string> = {
+    "openrouter.configured": configured.OPENROUTER_API_KEY ? "true" : "false",
+    "mesh.configured": configured.MESHY_API_KEY ? "true" : "false",
+    "trellis.configured":
+      configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false",
+    "cad.configured": configured.CAD_API_KEY ? "true" : "false",
+  };
+  const { settings, cadConnection } = buildRendererSettingsMap(persistedAppSettings, extras);
   const withUser = getRendererSettings(event.sender.id, settings);
   appSettings.set(event.sender.id, withUser);
-  return { ok: true, settings: withUser };
+  return { ok: true, settings: withUser, cadConnection };
 });
 
 ipcMain.handle("caval:locale-get", (event) => {
