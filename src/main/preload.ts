@@ -1072,11 +1072,7 @@ contextBridge.exposeInMainWorld("caval", {
 
   cad: {
     isCloudOnly: () =>
-      ipcRenderer.invoke("cad:isCloudOnly") as Promise<{
-        ok: boolean;
-        cloudOnly?: boolean;
-        defaultUrl?: string;
-      }>,
+      ipcRenderer.invoke("cad:isCloudOnly") as Promise<{ cloudOnly: boolean }>,
     health: () => ipcRenderer.invoke("cad:health") as Promise<CadHealthSnapshot>,
     plan: (input: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
