@@ -387,9 +387,7 @@ export const registerCadHandlers = (
   orphanTimer.unref?.();
 
   handle("cad:isCloudOnly", () => ({
-    ok: true,
     cloudOnly: isCadCloudOnly(),
-    defaultUrl: DEFAULT_CAD_CLOUD_URL,
   }));
 
   /** Keys stay in main env — never accept secret fields from the renderer. */

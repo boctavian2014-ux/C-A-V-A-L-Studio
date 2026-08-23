@@ -260,7 +260,7 @@ interface CavalPreloadApi {
 }
 
 interface CavalCadApi {
-  isCloudOnly?: () => Promise<{ ok: boolean; cloudOnly?: boolean; defaultUrl?: string }>;
+  isCloudOnly?: () => Promise<{ cloudOnly: boolean }>;
   health?: () => Promise<import("../shared/cad-health-contract").CadHealthSnapshot>;
   plan: (input: {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
