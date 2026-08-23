@@ -314,11 +314,9 @@ export function ApiKeysForm({ showSaveButton = false, onSaved }: ApiKeysFormProp
         localOpenRouter: Boolean(configured.OPENROUTER_API_KEY),
         localPiapi: Boolean(configured.PIAPI_API_KEY) || Boolean(configured.TRELLIS_API_KEY),
         cloudOk: Boolean(health?.ok),
-        cloudUrl: health?.url,
         cloudOpenRouter: health?.openRouterConfigured,
         cloudPiapi: health?.piapiConfigured,
         openscadInstalled: health?.openscadInstalled,
-        cloudError: health?.error ?? (!health ? 'CAD API indisponibil în aplicație.' : undefined),
       });
       setCadTone(dual.tone);
       setCadSummary(dual.text);

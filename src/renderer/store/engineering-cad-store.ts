@@ -144,7 +144,7 @@ async function loadCadCredentials(): Promise<{
 }
 
 async function preflightCadCloud(cad: NonNullable<typeof window.caval>['cad']): Promise<
-  | { ok: true; url?: string }
+  | { ok: true }
   | { ok: false; error: string }
 > {
   if (!cad?.health) return { ok: true };
@@ -152,12 +152,10 @@ async function preflightCadCloud(cad: NonNullable<typeof window.caval>['cad']): 
   if (!health.ok) {
     return {
       ok: false,
-      error:
-        health.error ??
-        `Server CAD cloud offline (${health.url ?? 'URL necunoscut'}). Setări → CAD Cloud 3D.`,
+      error: 'CAD Cloud offline. Settings → CAD Cloud 3D.',
     };
   }
-  return { ok: true, url: health.url };
+  return { ok: true };
 }
 
 async function warmCadPipeline(modelId: string, projectPath: string | null | undefined): Promise<void> {

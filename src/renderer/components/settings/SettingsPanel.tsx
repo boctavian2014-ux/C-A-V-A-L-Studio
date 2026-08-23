@@ -468,11 +468,9 @@ function SectionCadCloud() {
       localOpenRouter,
       localPiapi,
       cloudOk: Boolean(health.ok),
-      cloudUrl: health.url,
       cloudOpenRouter: health.openRouterConfigured,
       cloudPiapi: health.piapiConfigured,
       openscadInstalled: health.openscadInstalled,
-      cloudError: health.error,
     });
     setHealthTone(dual.tone);
     const extras = [

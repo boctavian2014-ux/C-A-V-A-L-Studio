@@ -36,6 +36,7 @@ import {
   scanCadLockOrphans,
 } from "./cad-workspace-lock";
 import type { BoundWorkspaceRootGetter } from "./bound-workspace";
+import { mapCadHealthSnapshot } from "../shared/cad-health-contract";
 
 let resolvedBaseUrl: string | null = null;
 
@@ -814,14 +815,9 @@ export const registerCadHandlers = (
   handle("cad:health", async () => {
     try {
       const base = await resolveCadBaseUrl();
-      const ok = await probeHealth(base, 5_000);
-      if (!ok) {
-        return {
-          ok: false,
-          url: base,
-          cloudOnly: isCadCloudOnly(),
-          error: "Server CAD cloud offline — verifică URL în Setări → CAD Cloud.",
-        };
+      const reachable = await probeHealth(base, 5_000);
+      if (!reachable) {
+        return mapCadHealthSnapshot({ reachable: false });
       }
       const result = await safeFetch(`${base.replace(/\/+$/, "")}/health`, {
         mode: "cad-base",
@@ -830,15 +826,18 @@ export const registerCadHandlers = (
         maxBytes: NETWORK_GUARD_DEFAULTS.JSON_MAX_BYTES,
         allowedContentTypes: null,
       });
-      const body = JSON.parse(result.buffer.toString("utf8")) as Record<string, unknown>;
-      return { ok: true, url: base, cloudOnly: isCadCloudOnly(), ...body };
-    } catch (error) {
-      return {
-        ok: false,
-        url: await resolveCadBaseUrl(),
-        cloudOnly: isCadCloudOnly(),
-        error: error instanceof Error ? error.message : String(error),
-      };
+      if (!result.ok) {
+        return mapCadHealthSnapshot({ reachable: false });
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(result.buffer.toString("utf8"));
+      } catch {
+        return mapCadHealthSnapshot({ reachable: false });
+      }
+      return mapCadHealthSnapshot({ reachable: true, body });
+    } catch {
+      return mapCadHealthSnapshot({ reachable: false });
     }
   });
 
