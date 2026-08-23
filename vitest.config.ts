@@ -123,5 +123,9 @@ export default defineConfig({
     testTimeout: 15_000,
     // Match testTimeout: first vi.resetModules()+handler import is cold, not hung.
     hookTimeout: 15_000,
+    // Vitest 4: reduce fork fan-out on Linux CI. Full suite still hit
+    // "Worker exited unexpectedly" (11x) with defaults (328/339). Smoke subset
+    // (4 files) was green — serialize workers to isolate remaining exits (#16).
+    maxWorkers: 1,
   },
 });
