@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { CadHealthSnapshot } from "../shared/cad-health-contract";
 import type { ConnectionHealthSnapshot } from "../shared/connection-health-contract";
 import { gitApi } from "./preload-git";
 import { problemsApi } from "./preload-problems";
@@ -1076,19 +1077,7 @@ contextBridge.exposeInMainWorld("caval", {
         cloudOnly?: boolean;
         defaultUrl?: string;
       }>,
-    health: () =>
-      ipcRenderer.invoke("cad:health") as Promise<{
-        ok: boolean;
-        url?: string;
-        cloudOnly?: boolean;
-        openscadInstalled?: boolean;
-        openRouterConfigured?: boolean;
-        meshyConfigured?: boolean;
-        piapiConfigured?: boolean;
-        meshWorkerConfigured?: boolean;
-        meshConfigured?: boolean;
-        error?: string;
-      }>,
+    health: () => ipcRenderer.invoke("cad:health") as Promise<CadHealthSnapshot>,
     plan: (input: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       latestUserText: string;

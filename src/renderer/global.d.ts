@@ -261,18 +261,7 @@ interface CavalPreloadApi {
 
 interface CavalCadApi {
   isCloudOnly?: () => Promise<{ ok: boolean; cloudOnly?: boolean; defaultUrl?: string }>;
-  health?: () => Promise<{
-    ok: boolean;
-    url?: string;
-    cloudOnly?: boolean;
-    openscadInstalled?: boolean;
-    openRouterConfigured?: boolean;
-    meshyConfigured?: boolean;
-    piapiConfigured?: boolean;
-    meshWorkerConfigured?: boolean;
-    meshConfigured?: boolean;
-    error?: string;
-  }>;
+  health?: () => Promise<import("../shared/cad-health-contract").CadHealthSnapshot>;
   plan: (input: {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     latestUserText: string;
