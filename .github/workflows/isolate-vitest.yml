@@ -1,0 +1,121 @@
+# Temporary diagnostic workflow. Do not merge. Delete after Node 22 isolation results.
+#
+# GitHub only indexes workflow_dispatch from the default branch (404 otherwise).
+# pull_request on this diagnostic branch runs the three isolation commands on
+# Ubuntu / Node 22.x without merging this file to main or changing test.yml.
+name: Isolate Vitest Node 22 (diagnostic)
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_command:
+        description: Must begin exactly with "npx vitest run tests/"
+        required: true
+        type: string
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    name: isolate
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TEST_COMMAND: ${{ inputs.test_command }}
+    steps: &isolate-steps
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Print runtime
+        run: |
+          node --version
+          npm --version
+          uname -a
+          git rev-parse --short HEAD
+          git log -1 --oneline
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Print package versions
+        run: |
+          npm ls vitest better-sqlite3 || true
+          npm ls --all better-sqlite3 || true
+          node -e "const p=require('./node_modules/better-sqlite3/package.json'); console.log(JSON.stringify({name:p.name,version:p.version,engines:p.engines},null,2))"
+
+      - name: Run isolation command
+        id: isolate_run
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+          import subprocess
+
+          cmd = os.environ.get("TEST_COMMAND", "")
+          prefix = "npx vitest run tests/"
+          if not cmd.startswith(prefix):
+              print(
+                  "Rejected: command must begin exactly with "
+                  "'npx vitest run tests/'",
+                  file=sys.stderr,
+              )
+              sys.exit(2)
+          if re.search(r"[;|&`$<>\n\r(){}!#\\]", cmd):
+              print("Rejected: shell metacharacters are not allowed", file=sys.stderr)
+              sys.exit(2)
+
+          parts = cmd.split()
+          if parts[:3] != ["npx", "vitest", "run"] or len(parts) < 4:
+              print("Rejected: invalid argv", file=sys.stderr)
+              sys.exit(2)
+
+          file_re = re.compile(r"^tests/[A-Za-z0-9_./-]+\.test\.(ts|tsx)$")
+          for path in parts[3:]:
+              if ".." in path or not file_re.match(path):
+                  print(f"Rejected path: {path}", file=sys.stderr)
+                  sys.exit(2)
+
+          printed = " ".join(parts)
+          print(f"ISOLATION_COMMAND={printed}", flush=True)
+
+          result = subprocess.run(["npx", *parts[1:]], env=os.environ)
+          code = result.returncode if result.returncode is not None else 1
+          print(f"ISOLATION_EXIT_CODE={code}", flush=True)
+          sys.exit(code)
+          PY
+
+      - name: Process diagnostics
+        if: always()
+        run: |
+          echo "isolate_run.outcome=${{ steps.isolate_run.outcome }}"
+          echo "isolate_run.conclusion=${{ steps.isolate_run.conclusion }}"
+          echo "TEST_COMMAND=${TEST_COMMAND}"
+          echo "--- ps -ef ---"
+          ps -ef || true
+          echo "--- end ps ---"
+
+  isolate_pr:
+    name: ${{ matrix.test_command }}
+    if: github.event_name == 'pull_request' && github.head_ref == 'diagnose/node22-vitest4-sqlite-2026-08-23'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        test_command:
+          - npx vitest run tests/main/db/ai-persistence.test.ts
+          - npx vitest run tests/main/electron-ipc.integration.test.ts
+          - npx vitest run tests/main/db/ai-persistence.test.ts tests/main/electron-ipc.integration.test.ts
+    env:
+      TEST_COMMAND: ${{ matrix.test_command }}
+    steps: *isolate-steps
