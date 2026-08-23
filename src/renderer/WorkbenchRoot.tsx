@@ -171,7 +171,7 @@ function StatusBar({ aiPanelOpen, onToggleAI }: { aiPanelOpen: boolean; onToggle
       >
         {errorCount === 0 ? '✓' : '✕'} {errorCount} {t('statusBar.errors')} &nbsp;⚠ {warningCount}
       </StatusItem>
-      <StatusItem title={t('statusBar.connectionUnavailableTooltip')} style={{ gap: 6 }}>
+      <StatusItem style={{ gap: 6 }}>
         <ConnectionStatusIndicator />
       </StatusItem>
       <StatusItem>

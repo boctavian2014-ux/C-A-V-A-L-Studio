@@ -1,4 +1,6 @@
 /** @vitest-environment jsdom */
+import fs from "node:fs";
+import path from "node:path";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,9 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActivityBar } from "../../src/renderer/components/sidebar/ActivityBar";
 import { ConnectionStatusIndicator } from "../../src/renderer/components/workbench/ConnectionStatusIndicator";
 import { WorkbenchHeader } from "../../src/renderer/components/workbench/WorkbenchHeader";
+import { useEditorStore } from "../../src/renderer/store/editor-store";
 import { usePreviewStore } from "../../src/renderer/store/preview-store";
 import { I18nProvider } from "../../ai/i18n/I18nProvider";
 import { CavalThemeProvider } from "../../themes/theme-provider";
+import type { ConnectionHealthSnapshot } from "../../src/shared/connection-health-contract";
 
 function wrap(ui: ReactElement) {
   return (
@@ -118,14 +122,88 @@ describe("ActivityBar layout", () => {
   });
 });
 
+function snapshot(overall: ConnectionHealthSnapshot["overall"]): ConnectionHealthSnapshot {
+  return {
+    overall,
+    railway: overall,
+    mcp: "skipped",
+    checkedAt: Date.now(),
+  };
+}
+
+function stubConnectionHealth(impl: () => Promise<ConnectionHealthSnapshot>) {
+  Object.assign(window, {
+    caval: { connectionHealth: impl },
+  });
+}
+
+async function flushAct() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe("ConnectionStatusIndicator", () => {
-  it("renders with accessible unavailable label", () => {
+  const fetchSpy = vi.fn();
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    useEditorStore.setState({ projectPath: null });
+    fetchSpy.mockClear();
+    vi.stubGlobal("fetch", fetchSpy);
+    stubConnectionHealth(async () => snapshot("unknown"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("renders unknown until a verified check succeeds", () => {
+    stubConnectionHealth(() => new Promise(() => undefined));
     const { container, unmount } = mount(<ConnectionStatusIndicator />);
     const dot = container.querySelector('[data-testid="statusbar-connection-indicator"]');
     expect(dot).toBeTruthy();
-    expect(dot?.getAttribute("aria-label")).toMatch(/unavailable|indisponibil/i);
+    expect(dot?.getAttribute("aria-label")).toMatch(/status unavailable|status conexiune indisponibil/i);
     expect(dot?.getAttribute("data-connection-state")).toBe("unknown");
+    expect(fetchSpy).not.toHaveBeenCalled();
     unmount();
+  });
+
+  it("renders healthy, degraded, and unavailable from the preload snapshot", async () => {
+    const cases: Array<{ overall: ConnectionHealthSnapshot["overall"]; label: RegExp }> = [
+      { overall: "healthy", label: /healthy|sănătoase/i },
+      { overall: "degraded", label: /degraded|degradată/i },
+      { overall: "unavailable", label: /^Connection unavailable$|^Conexiune indisponibilă$/ },
+    ];
+
+    for (const { overall, label } of cases) {
+      stubConnectionHealth(async () => snapshot(overall));
+      const { container, unmount } = mount(<ConnectionStatusIndicator />);
+      await flushAct();
+      const dot = container.querySelector('[data-testid="statusbar-connection-indicator"]');
+      expect(dot?.getAttribute("data-connection-state")).toBe(overall);
+      expect(dot?.getAttribute("aria-label")).toMatch(label);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  it("keeps status-bar order Problems → Connection → Branch", () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../src/renderer/WorkbenchRoot.tsx"),
+      "utf8"
+    );
+    const problems = src.indexOf("statusBar.problemsSummary");
+    const connection = src.indexOf("<ConnectionStatusIndicator");
+    const branch = src.indexOf("statusBar.noGit");
+    expect(problems).toBeGreaterThan(-1);
+    expect(connection).toBeGreaterThan(problems);
+    expect(branch).toBeGreaterThan(connection);
+
+    const connectionItem = src.slice(Math.max(0, connection - 160), connection);
+    expect(connectionItem).not.toContain("connectionUnavailableTooltip");
+    expect(connectionItem).not.toMatch(/title=\{t\(/);
   });
 });
 
