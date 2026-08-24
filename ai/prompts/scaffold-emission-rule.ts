@@ -31,7 +31,7 @@ SCAFFOLD EMISSION (obligatoriu în Code Mode):
 - Un fișier = un fence; header obligatoriu cu path relativ la workspace (ex. \`\`\`typescript:src/main/foo.ts\`\`\`).
 - Interzis: „voi crea…”, liste lungi fără cod, snippet-uri fără path, path absolut Windows.
 - Chat: max câteva linii status/recap DUPĂ fence-uri — nu dump de sursă în prose.
-- parseScaffoldFiles + applyScaffoldToWorkspace scriu automat în proiectul deschis.
+- parseScaffoldFiles extrage fence-uri; scrierea pe disc trece doar prin write gate + Accept, nu prin finish().
 `.trim();
 
 export const SCAFFOLD_CONTINUE_USER_MESSAGE = [
