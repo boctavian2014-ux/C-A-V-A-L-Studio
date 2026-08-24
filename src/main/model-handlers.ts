@@ -61,6 +61,12 @@ import {
   parseAbortStreamId,
   startAbortableStream,
 } from "./abort/stream-abort";
+import { TURN_WATCHDOG_ABORT_REASON } from "../shared/turn-watchdog";
+import {
+  armTurnWatchdog,
+  disarmTurnWatchdog,
+  wasTurnWatchdogEmitted,
+} from "./ai/turn-watchdog-runtime";
 import { cancelCadJobRemote } from "./cad-handlers";
 import { releaseCadWorkspaceLock } from "./cad-workspace-lock";
 import { loadMultiAgentConfig, loadReasoningConfig, usesAgenticToolRuntime } from "../../ai/composer/multi-agent/config";
@@ -1322,6 +1328,15 @@ async function streamToRenderer(
     workspaceRoot: workspaceRoot?.trim() ?? "",
   });
   const abortRoot = startAbortableStream(streamId);
+  armTurnWatchdog({
+    streamId,
+    mode: request.mode,
+    stream,
+    abort: () => {
+      abortAbortableStream(streamId, TURN_WATCHDOG_ABORT_REASON);
+      abortMultiAgentPipeline(streamId);
+    },
+  });
   // Bound workspace is authoritative — never trust renderer cwd for context.
   request = { ...request, workspaceRoot };
   if (request.ideContext !== undefined) {
@@ -1682,6 +1697,9 @@ async function streamToRenderer(
 
   if (getStreamAbortSignal(streamId)?.aborted) {
     markOperationTerminal(streamId, "aborted");
+    if (wasTurnWatchdogEmitted(streamId)) {
+      return;
+    }
     emitTimelineEvent(stream, streamId, {
       type: "error",
       label: "Generation cancelled",
@@ -1725,6 +1743,7 @@ async function streamToRenderer(
     });
 
   } finally {
+    disarmTurnWatchdog(streamId);
     discardIncompleteStreamTimeline(streamId);
     finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
@@ -1756,6 +1775,15 @@ async function streamResumeToRenderer(
       workspaceRoot: input.workspaceRoot?.trim() ?? "",
     });
     const abortRoot = startAbortableStream(streamId);
+    armTurnWatchdog({
+      streamId,
+      mode: "agentic",
+      stream,
+      abort: () => {
+        abortAbortableStream(streamId, TURN_WATCHDOG_ABORT_REASON);
+        abortMultiAgentPipeline(streamId);
+      },
+    });
     if (!stream.isAlive()) return;
     const originalTurn = getTrustedChatTurn(input.runId) ?? getTrustedChatTurn(streamId);
     if (originalTurn && originalTurn.senderId === senderId && input.workspaceRoot?.trim()) {
@@ -1859,6 +1887,7 @@ async function streamResumeToRenderer(
       error: safeErrorMessageForUi(result.error ?? "Pipeline resume failed"),
     });
   } finally {
+    disarmTurnWatchdog(streamId);
     discardIncompleteStreamTimeline(streamId);
     finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);

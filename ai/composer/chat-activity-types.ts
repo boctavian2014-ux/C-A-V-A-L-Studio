@@ -41,7 +41,7 @@ export function formatMultiAgentStatus(phase: MultiAgentPhase, detail?: string):
   return detail ? `${label} · ${detail}` : `${label}…`;
 }
 
-export type ChatActivityStepStatus = 'pending' | 'active' | 'done';
+export type ChatActivityStepStatus = 'pending' | 'active' | 'done' | 'timed_out';
 
 export interface ChatActivityStep {
   id: ChatActivityPhase;
@@ -122,6 +122,11 @@ export function patchActivityStep(
 
 export function markAllActivityDone(steps: ChatActivityStep[]): ChatActivityStep[] {
   return steps.map((s) => ({ ...s, status: 'done' as const }));
+}
+
+/** Close leftover activity on watchdog expiry — not a successful done. */
+export function markActivityTimedOut(steps: ChatActivityStep[]): ChatActivityStep[] {
+  return steps.map((s) => (s.status === 'done' ? s : { ...s, status: 'timed_out' as const }));
 }
 
 export interface MultiAgentStepRecord {

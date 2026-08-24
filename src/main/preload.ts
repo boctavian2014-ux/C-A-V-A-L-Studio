@@ -144,6 +144,7 @@ export interface CavalStreamChunk {
   kind?: import("../shared/chat-stream-visibility").ChatStreamItemKind;
   reasoningDelta?: string;
   error?: string;
+  timedOut?: boolean;
   resolvedModel?: string;
   reason?: string;
   model?: string;
