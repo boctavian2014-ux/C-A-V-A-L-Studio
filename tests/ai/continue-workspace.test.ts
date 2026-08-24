@@ -49,6 +49,33 @@ describe('continue-workspace intent', () => {
     expect(isContinueWorkspaceRequest('resume the workspace')).toBe(true);
   });
 
+  it('treats Romanian diacritic continue phrases as continue, not inspect-only (#56)', () => {
+    expect(isContinueWorkspaceRequest('Continuă de unde am rămas')).toBe(true);
+    expect(isInspectOnlyWorkspaceRequest('Continuă de unde am rămas')).toBe(false);
+
+    expect(isContinueWorkspaceRequest('CONTINUĂ')).toBe(true);
+    expect(isInspectOnlyWorkspaceRequest('CONTINUĂ')).toBe(false);
+
+    expect(isContinueWorkspaceRequest('Continua')).toBe(true);
+    expect(isInspectOnlyWorkspaceRequest('Continua')).toBe(false);
+
+    expect(isContinueWorkspaceRequest('Verifică proiectul și continuă de unde am rămas')).toBe(
+      true
+    );
+    expect(
+      isInspectOnlyWorkspaceRequest('Verifică proiectul și continuă de unde am rămas')
+    ).toBe(false);
+
+    expect(isInspectOnlyWorkspaceRequest('Verifică folderul')).toBe(true);
+    expect(isContinueWorkspaceRequest('Verifică folderul')).toBe(true);
+  });
+
+  it('does not false-positive on continuăm / continuare (#56)', () => {
+    expect(isContinueWorkspaceRequest('Continuăm discuția')).toBe(false);
+    expect(isInspectOnlyWorkspaceRequest('Continuăm discuția')).toBe(false);
+    expect(isContinueWorkspaceRequest('Aceasta este o continuare a planului')).toBe(false);
+  });
+
   it('does not treat system continue markers as workspace continue', () => {
     expect(isContinueWorkspaceRequest('SCAFFOLD_CONTINUE')).toBe(false);
     expect(isContinueWorkspaceRequest('DELIVERY_CONTINUE')).toBe(false);
