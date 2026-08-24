@@ -37,6 +37,15 @@ import {
   readFileRedacted,
   truncateToTokens,
 } from "../../../src/main/ai/enhanced-context";
+import {
+  applyEnhancedContextToChatRequest,
+  applyIdeContextToChatRequest,
+} from "../../../src/main/ai/ide-context-collector";
+import {
+  ASK_COMPLETION_MAX_TOKENS,
+  CAVALLO_ASK_PROMPT,
+} from "../../../ai/prompts/cavallo-enterprise-modes";
+import { ASK_TURN_TIMEOUT_MS } from "../../../src/shared/turn-watchdog";
 
 describe("7d.3 enhanced context", () => {
   const roots: string[] = [];
@@ -64,6 +73,18 @@ describe("7d.3 enhanced context", () => {
     expect(extractSearchQuery("look at src/utils/validation.ts please")).toContain(
       "validation"
     );
+  });
+
+  it("keeps Romanian diacritics intact and scores index.html as a filename", () => {
+    expect(extractSearchQuery("Explică-mi rolul fișierului index.html.")).toBe(
+      "index.html"
+    );
+    expect(extractSearchQuery("ce face INDEX.HTML in proiect")).toMatch(/^index\.html$/i);
+
+    const noFilename = extractSearchQuery("Explică-mi rolul fișierului.");
+    expect(noFilename.normalize("NFC")).toContain("fișierului");
+    expect(noFilename.split(/\s+/u)).not.toContain("ierului");
+    expect(noFilename.split(/\s+/u)).not.toContain("fi");
   });
 
   it("includes relevant search hits and always scores current file 1.0", async () => {
@@ -267,5 +288,67 @@ describe("7d.3 enhanced context", () => {
     );
     expect(block).not.toContain("<!DOCTYPE html>");
     expect(block).toContain("README.md");
+  });
+
+  it("does not paste the same file body in IDE_CONTEXT and ENHANCED_CONTEXT", async () => {
+    const root = tempRoot("caval-p11b-");
+    const body = `<!DOCTYPE html>\n<html><body>P11B_MARKER</body></html>\n`;
+    fs.writeFileSync(path.join(root, "index.html"), body);
+    fs.writeFileSync(path.join(root, "README.md"), "# other\n");
+
+    indexState.root = root;
+    indexState.index = {
+      lastFullScan: Date.now(),
+      totalFiles: 2,
+      files: [
+        {
+          path: "index.html",
+          language: "html",
+          symbols: [],
+          imports: [],
+          exports: [],
+          sizeBytes: body.length,
+          lastIndexed: 1,
+        },
+        {
+          path: "README.md",
+          language: "md",
+          symbols: [],
+          imports: [],
+          exports: [],
+          sizeBytes: 8,
+          lastIndexed: 1,
+        },
+      ],
+    };
+
+    const userMessage = `Explică-mi rolul fișierului index.html.\n\nCod din fișierul activ \`index.html\`:\n\`\`\`html\n${body}\n\`\`\``;
+    const afterIde = applyIdeContextToChatRequest(
+      {
+        message: userMessage,
+        messages: [{ role: "user", content: userMessage }],
+      },
+      {
+        activeFile: {
+          path: path.join(root, "index.html"),
+          language: "html",
+          content: body,
+        },
+      }
+    );
+    const afterEnhanced = await applyEnhancedContextToChatRequest(afterIde, root);
+    const user =
+      [...(afterEnhanced.messages ?? [])].reverse().find((m) => m.role === "user")
+        ?.content ?? afterEnhanced.message;
+
+    expect(user.split("P11B_MARKER").length - 1).toBe(1);
+    expect((user.match(/<<IDE_CONTEXT/g) ?? []).length).toBe(1);
+  });
+
+  it("does not change the P1.1 Ask token cap, timeout, or prompt contract", () => {
+    expect(ASK_TURN_TIMEOUT_MS).toBe(28_000);
+    expect(ASK_COMPLETION_MAX_TOKENS).toBe(256);
+    expect(CAVALLO_ASK_PROMPT).toMatch(/at most 6 short sentences/i);
+    expect(CAVALLO_ASK_PROMPT).not.toContain("[END ASK]");
   });
 });

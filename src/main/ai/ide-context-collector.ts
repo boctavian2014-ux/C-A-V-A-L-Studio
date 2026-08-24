@@ -99,6 +99,9 @@ export async function applyEnhancedContextToChatRequest<
     userTurnAlreadyIncludesFileContent(lastUser, enhanced.currentFile.content)
       ? enhanced.currentFile.path
       : undefined,
+    ...enhanced.relatedFiles
+      .filter((f) => userTurnAlreadyIncludesFileContent(lastUser, f.content))
+      .map((f) => f.path),
   ].filter((p): p is string => Boolean(p?.trim()));
 
   const block = formatEnhancedContextForPrompt(enhanced, { skipFilePaths });
