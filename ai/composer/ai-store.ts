@@ -62,6 +62,7 @@ import {
   type MultiAgentPhase,
   createInitialActivitySteps,
   markAllActivityDone,
+  markActivityTimedOut,
   patchActivityStep,
   formatMultiAgentStatus,
   patchMultiAgentSteps,
@@ -99,6 +100,11 @@ import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/m
 import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
 import { stripArenaChatNoise, formatArenaReasoning } from './chat-display';
 import { isTranscriptVisibleKind } from '../../src/shared/chat-stream-visibility';
+import {
+  TURN_WATCHDOG_ABORT_REASON,
+  TURN_WATCHDOG_USER_MESSAGE,
+  timeoutMsForAgentMode,
+} from '../../src/shared/turn-watchdog';
 import {
   buildEarlyArenaMessage,
   buildFinalRecap,
@@ -739,6 +745,7 @@ export function ensurePipelineVerifyListener(): void {
 }
 
 let abortController: AbortController | null = null;
+let rendererWatchdog: ReturnType<typeof setTimeout> | null = null;
 let streamCleanup: (() => void) | null = null;
 let activeStreamId: string | null = null;
 let pendingStreamId: string | null = null;
@@ -748,6 +755,23 @@ let prepareTokenId: string | null = null;
 let prepareRequestId = 0;
 let deliveryWaveIndex = 0;
 let agenticRepairWave = 0;
+
+function clearRendererWatchdog(): void {
+  if (rendererWatchdog) {
+    clearTimeout(rendererWatchdog);
+    rendererWatchdog = null;
+  }
+}
+
+function closeTurnNonceAndControllers(): void {
+  clearRendererWatchdog();
+  sendAbortController?.abort();
+  sendAbortController = null;
+  abortController?.abort();
+  abortController = null;
+  activeStreamId = null;
+  pendingStreamId = null;
+}
 
 const initialThread = createThread();
 
@@ -1232,6 +1256,8 @@ export const useAIStore = create<AIStore>()(
         };
 
         const assistantMsgId = generateId();
+        pendingStreamId = generateId();
+        activeStreamId = pendingStreamId;
         const assistantMsg: ChatMessage = {
           id: assistantMsgId,
           role: 'assistant',
@@ -1240,7 +1266,7 @@ export const useAIStore = create<AIStore>()(
           model: selectedModel,
           isStreaming: true,
           workspacePath: boundWorkspace ?? undefined,
-          streamId: pendingStreamId ?? undefined,
+          streamId: pendingStreamId,
           multiAgentStatus: isAgenticPipelineMode(agentMode) ? 'Memory…' : undefined,
           multiAgentSteps: isAgenticPipelineMode(agentMode)
               ? [{ phase: 'memory', status: 'active', detail: 'init', at: Date.now() }]
@@ -1252,8 +1278,7 @@ export const useAIStore = create<AIStore>()(
         sendAbortController?.abort();
         sendAbortController = new AbortController();
         userStoppedStream = false;
-        pendingStreamId = generateId();
-        activeStreamId = pendingStreamId;
+        let turnClosed = false;
         const sendSignal = sendAbortController.signal;
         set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
 
@@ -1438,7 +1463,8 @@ export const useAIStore = create<AIStore>()(
         };
 
         const finish = (content: string, extra?: Partial<ChatMessage>, tabPath?: string | null) => {
-          if (userStoppedStream) return;
+          if (userStoppedStream || turnClosed) return;
+          turnClosed = true;
           if (isSessionStale()) {
             updateAssistant({
               content: 'Workspace schimbat — răspuns ignorat.',
@@ -1488,6 +1514,7 @@ export const useAIStore = create<AIStore>()(
                 : {}),
           });
           set({ isStreaming: false });
+          closeTurnNonceAndControllers();
 
           const projectPath = useEditorStore.getState().projectPath;
           const appliesScaffold = modeSupportsFileApply(agentMode);
@@ -1847,7 +1874,8 @@ export const useAIStore = create<AIStore>()(
         }
 
         const handleStreamChunk = (chunk: CavalStreamChunk) => {
-          if (userStoppedStream) return;
+          if (userStoppedStream || turnClosed) return;
+          if (chunk.streamId && activeStreamId && chunk.streamId !== activeStreamId) return;
           if (isSessionStale()) {
             if (chunk.type === 'done' || chunk.type === 'error') {
               finish('Workspace schimbat — stream oprit.', { error: 'workspace-changed' });
@@ -1975,6 +2003,16 @@ export const useAIStore = create<AIStore>()(
                   : rawStreamBuffer,
             });
           }
+          if (chunk.timedOut) {
+            const steps = get().messages.find((m) => m.id === assistantMsgId)?.activitySteps;
+            finish(TURN_WATCHDOG_USER_MESSAGE, {
+              error: TURN_WATCHDOG_ABORT_REASON,
+              activitySteps: steps?.length ? markActivityTimedOut(steps) : undefined,
+            });
+            streamCleanup?.();
+            streamCleanup = null;
+            return;
+          }
           if (chunk.type === 'error') {
             if (userStoppedStream || chunk.error === 'Aborted') return;
             finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error }, activeTabPath);
@@ -2076,6 +2114,20 @@ export const useAIStore = create<AIStore>()(
           activeStreamId = streamId;
           updateAssistant({ streamId });
           abortController = new AbortController();
+          clearRendererWatchdog();
+          rendererWatchdog = setTimeout(() => {
+            if (userStoppedStream || turnClosed) return;
+            if (activeStreamId !== streamId) return;
+            void getCaval()?.abortChatStream?.(streamId);
+            abortController?.abort();
+            const steps = get().messages.find((m) => m.id === assistantMsgId)?.activitySteps;
+            finish(TURN_WATCHDOG_USER_MESSAGE, {
+              error: TURN_WATCHDOG_ABORT_REASON,
+              activitySteps: steps?.length ? markActivityTimedOut(steps) : undefined,
+            });
+            streamCleanup?.();
+            streamCleanup = null;
+          }, timeoutMsForAgentMode(agentMode));
           activeStreamBuffer = '';
           rawStreamBuffer = '';
           gotFirstDelta = false;
@@ -2295,6 +2347,7 @@ export const useAIStore = create<AIStore>()(
 
       stopStreaming: () => {
         userStoppedStream = true;
+        clearRendererWatchdog();
         sendAbortController?.abort();
         sendAbortController = null;
         const sid = activeStreamId ?? pendingStreamId;

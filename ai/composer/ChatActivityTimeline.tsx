@@ -14,6 +14,13 @@ function StepIcon({ status }: { status: ChatActivityStep['status'] }) {
       </span>
     );
   }
+  if (status === 'timed_out') {
+    return (
+      <span style={{ color: 'var(--caval-warning, #F59E0B)', fontSize: 11, width: 14, textAlign: 'center' }}>
+        ✕
+      </span>
+    );
+  }
   if (status === 'active') {
     return (
       <span
@@ -41,7 +48,7 @@ export function ChatActivityTimeline({ steps, collapsed }: ChatActivityTimelineP
     : steps.filter((s) => s.status !== 'pending' || steps.findIndex((x) => x.status === 'active') >= steps.indexOf(s));
 
   const displaySteps = collapsed && visible.length === 0
-    ? steps.filter((s) => s.status === 'done').slice(-1)
+    ? steps.filter((s) => s.status === 'done' || s.status === 'timed_out').slice(-1)
     : visible.length > 0 ? visible : steps.slice(0, 1);
 
   return (
