@@ -42,6 +42,7 @@ import {
   resolveTrustedExecutionCapability,
   type ExecutionMode,
 } from "../../ai/modes/execution-mode";
+import { stageDirectChatScaffoldProposal } from "../../ai/composer/direct-chat-propose";
 import {
   runCavalloMultiAgentPipeline,
   resumeCavalloMultiAgentPipeline,
@@ -1720,6 +1721,35 @@ async function streamToRenderer(
 
   if (result.ok) {
     markOperationTerminal(streamId, "completed");
+    const proposedWrites = stageDirectChatScaffoldProposal({
+      workspaceRoot,
+      text: result.text ?? "",
+      capability,
+      stageKey: streamId,
+      aborted: wasTurnWatchdogEmitted(streamId),
+    });
+    if (proposedWrites.length > 0) {
+      registerTrustedChatTurn(
+        {
+          senderId,
+          streamId,
+          mainResolved: capability.mainResolved,
+          effective: capability.effective,
+        },
+        [streamId]
+      );
+      emitTimelineEvent(stream, streamId, {
+        type: "tool_call",
+        label: `propose ${proposedWrites.length} file(s)`,
+        toolName: "chat_apply",
+      });
+      emitTimelineEvent(stream, streamId, {
+        type: "tool_result",
+        label: `${proposedWrites.length} change(s) awaiting Accept`,
+        toolName: "chat_apply",
+        success: true,
+      });
+    }
     persistAssistantMessageAndFlush({
       workspaceRoot,
       conversationId: request.conversationId,
@@ -1732,6 +1762,9 @@ async function streamToRenderer(
       type: "done",
       model: result.resolvedModel,
       provider: result.provider,
+      writtenFiles: [],
+      proposedWrites,
+      proposeStageKey: proposedWrites.length > 0 ? streamId : undefined,
     });
     return;
   }
