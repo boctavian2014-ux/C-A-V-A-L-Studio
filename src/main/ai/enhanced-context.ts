@@ -91,33 +91,39 @@ export function truncateToTokens(content: string, maxTokens: number): string {
   return `${content.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
+/** Path-like tokens and common source/markup names outrank prose. */
+const SEARCH_FILENAME_EXT =
+  /\.(ts|tsx|js|jsx|mjs|cjs|py|json|html|htm|css|scss|md|vue|svelte)$/i;
+
 /**
  * Prefer camelCase / PascalCase / snake_case / path-like tokens over stop words.
  * Ex: "Fix the bug in validateEmail" → "validateEmail"
+ * Unicode letters stay intact (`fișierului` must not become `fi` + `ierului`).
  */
 export function extractSearchQuery(userMessage: string): string {
-  const raw = typeof userMessage === "string" ? userMessage.trim() : "";
+  const raw = typeof userMessage === "string" ? userMessage.trim().normalize("NFC") : "";
   if (!raw) return "";
 
-  const cleaned = raw.replace(/[^\w./\\-]+/g, " ");
+  // `\w` without the unicode flag splits on diacritics (`ș` → space).
+  const cleaned = raw.replace(/[^\p{L}\p{N}._/\\-]+/gu, " ");
   const words = cleaned.split(/\s+/).filter(Boolean);
 
   type Scored = { word: string; score: number };
   const scored: Scored[] = [];
 
   for (const word of words) {
-    const bare = word.replace(/^['"`]+|['"`]+$/g, "");
+    const bare = word.replace(/^['"`]+|['"`]+$/g, "").replace(/[.,;:!?]+$/g, "");
     if (bare.length < 3) continue;
     const lower = bare.toLowerCase();
     if (STOP_WORDS.has(lower)) continue;
 
     let score = 0;
-    if (/\.(ts|tsx|js|jsx|mjs|cjs|py|json)$/i.test(bare)) score += 12;
+    if (SEARCH_FILENAME_EXT.test(bare)) score += 12;
     if (/[\\/]/.test(bare)) score += 11;
     if (/^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+$/.test(bare)) score += 10; // PascalCase
     if (/^[a-z]+(?:[A-Z][a-z0-9]+)+$/.test(bare)) score += 10; // camelCase
     if (/^[a-zA-Z_][a-zA-Z0-9]*_[a-zA-Z0-9_]+$/.test(bare)) score += 8; // snake_case
-    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(bare) && bare.length > 2) score += 3;
+    if (/^[\p{L}_][\p{L}\p{N}_]*$/u.test(bare) && bare.length > 2) score += 3;
     if (/^[a-z]+$/.test(bare) && bare.length < 6) score -= 2;
     if (score > 0) scored.push({ word: bare, score });
   }
@@ -255,7 +261,7 @@ export async function buildEnhancedContext(
     for (const result of searchResults) {
       if (relatedFiles.length >= maxFiles) break;
       if (result.score < ENHANCED_CONTEXT_MIN_RELEVANCE) continue;
-      if (currentRel && result.file.path === currentRel) continue;
+      if (currentRel && workspaceFilePathOverlaps(result.file.path, currentRel)) continue;
 
       const content = await readFileRedacted(
         root,
