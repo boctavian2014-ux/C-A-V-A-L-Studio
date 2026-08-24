@@ -9,10 +9,19 @@ import { AI_TOOL_DEFINITIONS, isAiToolName, type AiToolName } from "../../src/sh
 import { executeAiTool } from "../../src/main/ai/ai-tools-executor";
 import { runAllowedWorkspaceCommand } from "./workspace-command-runner";
 import { runTerminalCommand } from "../../src/main/terminal-bridge";
+import {
+  shouldGrantChatWriteTurn,
+  type TrustedExecutionCapability,
+} from "../modes/execution-mode";
 
 export interface ToolCall {
   name: string;
   arguments: Record<string, unknown>;
+}
+
+export interface ToolExecuteContext {
+  /** Must match the granted write turn id for write_file. */
+  turnId?: string;
 }
 
 export interface ToolResult {
@@ -80,11 +89,44 @@ type McpToolInvoker = (serverId: string, toolName: string, args: Record<string, 
 export class ToolRegistry {
   private mcpInvoker: McpToolInvoker | null = null;
   private mcpToolDefinitions: ToolDefinition[] = [];
+  private allowWrites = false;
+  private writeGateEnabled = true;
+  private writeTurnId: string | null = null;
 
   constructor(
     private readonly workspaceRoot: string,
     private readonly contextEngine?: ContextEngineApi
   ) {}
+
+  setWriteAllowed(allowed: boolean): void {
+    this.allowWrites = allowed;
+    if (!allowed) this.writeTurnId = null;
+  }
+
+  /** Fail-closed chat turn: writes require a granted capability/turn id. */
+  enableWriteGate(): void {
+    this.writeGateEnabled = true;
+    this.allowWrites = false;
+    this.writeTurnId = null;
+  }
+
+  grantWriteTurn(turnId: string): void {
+    if (!turnId.trim()) return;
+    this.writeGateEnabled = true;
+    this.writeTurnId = turnId.trim();
+    this.allowWrites = true;
+  }
+
+  grantedWriteTurnId(): string | null {
+    return this.writeTurnId;
+  }
+
+  revokeWriteTurn(turnId?: string): void {
+    if (turnId && this.writeTurnId && this.writeTurnId !== turnId.trim()) return;
+    this.writeTurnId = null;
+    this.allowWrites = false;
+    this.writeGateEnabled = true;
+  }
 
   setMcpInvoker(invoker: McpToolInvoker): void {
     this.mcpInvoker = invoker;
@@ -98,7 +140,7 @@ export class ToolRegistry {
     return [...BUILTIN_TOOLS, ...this.mcpToolDefinitions];
   }
 
-  async execute(call: ToolCall): Promise<ToolResult> {
+  async execute(call: ToolCall, context?: ToolExecuteContext): Promise<ToolResult> {
     if (call.name.startsWith("mcp:")) {
       if (!this.mcpInvoker) return { ok: false, error: "MCP not configured" };
       const parsed = call.name.match(/^mcp:([^:]+):(.+)$/);
@@ -117,7 +159,7 @@ export class ToolRegistry {
         const content = String(
           call.arguments.content ?? call.arguments.body ?? call.arguments.code ?? call.arguments.text ?? ""
         );
-        return this.writeFile(filePath, content);
+        return this.writeFile(filePath, content, context?.turnId);
       }
       case "list_dir":
         return this.listDir(String(call.arguments.path ?? "."));
@@ -164,7 +206,18 @@ export class ToolRegistry {
     }
   }
 
-  private async writeFile(filePath: string, content: string): Promise<ToolResult> {
+  private async writeFile(filePath: string, content: string, turnId?: string): Promise<ToolResult> {
+    if (this.writeGateEnabled) {
+      if (!this.writeTurnId || !this.allowWrites) {
+        return { ok: false, error: "Write rejected: no write capability for this turn." };
+      }
+      if (!turnId?.trim() || turnId.trim() !== this.writeTurnId) {
+        return { ok: false, error: "Write rejected: turn id mismatch." };
+      }
+    }
+    if (!this.allowWrites) {
+      return { ok: false, error: "Write rejected: this turn is read-only." };
+    }
     if (!filePath.trim()) {
       return { ok: false, error: "write_file requires path (relative to workspace root)." };
     }
@@ -238,4 +291,18 @@ export class ToolRegistry {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
+}
+
+/** Fail-closed: grant only when main and effective modes both allow disk writes. */
+export function applyTrustedWriteGate(
+  registry: ToolRegistry,
+  turnId: string,
+  capability: TrustedExecutionCapability
+): "granted" | "blocked" {
+  registry.enableWriteGate();
+  if (turnId.trim() && shouldGrantChatWriteTurn(capability)) {
+    registry.grantWriteTurn(turnId.trim());
+    return "granted";
+  }
+  return "blocked";
 }

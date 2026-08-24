@@ -47,6 +47,7 @@ export async function runCompletionWithTools(input: {
   callbacks?: ToolLoopCallbacks;
   parentAbortId?: string;
   signal?: AbortSignal;
+  writeTurnId?: string;
 }): Promise<
   | { ok: true; text: string; writtenPaths: string[] }
   | { ok: false; error: string; writtenPaths?: string[] }
@@ -66,6 +67,7 @@ export async function runCompletionWithTools(input: {
       modelId,
       callbacks,
       signal,
+      writeTurnId: input.writeTurnId,
     });
   } finally {
     if (toolAbort) abortRegistry.release(toolAbort.id);
@@ -80,11 +82,12 @@ async function runToolLoopBody(input: {
   modelId: string;
   callbacks?: ToolLoopCallbacks;
   signal?: AbortSignal;
+  writeTurnId?: string;
 }): Promise<
   | { ok: true; text: string; writtenPaths: string[] }
   | { ok: false; error: string; writtenPaths?: string[] }
 > {
-  const { aiClient, registry, baseRequest, initialMessages, modelId, callbacks, signal } = input;
+  const { aiClient, registry, baseRequest, initialMessages, modelId, callbacks, signal, writeTurnId } = input;
   const profile = getModelProfile(modelId);
   const tools = registry.listTools();
   const maxSteps = maxToolStepsForIntent(baseRequest.intent);
@@ -160,10 +163,13 @@ async function runToolLoopBody(input: {
         return { ok: false, error: ABORTED_ERROR, writtenPaths };
       }
       callbacks?.onToolCall?.(call.name, "start");
-      const result = await registry.execute({
-        name: call.name,
-        arguments: call.arguments ?? {},
-      });
+      const result = await registry.execute(
+        {
+          name: call.name,
+          arguments: call.arguments ?? {},
+        },
+        writeTurnId ? { turnId: writeTurnId } : undefined
+      );
 
       const toolContent = result.ok
         ? stringifyToolOutput(result.output)

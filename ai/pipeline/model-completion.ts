@@ -406,6 +406,7 @@ export async function executeModelCompletion(
             callbacks,
             parentAbortId: input.abortParentId,
             signal: input.signal,
+            writeTurnId: input.requestId,
           });
 
           if (toolResult.ok) {
