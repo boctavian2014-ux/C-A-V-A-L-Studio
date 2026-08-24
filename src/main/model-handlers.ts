@@ -30,7 +30,6 @@ import {
   getTrustedChatTurn,
   registerTrustedChatTurn,
 } from "./ai/trusted-chat-turn";
-import { formatToolCallNotice } from "../../ai/pipeline/tool-agent-loop";
 import { enrichChatWithZeroLatency } from "./zl-handlers";
 import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
@@ -637,6 +636,11 @@ function createStreamChunkSender(
     }
   };
   return { send, isAlive: () => alive };
+}
+
+function sendAssistantDelta(stream: StreamChunkSender, delta: string): boolean {
+  if (!delta) return true;
+  return stream.send({ type: "delta", delta, kind: "assistant_message" });
 }
 
 function sendStatusChunk(
@@ -1503,10 +1507,6 @@ async function streamToRenderer(
         if (!stream.isAlive()) return;
         stream.send({ type: "meta", resolvedModel, reason });
       },
-      onDelta: (delta) => {
-        if (!stream.isAlive()) return;
-        stream.send({ type: "delta", delta });
-      },
       onReasoning: (reasoningDelta) => {
         if (!stream.isAlive()) return;
         stream.send({ type: "reasoning", reasoningDelta });
@@ -1532,9 +1532,6 @@ async function streamToRenderer(
         pipelineRecapMeta: result.pipelineRecapMeta,
         finishedAt: new Date().toISOString(),
       });
-      if (result.text?.includes('```')) {
-        if (!stream.send({ type: "delta", delta: result.text })) return;
-      }
       const proposedWrites = result.proposedWrites ?? [];
       if (proposedWrites.length > 0) {
         registerTrustedChatTurn(
@@ -1639,7 +1636,7 @@ async function streamToRenderer(
     },
     onDelta: (delta) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
-      stream.send({ type: "delta", delta });
+      sendAssistantDelta(stream, delta);
     },
     onReasoning: (reasoningDelta) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
@@ -1667,17 +1664,7 @@ async function streamToRenderer(
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
       const isDirectCodingMode =
         fusedRequest.mode === "code" || fusedRequest.mode === "debug" || fusedRequest.mode === "agentic";
-      if (!isDirectCodingMode) {
-        const notice = formatToolCallNotice(toolName, status, detail);
-        if (notice) {
-          if (!stream.send({ type: "delta", delta: notice })) return;
-        }
-      } else if (status === "error" && detail) {
-        stream.send({
-          type: "delta",
-          delta: `\n⚠ ${toolName}: ${detail.slice(0, 120)}\n`,
-        });
-      } else if (status === "done" && toolName === "write_file" && writtenPath) {
+      if (isDirectCodingMode && status === "done" && toolName === "write_file" && writtenPath) {
         sendStatusChunk(stream, "write", "active", writtenPath);
       }
       sendToolTimeline(stream, streamId, toolName, status, detail, writtenPath);
@@ -1795,10 +1782,6 @@ async function streamResumeToRenderer(
         if (!stream.isAlive()) return;
         stream.send({ type: "meta", resolvedModel, reason });
       },
-      onDelta: (delta) => {
-        if (!stream.isAlive()) return;
-        stream.send({ type: "delta", delta });
-      },
       onReasoning: (reasoningDelta) => {
         if (!stream.isAlive()) return;
         stream.send({ type: "reasoning", reasoningDelta });
@@ -1818,9 +1801,6 @@ async function streamResumeToRenderer(
         pipelineRecapMeta: result.pipelineRecapMeta,
         finishedAt: new Date().toISOString(),
       });
-      if (result.text?.includes("```")) {
-        if (!stream.send({ type: "delta", delta: result.text })) return;
-      }
       const proposedWrites = result.proposedWrites ?? [];
       if (proposedWrites.length > 0) {
         const originalTurn = getTrustedChatTurn(input.runId) ?? getTrustedChatTurn(streamId);

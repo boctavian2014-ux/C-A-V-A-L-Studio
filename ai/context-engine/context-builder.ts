@@ -9,7 +9,6 @@ import type { EditorTab, FileNode } from '../../src/renderer/store/editor-store'
 import { CODING_ARENA_SYSTEM_PROMPT } from '../prompts/coding-arena';
 import {
   buildMultiModelSystemPrompt,
-  MULTI_MODEL_RECAP_ADDON,
 } from '../prompts/multi-model-reasoning-chat';
 import type { AgentModeId } from '../modes/agent-modes';
 import {
@@ -77,7 +76,7 @@ export function buildProjectTreeSummary(nodes: FileNode[], maxItems = 40): strin
 // ──────────────────────────────────────────────
 
 export function buildLiteSystemPrompt(agentMode?: ContextOptions['agentMode']): string {
-  return `${buildMultiModelSystemPrompt({ agentMode })}${MULTI_MODEL_RECAP_ADDON}`;
+  return buildMultiModelSystemPrompt({ agentMode });
 }
 
 function buildEnterpriseOrLiteSystemPrompt(
@@ -216,7 +215,7 @@ export function buildContextMessages(
                 includeScaffold: opts.agentMode === 'code' || opts.agentMode === 'debug',
               })
             : attachProject
-              ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}${MULTI_MODEL_RECAP_ADDON}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
+              ? `${buildMultiModelSystemPrompt({ agentMode: opts.agentMode, workspacePath: opts.projectPath })}\n\n${buildSystemPrompt(projectName, opts.projectPath)}`
               : buildLiteSystemPrompt(opts.agentMode);
   messages.push({ role: 'system', content: systemContent });
   usedTokens += estimateTokens(systemContent);

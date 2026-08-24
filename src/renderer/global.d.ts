@@ -159,6 +159,7 @@ interface CavalStreamChunk {
   streamId: string;
   type: "meta" | "delta" | "done" | "error" | "tool" | "status" | "reasoning" | "multiagent" | "reasoning-brief" | "delivery-pause" | "timeline";
   delta?: string;
+  kind?: import('../../src/shared/chat-stream-visibility').ChatStreamItemKind;
   reasoningDelta?: string;
   error?: string;
   resolvedModel?: string;

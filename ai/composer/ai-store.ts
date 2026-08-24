@@ -98,6 +98,7 @@ import {
 import { getFashionMatchingScaffoldFiles } from '../scaffolds/fashion-matching/manifest';
 import { isLlmRefusal } from '../scaffolds/fashion-matching/detect';
 import { stripArenaChatNoise, formatArenaReasoning } from './chat-display';
+import { isTranscriptVisibleKind } from '../../src/shared/chat-stream-visibility';
 import {
   buildEarlyArenaMessage,
   buildFinalRecap,
@@ -1951,6 +1952,9 @@ export const useAIStore = create<AIStore>()(
             }
           }
           if (chunk.type === 'delta' && chunk.delta) {
+            if (!isTranscriptVisibleKind(chunk.kind)) {
+              return;
+            }
             if (!gotFirstDelta) {
               gotFirstDelta = true;
               updateActivity('think', 'done');
@@ -2006,11 +2010,7 @@ export const useAIStore = create<AIStore>()(
             }
             if (chunk.composeText?.trim()) {
               capturedComposeText = chunk.composeText;
-              if ((rawStreamBuffer.match(/```/g)?.length ?? 0) < 2) {
-                rawStreamBuffer = chunk.composeText;
-                activeStreamBuffer = chunk.composeText;
-                syncLiveEditorPreview(chunk.composeText);
-              }
+              syncLiveEditorPreview(chunk.composeText);
             }
             if (chunk.writtenFiles?.length) {
               pipelineWrittenFiles = chunk.writtenFiles;

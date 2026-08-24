@@ -12,12 +12,13 @@ describe('multi-model-reasoning-chat', () => {
     expect(MULTI_MODEL_REASONING_CHAT_PROMPT).toContain('MODE 1');
     expect(MULTI_MODEL_REASONING_CHAT_PROMPT).toContain('MODE 2');
     expect(MULTI_MODEL_REASONING_CHAT_PROMPT).toContain('MODE 3');
+    expect(MULTI_MODEL_REASONING_CHAT_PROMPT).toContain('AUTO-SWITCHING');
   });
 
-  it('includes auto-switching and end recap', () => {
-    expect(MULTI_MODEL_REASONING_CHAT_PROMPT).toContain('AUTO-SWITCHING');
-    expect(MULTI_MODEL_REASONING_CHAT_PROMPT).toContain('END-OF-RESPONSE SUMMARY');
+  it('does not append the recap addon to streaming system prompts', () => {
     expect(MULTI_MODEL_RECAP_ADDON).toContain('Understood');
+    const prompt = buildMultiModelSystemPrompt({ agentMode: 'ask' });
+    expect(prompt).not.toContain(MULTI_MODEL_RECAP_ADDON.trim());
   });
 
   it('maps agent modes to hints', () => {
