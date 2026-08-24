@@ -5,7 +5,7 @@ import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, checkModelReadiness } from '../models/model-readiness';
 import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
-import { isAskChatMode } from '../../src/shared/ai-context-prepare';
+import { isAskChatMode, shouldAttachHeavyChatContext } from '../../src/shared/ai-context-prepare';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
 import { resolveEffectiveMode, isCavalloModesTestRequest } from '../modes/mode-router';
@@ -1356,9 +1356,11 @@ export const useAIStore = create<AIStore>()(
         let zlWarmContext = '';
         let workspaceBootstrap = '';
         // Agentic: pipeline on main — skip blocking ZL complete, but still fetch bootstrap.
+        // Ask/READ_ONLY: skip ZL/bootstrap fetches so they cannot occupy the local model.
         const isAgentic = isAgenticPipelineMode(agentMode);
+        const attachHeavyContext = shouldAttachHeavyChatContext(agentMode);
 
-        if (editorState.projectPath && caval) {
+        if (editorState.projectPath && caval && attachHeavyContext) {
           const bootstrapPromise = caval.getWorkspaceBootstrap
             ? withTimeout(
                 caval

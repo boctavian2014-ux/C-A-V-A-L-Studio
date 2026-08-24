@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { getCavalloSystemPrompt } from "../../ai/modes/mode-router";
-import { CAVALLO_ASK_PROMPT, WORKSPACE_CONTEXT_DATA_RULE } from "../../ai/prompts/cavallo-enterprise-modes";
+import {
+  ASK_COMPLETION_MAX_TOKENS,
+  CAVALLO_ASK_PROMPT,
+  WORKSPACE_CONTEXT_DATA_RULE,
+} from "../../ai/prompts/cavallo-enterprise-modes";
 import { applyIdeContextToChatRequest } from "../../src/main/ai/ide-context-collector";
 import { formatEnhancedContextForPrompt } from "../../src/main/ai/enhanced-context";
 import { ASK_TURN_TIMEOUT_MS } from "../../src/shared/turn-watchdog";
@@ -80,6 +84,7 @@ describe("P1.1 Ask / READ_ONLY prompt construction", () => {
     const prompt = getCavalloSystemPrompt("ask", { workspaceRoot: "C:/tmp/ws" });
     expect(prompt).toContain("ASK MODE");
     expect(prompt).toContain(WORKSPACE_CONTEXT_DATA_RULE);
+    expect(prompt).toMatch(/at most 6 short sentences/i);
     expect(prompt).not.toContain("[END ASK]");
     expect(prompt).not.toMatch(/\bExamples\b/);
     expect(prompt).not.toContain("Related concepts");
@@ -89,6 +94,11 @@ describe("P1.1 Ask / READ_ONLY prompt construction", () => {
     expect(prompt).not.toContain("CODE MODE —");
     expect(CAVALLO_ASK_PROMPT).not.toContain("[END ASK]");
     expect(CAVALLO_ASK_PROMPT).not.toContain("TEST PROTOCOL");
+  });
+
+  it("caps Ask completion tokens so local 7B can finish inside 28s", () => {
+    expect(ASK_COMPLETION_MAX_TOKENS).toBe(256);
+    expect(ASK_COMPLETION_MAX_TOKENS).toBeLessThan(1024);
   });
 
   it("states the untrusted-workspace rule once in the system prompt, not the user turn", () => {

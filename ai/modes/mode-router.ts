@@ -14,6 +14,7 @@ import {
   getCavalloEnterprisePrompt,
   CAVALLO_GLOBAL_RULES,
   WORKSPACE_CONTEXT_DATA_RULE,
+  ASK_COMPLETION_MAX_TOKENS,
 } from '../prompts/cavallo-enterprise-modes';
 import {
   CAVALLO_AI_IDENTITY,
@@ -148,4 +149,9 @@ export function getModeLabel(mode: DirectChatModeId): string {
   }
 }
 
-export { CAVALLO_GLOBAL_RULES, WORKSPACE_CONTEXT_DATA_RULE, isCavalloModesTestRequest };
+export {
+  CAVALLO_GLOBAL_RULES,
+  WORKSPACE_CONTEXT_DATA_RULE,
+  ASK_COMPLETION_MAX_TOKENS,
+  isCavalloModesTestRequest,
+};

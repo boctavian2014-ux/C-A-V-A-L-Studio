@@ -35,7 +35,7 @@ import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
 import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
 import { CODING_ARENA_SYSTEM_PROMPT } from "../../ai/prompts/coding-arena";
-import { getCavalloSystemPrompt } from "../../ai/modes/mode-router";
+import { ASK_COMPLETION_MAX_TOKENS, getCavalloSystemPrompt } from "../../ai/modes/mode-router";
 import { isDirectChatMode } from "../../ai/modes/intent-detector";
 import {
   allowsProposedOrWritePipeline,
@@ -578,7 +578,7 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 
     jsonMode: request.jsonMode,
 
-    maxTokens: request.maxTokens ?? (request.mode === "code" ? 8192 : undefined),
+    maxTokens: request.maxTokens ?? (request.mode === "code" ? 8192 : request.mode === "ask" ? ASK_COMPLETION_MAX_TOKENS : undefined),
 
     temperature: request.temperature,
 
