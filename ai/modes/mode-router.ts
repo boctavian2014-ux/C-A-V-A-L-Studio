@@ -106,8 +106,8 @@ export function getCavalloSystemPrompt(
     return '';
   }
 
-  if (!isDirectChatMode(normalized)) {
-    let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt('ask')}`;
+  if (!isDirectChatMode(normalized) || normalized === 'ask') {
+    let prompt = getCavalloEnterprisePrompt('ask');
     if (opts?.workspaceRoot?.trim()) {
       prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
     }
@@ -116,7 +116,7 @@ export function getCavalloSystemPrompt(
 
   let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt(normalized)}`;
 
-  if (normalized !== 'ask' && enforceEndLabels) {
+  if (enforceEndLabels) {
     prompt += `\n\n${getModeEndLabelInstruction(normalized)}`;
   }
 

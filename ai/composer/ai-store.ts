@@ -5,6 +5,7 @@ import type { ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, checkModelReadiness } from '../models/model-readiness';
 import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
+import { isAskChatMode } from '../../src/shared/ai-context-prepare';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
 import { resolveEffectiveMode, isCavalloModesTestRequest } from '../modes/mode-router';
@@ -2220,14 +2221,20 @@ export const useAIStore = create<AIStore>()(
           void caval?.mcpEnsureReady?.();
         }
 
+        const isAskSlim =
+          isAskChatMode(agentMode) &&
+          uniqueMentions.length === 0 &&
+          attachmentsSnapshot.length === 0;
+
         const isFastChat =
-          agentMode !== 'code' &&
+          isAskSlim ||
+          (agentMode !== 'code' &&
           !isAgenticPipelineMode(agentMode) &&
           !editorState.projectPath &&
           !attachProject &&
           !isByokModel(selectedModel) &&
           uniqueMentions.length === 0 &&
-          attachmentsSnapshot.length === 0;
+          attachmentsSnapshot.length === 0);
 
         const scaffoldMode = modeSupportsFileApply(agentMode);
 
@@ -2239,12 +2246,14 @@ export const useAIStore = create<AIStore>()(
           );
           startIpcStream(
             contextMessages,
-            {
-              projectContext: mergeProjectContextWithBootstrap(
-                prepWarmReady && zlWarmContext ? zlWarmContext : undefined,
-                workspaceBootstrap
-              ) || undefined,
-            },
+            isAskSlim
+              ? {}
+              : {
+                  projectContext: mergeProjectContextWithBootstrap(
+                    prepWarmReady && zlWarmContext ? zlWarmContext : undefined,
+                    workspaceBootstrap
+                  ) || undefined,
+                },
             scaffoldMode
           );
           return;

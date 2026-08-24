@@ -369,6 +369,15 @@ export function appendIdeContextBlock(message: string, block: string): string {
   return `${message}\n\n${block}`;
 }
 
+/** Ask/READ_ONLY chat — skip ZL, enhanced search, and project-tree dumps. */
+export function isAskChatMode(mode?: string): boolean {
+  return mode === "ask";
+}
+
+export function shouldAttachHeavyChatContext(mode?: string): boolean {
+  return !isAskChatMode(mode);
+}
+
 /** @internal tests */
 export function estimateIdeContextCharsForTests(ctx: IdeContextPayload): number {
   return estimatePayloadChars(ctx);
