@@ -116,6 +116,7 @@ import {
   installWebContentsSecurity,
 } from "./renderer-security";
 import { registerWorkspaceBindingHandlers } from "./workspace-binding-handlers";
+import { registerWorkspaceDiscoveryHandlers } from "./workspace-discovery-handlers";
 import {
   ensureLocalAiRuntime,
   ensureOllamaOnBoot,
@@ -1094,6 +1095,7 @@ registerWorkspaceBindingHandlers({
   addRecentWorkspace,
   onOpen: sendWorkspaceToRenderer,
 });
+registerWorkspaceDiscoveryHandlers(getBoundWorkspaceRoot);
 
 ipcMain.handle("workspace:list-recent", (event) => {
   assertTrustedSender(event);

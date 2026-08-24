@@ -718,6 +718,10 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.invoke("caval:workspace-open", folderPath, options) as Promise<{ ok: boolean; path?: string; error?: string; cached?: boolean }>,
   workspaceSync: (folderPath: string) =>
     ipcRenderer.invoke("caval:workspace-sync", folderPath) as Promise<{ ok: boolean; path?: string }>,
+  workspaceDiscover: (options?: { runVerify?: boolean }) =>
+    ipcRenderer.invoke("caval:workspace-discover", options) as Promise<
+      import("../shared/workspace-discovery-contract").WorkspaceDiscoverySnapshot
+    >,
   workspace: {
     listRecent: () =>
       ipcRenderer.invoke("workspace:list-recent") as Promise<{

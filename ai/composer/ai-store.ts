@@ -78,6 +78,11 @@ import {
   dispatchOpenCodingChat,
   formatEngineeringContextForCoding,
 } from '../engineering/engineering-handoff';
+import { isContinueWorkspaceRequest } from '../workspace/workspace-discovery';
+import {
+  runContinueWorkspaceFlow,
+  buildWorkspaceDiscoveryUserMessage,
+} from './continue-workspace-flow';
 import { applyScaffoldToWorkspace, parseScaffoldFiles } from './scaffold-apply';
 import {
   isWatchdogTimeoutError,
@@ -1091,7 +1096,63 @@ export const useAIStore = create<AIStore>()(
           return;
         }
 
+        let continueWorkspaceAugment: string | undefined;
+        if (isContinueWorkspaceRequest(userText)) {
+          let continueWorkspace = useEditorStore.getState().projectPath;
+          if (
+            !continueWorkspace?.trim() &&
+            /\bcontinu[ăa]\s+proiectul|\bcontinue\s+(?:the\s+)?project\b/i.test(userText)
+          ) {
+            const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
+            if (ensured.ok && ensured.path) {
+              continueWorkspace = ensured.path;
+              if (ensured.created) {
+                const where =
+                  ensured.location === 'downloads' ? 'Downloads' : 'Desktop';
+                showWorkbenchToast(
+                  tActive('toast.projectCreated', { where, path: ensured.path })
+                );
+              }
+            }
+          }
+          const flow = await runContinueWorkspaceFlow({
+            userText,
+            boundWorkspace: continueWorkspace,
+            caval: window.caval,
+          });
+          if (flow.handled && flow.earlyReturn) {
+            const userMsg: ChatMessage = {
+              id: generateId(),
+              role: 'user',
+              content: userText,
+              timestamp: Date.now(),
+            };
+            const assistantMsg: ChatMessage = {
+              id: generateId(),
+              role: 'assistant',
+              content: flow.snapshot
+                ? buildWorkspaceDiscoveryUserMessage(flow.snapshot)
+                : 'Nu este deschis niciun folder de proiect. Alege un folder sau creează un proiect.',
+              timestamp: Date.now(),
+            };
+            const nextMessages = [...get().messages, userMsg, assistantMsg];
+            set((s) => ({
+              messages: nextMessages,
+              threads: s.threads.map((t) =>
+                t.id === s.activeThreadId
+                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
+                  : t
+              ),
+            }));
+            return;
+          }
+          if (flow.augmentedUserText) {
+            continueWorkspaceAugment = flow.augmentedUserText;
+          }
+        }
+
         if (
+          !isContinueWorkspaceRequest(userText) &&
           !isDeliveryContinueRequest(userText) &&
           !isScaffoldContinueRequest(userText) &&
           !isArenaContinueRequest(userText) &&
@@ -1114,6 +1175,7 @@ export const useAIStore = create<AIStore>()(
           isArenaContinueRequest(userText);
 
         if (
+          !isContinueWorkspaceRequest(userText) &&
           (modeSupportsFileApply(get().agentMode) ||
             isFashionMatchingEngineRequest(userText)) &&
           !boundWorkspace?.trim()
@@ -1238,7 +1300,7 @@ export const useAIStore = create<AIStore>()(
         }
 
         const attachmentsSnapshot = [...attachedFiles];
-        let apiPrompt = userText;
+        let apiPrompt = continueWorkspaceAugment ?? userText;
         let fashionSeeded = false;
         let fashionSeedCount = 0;
 

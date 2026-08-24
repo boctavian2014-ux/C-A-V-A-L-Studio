@@ -60,6 +60,13 @@ describe("SEC-IPC-WS-BINDING-001 workspace bind", () => {
     );
   });
 
+  it("resolveBindableWorkspaceDirectory rejects URL-like paths", () => {
+    expect(() => resolveBindableWorkspaceDirectory("https://evil.example/repo")).toThrow(
+      /not a URL/i
+    );
+    expect(() => resolveBindableWorkspaceDirectory("file:///tmp/project")).toThrow(/not a URL/i);
+  });
+
   it("caval:workspace-open rejects untrusted sender without bind", async () => {
     harness.sender.getURL = () => "https://evil.example/";
     harness.sender.mainFrame.url = "https://evil.example/";

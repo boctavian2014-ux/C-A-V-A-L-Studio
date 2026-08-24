@@ -2,6 +2,7 @@ import { isScaffoldContinueRequest } from "../../../ai/prompts/scaffold-emission
 import { isDeliveryContinueRequest } from "../../../ai/prompts/full-delivery-rule";
 import { isAgenticRepairRequest } from "../../../ai/prompts/agentic-repair";
 import { isArenaContinueRequest } from "../../../ai/prompts/arena-continue";
+import { isContinueWorkspaceRequest } from "../../../ai/workspace/workspace-discovery";
 
 /** Derive a short folder name from the user prompt (first line). */
 export function projectNameFromPrompt(text: string): string {
@@ -10,7 +11,8 @@ export function projectNameFromPrompt(text: string): string {
     isScaffoldContinueRequest(raw) ||
     isDeliveryContinueRequest(raw) ||
     isAgenticRepairRequest(raw) ||
-    isArenaContinueRequest(raw)
+    isArenaContinueRequest(raw) ||
+    isContinueWorkspaceRequest(raw)
   ) {
     return "Caval-Project";
   }
