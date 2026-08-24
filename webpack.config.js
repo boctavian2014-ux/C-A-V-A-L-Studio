@@ -55,7 +55,9 @@ module.exports = [
     name: "main",
     target: "electron-main",
     externals: {
-      "node-pty": "commonjs2 node-pty"
+      "node-pty": "commonjs2 node-pty",
+      // Native addon — must resolve from node_modules at runtime (not webpack dist paths).
+      "better-sqlite3": "commonjs2 better-sqlite3",
     },
     entry: {
       "main/electron-main": "./src/main/electron-main.ts",
