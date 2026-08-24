@@ -806,6 +806,9 @@ export const ro = {
   "workCanvas.header.followOff": "Urmărește AI: Nu",
   "workCanvas.header.stop": "Stop",
   "workCanvas.loadError": "Nu s-a putut deschide {{path}}",
+  "workCanvas.fileReadError":
+    "Nu am putut citi {{path}} din workspace. Verific calea și starea folderului înainte să continui.",
+  "workCanvas.retryOpen": "Încearcă din nou",
 
   "ai.details.show": "Detalii",
   "ai.details.hide": "Ascunde detaliile",

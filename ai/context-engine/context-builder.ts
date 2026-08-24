@@ -340,32 +340,27 @@ export function formatContextSearchResults(
     .join('\n\n---\n\n');
 }
 
-/** Rezolvă @mentions la conținut fișier (max 6 fișiere) */
+/** Rezolvă @mentions la conținut fișier (max 6 fișiere) — doar citiri reușite intră în context. */
 export async function resolveMentionFiles(
   mentions: string[],
   projectPath: string | null,
-  readFile: (path: string) => Promise<{ ok: boolean; content?: string }>
+  readFile: (relativePath: string) => Promise<{ ok: boolean; content?: string }>
 ): Promise<Array<{ path: string; name: string; content: string }>> {
   if (!projectPath || mentions.length === 0) return [];
 
-  const sep = projectPath.includes('\\') ? '\\' : '/';
   const resolved: Array<{ path: string; name: string; content: string }> = [];
 
   for (const mention of mentions.slice(0, 6)) {
-    const candidates = [
-      mention,
-      `${projectPath}${sep}${mention.replace(/\//g, sep)}`,
-    ];
-    for (const candidate of candidates) {
-      const res = await readFile(candidate);
-      if (res.ok && res.content) {
-        resolved.push({
-          path: candidate,
-          name: mention,
-          content: res.content.slice(0, 8_000),
-        });
-        break;
-      }
+    const relative = mention.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!relative || relative.split('/').some((seg) => seg === '..')) continue;
+
+    const res = await readFile(relative);
+    if (res.ok && res.content) {
+      resolved.push({
+        path: relative,
+        name: mention,
+        content: res.content.slice(0, 8_000),
+      });
     }
   }
 

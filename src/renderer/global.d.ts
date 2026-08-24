@@ -18,7 +18,7 @@ interface CavalFsApi {
   pickFiles: () => Promise<string[] | null>;
   openFolder: () => Promise<string | null>;
   readTree: (dirPath: string) => Promise<import("./store/editor-store").FileNode[]>;
-  readFile: (filePath: string) => Promise<{ ok: boolean; content: string; error?: string }>;
+  readFile: (filePath: string) => Promise<import("../../shared/workspace-file-read-contract").WorkspaceFileReadResult>;
   writeFile: (filePath: string, content: string) => Promise<{ ok: boolean; error?: string }>;
   createFile: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   createDir: (dirPath: string) => Promise<{ ok: boolean; error?: string }>;

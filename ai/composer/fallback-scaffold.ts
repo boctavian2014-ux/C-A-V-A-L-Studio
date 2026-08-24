@@ -2,7 +2,6 @@ import type { TimelineEvent } from "../../src/shared/ai-timeline-contract";
 import { sanitizeTimelineEvent } from "../../src/shared/ai-timeline-contract";
 import { applyScaffoldToWorkspace } from "./scaffold-apply";
 import type { ParsedScaffoldFile } from "./scaffold-parser";
-import { joinWorkspaceRelativePath } from "./written-files";
 
 export const FALLBACK_SCAFFOLD_TOAST =
   "Proiect creat cu scaffold minim — AI nu a generat fișiere. Editează src/App.tsx pentru a începe.";
@@ -14,15 +13,14 @@ export const FALLBACK_RUNNABLE_TOAST =
   "Am completat package.json ca Preview să poată rula (npm run dev).";
 
 async function readWorkspaceText(
-  projectPath: string,
+  _projectPath: string,
   relativePath: string
 ): Promise<string | null> {
   const caval = window.caval;
   if (!caval?.fs?.readFile) return null;
-  const abs = joinWorkspaceRelativePath(projectPath, relativePath);
   try {
-    const res = await caval.fs.readFile(abs);
-    if (res?.ok && typeof res.content === "string") return res.content;
+    const res = await caval.fs.readFile(relativePath.replace(/\\/g, '/'));
+    if (res?.ok && typeof res.content === 'string') return res.content;
   } catch {
     /* missing */
   }

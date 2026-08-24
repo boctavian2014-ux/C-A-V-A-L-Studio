@@ -21,14 +21,21 @@ describe("fallback-scaffold", () => {
       fs: {
         createDir: vi.fn(async () => ({ ok: true })),
         writeFile: vi.fn(async (filePath: string, content: string) => {
-          filesOnDisk.set(filePath.replace(/\\/g, "/").toLowerCase(), content);
+          const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+          const relative = normalized.replace(/^c:\/proj\//, "");
+          filesOnDisk.set(relative, content);
+          filesOnDisk.set(normalized, content);
           return { ok: true };
         }),
         readFile: vi.fn(async (filePath: string) => {
-          const key = filePath.replace(/\\/g, "/").toLowerCase();
-          const content = filesOnDisk.get(key);
-          if (content != null) return { ok: true, content };
-          return { ok: false, error: "missing" };
+          const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+          const relative = normalized.replace(/^c:\/proj\//, "");
+          const content =
+            filesOnDisk.get(relative) ??
+            filesOnDisk.get(normalized) ??
+            filesOnDisk.get(`c:/proj/${relative}`);
+          if (content != null) return { ok: true, content, path: relative, language: "plaintext" };
+          return { ok: false, code: "NOT_FOUND", message: "Could not open this workspace file." };
         }),
       },
     };
@@ -49,14 +56,14 @@ describe("fallback-scaffold", () => {
 
   it("writes Express package.json when src/index.ts imports express", async () => {
     filesOnDisk.set(
-      "c:/proj/src/index.ts",
+      "src/index.ts",
       "import express from 'express';\nconst app = express();\napp.listen(3000);\n"
     );
     const result = await applyFallbackScaffold("C:\\proj", { projectName: "api" });
     expect(result.written).toContain("package.json");
     expect(result.written).toContain("caval.jsonc");
     expect(result.written).not.toContain("src/App.tsx");
-    const pkg = filesOnDisk.get("c:/proj/package.json") ?? "";
+    const pkg = filesOnDisk.get("package.json") ?? "";
     expect(pkg).toContain("tsx watch");
     expect(pkg).toContain("express");
     expect(getMinimalExpressScaffoldFiles("api").some((f) => f.path === "caval.jsonc")).toBe(
@@ -66,10 +73,7 @@ describe("fallback-scaffold", () => {
   });
 
   it("skips when scripts.dev already exists", async () => {
-    filesOnDisk.set(
-      "c:/proj/package.json",
-      JSON.stringify({ scripts: { dev: "vite" } })
-    );
+    filesOnDisk.set("package.json", JSON.stringify({ scripts: { dev: "vite" } }));
     const result = await applyFallbackScaffold("C:\\proj");
     expect(result.skippedBecauseExisting).toBe(true);
   });

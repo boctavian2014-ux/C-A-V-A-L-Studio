@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { notifyWorkspaceChanged } from './workspace-bridge';
 import { useAiWorkCanvasStore } from './ai-work-canvas-store';
+import {
+  toWorkspaceDisplayPath,
+  toWorkspaceRelativePath,
+} from '../utils/workspace-path';
 
 // ──────────────────────────────────────────────
 //  Types
@@ -129,34 +133,53 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setActiveSymbol: (symbol) => set({ activeSymbol: symbol }),
 
   openFile: async (filePath) => {
-    const { tabs } = get();
+    const { tabs, projectPath } = get();
     const withoutPreview = tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID);
+    const relative = toWorkspaceRelativePath(projectPath, filePath);
 
-    const existing = withoutPreview.find((t) => t.path === filePath);
+    if (!relative) {
+      useAiWorkCanvasStore.getState().setEditorFileReadError({
+        relativePath: filePath.split(/[/\\]/).pop() ?? filePath,
+        code: 'OUTSIDE_WORKSPACE',
+      });
+      return;
+    }
+
+    const displayPath = toWorkspaceDisplayPath(projectPath, relative);
+    const existing = withoutPreview.find(
+      (t) => toWorkspaceRelativePath(projectPath, t.path) === relative
+    );
     if (existing) {
+      useAiWorkCanvasStore.getState().clearEditorFileReadError();
       set({ tabs: withoutPreview, activeTabId: existing.id });
       return;
     }
 
-    const result = await window.caval.fs.readFile(filePath);
+    const result = await window.caval.fs.readFile(relative);
     if (!result.ok) {
-      console.error('Nu pot citi fișierul:', result.error);
+      useAiWorkCanvasStore.getState().setEditorFileReadError({
+        relativePath: relative,
+        code: result.code ?? 'READ_FAILED',
+      });
+      console.error('Nu pot citi fișierul:', relative, result.code);
       return;
     }
 
-    const name = filePath.split(/[/\\]/).pop() ?? filePath;
+    useAiWorkCanvasStore.getState().clearEditorFileReadError();
+
+    const name = relative.split(/[/\\]/).pop() ?? relative;
     const tab: EditorTab = {
-      id: filePath,
+      id: displayPath,
       name,
-      path: filePath,
+      path: displayPath,
       content: result.content,
-      language: detectLanguage(name),
+      language: result.language ?? detectLanguage(name),
       isDirty: false,
     };
 
     set({
       tabs: [...withoutPreview, tab],
-      activeTabId: filePath,
+      activeTabId: displayPath,
     });
   },
 
@@ -244,18 +267,30 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   reloadTabForPath: async (relativePath) => {
     const { tabs, projectPath } = get();
     if (!projectPath) return;
-    const norm = (p: string) => p.replace(/\\/g, '/');
-    const fullPath = `${norm(projectPath)}/${norm(relativePath)}`;
-    const tab = tabs.find((t) => norm(t.path) === fullPath);
+    const rel = toWorkspaceRelativePath(projectPath, relativePath) ?? relativePath.replace(/^[/\\]+/, '');
+    const tab = tabs.find((t) => toWorkspaceRelativePath(projectPath, t.path) === rel);
     if (!tab) return;
 
-    const result = await window.caval.fs.readFile(tab.path);
+    const result = await window.caval.fs.readFile(rel);
     if (result.ok) {
+      useAiWorkCanvasStore.getState().clearEditorFileReadError();
       set((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === tab.id ? { ...t, content: result.content, isDirty: false } : t
+          t.id === tab.id
+            ? {
+                ...t,
+                content: result.content,
+                language: result.language ?? t.language,
+                isDirty: false,
+              }
+            : t
         ),
       }));
+    } else {
+      useAiWorkCanvasStore.getState().setEditorFileReadError({
+        relativePath: rel,
+        code: result.code ?? 'READ_FAILED',
+      });
     }
   },
 
