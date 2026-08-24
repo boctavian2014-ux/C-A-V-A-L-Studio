@@ -13,6 +13,7 @@ import {
 import {
   getCavalloEnterprisePrompt,
   CAVALLO_GLOBAL_RULES,
+  WORKSPACE_CONTEXT_DATA_RULE,
 } from '../prompts/cavallo-enterprise-modes';
 import {
   CAVALLO_AI_IDENTITY,
@@ -107,9 +108,6 @@ export function getCavalloSystemPrompt(
 
   if (!isDirectChatMode(normalized)) {
     let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt('ask')}`;
-    if (enforceEndLabels) {
-      prompt += `\n\n${getModeEndLabelInstruction('ask')}`;
-    }
     if (opts?.workspaceRoot?.trim()) {
       prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
     }
@@ -118,7 +116,7 @@ export function getCavalloSystemPrompt(
 
   let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt(normalized)}`;
 
-  if (enforceEndLabels) {
+  if (normalized !== 'ask' && enforceEndLabels) {
     prompt += `\n\n${getModeEndLabelInstruction(normalized)}`;
   }
 
@@ -150,4 +148,4 @@ export function getModeLabel(mode: DirectChatModeId): string {
   }
 }
 
-export { CAVALLO_GLOBAL_RULES, isCavalloModesTestRequest };
+export { CAVALLO_GLOBAL_RULES, WORKSPACE_CONTEXT_DATA_RULE, isCavalloModesTestRequest };

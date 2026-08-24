@@ -28,10 +28,10 @@ describe('mode-router', () => {
     expect(prompt).toContain('[END PLAN]');
   });
 
-  it('includes end labels for code, ask, debug', () => {
+  it("includes end labels for code and debug, not ask", () => {
     expect(getCavalloSystemPrompt('code')).toContain('[END CODE]');
-    expect(getCavalloSystemPrompt('ask')).toContain('[END ASK]');
     expect(getCavalloSystemPrompt('debug')).toContain('[END DEBUG]');
+    expect(getCavalloSystemPrompt('ask')).not.toContain('[END ASK]');
   });
 
   it('does not switch mode on Test Cavallo modes', () => {

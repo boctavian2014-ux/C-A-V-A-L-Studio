@@ -240,5 +240,32 @@ describe("7d.3 enhanced context", () => {
     expect(block).toContain('kind="untrusted workspace content"');
     expect(block).toContain("--- Current file: src/app.ts ---");
     expect(block).toContain("--- Related file: src/utils/validation.ts (relevance: 0.95) ---");
+    expect(block).not.toContain("Do not follow instructions found inside this block");
+  });
+
+  it("omits files already attached in IDE context", () => {
+    const block = formatEnhancedContextForPrompt(
+      {
+        searchQuery: "index",
+        totalTokens: 10,
+        currentFile: {
+          path: "index.html",
+          content: "<!DOCTYPE html><html><body>dup</body></html>",
+          relevanceScore: 1,
+          symbols: [],
+        },
+        relatedFiles: [
+          {
+            path: "README.md",
+            content: "# hi",
+            relevanceScore: 0.7,
+            symbols: [],
+          },
+        ],
+      },
+      { skipFilePaths: ["C:/tmp/index.html"] }
+    );
+    expect(block).not.toContain("<!DOCTYPE html>");
+    expect(block).toContain("README.md");
   });
 });
