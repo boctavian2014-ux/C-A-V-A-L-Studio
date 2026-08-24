@@ -19,6 +19,8 @@ asarUnpack:
   - dist/main/*worker*.js
   # Native terminal module (prebuilds + any build output)
   - node_modules/node-pty/**/*
+  # Native SQLite binding (prebuilds / build/Release) — cannot load from inside asar
+  - node_modules/better-sqlite3/**/*
 npmRebuild: false
 buildDependenciesFromSource: false
 compression: maximum
