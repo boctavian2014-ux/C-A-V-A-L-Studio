@@ -9,21 +9,49 @@ describe('write_file tool', () => {
   it('rejects empty content so the model must send real code', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'caval-tool-'));
     const registry = new ToolRegistry(root);
-    const result = await registry.execute({
-      name: 'write_file',
-      arguments: { path: 'test.ts', content: '   ' },
-    });
+    registry.grantWriteTurn('turn-empty');
+    const result = await registry.execute(
+      {
+        name: 'write_file',
+        arguments: { path: 'test.ts', content: '   ' },
+      },
+      { turnId: 'turn-empty' }
+    );
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/non-empty content/i);
+  });
+
+  it('rejects write_file until a write capability/turn id is granted', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'caval-tool-cap-'));
+    const registry = new ToolRegistry(root);
+    const blocked = await registry.execute({
+      name: 'write_file',
+      arguments: { path: 'src/index.html', content: '<html></html>\n' },
+    });
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error).toMatch(/capability/i);
+    registry.grantWriteTurn('turn-apply');
+    const allowed = await registry.execute(
+      {
+        name: 'write_file',
+        arguments: { path: 'src/ok.ts', content: 'export const ok = 1;\n' },
+      },
+      { turnId: 'turn-apply' }
+    );
+    expect(allowed.ok).toBe(true);
   });
 
   it('accepts alternate argument names from some models', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'caval-tool-'));
     const registry = new ToolRegistry(root);
-    const result = await registry.execute({
-      name: 'write_file',
-      arguments: { file_path: 'src/app.ts', code: 'export const x = 1;\n' },
-    });
+    registry.grantWriteTurn('turn-alt');
+    const result = await registry.execute(
+      {
+        name: 'write_file',
+        arguments: { file_path: 'src/app.ts', code: 'export const x = 1;\n' },
+      },
+      { turnId: 'turn-alt' }
+    );
     expect(result.ok).toBe(true);
     const written = await fs.readFile(path.join(root, 'src', 'app.ts'), 'utf8');
     expect(written).toContain('export const x');

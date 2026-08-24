@@ -25,6 +25,11 @@ import {
 import type { RoutingIntent } from "../../ai/types";
 
 import { ensureMcpServersReady, getOrCreateToolRegistry } from "./mcp-handlers";
+import { applyTrustedWriteGate } from "../../ai/tools/tool-registry";
+import {
+  getTrustedChatTurn,
+  registerTrustedChatTurn,
+} from "./ai/trusted-chat-turn";
 import { formatToolCallNotice } from "../../ai/pipeline/tool-agent-loop";
 import { enrichChatWithZeroLatency } from "./zl-handlers";
 import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
@@ -33,6 +38,11 @@ import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule"
 import { CODING_ARENA_SYSTEM_PROMPT } from "../../ai/prompts/coding-arena";
 import { getCavalloSystemPrompt } from "../../ai/modes/mode-router";
 import { isDirectChatMode } from "../../ai/modes/intent-detector";
+import {
+  allowsProposedOrWritePipeline,
+  resolveTrustedExecutionCapability,
+  type ExecutionMode,
+} from "../../ai/modes/execution-mode";
 import {
   runCavalloMultiAgentPipeline,
   resumeCavalloMultiAgentPipeline,
@@ -170,6 +180,9 @@ export interface CavalChatStreamRequest {
 
   /** Greenfield / Engineering handoff — must write files via tools */
   scaffoldMode?: boolean;
+
+  /** Renderer hint only. Main re-resolves capability from the user message. */
+  executionMode?: ExecutionMode;
 
   /** Skip multi-agent pipeline — use single-call Balanced Mode */
   skipMultiAgent?: boolean;
@@ -421,6 +434,13 @@ function injectProjectContextIntoMessages(
   }
   const insertAt = msgs.length - 1 - lastUserRev;
   return [...msgs.slice(0, insertAt), { role: "user", content: block }, ...msgs.slice(insertAt)];
+}
+
+function trustedCapabilityForRequest(request: CavalChatStreamRequest) {
+  return resolveTrustedExecutionCapability({
+    userMessage: request.message,
+    rendererRequestedMode: request.executionMode,
+  });
 }
 
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
@@ -1282,11 +1302,12 @@ async function streamToRenderer(
 ): Promise<void> {
   trackActiveStream(senderId, streamId);
   const stream = createStreamChunkSender(sender, senderId, streamId);
+  let workspaceRoot = "";
   try {
   const explicitRoot = request.workspaceRoot?.trim();
   const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim();
   const userBoundWorkspace = Boolean(explicitRoot || boundRoot);
-  const workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
+  workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
   const multiAgentConfig = workspaceRoot?.trim()
     ? loadMultiAgentConfig(workspaceRoot)
     : undefined;
@@ -1443,8 +1464,18 @@ async function streamToRenderer(
     return;
   }
 
+  const capability = trustedCapabilityForRequest(request);
+  request = { ...request, executionMode: capability.effective };
+  registerTrustedChatTurn({
+    senderId,
+    streamId,
+    mainResolved: capability.mainResolved,
+    effective: capability.effective,
+  });
+
   const useMultiAgent =
     !request.skipMultiAgent &&
+    allowsProposedOrWritePipeline(capability.effective) &&
     shouldUseMultiAgentPipeline(request.mode, request.message, workspaceRoot, multiAgentConfig, {
       userBoundWorkspace,
     });
@@ -1506,6 +1537,15 @@ async function streamToRenderer(
       }
       const proposedWrites = result.proposedWrites ?? [];
       if (proposedWrites.length > 0) {
+        registerTrustedChatTurn(
+          {
+            senderId,
+            streamId,
+            mainResolved: capability.mainResolved,
+            effective: capability.effective,
+          },
+          result.runId ? [result.runId] : []
+        );
         emitTimelineEvent(stream, streamId, {
           type: "tool_call",
           label: `propose ${proposedWrites.length} file(s)`,
@@ -1574,6 +1614,9 @@ async function streamToRenderer(
   const toolRegistry = useTools
     ? getOrCreateToolRegistry(senderId, workspaceRoot)
     : undefined;
+  if (toolRegistry) {
+    applyTrustedWriteGate(toolRegistry, streamId, capability);
+  }
 
   const completionInput: CompleteModelTextInput = {
     ...toCompletionInput(fusedRequest),
@@ -1698,6 +1741,9 @@ async function streamToRenderer(
     discardIncompleteStreamTimeline(streamId);
     finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
+    if (workspaceRoot?.trim()) {
+      getOrCreateToolRegistry(senderId, workspaceRoot).revokeWriteTurn(streamId);
+    }
   }
 }
 
@@ -1724,6 +1770,19 @@ async function streamResumeToRenderer(
     });
     const abortRoot = startAbortableStream(streamId);
     if (!stream.isAlive()) return;
+    const originalTurn = getTrustedChatTurn(input.runId) ?? getTrustedChatTurn(streamId);
+    if (originalTurn && originalTurn.senderId === senderId && input.workspaceRoot?.trim()) {
+      applyTrustedWriteGate(
+        getOrCreateToolRegistry(senderId, input.workspaceRoot),
+        streamId,
+        {
+          mainResolved: originalTurn.mainResolved,
+          rendererRequested: originalTurn.effective,
+          effective: originalTurn.effective,
+        }
+      );
+      registerTrustedChatTurn(originalTurn, [streamId]);
+    }
     sendStatusChunk(stream, "prepare", "done");
     sendMultiAgentStatusChunk(stream, streamId, "subagent", "active", "UI delivery resume");
 
@@ -1764,6 +1823,14 @@ async function streamResumeToRenderer(
       }
       const proposedWrites = result.proposedWrites ?? [];
       if (proposedWrites.length > 0) {
+        const originalTurn = getTrustedChatTurn(input.runId) ?? getTrustedChatTurn(streamId);
+        if (originalTurn) {
+          registerTrustedChatTurn(originalTurn, [
+            streamId,
+            input.runId,
+            ...(result.runId ? [result.runId] : []),
+          ]);
+        }
         emitTimelineEvent(stream, streamId, {
           type: "tool_call",
           label: `propose ${proposedWrites.length} file(s)`,
@@ -1815,6 +1882,9 @@ async function streamResumeToRenderer(
     discardIncompleteStreamTimeline(streamId);
     finishAbortableStream(streamId);
     untrackActiveStream(senderId, streamId);
+    if (input.workspaceRoot?.trim()) {
+      getOrCreateToolRegistry(senderId, input.workspaceRoot).revokeWriteTurn(streamId);
+    }
   }
 }
 
