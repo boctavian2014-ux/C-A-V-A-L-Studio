@@ -23,14 +23,40 @@ export const DISCOVERY_IGNORE_DIRS = new Set([
 
 export const DISCOVERY_SKIP_FILES = new Set(['.env', '.env.local', '.env.production']);
 
+/**
+ * JS `\b` is ASCII-only and fails at Romanian diacritic boundaries (ă/Ă, etc.).
+ * Use Unicode letter/number lookarounds instead (#56).
+ */
+const WB_LEFT = '(?<![\\p{L}\\p{N}_])';
+const WB_RIGHT = '(?![\\p{L}\\p{N}_])';
+
+const CONTINUE_WORD = `${WB_LEFT}continu[ăa]${WB_RIGHT}`;
+const CONTINUE_EN_WORD = `${WB_LEFT}continue${WB_RIGHT}`;
+const INSPECT_ONLY_PATTERN = new RegExp(
+  `${WB_LEFT}(?:verific[ăa]|check)\\s+(?:folderul|directorul|workspace|proiectul)${WB_RIGHT}`,
+  'iu'
+);
+const HAS_CONTINUE_RO = new RegExp(CONTINUE_WORD, 'iu');
+const HAS_CONTINUE_EN = new RegExp(CONTINUE_EN_WORD, 'iu');
+
 const CONTINUE_WORKSPACE_PATTERNS: RegExp[] = [
-  /\b(?:verific[ăa]|check)\s+(?:folderul|directorul|workspace(?:-ul)?|proiectul|project\s+folder)\b/i,
-  /\b(?:vezi|see)\s+(?:unde\s+(?:ai\s+)?r[ăa]mas|where\s+(?:you\s+|we\s+)?left\s+off?)\b/i,
-  /\bcontinu[ăa]\s+proiectul\b/i,
-  /\bcontinue\s+(?:the\s+)?project\b/i,
-  /^(?:continu[ăa]|continue)\.?$/i,
-  /\bcontinue\s+(?:the\s+)?(?:project|workspace|work)\b/i,
-  /\bresume\s+(?:the\s+)?(?:project|workspace)\b/i,
+  new RegExp(
+    `${WB_LEFT}(?:verific[ăa]|check)\\s+(?:folderul|directorul|workspace(?:-ul)?|proiectul|project\\s+folder)${WB_RIGHT}`,
+    'iu'
+  ),
+  new RegExp(
+    `${WB_LEFT}(?:vezi|see)\\s+(?:unde\\s+(?:ai\\s+)?r[ăa]mas|where\\s+(?:you\\s+|we\\s+)?left\\s+off?)${WB_RIGHT}`,
+    'iu'
+  ),
+  new RegExp(`${WB_LEFT}continu[ăa]\\s+proiectul${WB_RIGHT}`, 'iu'),
+  new RegExp(
+    `${WB_LEFT}continu[ăa]\\s+(?:de\\s+)?unde\\s+(?:(?:ai|am)\\s+)?r[ăa]mas${WB_RIGHT}`,
+    'iu'
+  ),
+  new RegExp(`${WB_LEFT}continue\\s+(?:the\\s+)?project${WB_RIGHT}`, 'iu'),
+  /^(?:continu[ăa]|continue)\.?$/iu,
+  new RegExp(`${WB_LEFT}continue\\s+(?:the\\s+)?(?:project|workspace|work)${WB_RIGHT}`, 'iu'),
+  new RegExp(`${WB_LEFT}resume\\s+(?:the\\s+)?(?:project|workspace)${WB_RIGHT}`, 'iu'),
 ];
 
 /** User intent: inspect active workspace and continue safely — not system *_CONTINUE markers. */
@@ -51,9 +77,7 @@ export function isContinueWorkspaceRequest(message: string): boolean {
 export function isInspectOnlyWorkspaceRequest(message: string): boolean {
   const text = message.trim();
   return (
-    /\b(?:verific[ăa]|check)\s+(?:folderul|directorul|workspace|proiectul)\b/i.test(text) &&
-    !/\bcontinu[ăa]\b/i.test(text) &&
-    !/\bcontinue\b/i.test(text)
+    INSPECT_ONLY_PATTERN.test(text) && !HAS_CONTINUE_RO.test(text) && !HAS_CONTINUE_EN.test(text)
   );
 }
 
