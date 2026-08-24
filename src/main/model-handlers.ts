@@ -35,7 +35,7 @@ import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
 import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
 import { CODING_ARENA_SYSTEM_PROMPT } from "../../ai/prompts/coding-arena";
-import { getCavalloSystemPrompt } from "../../ai/modes/mode-router";
+import { ASK_COMPLETION_MAX_TOKENS, getCavalloSystemPrompt } from "../../ai/modes/mode-router";
 import { isDirectChatMode } from "../../ai/modes/intent-detector";
 import {
   allowsProposedOrWritePipeline,
@@ -82,6 +82,7 @@ import { assertTrustedSender } from "./ipc-trust";
 import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
 import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
 import type { IdeContextPayload } from "../shared/ai-context-contract";
+import { shouldAttachHeavyChatContext } from "../shared/ai-context-prepare";
 import { applyIdeContextToChatRequest, applyEnhancedContextToChatRequest } from "./ai/ide-context-collector";
 import { emitTimelineEvent } from "./ai/timeline-emit";
 import {
@@ -577,7 +578,7 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 
     jsonMode: request.jsonMode,
 
-    maxTokens: request.maxTokens ?? (request.mode === "code" ? 8192 : undefined),
+    maxTokens: request.maxTokens ?? (request.mode === "code" ? 8192 : request.mode === "ask" ? ASK_COMPLETION_MAX_TOKENS : undefined),
 
     temperature: request.temperature,
 
@@ -1344,6 +1345,7 @@ async function streamToRenderer(
   }
   // Pas 7d.3 — related workspace files from lexical index search (skip editor micro-ops).
   if (
+    shouldAttachHeavyChatContext(request.mode) &&
     !request.quickFix &&
     !request.quickFixAccept &&
     !request.timelineFileWrite &&
@@ -1354,7 +1356,9 @@ async function streamToRenderer(
   ) {
     request = await applyEnhancedContextToChatRequest(request, workspaceRoot);
   }
-  request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
+  if (shouldAttachHeavyChatContext(request.mode)) {
+    request = enrichRequestWithWorkspaceBootstrap(request, workspaceRoot);
+  }
 
   // Pas 6.1 / 6.2 — editor write accepts + quick-fix propose on existing stream channel.
   if (request.quickFixAccept || request.quickFix || request.timelineFileWrite) {
@@ -1611,7 +1615,9 @@ async function streamToRenderer(
   }
 
   const fusedRequest =
-    request.jsonMode || (request.context?.fileContent?.length ?? 0) > 400
+    !shouldAttachHeavyChatContext(request.mode) ||
+    request.jsonMode ||
+    (request.context?.fileContent?.length ?? 0) > 400
       ? request
       : enrichChatWithZeroLatency(request, workspaceRoot);
 

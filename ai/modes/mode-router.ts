@@ -13,6 +13,8 @@ import {
 import {
   getCavalloEnterprisePrompt,
   CAVALLO_GLOBAL_RULES,
+  WORKSPACE_CONTEXT_DATA_RULE,
+  ASK_COMPLETION_MAX_TOKENS,
 } from '../prompts/cavallo-enterprise-modes';
 import {
   CAVALLO_AI_IDENTITY,
@@ -105,11 +107,8 @@ export function getCavalloSystemPrompt(
     return '';
   }
 
-  if (!isDirectChatMode(normalized)) {
-    let prompt = `${CAVALLO_AI_IDENTITY}\n\n${getCavalloEnterprisePrompt('ask')}`;
-    if (enforceEndLabels) {
-      prompt += `\n\n${getModeEndLabelInstruction('ask')}`;
-    }
+  if (!isDirectChatMode(normalized) || normalized === 'ask') {
+    let prompt = getCavalloEnterprisePrompt('ask');
     if (opts?.workspaceRoot?.trim()) {
       prompt += `\n\nWorkspace root: ${opts.workspaceRoot.trim()}`;
     }
@@ -150,4 +149,9 @@ export function getModeLabel(mode: DirectChatModeId): string {
   }
 }
 
-export { CAVALLO_GLOBAL_RULES, isCavalloModesTestRequest };
+export {
+  CAVALLO_GLOBAL_RULES,
+  WORKSPACE_CONTEXT_DATA_RULE,
+  ASK_COMPLETION_MAX_TOKENS,
+  isCavalloModesTestRequest,
+};

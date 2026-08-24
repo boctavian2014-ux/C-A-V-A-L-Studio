@@ -2,6 +2,7 @@ import type { IdeContextPayload } from "../../shared/ai-context-contract";
 import {
   appendIdeContextBlock,
   formatIdeContextForPrompt,
+  userTurnAlreadyIncludesFileContent,
   validateAndBudgetIdeContext,
 } from "../../shared/ai-context-prepare";
 import {
@@ -31,7 +32,15 @@ export function applyIdeContextToChatRequest<
     return rest as T;
   }
 
-  const block = formatIdeContextForPrompt(ctx);
+  const lastUserForDedupe =
+    [...(request.messages ?? [])].reverse().find((m) => m.role === "user")?.content ??
+    request.message ??
+    "";
+  const omitActiveFileContent = userTurnAlreadyIncludesFileContent(
+    lastUserForDedupe,
+    ctx.activeFile?.content
+  );
+  const block = formatIdeContextForPrompt(ctx, { omitActiveFileContent });
   const messages = request.messages?.map((m) => ({ ...m }));
   if (messages?.length && block) {
     const lastUserIdx = [...messages].reverse().findIndex((m) => m.role === "user");
@@ -84,7 +93,15 @@ export async function applyEnhancedContextToChatRequest<
     currentSelection,
   });
 
-  const block = formatEnhancedContextForPrompt(enhanced);
+  const skipFilePaths = [
+    request.ideContext?.activeFile?.path,
+    enhanced.currentFile &&
+    userTurnAlreadyIncludesFileContent(lastUser, enhanced.currentFile.content)
+      ? enhanced.currentFile.path
+      : undefined,
+  ].filter((p): p is string => Boolean(p?.trim()));
+
+  const block = formatEnhancedContextForPrompt(enhanced, { skipFilePaths });
   if (!block.trim()) return request;
 
   const messages = request.messages?.map((m) => ({ ...m }));
