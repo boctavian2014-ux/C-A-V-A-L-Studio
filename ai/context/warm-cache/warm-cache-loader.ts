@@ -80,7 +80,15 @@ export class WarmCacheLoader {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (collected.length >= limit) break;
-      if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git" || entry.name === ".caval") continue;
+      if (
+        entry.name === "node_modules" ||
+        entry.name === "dist" ||
+        entry.name === ".git" ||
+        entry.name === ".caval" ||
+        entry.name === ".cavalo" ||
+        entry.name === ".agent" ||
+        entry.name === "context-cache"
+      ) continue;
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) await this.walk(fullPath, limit, collected);
       else if (/\.(ts|tsx|js|jsx|json|md|css|html)$/i.test(entry.name)) collected.push(fullPath);

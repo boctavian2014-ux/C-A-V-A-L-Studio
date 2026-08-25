@@ -82,6 +82,36 @@ describe("workspace-file-read", () => {
     if (!result.ok) expect(result.code).toBe("OUTSIDE_WORKSPACE");
   });
 
+  it("reads a file from a workspace path that contains spaces", () => {
+    const spaced = fs.mkdtempSync(path.join(os.tmpdir(), "WEBSITE CAVALLO "));
+    try {
+      fs.writeFileSync(path.join(spaced, "README.md"), "# spaced\n", "utf8");
+      const result = readWorkspaceFileRelative(normalizeWorkspaceRoot(spaced), "README.md");
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.content).toContain("spaced");
+    } finally {
+      fs.rmSync(spaced, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects internal context-cache documents from renderer IPC reads", () => {
+    fs.mkdirSync(path.join(workspace, ".caval", "context-cache"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, ".caval", "context-cache", "documents.json"),
+      "[]",
+      "utf8"
+    );
+    const result = readWorkspaceFileRelative(
+      workspace,
+      ".caval/context-cache/documents.json"
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("INTERNAL_PATH");
+      expect(JSON.stringify(result)).not.toContain("documents.json");
+    }
+  });
+
   it("returns NOT_FOUND for missing files", () => {
     const result = readWorkspaceFileRelative(workspace, "missing.txt");
     expect(result.ok).toBe(false);
@@ -131,5 +161,20 @@ describe("fs:readFile IPC contract", () => {
     expect(result.ok).toBe(false);
     expect(result.code).toBe("OUTSIDE_WORKSPACE");
     expect(JSON.stringify(result)).not.toContain(workspace);
+  });
+
+  it("rejects internal cache paths without crashing", async () => {
+    fs.mkdirSync(path.join(workspace, ".caval", "context-cache"), { recursive: true });
+    fs.writeFileSync(
+      path.join(workspace, ".caval", "context-cache", "documents.json"),
+      "[]",
+      "utf8"
+    );
+    const result = await harness.invoke<{ ok: boolean; code?: string }>(
+      "fs:readFile",
+      ".caval/context-cache/documents.json"
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("INTERNAL_PATH");
   });
 });

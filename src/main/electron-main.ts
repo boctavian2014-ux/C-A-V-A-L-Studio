@@ -34,6 +34,7 @@ import {
   type RecentWorkspaceSource,
 } from "./recent-workspaces";
 import { createProjectOnDesktop } from "./desktop-project";
+import { listFolderFiles } from "./workspace-folder-files";
 import { registerEngineeringHandlers } from "./engineering-handlers";
 import { registerModelHandlers, abortAllStreamsForSender } from "./model-handlers";
 import { registerMcpHandlers } from "./mcp-handlers";
@@ -399,38 +400,6 @@ const openFile = async (): Promise<void> => {
   void workspaceIndexService.openWorkspace(projectPath).catch(() => undefined);
   void preloadManager.onWorkspaceOpen(projectPath, projectFiles.map((f) => f.path));
   preloadForContext(inferPreloadContext(projectPath, projectFiles.map((f) => f.path)));
-};
-
-const listFolderFiles = async (folderPath: string, limit = 80, preferredFilePath?: string): Promise<Array<{ path: string; label: string; language: string; content: string }>> => {
-  const files: Array<{ path: string; label: string; language: string; content: string }> = [];
-  const walk = async (dir: string): Promise<void> => {
-    if (files.length >= limit) return;
-    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (files.length >= limit || entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git") continue;
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(fullPath);
-      } else if (/\.(ts|tsx|js|jsx|json|md|css|html|py|go|rs|java|txt)$/i.test(entry.name)) {
-        files.push({
-          path: fullPath,
-          label: path.relative(folderPath, fullPath),
-          language: languageFromPath(fullPath),
-          content: await fs.readFile(fullPath, "utf8").catch(() => "")
-        });
-      }
-    }
-  };
-  await walk(folderPath);
-  if (!preferredFilePath) {
-    return files;
-  }
-
-  return files.sort((left, right) => {
-    if (left.path === preferredFilePath) return -1;
-    if (right.path === preferredFilePath) return 1;
-    return left.label.localeCompare(right.label);
-  });
 };
 
 const openFolder = async (): Promise<void> => {

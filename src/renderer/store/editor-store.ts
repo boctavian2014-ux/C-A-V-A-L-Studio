@@ -5,6 +5,7 @@ import {
   toWorkspaceDisplayPath,
   toWorkspaceRelativePath,
 } from '../utils/workspace-path';
+import { isInternalWorkspacePath } from '../../shared/internal-workspace-paths';
 
 // ──────────────────────────────────────────────
 //  Types
@@ -108,10 +109,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setProjectPath: (path) => {
     const prev = get().projectPath;
-    set({ projectPath: path });
     if (prev !== path) {
+      useAiWorkCanvasStore.getState().clearEditorFileReadError();
+      set({
+        projectPath: path,
+        fileTree: [],
+        tabs: [],
+        activeTabId: null,
+        editorSelection: null,
+        activeSymbol: null,
+      });
       notifyWorkspaceChanged(path);
+      return;
     }
+    set({ projectPath: path });
   },
   setFileTree: (tree) => set({ fileTree: tree }),
 
@@ -137,11 +148,23 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const withoutPreview = tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID);
     const relative = toWorkspaceRelativePath(projectPath, filePath);
 
-    if (!relative) {
+    const keepLastValidDocument = (code: 'OUTSIDE_WORKSPACE' | 'INTERNAL_PATH' | 'NOT_FOUND' | 'NOT_A_FILE' | 'READ_FAILED' | 'NO_WORKSPACE', displayRel: string) => {
+      if (code === 'INTERNAL_PATH' || withoutPreview.length > 0) {
+        return;
+      }
       useAiWorkCanvasStore.getState().setEditorFileReadError({
-        relativePath: filePath.split(/[/\\]/).pop() ?? filePath,
-        code: 'OUTSIDE_WORKSPACE',
+        relativePath: displayRel,
+        code,
       });
+    };
+
+    if (!relative) {
+      keepLastValidDocument('OUTSIDE_WORKSPACE', filePath.split(/[/\\]/).pop() ?? filePath);
+      return;
+    }
+
+    if (isInternalWorkspacePath(relative, projectPath)) {
+      keepLastValidDocument('INTERNAL_PATH', relative);
       return;
     }
 
@@ -157,11 +180,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     const result = await window.caval.fs.readFile(relative);
     if (!result.ok) {
-      useAiWorkCanvasStore.getState().setEditorFileReadError({
-        relativePath: relative,
-        code: result.code ?? 'READ_FAILED',
-      });
-      console.error('Nu pot citi fișierul:', relative, result.code);
+      keepLastValidDocument(result.code ?? 'READ_FAILED', relative);
+      if (result.code !== 'INTERNAL_PATH' && withoutPreview.length === 0) {
+        console.error('Nu pot citi fișierul:', relative, result.code);
+      }
       return;
     }
 
@@ -268,6 +290,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const { tabs, projectPath } = get();
     if (!projectPath) return;
     const rel = toWorkspaceRelativePath(projectPath, relativePath) ?? relativePath.replace(/^[/\\]+/, '');
+    if (isInternalWorkspacePath(rel, projectPath)) return;
     const tab = tabs.find((t) => toWorkspaceRelativePath(projectPath, t.path) === rel);
     if (!tab) return;
 

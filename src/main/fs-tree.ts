@@ -11,6 +11,10 @@ const IGNORE = new Set([
   "coverage",
   ".turbo",
   ".cache",
+  ".caval",
+  ".cavalo",
+  ".agent",
+  "context-cache",
 ]);
 
 export interface FileNode {
