@@ -814,7 +814,7 @@ export const en = {
   "workCanvas.header.followOn": "Follow AI: On",
   "workCanvas.header.followOff": "Follow AI: Off",
   "workCanvas.header.stop": "Stop",
-  "workCanvas.loadError": "Could not open {{path}}",
+  "workCanvas.loadError": "Editor failed to load for {{path}}",
   "workCanvas.fileReadError":
     "Could not read {{path}} from the workspace. Check the path and folder state before continuing.",
   "workCanvas.retryOpen": "Try again",

@@ -98,7 +98,7 @@ vi.mock("../../ai/i18n/useTranslation", () => ({
         "workCanvas.header.followOff": "Follow AI: Off",
         "workCanvas.header.stop": "Stop",
         "common.retry": "Retry",
-        "workCanvas.loadError": `Could not open ${params?.path ?? ""}`,
+        "workCanvas.loadError": `Editor failed to load for ${params?.path ?? ""}`,
         "loading.editor": "Loading editor…",
         "editor.unsavedChanges": "Unsaved",
       };

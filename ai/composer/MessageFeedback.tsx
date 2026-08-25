@@ -39,6 +39,8 @@ export function MessageFeedbackButtons({
   streamId?: string | null;
 }): React.ReactElement {
   const { t } = useTranslation();
+  const [resolvable, setResolvable] = useState(false);
+  const [checkedResolvable, setCheckedResolvable] = useState(false);
   const [feedback, setFeedback] = useState<MessageFeedbackRow | null>(null);
   const [showComment, setShowComment] = useState(false);
   const [comment, setComment] = useState("");
@@ -48,11 +50,33 @@ export function MessageFeedbackButtons({
   useEffect(() => {
     let cancelled = false;
     const api = window.caval?.aiHistory;
-    if (!api?.getFeedback) return;
-    void api.getFeedback(messageId, streamId ?? undefined).then((res) => {
-      if (cancelled) return;
-      if (res.ok) setFeedback(res.feedback ?? null);
-    });
+    setResolvable(false);
+    setCheckedResolvable(false);
+    setFeedback(null);
+    setShowComment(false);
+    setComment("");
+    setError(null);
+    if (!api?.getFeedback) {
+      setCheckedResolvable(true);
+      return;
+    }
+    void api
+      .getFeedback(messageId, streamId ?? undefined)
+      .then((res) => {
+        if (cancelled) return;
+        setCheckedResolvable(true);
+        if (!res.ok) {
+          setResolvable(false);
+          return;
+        }
+        setResolvable(true);
+        setFeedback(res.feedback ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCheckedResolvable(true);
+        setResolvable(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -77,6 +101,10 @@ export function MessageFeedbackButtons({
       }
       const res = await api.setFeedback(messageId, rating, undefined, streamId ?? undefined);
       if (!res.ok || !res.feedback) {
+        if (res.error === "Message not found") {
+          setResolvable(false);
+          return;
+        }
         setError(res.error ?? "Could not save feedback");
         return;
       }
@@ -102,6 +130,10 @@ export function MessageFeedbackButtons({
         streamId ?? undefined
       );
       if (!res.ok || !res.feedback) {
+        if (res.error === "Message not found") {
+          setResolvable(false);
+          return;
+        }
         setError(res.error ?? "Could not save comment");
         return;
       }
@@ -111,6 +143,10 @@ export function MessageFeedbackButtons({
       setBusy(false);
     }
   };
+
+  if (!checkedResolvable || !resolvable) {
+    return <></>;
+  }
 
   return (
     <div className="message-feedback" data-testid="message-feedback">

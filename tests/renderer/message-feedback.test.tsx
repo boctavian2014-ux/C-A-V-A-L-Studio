@@ -81,6 +81,19 @@ describe("7e.2 MessageFeedback UI", () => {
     expect(container.querySelector('[data-testid="message-feedback-down"]')).toBeTruthy();
   });
 
+  it("hides controls when the assistant message is not persisted", async () => {
+    const getFeedback = vi.fn(async () => ({ ok: false, error: "Message not found" }));
+    mockAiHistory({ getFeedback });
+    const { container, unmount } = mount(
+      <MessageFeedbackButtons messageId="transient-msg" streamId="stopped-stream" />
+    );
+    mounted = { unmount };
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="message-feedback"]')).toBeNull();
+  });
+
   it("sets positive feedback on click", async () => {
     const { setFeedback } = mockAiHistory();
     const { container, unmount } = mount(

@@ -72,6 +72,18 @@ describe("7e.2 message feedback persistence", () => {
     db.close();
   });
 
+  it("reports unresolved visible feedback controls as not found", () => {
+    const root = tempRoot("caval-7e2-missing-");
+    const db = createAiPersistence(root);
+    const cid = db.createConversation(root, "Missing");
+    db.addMessage(cid, "assistant", "Done", "real-stream");
+
+    const res = getHistoryFeedback(root, "transient-ui-id", "missing-stream", db);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("Message not found");
+    db.close();
+  });
+
   it("cascade deletes feedback with conversation", () => {
     const root = tempRoot("caval-7e2-cascade-");
     const db = createAiPersistence(root);

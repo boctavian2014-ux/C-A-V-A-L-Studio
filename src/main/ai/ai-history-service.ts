@@ -247,7 +247,7 @@ export function getHistoryFeedback(
   if (!root) return { ok: false, error: "Missing workspace" };
   const db = persistence ?? getAiPersistence(root);
   const resolved = resolveFeedbackMessageId(root, messageId, streamId, db);
-  if (!resolved) return { ok: true, feedback: null };
+  if (!resolved) return { ok: false, error: "Message not found" };
   const row = db.getFeedback(resolved);
   return {
     ok: true,
