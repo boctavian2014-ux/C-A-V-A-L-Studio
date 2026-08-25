@@ -9,6 +9,9 @@ release-fixed/
 coverage/
 .cicd-artifacts/
 artifacts/c2-observation/
+.triage-ci-logs/
+_verify_artifacts/
+_verify_workspace/
 .DS_Store
 .caval/
 .cavalo/
