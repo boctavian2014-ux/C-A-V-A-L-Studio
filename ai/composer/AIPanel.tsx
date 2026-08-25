@@ -296,6 +296,7 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
 
   return (
     <>
+      {wasStopped && message.content ? <CompactArenaStatus text={message.content} /> : null}
       {isStreaming && !(message.writtenFiles?.length) ? <StreamingDots /> : null}
       {!isStreaming && (message.writtenFiles?.length ?? 0) > 0 ? (
         <div style={{ fontSize: 12, color: 'var(--caval-text-muted)', marginBottom: 4 }}>
@@ -414,6 +415,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
       : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
+  const messageWasStopped = message.multiAgentStatus === 'Oprit';
 
   const senderLabel = isUser ? t('ai.chat.userLabel') : t('ai.chat.agenticSender');
 
@@ -578,7 +580,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <SuggestedCommandsCard commands={shellCommands} />
         )}
 
-        {!isUser && !message.isStreaming && !message.error && (
+        {!isUser && !message.isStreaming && !message.error && !messageWasStopped && (
           <MessageFeedbackButtons messageId={message.id} streamId={message.streamId} />
         )}
 

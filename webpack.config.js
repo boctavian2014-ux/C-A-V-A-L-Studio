@@ -80,6 +80,11 @@ module.exports = [
           __dirname,
           "node_modules/monaco-editor/esm/vs/editor/editor.api.js"
         ),
+        // Force @monaco-editor/react and our eager setup through the same loader singleton.
+        "@monaco-editor/loader$": path.resolve(
+          __dirname,
+          "node_modules/@monaco-editor/loader/lib/es/index.js"
+        ),
         // Bundling compatibility (Linux webpack): ProvidePlugin requires a module path, not a Node package.
         globalThis: path.resolve(__dirname, "src/renderer/provide-global.js"),
       },

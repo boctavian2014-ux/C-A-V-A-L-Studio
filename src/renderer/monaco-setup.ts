@@ -1,4 +1,4 @@
-import { loader } from '@monaco-editor/react';
+import loader from '@monaco-editor/loader';
 import * as monaco from 'monaco-editor';
 // Bare `monaco-editor` aliases to editor.api.js; load TS language API separately.
 import 'monaco-editor/esm/vs/language/typescript/monaco.contribution.js';

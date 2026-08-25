@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/glass.css";
+import "./monaco-setup";
 import { WorkbenchRoot } from "./WorkbenchRoot";
 import { I18nProvider } from "../../ai/i18n/I18nProvider";
 
