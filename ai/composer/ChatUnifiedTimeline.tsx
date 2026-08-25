@@ -61,10 +61,9 @@ export function mergeUnifiedTimelineRows(
 }
 
 function rowTone(event: TimelineEvent): string {
-  // WCAG AA-oriented accents on dark surface (~#0D1117)
-  if (event.type === 'error' || event.success === false) return '#F87171';
-  if (event.type === 'file_write' || event.success === true) return '#34D399';
-  if (event.type === 'tool_call') return '#22D3EE';
+  if (event.type === 'error' || event.success === false) return 'var(--caval-error)';
+  if (event.type === 'file_write' || event.success === true) return 'var(--caval-success)';
+  if (event.type === 'tool_call') return 'var(--caval-accent)';
   return 'var(--caval-text-muted)';
 }
 
@@ -79,21 +78,6 @@ export function labelForTimelineType(type: TimelineEventType): string {
   return labels[type] ?? type;
 }
 
-function iconForType(type: TimelineEventType): string {
-  switch (type) {
-    case 'tool_call':
-      return '›';
-    case 'tool_result':
-      return '·';
-    case 'file_write':
-      return '✎';
-    case 'error':
-      return '!';
-    default:
-      return '·';
-  }
-}
-
 export function ChatUnifiedTimeline({
   message,
   onToggleExpanded,
@@ -105,7 +89,7 @@ export function ChatUnifiedTimeline({
   const rows = useMemo(() => mergeUnifiedTimelineRows(message), [message]);
   const streaming = Boolean(message.isStreaming);
   const timelineDetail = useAiSettingsStore((s) => s.settings.timelineDetail);
-  const [localExpanded, setLocalExpanded] = useState(timelineDetail === 'verbose');
+  const [localExpanded, setLocalExpanded] = useState(false);
   const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({});
   const expanded = streaming
     ? true
@@ -118,139 +102,79 @@ export function ChatUnifiedTimeline({
     onToggleExpanded?.(next);
   };
 
-  const visible = expanded ? rows : rows.slice(-2);
   const showDetail = timelineDetail === 'verbose';
 
   const toggleDetail = (id: string) => {
     setOpenDetails((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const toggleLabel = t('ai.timeline.activitySteps', { count: rows.length });
+
   return (
     <div
-      className="ai-timeline"
+      className="ai-timeline ai-timeline-compact"
       data-testid="ai-unified-timeline"
       role="log"
       aria-live={streaming ? 'polite' : 'off'}
       aria-relevant="additions"
       aria-label={t('ai.timeline.activityAria')}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        marginBottom: 8,
-        padding: '6px 8px',
-        borderRadius: 6,
-        background: 'var(--caval-bg-elevated, transparent)',
-        border: '1px solid var(--caval-border)',
-      }}
     >
       <button
         type="button"
+        className="ai-timeline-toggle"
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          color: 'var(--caval-text-muted)',
-          fontSize: 9.5,
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-        }}
       >
-        <span>
-          AI activity · {rows.length} step{rows.length === 1 ? '' : 's'}
-          {streaming ? ' · live' : ''}
+        <span className="ai-timeline-chevron" aria-hidden="true">
+          {expanded ? '▾' : '›'}
         </span>
-        <span style={{ textTransform: 'none', fontWeight: 500 }}>
-          {expanded ? 'Hide' : 'Show'}
-        </span>
+        <span>{toggleLabel}</span>
+        {streaming ? (
+          <span className="ai-timeline-live">{t('ai.timeline.live')}</span>
+        ) : null}
       </button>
-      {visible.map((event) => {
-        const detailOpen = Boolean(openDetails[event.id]) || showDetail;
-        const hasDetail = Boolean(event.detail);
-        return (
-          <div
-            key={event.id}
-            role="listitem"
-            tabIndex={0}
-            data-testid="ai-timeline-event"
-            className={`timeline-event timeline-${event.type}`}
-            aria-label={`${labelForTimelineType(event.type)}: ${event.label}`}
-            aria-expanded={hasDetail ? detailOpen : undefined}
-            onKeyDown={(e) => {
-              if (!hasDetail) return;
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                toggleDetail(event.id);
-              }
-            }}
-            onClick={() => {
-              if (hasDetail) toggleDetail(event.id);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-              fontSize: 11.5,
-              color: event.type === 'error' ? rowTone(event) : 'var(--caval-text)',
-              lineHeight: 1.35,
-              cursor: hasDetail ? 'pointer' : 'default',
-              outline: 'none',
-            }}
-          >
-            <span
-              style={{
-                fontFamily: 'JetBrains Mono, monospace',
-                fontSize: 10,
-                color: 'var(--caval-text-muted)',
-                flexShrink: 0,
-                minWidth: 58,
-              }}
-            >
-              {formatTime(event.timestamp)}
-            </span>
-            <span
-              aria-hidden="true"
-              title={labelForTimelineType(event.type)}
-              style={{
-                width: 14,
-                height: 14,
-                marginTop: 1,
-                flexShrink: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: rowTone(event),
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              {iconForType(event.type)}
-            </span>
-            <span style={{ minWidth: 0 }}>
-              <span>{event.label}</span>
-              {hasDetail && detailOpen ? (
+      {expanded ? (
+        <div className="ai-timeline-steps" role="list">
+          {rows.map((event) => {
+            const detailOpen = Boolean(openDetails[event.id]) || showDetail;
+            const hasDetail = Boolean(event.detail);
+            return (
+              <div
+                key={event.id}
+                role="listitem"
+                tabIndex={0}
+                data-testid="ai-timeline-event"
+                className={`timeline-event timeline-${event.type}`}
+                aria-label={`${labelForTimelineType(event.type)}: ${event.label}`}
+                aria-expanded={hasDetail ? detailOpen : undefined}
+                onKeyDown={(e) => {
+                  if (!hasDetail) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleDetail(event.id);
+                  }
+                }}
+                onClick={() => {
+                  if (hasDetail) toggleDetail(event.id);
+                }}
+              >
+                <span className="ai-timeline-time">{formatTime(event.timestamp)}</span>
                 <span
-                  style={{
-                    display: 'block',
-                    fontSize: 10.5,
-                    color: 'var(--caval-text-muted)',
-                  }}
-                >
-                  {event.detail}
+                  className="ai-timeline-dot"
+                  aria-hidden="true"
+                  style={{ color: rowTone(event) }}
+                />
+                <span className="ai-timeline-label">
+                  <span>{event.label}</span>
+                  {hasDetail && detailOpen ? (
+                    <span className="ai-timeline-detail">{event.detail}</span>
+                  ) : null}
                 </span>
-              ) : null}
-            </span>
-          </div>
-        );
-      })}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

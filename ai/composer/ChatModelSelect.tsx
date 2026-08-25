@@ -39,8 +39,8 @@ function renderOptions(
 interface ChatModelSelectProps {
   catalog: CavalModelCatalog | null;
   loading: boolean;
-  /** `stacked` = full-width Robotics layout; `inline` = compact coding chat (default). */
-  variant?: 'inline' | 'stacked';
+  /** `stacked` = full-width Robotics layout; `inline` = compact coding chat; `compact` = borderless composer row. */
+  variant?: 'inline' | 'stacked' | 'compact';
 }
 
 export function ChatModelSelect({
@@ -49,6 +49,7 @@ export function ChatModelSelect({
   variant = 'inline',
 }: ChatModelSelectProps) {
   const stacked = variant === 'stacked';
+  const compact = variant === 'compact';
   const { selectedModel, setModel, activeResolvedModel, modelLabels, agentMode } = useAIStore();
   const [showKeys, setShowKeys] = useState(false);
   const [modelHealth, setModelHealth] = useState<Record<string, ModelHealthStatus>>({});
@@ -127,45 +128,47 @@ export function ChatModelSelect({
   return (
     <>
       <div
+        className={compact ? 'chat-model-select-compact' : undefined}
         style={{
           display: 'flex',
           flexDirection: 'column',
-          alignItems: stacked ? 'stretch' : 'flex-end',
+          alignItems: stacked ? 'stretch' : compact ? 'center' : 'flex-end',
           minWidth: 0,
-          width: stacked ? '100%' : undefined,
-          maxWidth: stacked ? 'none' : 240,
+          width: stacked ? '100%' : compact ? 'auto' : undefined,
+          maxWidth: stacked ? 'none' : compact ? 'none' : 240,
+          flex: compact ? '1 1 auto' : undefined,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: stacked ? 8 : 4, width: '100%', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: stacked ? 8 : compact ? 6 : 4, width: compact ? 'auto' : '100%', minWidth: 0 }}>
           {selectedHealth && (
             <span
               title={modelHealthLabel(selectedHealth)}
               style={{
-                width: stacked ? 8 : 7,
-                height: stacked ? 8 : 7,
+                width: stacked ? 8 : compact ? 6 : 7,
+                height: stacked ? 8 : compact ? 6 : 7,
                 borderRadius: '50%',
                 background: healthColor,
                 flexShrink: 0,
               }}
             />
           )}
-          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <div style={{ position: 'relative', flex: compact ? '0 1 auto' : 1, minWidth: 0 }}>
             <select
               value={selectValue}
               disabled={loading}
               onChange={(e) => setModel(e.target.value)}
               title={profileSummary.description || getModelDisplayLabel(selectValue, modelLabels)}
               style={{
-                width: '100%',
+                width: compact ? 'auto' : '100%',
                 minWidth: 0,
-                maxWidth: stacked ? 'none' : 200,
-                padding: stacked ? '8px 28px 8px 12px' : '6px 28px 6px 12px',
-                borderRadius: 8,
-                border: '1px solid var(--caval-border)',
-                background: 'var(--caval-bg)',
+                maxWidth: stacked ? 'none' : compact ? 160 : 200,
+                padding: stacked ? '8px 28px 8px 12px' : compact ? '2px 18px 2px 0' : '6px 28px 6px 12px',
+                borderRadius: compact ? 0 : 8,
+                border: compact ? 'none' : '1px solid var(--caval-border)',
+                background: compact ? 'transparent' : 'var(--caval-bg)',
                 color: 'var(--caval-text)',
-                fontSize: stacked ? 13 : 12,
-                fontWeight: 500,
+                fontSize: stacked ? 13 : compact ? 11 : 12,
+                fontWeight: compact ? 500 : 500,
                 cursor: loading ? 'wait' : 'pointer',
                 appearance: 'none',
                 overflow: 'hidden',
@@ -197,10 +200,10 @@ export function ChatModelSelect({
             <span
               style={{
                 position: 'absolute',
-                right: 8,
+                right: compact ? 0 : 8,
                 top: '50%',
                 transform: 'translateY(-50%)',
-                fontSize: stacked ? 10 : 8,
+                fontSize: stacked ? 10 : compact ? 7 : 8,
                 color: 'var(--caval-text-muted)',
                 pointerEvents: 'none',
               }}
@@ -209,6 +212,7 @@ export function ChatModelSelect({
             </span>
           </div>
 
+          {!compact && (
           <button
             type="button"
             onClick={() => setShowKeys(true)}
@@ -230,9 +234,10 @@ export function ChatModelSelect({
           >
             🔑
           </button>
+          )}
         </div>
 
-        {selectedHealth && selectedHealth !== 'ready' && (
+        {!compact && selectedHealth && selectedHealth !== 'ready' && (
           <div
             style={{
               fontSize: metaFontSize,
@@ -281,7 +286,7 @@ export function ChatModelSelect({
               </div>
             )}
           </>
-        ) : (
+        ) : compact ? null : (
           <>
             {codingGuide.canCode && (
               <div

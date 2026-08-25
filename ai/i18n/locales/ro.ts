@@ -506,6 +506,13 @@ export const ro = {
   "ai.panel.close": "Închide panoul AI (Ctrl+Shift+A)",
   "ai.panel.stop": "Stop",
   "ai.panel.send": "Trimite ↵",
+  "ai.panel.sendLabel": "Trimite",
+  "ai.panel.sendHint": "Enter",
+  "ai.panel.headerBrand": "CAVAL",
+  "ai.panel.headerContext": "Agentic",
+  "ai.panel.statusActive": "AI activ",
+  "ai.panel.workspaceContext": "Context workspace activ",
+  "ai.panel.dismissNotice": "Închide notificarea",
   "ai.panel.newChat": "Chat nou",
   "ai.panel.accept": "Acceptă",
   "ai.panel.reject": "Respinge",
@@ -737,6 +744,8 @@ export const ro = {
   "ai.panel.openComposer": "Deschide Composer (multi-fișier)",
 
   "ai.chat.userLabel": "Tu",
+  "ai.chat.agenticSender": "Agentic",
+  "ai.chat.multiModelShort": "multi-model",
   "ai.chat.agenticMultiModel": "Agentic · multi-model",
   "ai.chat.agenticWithModel": "Agentic · {{model}}",
   "ai.chat.modelFallback": "Model",
@@ -817,6 +826,8 @@ export const ro = {
   "ai.timeline.selfAudit": "Scoruri self-audit",
   "ai.timeline.pipeline": "Pipeline · multi-model",
   "ai.timeline.activityAria": "Activitate AI",
+  "ai.timeline.activitySteps": "Activitate · {{count}} pași",
+  "ai.timeline.live": "live",
 
   "ai.onboarding.dismissTip": "Închide sfatul",
 

@@ -8,7 +8,6 @@ import { getAgentMode, isAgenticPipelineMode } from '../modes/agent-modes';
 import { getModelProfileSummary } from '../models/model-profile-ui';
 import { ChatActivityTimeline } from './ChatActivityTimeline';
 import { ChatUnifiedTimeline } from './ChatUnifiedTimeline';
-import { CavaloAiMark } from '../../src/renderer/components/brand/CavaloHorseMark';
 import { ChatReasoningBlock } from './ChatReasoningBlock';
 import { hashChatDraft } from './chat-prepare';
 import { summarizeForChatPanel, formatChatPanelSummary, formatArenaReasoning, sanitizeLiveReasoning } from './chat-display';
@@ -280,10 +279,11 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
     Boolean(message.recap || hasModelOrchSteps(message.multiAgentSteps)) &&
     roleMapEntries.length > 0;
 
+  const hasTimeline = (message.timelineEvents?.length ?? 0) > 0 ||
+    (message.multiAgentSteps?.length ?? 0) > 0;
+
   const hasDetails = Boolean(
-    (message.timelineEvents?.length ?? 0) > 0 ||
-      (message.multiAgentSteps?.length ?? 0) > 0 ||
-      (message.activitySteps?.length ?? 0) > 0 ||
+    (message.activitySteps?.length ?? 0) > 0 ||
       liveReasoning ||
       message.reasoningBrief ||
       message.recap ||
@@ -302,9 +302,9 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
           {t('ai.files.createdCount', { count: message.writtenFiles!.length })}
         </div>
       ) : null}
+      {hasTimeline ? <ChatUnifiedTimeline message={message} /> : null}
       <AiMessageDetails hasContent={hasDetails}>
         {needsReview ? <MandatoryReviewBadge /> : null}
-        <ChatUnifiedTimeline message={message} />
         {cfg.showPipelineTimeline && (message.multiAgentSteps?.length ?? 0) > 0 && (
           <MultiAgentTimeline
             steps={message.multiAgentSteps!}
@@ -410,12 +410,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     : null;
   const effectiveModelId = message.resolvedModel ?? message.model ?? '';
   const modelLabel = arenaMode
-    ? resolvedLabel
-      ? t('ai.chat.agenticWithModel', { model: resolvedLabel })
-      : t('ai.chat.agenticMultiModel')
+    ? resolvedLabel ?? t('ai.chat.multiModelShort')
     : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
       : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
+
+  const senderLabel = isUser ? t('ai.chat.userLabel') : t('ai.chat.agenticSender');
 
   const displayText = arenaMode
     ? message.reasoningBrief || message.recap
@@ -434,10 +434,14 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   const nonAgenticDetails = Boolean(
     !isUser &&
       !arenaMode &&
-      ((message.timelineEvents?.length ?? 0) > 0 ||
-        (message.activitySteps?.length ?? 0) > 0 ||
+      ((message.activitySteps?.length ?? 0) > 0 ||
         Boolean(message.reasoning) ||
         Boolean(effectiveModelId))
+  );
+
+  const nonAgenticTimeline = !isUser && !arenaMode && (
+    (message.timelineEvents?.length ?? 0) > 0 ||
+    (message.multiAgentSteps?.length ?? 0) > 0
   );
 
   const completedFilePaths = useMemo(() => {
@@ -456,30 +460,25 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 
   return (
-    <div style={{
-      alignSelf: isUser ? 'flex-end' : 'flex-start',
-      maxWidth: '96%',
-    }}>
-      {/* Label */}
-      <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em', paddingLeft: 2 }}>
-        {isUser ? t('ai.chat.userLabel') : (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--caval-accent)', display: 'inline-block', flexShrink: 0 }} />
-            <span>{modelLabel}</span>
-          </span>
-        )}
-      </div>
+    <article
+      className={`chat-message${isUser ? ' chat-message-user' : ' chat-message-assistant'}`}
+      data-testid={`chat-message-${message.role}`}
+    >
+      <header className="chat-message-header">
+        <span
+          className={`chat-message-avatar${isUser ? ' chat-message-avatar-user' : ' chat-message-avatar-assistant'}`}
+          aria-hidden="true"
+        />
+        <span className="chat-message-sender">{senderLabel}</span>
+        {!isUser && modelLabel ? (
+          <>
+            <span className="chat-message-meta-sep" aria-hidden="true">·</span>
+            <span className="chat-message-model">{modelLabel}</span>
+          </>
+        ) : null}
+      </header>
 
-      {/* Conținut */}
-      <div style={{
-        padding: '9px 12px', borderRadius: isUser ? '10px 10px 3px 10px' : '10px 10px 10px 3px',
-        background: isUser ? 'var(--caval-accent-glow)' : 'var(--caval-surface)',
-        border: `1px solid ${isUser ? 'var(--caval-accent-ring)' : 'var(--caval-border)'}`,
-        fontSize: 13, lineHeight: 1.6, color: 'var(--caval-text)',
-        userSelect: 'text',
-        WebkitUserSelect: 'text',
-        cursor: 'text',
-      }}>
+      <div className="chat-message-body">
         {!isUser && arenaMode ? (
           message.isStreaming ||
           message.reasoningBrief ||
@@ -519,23 +518,25 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
 
         {!isUser && !arenaMode ? (
-          <AiMessageDetails hasContent={nonAgenticDetails}>
-            {message.reasoning ? (
-              <ChatReasoningBlock
-                reasoning={message.reasoning}
-                isStreaming={Boolean(message.isStreaming && !message.content)}
-                defaultExpanded={false}
-              />
-            ) : null}
-            <ChatUnifiedTimeline message={message} />
-            {(message.activitySteps?.length ?? 0) > 0 && !(message.timelineEvents?.length) ? (
-              <ChatActivityTimeline
-                steps={message.activitySteps!}
-                collapsed={Boolean(message.content)}
-              />
-            ) : null}
-            {effectiveModelId ? <ModelProfileChips modelId={effectiveModelId} /> : null}
-          </AiMessageDetails>
+          <>
+            {nonAgenticTimeline ? <ChatUnifiedTimeline message={message} /> : null}
+            <AiMessageDetails hasContent={nonAgenticDetails}>
+              {message.reasoning ? (
+                <ChatReasoningBlock
+                  reasoning={message.reasoning}
+                  isStreaming={Boolean(message.isStreaming && !message.content)}
+                  defaultExpanded={false}
+                />
+              ) : null}
+              {(message.activitySteps?.length ?? 0) > 0 && !(message.timelineEvents?.length) ? (
+                <ChatActivityTimeline
+                  steps={message.activitySteps!}
+                  collapsed={Boolean(message.content)}
+                />
+              ) : null}
+              {effectiveModelId ? <ModelProfileChips modelId={effectiveModelId} /> : null}
+            </AiMessageDetails>
+          </>
         ) : null}
 
         {/* Diff block dacă există */}
@@ -581,14 +582,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <MessageFeedbackButtons messageId={message.id} streamId={message.streamId} />
         )}
 
-        {/* Eroare */}
         {message.error && (
-          <div style={{ marginTop: 8, padding: '6px 10px', borderRadius: 5, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', fontSize: 11.5, color: 'var(--caval-error)' }}>
-            ⚠ {message.error}
+          <div className="chat-message-error" role="alert">
+            {message.error}
           </div>
         )}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -694,25 +694,10 @@ function StreamingText({ content }: { content: string }) {
 function MandatoryReviewBadge() {
   const { t } = useTranslation();
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '5px 10px',
-        borderRadius: 8,
-        border: '1px solid var(--caval-accent-ring)',
-        background: 'var(--caval-accent-glow)',
-        color: 'var(--caval-text)',
-        fontSize: 11,
-        fontWeight: 500,
-        width: '100%',
-      }}
-      title={t('ai.panel.readyToUseGateTitle')}
-    >
-      <span aria-hidden style={{ color: 'var(--caval-accent)' }}>●</span>
+    <div className="chat-review-badge" title={t('ai.panel.readyToUseGateTitle')}>
+      <span className="chat-review-badge-dot" aria-hidden="true" />
       <span>{t('ai.panel.mandatoryReviewActive')}</span>
-      <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.75 }}>{t('ai.panel.readyToUseGate')}</span>
+      <span className="chat-review-badge-hint">{t('ai.panel.readyToUseGate')}</span>
     </div>
   );
 }
@@ -1035,6 +1020,12 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
     syncTextareaHeight(e.target);
   };
 
+  const composerStatusPrefix = Boolean(
+    isStreaming ||
+      projectPath ||
+      ((isPrepareReady || (prepareInFlight && input.trim())) && !isStreaming)
+  );
+
   return (
     <div style={{
       width: panelWidth,
@@ -1054,80 +1045,53 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       />
 
       {/* ── Header ─────────────────────────── */}
-      <div style={{
-        padding: `8px ${PANEL_PAD_X}px`, borderBottom: `1px solid ${theme.colors.border}`,
-        display: 'flex', flexDirection: 'column', gap: 6,
-        flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          <CavaloAiMark size={22} />
-          <div>
-            <span style={{
-              fontSize: 11.5, fontWeight: 600, color: 'var(--caval-text)',
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-            }}>
-              {isAgentic ? t('ai.panel.codingArena') : modeDef.label}
+      <header className="chat-panel-header">
+        <div className="chat-panel-header-row">
+          <div className="chat-panel-title">
+            <span className="chat-panel-brand">{t('ai.panel.headerBrand')}</span>
+            <span className="chat-panel-title-sep" aria-hidden="true">/</span>
+            <span className="chat-panel-context">
+              {isAgentic ? t('ai.panel.headerContext') : modeDef.label}
             </span>
-            <div style={{ fontSize: 9.5, color: 'var(--caval-text-muted)', lineHeight: 1.2 }}>
-              {isAgentic
-                ? t('ai.panel.arenaSubtitle')
-                : agentMode === 'code'
-                  ? t('ai.panel.codeSubtitle')
-                  : modeDef.description}
-            </div>
           </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div className="chat-panel-header-actions">
         <button
           type="button"
           data-testid="ai-settings-open"
+          className={`chat-panel-icon-btn${showAiSettings ? ' chat-panel-icon-btn-active' : ''}`}
           onClick={() => setShowAiSettings((v) => !v)}
           title={t('ai.panel.settings')}
-          style={{
-            width: 24, height: 24, borderRadius: 4, border: 'none',
-            background: showAiSettings ? 'var(--caval-accent-glow)' : 'none',
-            color: showAiSettings ? 'var(--caval-accent)' : 'var(--caval-text-muted)',
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 13,
-          }}
+          aria-label={t('ai.panel.settings')}
         >
-          ⚙
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.2" />
+            <path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.4 3.4l.85.85M11.75 11.75l.85.85M3.4 12.6l.85-.85M11.75 4.25l.85-.85" strokeLinecap="round" />
+          </svg>
         </button>
         {messages.length > 0 && (
           <button
+            type="button"
+            className="chat-panel-icon-btn"
             onClick={clearChat}
             title={t('ai.panel.clearChat')}
-            style={{
-              width: 24, height: 24, borderRadius: 4, border: 'none',
-              background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14,
-            }}
+            aria-label={t('ai.panel.clearChat')}
           >
             ↺
           </button>
         )}
 
-        {/* Închide panel */}
         {onClose && (
           <button
+            type="button"
+            className="chat-panel-icon-btn"
             onClick={onClose}
             title={t('ai.panel.close')}
-            style={{
-              width: 24, height: 24, borderRadius: 4, border: 'none',
-              background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16, lineHeight: 1,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--caval-text)'; e.currentTarget.style.background = 'var(--caval-surface-raised)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--caval-text-muted)'; e.currentTarget.style.background = 'none'; }}
+            aria-label={t('ai.panel.close')}
           >
             ✕
           </button>
         )}
-        </div>
+          </div>
         </div>
         <AiPanelToolbar
           isStreaming={isStreaming}
@@ -1135,7 +1099,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             if (prompt.trim()) void sendMessage(prompt.trim());
           }}
         />
-      </div>
+      </header>
 
       {showAiSettings ? (
         <AiSettingsPanel onClose={() => setShowAiSettings(false)} />
@@ -1168,23 +1132,13 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
         </span>
         <button
           type="button"
+          className="chat-panel-new-chat-btn"
           onClick={() => {
             newThread();
             useAiHistoryStore.setState({ activeHistoryId: null });
             void refreshHistory();
           }}
           title={t('ai.panel.newChat')}
-          style={{
-            padding: '2px 10px',
-            fontSize: 10,
-            borderRadius: 4,
-            border: '1px solid var(--caval-accent-ring)',
-            background: 'var(--caval-accent-glow)',
-            color: 'var(--caval-accent)',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
         >
           {t('ai.panel.newChat')}
         </button>
@@ -1309,10 +1263,10 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       )}
 
       {/* ── Messages ───────────────────────── */}
-      <div ref={messagesScrollRef} className="ai-messages-scroll caval-selectable" style={{
+      <div ref={messagesScrollRef} className="ai-messages-scroll caval-selectable chat-messages-scroll" style={{
         flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
-        padding: messages.length === 0 ? 0 : '10px',
-        display: 'flex', flexDirection: 'column', gap: 10,
+        padding: messages.length === 0 ? 0 : `${PANEL_PAD_X}px`,
+        display: 'flex', flexDirection: 'column', gap: 12,
         overscrollBehavior: 'contain',
       }}>
         {messages.length === 0 ? (
@@ -1328,98 +1282,54 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
       <StickyLiveAiFiles />
 
       {/* ── Input ──────────────────────────── */}
-      <div style={{
-        padding: PANEL_PAD_X, borderTop: `1px solid ${theme.colors.border}`,
-        flexShrink: 0,
-        display: 'flex', flexDirection: 'column', gap: 8,
-      }}>
-        {modeSwitchNotice && !isAgentic && (
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--caval-accent)',
-              lineHeight: 1.35,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-            }}
-          >
-            <span>{modeSwitchNotice}</span>
-            <button
-              type="button"
-              onClick={() => clearModeSwitchNotice()}
-              style={{
-                border: 'none',
-                background: 'none',
-                color: 'var(--caval-text-muted)',
-                cursor: 'pointer',
-                fontSize: 10,
-                padding: 0,
-              }}
-            >
-              ✕
-            </button>
+      <footer className="chat-composer-footer">
+        {(modeSwitchNotice && !isAgentic) || (agentMode === 'code' && selectedModel.startsWith('caval-auto/')) || readinessHint ? (
+          <div className="chat-composer-notices">
+            {modeSwitchNotice && !isAgentic ? (
+              <div className="chat-composer-notice">
+                <span>{modeSwitchNotice}</span>
+                <button type="button" onClick={() => clearModeSwitchNotice()} aria-label={t('ai.panel.dismissNotice')}>✕</button>
+              </div>
+            ) : null}
+            {agentMode === 'code' && selectedModel.startsWith('caval-auto/') ? (
+              <div className="chat-composer-notice chat-composer-notice-muted" title={t('ai.panel.autoRouteHint')}>
+                {t('ai.panel.autoRouteHint')}
+              </div>
+            ) : null}
+            {readinessHint ? (
+              <div className="chat-composer-notice chat-composer-notice-warning" role="status">
+                {readinessHint}
+              </div>
+            ) : null}
           </div>
-        )}
-        {agentMode === 'code' && selectedModel.startsWith('caval-auto/') && (
-          <div style={{ fontSize: 10, color: 'var(--caval-text-muted)', lineHeight: 1.35 }}>
-            {t('ai.panel.autoRouteHint')}
-          </div>
-        )}
-        <div style={{
-          background: 'var(--caval-surface)', border: '2px solid var(--caval-border)',
-          borderRadius: 10,
-          transition: 'border-color 0.15s',
-        }}
-          onFocusCapture={(e) => (e.currentTarget.style.borderColor = 'var(--caval-accent)')}
-          onBlurCapture={(e) => (e.currentTarget.style.borderColor = 'var(--caval-border)')}
-        >
+        ) : null}
+        <div className="chat-composer-card">
           <textarea
             ref={textareaRef}
+            className="chat-composer-input"
             value={input}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
             placeholder={inputPlaceholder}
             rows={ARENA_INPUT_MIN_ROWS}
             style={{
-              width: '100%', border: 'none', background: 'transparent',
-              padding: '10px 12px 4px', fontSize: ARENA_FONT_SIZE, color: 'var(--caval-text)',
-              fontFamily: "'Inter', sans-serif", resize: 'none',
-              height: textareaHeight, minHeight: ARENA_INPUT_MIN_HEIGHT, maxHeight: ARENA_INPUT_MAX_HEIGHT,
-              lineHeight: ARENA_LINE_HEIGHT, outline: 'none', overflow: 'auto',
-              boxSizing: 'border-box',
+              height: textareaHeight,
+              minHeight: ARENA_INPUT_MIN_HEIGHT,
+              maxHeight: ARENA_INPUT_MAX_HEIGHT,
             }}
           />
           {attachedFiles.length > 0 && (
-            <div style={{
-              display: 'flex', flexWrap: 'wrap', gap: 6,
-              padding: '0 10px 6px',
-            }}>
+            <div className="chat-composer-attachments">
               {attachedFiles.map((file) => (
-                <span
-                  key={file.id}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '2px 8px', borderRadius: 999, fontSize: 10.5,
-                    border: '1px solid var(--caval-border)',
-                    background: 'var(--caval-surface-raised)',
-                    color: 'var(--caval-text-muted)',
-                    maxWidth: '100%',
-                  }}
-                  title={file.path}
-                >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {file.path.startsWith('engineering://') ? '📐' : '📎'} {file.name}
+                <span key={file.id} className="chat-composer-attachment-chip" title={file.path}>
+                  <span className="chat-composer-attachment-name">
+                    {file.path.startsWith('engineering://') ? 'CAD' : 'File'} {file.name}
                   </span>
                   <button
                     type="button"
                     onClick={() => removeAttachment(file.id)}
-                    style={{
-                      border: 'none', background: 'none', cursor: 'pointer',
-                      color: 'var(--caval-text-muted)', fontSize: 12, lineHeight: 1, padding: 0,
-                    }}
                     title={t('ai.panel.removeAttachment')}
+                    aria-label={t('ai.panel.removeAttachment')}
                   >
                     ✕
                   </button>
@@ -1435,139 +1345,87 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             onChange={(e) => void handleFileInputChange(e)}
           />
 
-          <div style={{
-            display: 'flex', flexDirection: 'column', gap: 6,
-            padding: '4px 8px 8px',
-          }}>
-            {/* Row 1: actions + status + preview */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              flexWrap: 'wrap', minWidth: 0,
-            }}>
-              <IconBtn title={t('ai.panel.attachFile')} onClick={() => void handleAttachClick()}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+          <div className="chat-composer-toolbar">
+            <div className="chat-composer-toolbar-left">
+              <IconBtn title={t('ai.panel.attachFile')} onClick={() => void handleAttachClick()} ariaLabel={t('ai.panel.attachFile')}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
                   <path d="M12.5 8.5L7 14a4 4 0 01-5.66-5.66l7-7a2.5 2.5 0 013.54 3.54L5.5 11.5a1 1 0 01-1.42-1.42L10 4" strokeLinecap="round" />
                 </svg>
               </IconBtn>
               <IconBtn
                 title={t('ai.panel.refreshModels')}
                 onClick={() => void refreshCatalog()}
+                ariaLabel={t('ai.panel.refreshModels')}
               >
-                <span style={{ fontSize: 13, lineHeight: 1 }}>↻</span>
+                <span style={{ fontSize: 13, lineHeight: 1 }} aria-hidden="true">↻</span>
               </IconBtn>
               {onOpenComposer && (
-                <IconBtn title={t('ai.panel.openComposer')} onClick={onOpenComposer}>
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <IconBtn title={t('ai.panel.openComposer')} onClick={onOpenComposer} ariaLabel={t('ai.panel.openComposer')}>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
                     <path d="M2 4h12M2 8h8M2 12h10" strokeLinecap="round" />
                   </svg>
                 </IconBtn>
               )}
-
-              {(isPrepareReady || (prepareInFlight && input.trim())) && !isStreaming && (
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    fontSize: 10.5,
-                    color: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-text-muted)',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: isPrepareReady ? 'var(--caval-success)' : 'var(--caval-accent)',
-                      opacity: isPrepareReady ? 1 : 0.7,
-                      animation: isPrepareReady ? 'none' : 'dot-bounce 1.2s ease-in-out infinite',
-                    }}
-                  />
-                  {isPrepareReady ? t('ai.panel.prepareReady') : t('ai.panel.prepareBusy')}
-                  {preloadHint && (
-                    <span style={{ opacity: 0.75, marginLeft: 4 }}>{preloadHint}</span>
-                  )}
-                </span>
-              )}
-
-              {isPrepareReady && prepareState?.partialPlanPreview && !isStreaming && (
-                <div
-                  title={prepareState.partialPlanPreview}
-                  style={{
-                    fontSize: 10.5,
-                    lineHeight: 1.4,
-                    color: 'var(--caval-text-muted)',
-                    flex: '1 1 120px',
-                    minWidth: 0,
-                    maxWidth: '100%',
-                    whiteSpace: 'pre-wrap',
-                    overflow: 'hidden',
-                    maxHeight: '4.2em',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: 'vertical',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {prepareState.partialPlanPreview}
-                </div>
-              )}
             </div>
 
-            {readinessHint && (
-              <div style={{
-                marginBottom: 6,
-                padding: '6px 10px',
-                borderRadius: 6,
-                fontSize: 11,
-                lineHeight: 1.45,
-                color: '#F59E0B',
-                background: 'rgba(245,158,11,0.08)',
-                border: '1px solid rgba(245,158,11,0.2)',
-              }}>
-                {readinessHint}
-              </div>
-            )}
+            <div
+              className="chat-composer-status"
+              title={[
+                isStreaming ? t('ai.panel.statusActive') : null,
+                projectPath ? t('ai.panel.workspaceContext') : null,
+                isPrepareReady ? t('ai.panel.prepareReady') : prepareInFlight && input.trim() ? t('ai.panel.prepareBusy') : null,
+                prepareState?.partialPlanPreview ?? null,
+                preloadHint ?? null,
+              ].filter(Boolean).join(' · ')}
+            >
+              {isStreaming ? (
+                <span className="chat-composer-status-item">{t('ai.panel.statusActive')}</span>
+              ) : null}
+              {isStreaming && projectPath ? (
+                <span className="chat-composer-status-sep" aria-hidden="true">·</span>
+              ) : null}
+              {projectPath ? (
+                <span className="chat-composer-status-item chat-composer-status-muted">
+                  {t('ai.panel.workspaceContext')}
+                </span>
+              ) : null}
+              {(isStreaming || projectPath) && (isPrepareReady || (prepareInFlight && input.trim())) ? (
+                <span className="chat-composer-status-sep" aria-hidden="true">·</span>
+              ) : null}
+              {(isPrepareReady || (prepareInFlight && input.trim())) && !isStreaming ? (
+                <span className={`chat-composer-status-item${isPrepareReady ? ' chat-composer-status-ready' : ''}`}>
+                  <span className="chat-composer-status-dot" aria-hidden="true" />
+                  {isPrepareReady ? t('ai.panel.prepareReady') : t('ai.panel.prepareBusy')}
+                </span>
+              ) : null}
+              {composerStatusPrefix ? (
+                <span className="chat-composer-status-sep" aria-hidden="true">·</span>
+              ) : null}
+              <ChatModelSelect catalog={catalog} loading={catalogLoading} variant="compact" />
+            </div>
 
-            {/* Row 2: model + send — always visible */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-              gap: 6, flexShrink: 0, width: '100%', minWidth: 0,
-            }}>
-              <ChatModelSelect catalog={catalog} loading={catalogLoading} />
+            <div className="chat-composer-toolbar-right">
               {(() => {
                 const sendDisabled = !isStreaming && !input.trim() && attachedFiles.length === 0;
                 return (
                   <button
+                    type="button"
+                    className={`chat-composer-send${isStreaming ? ' chat-composer-send-stop' : ''}${sendDisabled ? ' chat-composer-send-disabled' : ''}`}
                     onClick={isStreaming ? stopStreaming : handleSend}
                     disabled={sendDisabled}
-                    style={{
-                      padding: '5px 14px', borderRadius: 6,
-                      border: sendDisabled ? '1px solid var(--caval-border)' : 'none',
-                      cursor: input.trim() || isStreaming || attachedFiles.length > 0 ? 'pointer' : 'default',
-                      background: isStreaming
-                        ? 'rgba(239,68,68,0.15)'
-                        : sendDisabled
-                          ? 'var(--caval-surface-raised)'
-                          : 'var(--caval-accent)',
-                      color: isStreaming
-                        ? 'var(--caval-error)'
-                        : sendDisabled
-                          ? 'var(--caval-text-muted)'
-                          : '#0E0E0F',
-                      fontSize: 12, fontWeight: 700, transition: 'all 0.12s',
-                      opacity: sendDisabled ? 0.65 : 1,
-                      flexShrink: 0,
-                    }}
+                    title={isStreaming ? t('ai.panel.stop') : t('ai.panel.send')}
                   >
-                    {isStreaming ? `■ ${t('ai.panel.stop')}` : t('ai.panel.send')}
+                    <span>{isStreaming ? t('ai.panel.stop') : t('ai.panel.sendLabel')}</span>
+                    {!isStreaming ? (
+                      <kbd className="chat-composer-send-hint" aria-hidden="true">{t('ai.panel.sendHint')}</kbd>
+                    ) : null}
                   </button>
                 );
               })()}
             </div>
           </div>
         </div>
-      </div>
+      </footer>
       </>
       )}
     </div>
@@ -1578,19 +1436,14 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 //  Icon button helper
 // ──────────────────────────────────────────────
 
-function IconBtn({ title, onClick, children }: { title: string; onClick?: () => void; children: React.ReactNode }) {
+function IconBtn({ title, onClick, children, ariaLabel }: { title: string; onClick?: () => void; children: React.ReactNode; ariaLabel?: string }) {
   return (
     <button
+      type="button"
+      className="chat-composer-icon-btn"
       title={title}
+      aria-label={ariaLabel ?? title}
       onClick={onClick}
-      style={{
-        width: 26, height: 26, borderRadius: 5, border: 'none',
-        background: 'none', color: 'var(--caval-text-muted)', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.12s',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--caval-surface-raised)'; e.currentTarget.style.color = 'var(--caval-text)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--caval-text-muted)'; }}
     >
       {children}
     </button>
