@@ -505,6 +505,13 @@ export const en = {
   "ai.panel.close": "Close AI Panel (Ctrl+Shift+A)",
   "ai.panel.stop": "Stop",
   "ai.panel.send": "Send ↵",
+  "ai.panel.sendLabel": "Send",
+  "ai.panel.sendHint": "Enter",
+  "ai.panel.headerBrand": "CAVAL",
+  "ai.panel.headerContext": "Agentic",
+  "ai.panel.statusActive": "AI active",
+  "ai.panel.workspaceContext": "Workspace context enabled",
+  "ai.panel.dismissNotice": "Dismiss notice",
   "ai.panel.newChat": "New chat",
   "ai.panel.accept": "Accept",
   "ai.panel.reject": "Reject",
@@ -737,6 +744,8 @@ export const en = {
   "ai.panel.openComposer": "Open Composer (multi-file)",
 
   "ai.chat.userLabel": "You",
+  "ai.chat.agenticSender": "Agentic",
+  "ai.chat.multiModelShort": "multi-model",
   "ai.chat.agenticMultiModel": "Agentic · multi-model",
   "ai.chat.agenticWithModel": "Agentic · {{model}}",
   "ai.chat.modelFallback": "Model",
@@ -817,6 +826,8 @@ export const en = {
   "ai.timeline.selfAudit": "Self-audit scores",
   "ai.timeline.pipeline": "Pipeline · multi-model",
   "ai.timeline.activityAria": "AI activity",
+  "ai.timeline.activitySteps": "Activity · {{count}} steps",
+  "ai.timeline.live": "live",
 
   "ai.onboarding.dismissTip": "Dismiss tip",
 

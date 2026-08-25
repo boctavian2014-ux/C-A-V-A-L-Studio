@@ -16,42 +16,19 @@ export function AiMessageDetails({ hasContent, children }: AiMessageDetailsProps
   if (!hasContent) return null;
 
   return (
-    <div
-      data-testid="ai-message-details"
-      style={{ marginTop: 8 }}
-    >
+    <div data-testid="ai-message-details" className="ai-message-details">
       <button
         type="button"
         data-testid="ai-message-details-toggle"
+        className="ai-message-details-toggle"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "4px 0",
-          border: "none",
-          background: "none",
-          color: "var(--caval-text-muted)",
-          fontSize: 10.5,
-          cursor: "pointer",
-        }}
       >
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <span aria-hidden="true">{open ? "▾" : "›"}</span>
         <span>{open ? t("ai.details.hide") : t("ai.details.show")}</span>
       </button>
       {open ? (
-        <div
-          data-testid="ai-message-details-body"
-          style={{
-            marginTop: 6,
-            paddingTop: 6,
-            borderTop: "1px solid var(--caval-border)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
-          }}
-        >
+        <div data-testid="ai-message-details-body" className="ai-message-details-body">
           {children}
         </div>
       ) : null}

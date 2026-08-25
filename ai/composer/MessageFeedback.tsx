@@ -3,6 +3,34 @@ import React, { useEffect, useState } from "react";
 import type { MessageFeedback as MessageFeedbackRow } from "../../src/shared/ai-history-contract";
 import { useTranslation } from "../i18n/useTranslation";
 
+function ThumbUpIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M4.5 6.5V13h-1a1 1 0 01-1-1v-4a1 1 0 011-1h1zm2-3.5a1 1 0 011 1v1h2.5a1.5 1.5 0 011.46 1.13l.7 2.8A1.5 1.5 0 0111.2 11H8.5V6.5a1 1 0 00-1-1H6.5z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+        fill={active ? "currentColor" : "none"}
+      />
+    </svg>
+  );
+}
+
+function ThumbDownIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M11.5 9.5V3h1a1 1 0 011 1v4a1 1 0 01-1 1h-1zm-2 3.5a1 1 0 01-1-1V11H6a1.5 1.5 0 01-1.46-1.13l-.7-2.8A1.5 1.5 0 014.8 5H7.5v4.5a1 1 0 001 1h1z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+        fill={active ? "currentColor" : "none"}
+      />
+    </svg>
+  );
+}
+
 export function MessageFeedbackButtons({
   messageId,
   streamId,
@@ -84,28 +112,9 @@ export function MessageFeedbackButtons({
     }
   };
 
-  const btnStyle = (active: boolean): React.CSSProperties => ({
-    height: 24,
-    minWidth: 28,
-    padding: "0 6px",
-    borderRadius: 4,
-    border: active
-      ? "1px solid var(--caval-accent-ring)"
-      : "1px solid var(--caval-border)",
-    background: active ? "var(--caval-accent-glow)" : "transparent",
-    color: active ? "var(--caval-accent)" : "var(--caval-text-muted)",
-    cursor: busy ? "wait" : "pointer",
-    fontSize: 12,
-    lineHeight: 1,
-  });
-
   return (
-    <div
-      className="message-feedback"
-      data-testid="message-feedback"
-      style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div className="message-feedback" data-testid="message-feedback">
+      <div className="message-feedback-actions">
         <button
           type="button"
           data-testid="message-feedback-up"
@@ -115,9 +124,8 @@ export function MessageFeedbackButtons({
           title={t("ai.feedback.good")}
           aria-label={t("ai.feedback.good")}
           aria-pressed={feedback?.rating === "positive"}
-          style={btnStyle(feedback?.rating === "positive")}
         >
-          👍
+          <ThumbUpIcon active={feedback?.rating === "positive"} />
         </button>
         <button
           type="button"
@@ -128,43 +136,27 @@ export function MessageFeedbackButtons({
           title={t("ai.feedback.bad")}
           aria-label={t("ai.feedback.bad")}
           aria-pressed={feedback?.rating === "negative"}
-          style={btnStyle(feedback?.rating === "negative")}
         >
-          👎
+          <ThumbDownIcon active={feedback?.rating === "negative"} />
         </button>
       </div>
 
       {showComment && (
-        <div
-          className="feedback-comment"
-          data-testid="message-feedback-comment"
-          style={{ display: "flex", flexDirection: "column", gap: 6 }}
-        >
+        <div className="feedback-comment" data-testid="message-feedback-comment">
           <textarea
             placeholder="What went wrong? (optional)"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             rows={2}
             disabled={busy}
-            style={{
-              width: "100%",
-              resize: "vertical",
-              fontSize: 11,
-              padding: 6,
-              borderRadius: 4,
-              border: "1px solid var(--caval-border)",
-              background: "var(--caval-surface-raised)",
-              color: "var(--caval-text)",
-              fontFamily: "inherit",
-            }}
           />
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="feedback-comment-actions">
             <button
               type="button"
               data-testid="message-feedback-comment-submit"
               disabled={busy}
               onClick={() => void handleCommentSubmit()}
-              style={btnStyle(true)}
+              className="feedback-btn active"
             >
               Submit
             </button>
@@ -173,7 +165,7 @@ export function MessageFeedbackButtons({
               data-testid="message-feedback-comment-cancel"
               disabled={busy}
               onClick={() => setShowComment(false)}
-              style={btnStyle(false)}
+              className="feedback-btn"
             >
               Cancel
             </button>
@@ -182,7 +174,7 @@ export function MessageFeedbackButtons({
       )}
 
       {error && (
-        <div role="alert" style={{ fontSize: 10, color: "var(--caval-error)" }}>
+        <div role="alert" className="message-feedback-error">
           {error}
         </div>
       )}
