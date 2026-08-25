@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+import { isInternalWorkspacePath } from "../shared/internal-workspace-paths";
 import {
   WORKSPACE_FILE_READ_SAFE_MESSAGE,
   type WorkspaceFileReadErrorCode,
@@ -47,6 +48,9 @@ export function readWorkspaceFileRelative(
     }
 
     const relative = assertWorkspaceRelativeInput(relativePath);
+    if (isInternalWorkspacePath(relative, workspaceRoot)) {
+      return { ok: false, code: "INTERNAL_PATH", message: WORKSPACE_FILE_READ_SAFE_MESSAGE };
+    }
     const target = requireSandboxedWorkspacePath(workspaceRoot, relative);
 
     let stat: fs.Stats;

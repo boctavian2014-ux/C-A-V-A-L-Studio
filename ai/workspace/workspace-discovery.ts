@@ -18,6 +18,9 @@ export const DISCOVERY_IGNORE_DIRS = new Set([
   '.turbo',
   '.cache',
   '.cavalo',
+  '.caval',
+  '.agent',
+  'context-cache',
   '__pycache__',
 ]);
 

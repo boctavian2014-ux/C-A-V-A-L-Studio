@@ -80,7 +80,15 @@ export class ParallelContextLoader {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (collected.length >= limit) break;
-      if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git" || entry.name === ".caval") {
+      if (
+        entry.name === "node_modules" ||
+        entry.name === "dist" ||
+        entry.name === ".git" ||
+        entry.name === ".caval" ||
+        entry.name === ".cavalo" ||
+        entry.name === ".agent" ||
+        entry.name === "context-cache"
+      ) {
         continue;
       }
       const fullPath = path.join(dir, entry.name);

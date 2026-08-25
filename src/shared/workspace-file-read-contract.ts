@@ -6,6 +6,7 @@ export type WorkspaceFileReadErrorCode =
   | "NOT_FOUND"
   | "NOT_A_FILE"
   | "OUTSIDE_WORKSPACE"
+  | "INTERNAL_PATH"
   | "READ_FAILED"
   | "NO_WORKSPACE";
 
