@@ -108,6 +108,9 @@ module.exports = [
       }),
       new MonacoWebpackPlugin({
         languages: ["typescript", "javascript", "json", "css", "html", "markdown", "python"],
+        // Workers land in dist/renderer/; page is dist/renderer/index.html.
+        filename: "renderer/[name].worker.js",
+        publicPath: "../",
         // Keep gotoSymbol + referenceSearch — used by editor commands (quickOutline / goToReferences).
         features: [
           "!rename",
@@ -117,7 +120,6 @@ module.exports = [
           "!colorPicker",
           "!folding",
         ],
-        publicPath: "renderer/",
       }),
       // TypeScript compiler is main-process only — bundling it in renderer causes OOM / black screen.
       new webpack.IgnorePlugin({

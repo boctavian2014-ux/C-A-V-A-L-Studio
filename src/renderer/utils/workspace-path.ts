@@ -46,6 +46,22 @@ export function toWorkspaceRelativePath(
   return rel;
 }
 
+/** Explorer highlight: tab ids are absolute display paths; tree ids are relative. */
+export function isFileTreeNodeActive(
+  node: { type: string; id: string; path: string },
+  activeTabId: string | null,
+  projectPath: string | null
+): boolean {
+  if (node.type !== "file" || !activeTabId) return false;
+  if (activeTabId === node.id || activeTabId === node.path) return true;
+  const activeRel = toWorkspaceRelativePath(projectPath, activeTabId)?.toLowerCase();
+  if (!activeRel) return false;
+  const nodeRel = (
+    toWorkspaceRelativePath(projectPath, node.path) ?? node.id.replace(/\\/g, "/")
+  ).toLowerCase();
+  return activeRel === nodeRel;
+}
+
 /** Display path for tabs — keeps absolute when workspace root is known. */
 export function toWorkspaceDisplayPath(
   workspaceRoot: string | null | undefined,

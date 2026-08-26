@@ -172,4 +172,41 @@ describe("editor-store openFile internal cache", () => {
       code: "NOT_FOUND",
     });
   });
+
+  it("surfaces an error when an internal path would leave the editor empty", async () => {
+    useEditorStore.setState({ tabs: [], activeTabId: null });
+    await useEditorStore.getState().openFile(".caval/context-cache/documents.json");
+
+    expect(useEditorStore.getState().tabs).toEqual([]);
+    expect(useEditorStore.getState().activeTabId).toBeNull();
+    expect(useAiWorkCanvasStore.getState().editorFileReadError).toEqual({
+      relativePath: ".caval/context-cache/documents.json",
+      code: "INTERNAL_PATH",
+    });
+  });
+
+  it("keeps the last requested file when opens race", async () => {
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    readFile.mockImplementation(async (rel: string) => {
+      if (rel === "slow.ts") {
+        await firstGate;
+        return { ok: true, path: "slow.ts", content: "export const slow = 1;", language: "typescript" };
+      }
+      return { ok: true, path: rel, content: "export const fast = 2;", language: "typescript" };
+    });
+    useEditorStore.setState({ tabs: [], activeTabId: null });
+
+    const slow = useEditorStore.getState().openFile("slow.ts");
+    const fast = useEditorStore.getState().openFile("fast.ts");
+    await fast;
+    releaseFirst();
+    await slow;
+
+    expect(useEditorStore.getState().activeTabId?.replace(/\\/g, "/")).toContain("fast.ts");
+    expect(useEditorStore.getState().tabs).toHaveLength(1);
+    expect(useEditorStore.getState().tabs[0]?.content).toContain("fast = 2");
+  });
 });

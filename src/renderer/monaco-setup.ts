@@ -2,6 +2,7 @@ import loader from '@monaco-editor/loader';
 import * as monaco from 'monaco-editor';
 // Bare `monaco-editor` aliases to editor.api.js; load TS language API separately.
 import 'monaco-editor/esm/vs/language/typescript/monaco.contribution.js';
+import { installMonacoClassicWorkers } from './monaco-worker-env';
 
 type MonacoTs = {
   typescriptDefaults?: {
@@ -37,3 +38,5 @@ if (tsLang?.typescriptDefaults && tsLang.ScriptTarget && tsLang.ModuleKind) {
 
 // Must run before any Editor component import chain initializes @monaco-editor/loader.
 loader.config({ monaco });
+// After monaco-editor (webpack plugin) installs getWorkerUrl — wrap as classic file:// workers.
+installMonacoClassicWorkers();

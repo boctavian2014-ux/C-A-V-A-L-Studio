@@ -20,6 +20,13 @@ export function registerWorkspaceBindingHandlers(opts: {
     root: string,
     source: RecentWorkspaceSource
   ) => Promise<void>;
+  /** Same bound root (e.g. renderer reload) — re-send folder-opened without session reset. */
+  onCachedOpen?: (
+    senderId: number,
+    sender: WebContents,
+    root: string,
+    source: RecentWorkspaceSource
+  ) => Promise<void>;
 }): void {
   ipcMain.handle(
     "caval:workspace-open",
@@ -36,6 +43,7 @@ export function registerWorkspaceBindingHandlers(opts: {
         if (current && pathsEqual(current, root)) {
           opts.bindWorkspace(event.sender.id, root);
           opts.addRecentWorkspace(root, source);
+          await opts.onCachedOpen?.(event.sender.id, event.sender, root, source);
           return { ok: true, path: root, cached: true };
         }
         await opts.onOpen(event.sender.id, event.sender, root, source);

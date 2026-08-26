@@ -6,6 +6,7 @@ import { SidebarCloseButton } from '../workbench/SidebarCloseButton';
 import { Cavalo3DIcon } from '../brand/Cavalo3DIcon';
 import { IconFolder } from '../brand/CavaloIcons';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import { isFileTreeNodeActive } from '../../utils/workspace-path';
 
 // ──────────────────────────────────────────────
 //  Iconuri fișiere după extensie
@@ -135,8 +136,8 @@ function TreeNode({
   depth: number;
   onContextMenu: (e: React.MouseEvent, node: FileNode) => void;
 }) {
-  const { activeTabId, openFile, expandedDirs, toggleDir } = useEditorStore();
-  const isActive = node.type === 'file' && activeTabId === node.id;
+  const { activeTabId, openFile, expandedDirs, toggleDir, projectPath } = useEditorStore();
+  const isActive = isFileTreeNodeActive(node, activeTabId, projectPath);
   const isOpen = expandedDirs.has(node.path);
 
   const handleClick = useCallback(() => {

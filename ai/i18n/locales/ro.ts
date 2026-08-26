@@ -818,6 +818,8 @@ export const ro = {
   "workCanvas.fileReadError":
     "Nu am putut citi {{path}} din workspace. Verific calea și starea folderului înainte să continui.",
   "workCanvas.retryOpen": "Încearcă din nou",
+  "editor.selectFile": "Selectează un fișier din Explorer ca să-l deschizi.",
+  "editor.selectFileHint": "Folderul e deschis, dar editorul nu are niciun document încărcat.",
 
   "ai.details.show": "Detalii",
   "ai.details.hide": "Ascunde detaliile",

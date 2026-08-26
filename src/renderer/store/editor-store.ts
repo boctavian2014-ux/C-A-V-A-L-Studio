@@ -114,6 +114,7 @@ function dropInternalTabs(
 }
 
 let untitledCounter = 0;
+let openFileGeneration = 0;
 
 // ──────────────────────────────────────────────
 //  Store
@@ -193,6 +194,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         editorSelection: cleaned.activeTabId ? current.editorSelection : null,
         activeSymbol: cleaned.activeTabId ? current.activeSymbol : null,
       });
+      if (cleaned.tabs.length === 0) {
+        useAiWorkCanvasStore.getState().setEditorFileReadError({
+          relativePath: relative,
+          code: "INTERNAL_PATH",
+        });
+      }
       return;
     }
 
@@ -206,7 +213,11 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return;
     }
 
+    const generation = ++openFileGeneration;
     const result = await window.caval.fs.readFile(relative);
+    if (generation !== openFileGeneration) {
+      return;
+    }
     if (!result.ok) {
       keepLastValidDocument(result.code ?? 'READ_FAILED', relative);
       if (result.code !== 'INTERNAL_PATH' && withoutPreview.length === 0) {
