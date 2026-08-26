@@ -1,5 +1,6 @@
 import type { ProposedWrite } from "../../src/shared/ai-chat-apply-contract";
 import {
+  allowsDiskWrites,
   shouldAllowChatApplyAccept,
   type TrustedExecutionCapability,
 } from "../modes/execution-mode";
@@ -17,12 +18,14 @@ export interface StageDirectChatScaffoldInput {
 
 /**
  * Direct Code/Debug done path: parse fences and stage the same turn-bound
- * buffer Agentic uses. Does not write disk.
+ * buffer Agentic uses. Does not write disk. Write-granted turns (SCAFFOLD /
+ * APPLY_EDIT) skip staging so finish() can apply fences.
  */
 export function stageDirectChatScaffoldProposal(
   input: StageDirectChatScaffoldInput
 ): ProposedWrite[] {
   if (input.aborted) return [];
+  if (allowsDiskWrites(input.capability.effective)) return [];
   if (!shouldAllowChatApplyAccept(input.capability)) return [];
   const root = input.workspaceRoot?.trim();
   const key = input.stageKey.trim();

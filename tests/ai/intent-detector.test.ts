@@ -23,6 +23,13 @@ describe('intent-detector', () => {
     expect(r.mode).toBe('ask');
   });
 
+  it('prefers code over ask for an explicit create/write website prompt', () => {
+    const r = detectIntent(
+      'Creează un website de prezentare. Scrie efectiv fișierele în workspace. Secțiuni: Cum funcționează.'
+    );
+    expect(r.mode).toBe('code');
+  });
+
   it('defaults to ask when ambiguous', () => {
     const r = detectIntent('hello');
     expect(r.mode).toBe('ask');

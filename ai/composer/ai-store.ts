@@ -8,7 +8,7 @@ import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { isAskChatMode, shouldAttachHeavyChatContext } from '../../src/shared/ai-context-prepare';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
-import { resolveEffectiveMode, isCavalloModesTestRequest } from '../modes/mode-router';
+import { resolveEffectiveMode, isCavalloModesTestRequest, shouldPersistAutoModeSwitch } from '../modes/mode-router';
 import { CAVALLO_MODES_TEST_FIXTURE } from '../prompts/cavallo-mode-protocol';
 import { normalizeAgentModeId } from '../modes/intent-detector';
 import {
@@ -85,6 +85,7 @@ import {
 } from './continue-workspace-flow';
 import { applyScaffoldToWorkspace, parseScaffoldFiles } from './scaffold-apply';
 import {
+  buildTimeoutScaffoldRecoveryPatch,
   isWatchdogTimeoutError,
   planFinishDiskWritesForUserMessage,
   shouldAutoCreateDesktopWorkspace,
@@ -155,6 +156,8 @@ export interface ChatMessage {
   resolvedModel?: string;
   isStreaming?: boolean;
   error?: string;
+  /** Watchdog timeout recovered a scaffold/project on disk — not a successful model completion. */
+  timeoutRecovered?: boolean;
   diff?: DetectedDiff;
   activitySteps?: ChatActivityStep[];
   reasoning?: string;
@@ -1303,7 +1306,11 @@ export const useAIStore = create<AIStore>()(
             autoSwitch: cavalloCfg?.autoModeSwitch !== false,
             explicitTriggers: cavalloCfg?.explicitTriggers !== false,
           });
-          if (resolved.switched && resolved.mode !== agentMode) {
+          if (
+            resolved.switched &&
+            resolved.mode !== agentMode &&
+            shouldPersistAutoModeSwitch(agentMode, resolved.mode)
+          ) {
             get().setAgentMode(resolved.mode);
             ({
               selectedModel,
@@ -1625,14 +1632,10 @@ export const useAIStore = create<AIStore>()(
           closeTurnNonceAndControllers();
 
           const projectPath = useEditorStore.getState().projectPath;
-          const appliesScaffold = modeSupportsFileApply(agentMode);
           const skipScaffold =
-            !appliesScaffold ||
             !projectPath ||
-            extra?.error ||
-            isWatchdogTimeoutError(extra?.error) ||
-            Boolean(extra?.proposedWrites?.length);
-          const blockOnDiff = Boolean(diff);
+            (!diskPlan.applyParsedFences && !diskPlan.applyFallbackScaffold);
+          const blockOnDiff = Boolean(diff) && !diskPlan.timeoutRecovery;
           if (skipScaffold || blockOnDiff) {
             // Tool/pipeline writes already on disk — mark live strip done; keep until next chat.
             for (const f of earlyDiskWrites) {
@@ -1678,6 +1681,59 @@ export const useAIStore = create<AIStore>()(
             }
             writtenFiles = [...new Set(writtenFiles)];
             await useEditorStore.getState().refreshTree();
+
+            if (diskPlan.timeoutRecovery) {
+              let usedFallback = false;
+              if (
+                diskPlan.applyFallbackScaffold &&
+                !(await workspaceHasRunnableWebProject(projectPath))
+              ) {
+                const fallback = await applyFallbackScaffold(projectPath, {
+                  projectName: workspaceFolderTitle(projectPath),
+                });
+                if (fallback.written.length > 0) {
+                  usedFallback = true;
+                  writtenFiles = [...new Set([...writtenFiles, ...fallback.written])];
+                  scaffoldErrors = [...scaffoldErrors, ...fallback.errors];
+                  await useEditorStore.getState().refreshTree();
+                } else if (writtenFiles.length === 0) {
+                  scaffoldErrors = [...scaffoldErrors, ...fallback.errors];
+                }
+              }
+              const recovery = buildTimeoutScaffoldRecoveryPatch({
+                written: writtenFiles,
+                usedFallback,
+                applyErrors: scaffoldErrors,
+              });
+              const prevTl =
+                get().messages.find((m) => m.id === assistantMsgId)?.timelineEvents ?? [];
+              updateAssistant({
+                content: recovery.content,
+                error: recovery.error,
+                timeoutRecovered: recovery.timeoutRecovered,
+                writtenFiles: recovery.writtenFiles.length ? recovery.writtenFiles : undefined,
+                timelineEvents: recovery.timeoutRecovered
+                  ? [...prevTl, buildFallbackScaffoldTimelineEvent()]
+                  : prevTl,
+                timelineExpanded: recovery.timeoutRecovered,
+              });
+              for (const f of writtenFiles) {
+                useLiveAiEditsStore.getState().completeEdit(f);
+              }
+              const lastFile = writtenFiles.includes('src/App.tsx')
+                ? 'src/App.tsx'
+                : writtenFiles.includes('index.html')
+                  ? 'index.html'
+                  : writtenFiles[writtenFiles.length - 1];
+              if (lastFile) {
+                const opened = await openWrittenFile(lastFile);
+                if (opened) useEditorStore.getState().closeAiPreview();
+              } else {
+                useEditorStore.getState().closeAiPreview();
+              }
+              return;
+            }
+
             const recapText = msgForParse?.recap ?? capturedRecapMeta?.pendingIssues?.join(' ');
             const gate = capturedRecapMeta?.completionGate;
             const fullDelivery: FullDeliveryConfig =
@@ -1753,7 +1809,7 @@ export const useAIStore = create<AIStore>()(
               if (
                 diskPlan.allowWriteFollowup &&
                 scaffoldParsed > 0 &&
-                modeSupportsFileApply(agentMode) &&
+                (modeSupportsFileApply(agentMode) || diskPlan.applyParsedFences) &&
                 fullDelivery.autonomousFinish &&
                 canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
                 !isSessionStale()
