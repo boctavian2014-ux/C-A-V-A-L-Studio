@@ -5,7 +5,7 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityBar } from "../../src/renderer/components/sidebar/ActivityBar";
+import { ActivityBar, arenaStatusMotionMode } from "../../src/renderer/components/sidebar/ActivityBar";
 import { ConnectionStatusIndicator } from "../../src/renderer/components/workbench/ConnectionStatusIndicator";
 import { WorkbenchHeader } from "../../src/renderer/components/workbench/WorkbenchHeader";
 import { useEditorStore } from "../../src/renderer/store/editor-store";
@@ -31,6 +31,11 @@ function mount(ui: ReactElement) {
   });
   return {
     container,
+    rerender(next: ReactElement) {
+      act(() => {
+        root?.render(wrap(next));
+      });
+    },
     unmount() {
       act(() => {
         root?.unmount();
@@ -41,12 +46,40 @@ function mount(ui: ReactElement) {
   };
 }
 
+function stubMatchMedia(reduced: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: reduced && /prefers-reduced-motion:\s*reduce/.test(query),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
+const BAR_DEFAULTS = {
+  active: "explorer" as const,
+  onChange: () => undefined,
+  aiPanelOpen: false,
+  onToggleAI: () => undefined,
+  gitChangesCount: 0,
+  engineeringOpen: false,
+  onToggleEngineering: () => undefined,
+};
+
 describe("ActivityBar layout", () => {
   let mounted: { unmount: () => void } | undefined;
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     document.body.innerHTML = "";
+    stubMatchMedia(false);
     usePreviewStore.setState({
       activePreview: null,
       previewUrl: null,
@@ -62,20 +95,14 @@ describe("ActivityBar layout", () => {
   });
 
   function renderBar(overrides?: Partial<React.ComponentProps<typeof ActivityBar>>) {
-    const result = mount(
-      <ActivityBar
-        active="explorer"
-        onChange={() => undefined}
-        aiPanelOpen={false}
-        onToggleAI={() => undefined}
-        gitChangesCount={0}
-        engineeringOpen={false}
-        onToggleEngineering={() => undefined}
-        {...overrides}
-      />
-    );
+    const result = mount(<ActivityBar {...BAR_DEFAULTS} {...overrides} />);
     mounted = result;
-    return result;
+    return {
+      ...result,
+      setProps(next?: Partial<React.ComponentProps<typeof ActivityBar>>) {
+        result.rerender(<ActivityBar {...BAR_DEFAULTS} {...next} />);
+      },
+    };
   }
 
   it("renders main activities in VS Code order", () => {
@@ -151,6 +178,119 @@ describe("ActivityBar layout", () => {
         .querySelector('[data-testid="arena-status-icon-core"]')
         ?.getAttribute("data-active")
     ).toBe("true");
+  });
+
+  it("keeps the arena icon static at rest", () => {
+    const idle = renderBar();
+    const idleWrap = idle.container.querySelector('[data-testid="arena-status-icon"]');
+    expect(idleWrap?.getAttribute("data-state")).toBe("idle");
+    expect(idleWrap?.getAttribute("data-motion")).toBe("static");
+    expect(idleWrap?.getAttribute("data-reduced")).toBe("false");
+    expect(idleWrap?.getAttribute("style")).toMatch(/width:\s*24px/);
+    expect(idleWrap?.getAttribute("style")).toMatch(/height:\s*24px/);
+    expect(
+      idle.container.querySelector('[data-testid="activity-ai"]')?.getAttribute("style")
+    ).toMatch(/width:\s*38px/);
+    idle.unmount();
+    mounted = undefined;
+
+    const open = renderBar({ aiPanelOpen: true, arenaStatus: "open" });
+    expect(
+      open.container
+        .querySelector('[data-testid="arena-status-icon"]')
+        ?.getAttribute("data-motion")
+    ).toBe("static");
+    expect(
+      open.container
+        .querySelector('[data-testid="arena-status-icon-core"]')
+        ?.getAttribute("data-active")
+    ).toBe("false");
+  });
+
+  it("starts motion once for an active turn and stops immediately on cancel", () => {
+    const view = renderBar({ aiPanelOpen: true, arenaStatus: "open" });
+    expect(view.container.querySelectorAll('[data-testid="arena-status-icon"]')).toHaveLength(1);
+    expect(
+      view.container
+        .querySelector('[data-testid="arena-status-icon"]')
+        ?.getAttribute("data-motion")
+    ).toBe("static");
+
+    view.setProps({ aiPanelOpen: true, arenaStatus: "active" });
+    const activeWrap = view.container.querySelector('[data-testid="arena-status-icon"]');
+    expect(view.container.querySelectorAll('[data-testid="arena-status-icon"]')).toHaveLength(1);
+    expect(activeWrap?.getAttribute("data-state")).toBe("active");
+    expect(activeWrap?.getAttribute("data-motion")).toBe("active");
+    expect(
+      view.container
+        .querySelector('[data-testid="arena-status-icon-core"]')
+        ?.getAttribute("data-active")
+    ).toBe("true");
+
+    view.setProps({ aiPanelOpen: true, arenaStatus: "open" });
+    const restWrap = view.container.querySelector('[data-testid="arena-status-icon"]');
+    expect(view.container.querySelectorAll('[data-testid="arena-status-icon"]')).toHaveLength(1);
+    expect(restWrap?.getAttribute("data-state")).toBe("open");
+    expect(restWrap?.getAttribute("data-motion")).toBe("static");
+    expect(
+      view.container
+        .querySelector('[data-testid="arena-status-icon-core"]')
+        ?.getAttribute("data-active")
+    ).toBe("false");
+  });
+
+  it("does not stack motion or duplicate wrappers across consecutive turns", () => {
+    const view = renderBar({ aiPanelOpen: true, arenaStatus: "open" });
+    view.setProps({ aiPanelOpen: true, arenaStatus: "active" });
+    view.setProps({ aiPanelOpen: true, arenaStatus: "open" });
+    view.setProps({ aiPanelOpen: true, arenaStatus: "active" });
+
+    const wrappers = view.container.querySelectorAll('[data-testid="arena-status-icon"]');
+    expect(wrappers).toHaveLength(1);
+    expect(wrappers[0]?.getAttribute("data-state")).toBe("active");
+    expect(wrappers[0]?.getAttribute("data-motion")).toBe("active");
+    expect(wrappers[0]?.getAttribute("data-reduced")).toBe("false");
+    expect(
+      view.container.querySelectorAll('[data-testid="arena-status-icon"][data-motion="active"]')
+    ).toHaveLength(1);
+  });
+
+  it("keeps the arena icon static when reduced motion is preferred", () => {
+    stubMatchMedia(true);
+    const view = renderBar({ aiPanelOpen: true, arenaStatus: "active" });
+    const wrap = view.container.querySelector('[data-testid="arena-status-icon"]');
+    expect(wrap?.getAttribute("data-state")).toBe("active");
+    expect(wrap?.getAttribute("data-reduced")).toBe("true");
+    expect(wrap?.getAttribute("data-motion")).toBe("static");
+    expect(
+      view.container
+        .querySelector('[data-testid="arena-status-icon-core"]')
+        ?.getAttribute("data-active")
+    ).toBe("true");
+  });
+
+  it("maps motion only for active turns without reduced motion", () => {
+    expect(arenaStatusMotionMode("idle", false)).toBe("static");
+    expect(arenaStatusMotionMode("open", false)).toBe("static");
+    expect(arenaStatusMotionMode("active", false)).toBe("active");
+    expect(arenaStatusMotionMode("active", true)).toBe("static");
+  });
+
+  it("gates active animation behind prefers-reduced-motion in CSS", () => {
+    const css = fs.readFileSync(
+      path.join(__dirname, "../../src/renderer/styles/arena-status-icon-motion.css"),
+      "utf8"
+    );
+    expect(css).toContain("@keyframes caval-arena-status-active");
+    expect(css).toContain('[data-motion="active"]');
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(css).toContain("animation: none !important");
+
+    const entry = fs.readFileSync(
+      path.join(__dirname, "../../src/renderer/workbench-app.tsx"),
+      "utf8"
+    );
+    expect(entry).toContain("arena-status-icon-motion.css");
   });
 });
 
