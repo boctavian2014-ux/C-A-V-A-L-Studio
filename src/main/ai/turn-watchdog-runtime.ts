@@ -38,11 +38,13 @@ export function armTurnWatchdog(opts: {
   const { streamId, mode, stream, abort } = opts;
   disarmTurnWatchdog(streamId);
   const ms = timeoutMsForAgentMode(mode);
+  const envMs = Number(process.env.CAVAL_TURN_TIMEOUT_MS);
+  const waitMs = Number.isFinite(envMs) && envMs > 0 ? envMs : ms;
   const timer = setTimeout(() => {
     timers.delete(streamId);
     abort();
     emitTurnWatchdogTimeout(stream, streamId);
-  }, ms);
+  }, waitMs);
   timers.set(streamId, timer);
   return () => disarmTurnWatchdog(streamId);
 }

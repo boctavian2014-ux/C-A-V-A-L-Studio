@@ -111,4 +111,16 @@ describe("scaffold create-and-write contract", () => {
     expect(resolveEffectiveMode("code", WEBSITE_PROMPT).mode).toBe("code");
     expect(resolveEffectiveMode("code", WEBSITE_PROMPT).switched).toBe(false);
   });
+
+  it("timeout on create-and-write still plans fence apply or Vite fallback", () => {
+    const plan = planFinishDiskWritesForUserMessage({
+      userMessage: WEBSITE_PROMPT,
+      timedOut: true,
+      error: "timed_out",
+    });
+    expect(plan.timeoutRecovery).toBe(true);
+    expect(plan.applyParsedFences).toBe(true);
+    expect(plan.applyFallbackScaffold).toBe(true);
+    expect(plan.allowWriteFollowup).toBe(false);
+  });
 });

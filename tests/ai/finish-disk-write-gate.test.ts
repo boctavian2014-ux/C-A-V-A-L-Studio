@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  buildTimeoutScaffoldRecoveryPatch,
   isWatchdogTimeoutError,
   planFinishDiskWrites,
   planFinishDiskWritesForUserMessage,
@@ -29,6 +30,7 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.applyFallbackScaffold).toBe(false);
     expect(plan.autoInstallDependencies).toBe(false);
     expect(plan.allowWriteFollowup).toBe(false);
+    expect(plan.timeoutRecovery).toBe(false);
   });
 
   it("fence-only PROPOSE_EDIT create intent is proposal-only — zero finish() writes", () => {
@@ -39,6 +41,7 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.applyFallbackScaffold).toBe(false);
     expect(plan.autoInstallDependencies).toBe(false);
     expect(plan.allowWriteFollowup).toBe(false);
+    expect(plan.timeoutRecovery).toBe(false);
   });
 
   it("UI-looking agentic add-comment prompt never applies fences or fallback from finish()", () => {
@@ -61,6 +64,7 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.applyFallbackScaffold).toBe(false);
     expect(plan.autoInstallDependencies).toBe(false);
     expect(plan.allowWriteFollowup).toBe(false);
+    expect(plan.timeoutRecovery).toBe(false);
   });
 
   it("timeout flag alone is enough even if the original turn would have been APPLY_EDIT", () => {
@@ -74,6 +78,7 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.applyFallbackScaffold).toBe(false);
     expect(plan.autoInstallDependencies).toBe(false);
     expect(plan.allowWriteFollowup).toBe(false);
+    expect(plan.timeoutRecovery).toBe(false);
   });
 
   it("proposedWrites skip finish() disk writes (Accept is the only apply path)", () => {
@@ -97,6 +102,7 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.applyFallbackScaffold).toBe(false);
     expect(plan.autoInstallDependencies).toBe(true);
     expect(plan.allowWriteFollowup).toBe(true);
+    expect(plan.timeoutRecovery).toBe(false);
   });
 
   it("SCAFFOLD create-and-write applies fences and fallback from finish()", () => {
@@ -108,6 +114,7 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.applyFallbackScaffold).toBe(true);
     expect(plan.autoInstallDependencies).toBe(true);
     expect(plan.allowWriteFollowup).toBe(true);
+    expect(plan.timeoutRecovery).toBe(false);
   });
 
   it("hang/timeout plus a parseable fence still means zero applyScaffold/fallback calls", () => {
@@ -149,6 +156,55 @@ describe("P0.4 callers must not write when the plan forbids it", () => {
       await applyFallbackScaffold("C:\\proj");
     }
     expect(called).toBe(false);
+  });
+});
+
+describe("P0.4 create-and-write watchdog timeout recovery", () => {
+  const CREATE_WRITE =
+    "Creează un index.html simplu. Scrie efectiv fișierele în workspace.";
+
+  it("recovers fences and Vite fallback without follow-up or auto-install", () => {
+    const plan = planFinishDiskWritesForUserMessage({
+      userMessage: CREATE_WRITE,
+      error: TURN_WATCHDOG_ABORT_REASON,
+      timedOut: true,
+    });
+    expect(plan.timeoutRecovery).toBe(true);
+    expect(plan.applyParsedFences).toBe(true);
+    expect(plan.applyFallbackScaffold).toBe(true);
+    expect(plan.autoInstallDependencies).toBe(false);
+    expect(plan.allowWriteFollowup).toBe(false);
+  });
+
+  it("Ask/explain timeout still never writes", () => {
+    const plan = planFinishDiskWritesForUserMessage({
+      userMessage: "Explică-mi rolul fișierului index.html.",
+      error: TURN_WATCHDOG_ABORT_REASON,
+      timedOut: true,
+    });
+    expect(plan.timeoutRecovery).toBe(false);
+    expect(plan.applyParsedFences).toBe(false);
+    expect(plan.applyFallbackScaffold).toBe(false);
+  });
+
+  it("does not mark recovery as a successful model completion", () => {
+    const recovered = buildTimeoutScaffoldRecoveryPatch({
+      written: ["index.html", "package.json"],
+      usedFallback: true,
+    });
+    expect(recovered.timeoutRecovered).toBe(true);
+    expect(recovered.error).toBe(TURN_WATCHDOG_ABORT_REASON);
+    expect(recovered.content).toMatch(/nu a fost generat de model/i);
+
+    const failed = buildTimeoutScaffoldRecoveryPatch({
+      written: [],
+      usedFallback: true,
+      applyErrors: ["IPC filesystem unavailable"],
+    });
+    expect(failed.timeoutRecovered).toBe(false);
+    expect(failed.error).toBe(TURN_WATCHDOG_ABORT_REASON);
+    expect(failed.content).toContain("IPC filesystem unavailable");
+    expect(failed.content).not.toMatch(/proiect minim funcțional a fost creat de model/i);
   });
 });
 
