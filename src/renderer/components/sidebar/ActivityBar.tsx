@@ -5,11 +5,11 @@ import {
   IconSearch,
   IconGit,
   IconMarketplace,
-  IconSparkle,
   IconSettingsNeutral,
   IconEngineering,
   IconPreview,
 } from "../brand/CavaloIcons";
+import { ArenaRobot } from "../brand/ArenaRobot";
 import { usePreviewStore } from "../../store/preview-store";
 import { useEditorStore } from "../../store/editor-store";
 import type { PreviewStatus, PreviewTarget } from "../../../shared/preview-contract";
@@ -137,13 +137,7 @@ function TopRightBadge({
   );
 }
 
-function ArenaStatusIcon({
-  state,
-  children,
-}: {
-  state: ArenaStatusIconState;
-  children: React.ReactNode;
-}) {
+function ArenaStatusIcon({ state }: { state: ArenaStatusIconState }) {
   const prefersReducedMotion = usePrefersReducedMotion();
   const motion = arenaStatusMotionMode(state, prefersReducedMotion);
   return (
@@ -160,7 +154,7 @@ function ArenaStatusIcon({
         width: ACTIVITY_ICON,
         height: ACTIVITY_ICON,
         lineHeight: 0,
-        overflow: "hidden",
+        overflow: "visible",
         flexShrink: 0,
         transition: "none",
       }}
@@ -175,10 +169,11 @@ function ArenaStatusIcon({
           width: ACTIVITY_ICON,
           height: ACTIVITY_ICON,
           lineHeight: 0,
+          overflow: "visible",
           transition: "none",
         }}
       >
-        {children}
+        <ArenaRobot size={ACTIVITY_ICON} />
       </span>
     </span>
   );
@@ -436,9 +431,7 @@ export function ActivityBar({
           onClick={onToggleAI}
           testId="activity-ai"
         >
-          <ArenaStatusIcon state={arenaStatus === "active" ? "active" : aiPanelOpen ? "open" : "idle"}>
-            <IconSparkle size={ACTIVITY_ICON} />
-          </ArenaStatusIcon>
+          <ArenaStatusIcon state={arenaStatus === "active" ? "active" : aiPanelOpen ? "open" : "idle"} />
         </ActivityBarItem>
 
         <ActivityBarItem

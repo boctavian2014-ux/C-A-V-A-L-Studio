@@ -153,11 +153,17 @@ describe("ActivityBar layout", () => {
     const { container } = renderBar();
     const ai = container.querySelector('[data-testid="activity-ai"]');
     const wrappers = container.querySelectorAll('[data-testid="arena-status-icon"]');
+    const robots = container.querySelectorAll('[data-testid="arena-status-robot"]');
 
     expect(wrappers).toHaveLength(1);
+    expect(robots).toHaveLength(1);
     expect(ai?.contains(wrappers[0])).toBe(true);
+    expect(wrappers[0]?.contains(robots[0])).toBe(true);
     expect(wrappers[0]?.getAttribute("data-state")).toBe("idle");
     expect(container.querySelector('[data-testid="arena-status-icon-core"]')).toBeTruthy();
+    expect(robots[0]?.querySelector(".arena-robot-ear-left")).toBeTruthy();
+    expect(robots[0]?.querySelector(".arena-robot-ear-right")).toBeTruthy();
+    expect(robots[0]?.querySelector(".arena-robot-head")).toBeTruthy();
   });
 
   it("updates the arena status wrapper from panel-open to active", () => {
@@ -191,6 +197,8 @@ describe("ActivityBar layout", () => {
     expect(
       idle.container.querySelector('[data-testid="activity-ai"]')?.getAttribute("style")
     ).toMatch(/width:\s*38px/);
+    expect(idle.container.querySelectorAll('[data-testid="arena-status-robot"]')).toHaveLength(1);
+    expect(idleWrap?.getAttribute("data-motion")).toBe("static");
     idle.unmount();
     mounted = undefined;
 
@@ -219,6 +227,7 @@ describe("ActivityBar layout", () => {
     view.setProps({ aiPanelOpen: true, arenaStatus: "active" });
     const activeWrap = view.container.querySelector('[data-testid="arena-status-icon"]');
     expect(view.container.querySelectorAll('[data-testid="arena-status-icon"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('[data-testid="arena-status-robot"]')).toHaveLength(1);
     expect(activeWrap?.getAttribute("data-state")).toBe("active");
     expect(activeWrap?.getAttribute("data-motion")).toBe("active");
     expect(
@@ -230,6 +239,7 @@ describe("ActivityBar layout", () => {
     view.setProps({ aiPanelOpen: true, arenaStatus: "open" });
     const restWrap = view.container.querySelector('[data-testid="arena-status-icon"]');
     expect(view.container.querySelectorAll('[data-testid="arena-status-icon"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('[data-testid="arena-status-robot"]')).toHaveLength(1);
     expect(restWrap?.getAttribute("data-state")).toBe("open");
     expect(restWrap?.getAttribute("data-motion")).toBe("static");
     expect(
@@ -237,6 +247,9 @@ describe("ActivityBar layout", () => {
         .querySelector('[data-testid="arena-status-icon-core"]')
         ?.getAttribute("data-active")
     ).toBe("false");
+    expect(restWrap?.querySelectorAll('[class*="arena-robot-"]')).toHaveLength(
+      view.container.querySelectorAll('[class*="arena-robot-"]').length
+    );
   });
 
   it("does not stack motion or duplicate wrappers across consecutive turns", () => {
@@ -247,12 +260,22 @@ describe("ActivityBar layout", () => {
 
     const wrappers = view.container.querySelectorAll('[data-testid="arena-status-icon"]');
     expect(wrappers).toHaveLength(1);
+    expect(view.container.querySelectorAll('[data-testid="arena-status-robot"]')).toHaveLength(1);
     expect(wrappers[0]?.getAttribute("data-state")).toBe("active");
     expect(wrappers[0]?.getAttribute("data-motion")).toBe("active");
     expect(wrappers[0]?.getAttribute("data-reduced")).toBe("false");
     expect(
       view.container.querySelectorAll('[data-testid="arena-status-icon"][data-motion="active"]')
     ).toHaveLength(1);
+
+    view.setProps({ aiPanelOpen: true, arenaStatus: "open" });
+    const rest = view.container.querySelector('[data-testid="arena-status-icon"]');
+    expect(view.container.querySelectorAll('[data-testid="arena-status-robot"]')).toHaveLength(1);
+    expect(rest?.getAttribute("data-motion")).toBe("static");
+    expect(rest?.getAttribute("data-state")).toBe("open");
+    expect(
+      view.container.querySelectorAll('[data-testid="arena-status-icon"][data-motion="active"]')
+    ).toHaveLength(0);
   });
 
   it("keeps the arena icon static when reduced motion is preferred", () => {
@@ -262,11 +285,15 @@ describe("ActivityBar layout", () => {
     expect(wrap?.getAttribute("data-state")).toBe("active");
     expect(wrap?.getAttribute("data-reduced")).toBe("true");
     expect(wrap?.getAttribute("data-motion")).toBe("static");
+    expect(view.container.querySelectorAll('[data-testid="arena-status-robot"]')).toHaveLength(1);
     expect(
       view.container
         .querySelector('[data-testid="arena-status-icon-core"]')
         ?.getAttribute("data-active")
     ).toBe("true");
+    expect(
+      view.container.querySelectorAll('[data-testid="arena-status-icon"][data-motion="active"]')
+    ).toHaveLength(0);
   });
 
   it("maps motion only for active turns without reduced motion", () => {
@@ -281,10 +308,18 @@ describe("ActivityBar layout", () => {
       path.join(__dirname, "../../src/renderer/styles/arena-status-icon-motion.css"),
       "utf8"
     );
-    expect(css).toContain("@keyframes caval-arena-status-active");
+    expect(css).toContain("@keyframes caval-arena-robot-pose");
+    expect(css).toContain("@keyframes caval-arena-robot-head");
+    expect(css).toContain("@keyframes caval-arena-robot-ear-left");
+    expect(css).toContain("@keyframes caval-arena-robot-ear-right");
+    expect(css).toContain("@keyframes caval-arena-robot-antenna");
     expect(css).toContain('[data-motion="active"]');
+    expect(css).toContain(".arena-robot-ear-left");
+    expect(css).toContain("rotate(");
+    expect(css).not.toContain("caval-arena-status-active");
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
     expect(css).toContain("animation: none !important");
+    expect(css).toContain("transform: none !important");
 
     const entry = fs.readFileSync(
       path.join(__dirname, "../../src/renderer/workbench-app.tsx"),

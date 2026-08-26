@@ -1,37 +1,213 @@
-/* Active-turn motion for the Coding Arena activity icon. Transform-only; no layout. */
-@keyframes caval-arena-status-active {
+/* CAVAL arena robot: pose / ear / antenna motion. Transform-only; no layout. */
+
+@keyframes caval-arena-robot-pose {
   0%,
   100% {
-    transform: scale(1);
-    filter: drop-shadow(0 0 0 transparent);
+    transform: rotate(0deg) translateY(0);
   }
-  50% {
-    transform: scale(1.08);
-    filter: drop-shadow(0 0 4px rgba(0, 224, 255, 0.55));
+  16% {
+    transform: rotate(-8deg) translateY(0.35px);
+  }
+  34% {
+    transform: rotate(6deg) translateY(-0.55px);
+  }
+  52% {
+    transform: rotate(10deg) translateY(0.2px);
+  }
+  70% {
+    transform: rotate(-5deg) translateY(-0.3px);
+  }
+  86% {
+    transform: rotate(3deg) translateY(0.12px);
+  }
+}
+
+@keyframes caval-arena-robot-head {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  18% {
+    transform: rotate(-6deg);
+  }
+  38% {
+    transform: rotate(5deg);
+  }
+  58% {
+    transform: rotate(8deg);
+  }
+  78% {
+    transform: rotate(-4deg);
+  }
+}
+
+@keyframes caval-arena-robot-ear-left {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  16% {
+    transform: translateY(-1.7px) rotate(-14deg);
+  }
+  34% {
+    transform: translateY(-2.15px) rotate(-8deg);
+  }
+  52% {
+    transform: translateY(0.35px) rotate(10deg);
+  }
+  70% {
+    transform: translateY(-1.35px) rotate(-16deg);
+  }
+  86% {
+    transform: translateY(-0.4px) rotate(5deg);
+  }
+}
+
+@keyframes caval-arena-robot-ear-right {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  16% {
+    transform: translateY(0.45px) rotate(12deg);
+  }
+  34% {
+    transform: translateY(-2.15px) rotate(9deg);
+  }
+  52% {
+    transform: translateY(-2.25px) rotate(16deg);
+  }
+  70% {
+    transform: translateY(0.25px) rotate(-7deg);
+  }
+  86% {
+    transform: translateY(-1.45px) rotate(11deg);
+  }
+}
+
+@keyframes caval-arena-robot-antenna {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  22% {
+    transform: rotate(16deg);
+  }
+  48% {
+    transform: rotate(-10deg);
+  }
+  74% {
+    transform: rotate(12deg);
+  }
+}
+
+@keyframes caval-arena-robot-eyes {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-0.45px, 0.25px);
+  }
+  46% {
+    transform: translate(0.55px, -0.2px);
+  }
+  72% {
+    transform: translate(-0.3px, -0.35px);
   }
 }
 
 [data-testid="arena-status-icon"] {
-  overflow: hidden;
+  overflow: visible;
   contain: layout style;
 }
 
 [data-testid="arena-status-icon-core"] {
+  overflow: visible;
   transform-origin: 50% 50%;
   animation: none;
+  transition: none;
 }
 
-[data-testid="arena-status-icon"][data-motion="active"] [data-testid="arena-status-icon-core"] {
-  animation: caval-arena-status-active 1.1s ease-in-out infinite;
-}
-
-[data-testid="arena-status-icon"][data-motion="static"] [data-testid="arena-status-icon-core"],
-[data-testid="arena-status-icon"][data-reduced="true"] [data-testid="arena-status-icon-core"] {
+.arena-robot-pose,
+.arena-robot-head,
+.arena-robot-ear-left,
+.arena-robot-ear-right,
+.arena-robot-antenna,
+.arena-robot-eyes {
+  transform-box: fill-box;
   animation: none;
+  transition: none;
+  transform: none;
+}
+
+.arena-robot-pose,
+.arena-robot-head,
+.arena-robot-eyes {
+  transform-origin: 50% 55%;
+}
+
+.arena-robot-ear-left {
+  transform-origin: 100% 50%;
+}
+
+.arena-robot-ear-right {
+  transform-origin: 0% 50%;
+}
+
+.arena-robot-antenna {
+  transform-origin: 40% 100%;
+}
+
+[data-testid="arena-status-icon"][data-motion="active"] .arena-robot-pose {
+  animation: caval-arena-robot-pose 1.7s ease-in-out infinite;
+}
+
+[data-testid="arena-status-icon"][data-motion="active"] .arena-robot-head {
+  animation: caval-arena-robot-head 1.7s ease-in-out infinite;
+}
+
+[data-testid="arena-status-icon"][data-motion="active"] .arena-robot-ear-left {
+  animation: caval-arena-robot-ear-left 1.7s ease-in-out infinite;
+}
+
+[data-testid="arena-status-icon"][data-motion="active"] .arena-robot-ear-right {
+  animation: caval-arena-robot-ear-right 1.7s ease-in-out infinite;
+}
+
+[data-testid="arena-status-icon"][data-motion="active"] .arena-robot-antenna {
+  animation: caval-arena-robot-antenna 1.7s ease-in-out infinite;
+}
+
+[data-testid="arena-status-icon"][data-motion="active"] .arena-robot-eyes {
+  animation: caval-arena-robot-eyes 1.7s ease-in-out infinite;
+}
+
+[data-testid="arena-status-icon"][data-motion="static"] .arena-robot-pose,
+[data-testid="arena-status-icon"][data-motion="static"] .arena-robot-head,
+[data-testid="arena-status-icon"][data-motion="static"] .arena-robot-ear-left,
+[data-testid="arena-status-icon"][data-motion="static"] .arena-robot-ear-right,
+[data-testid="arena-status-icon"][data-motion="static"] .arena-robot-antenna,
+[data-testid="arena-status-icon"][data-motion="static"] .arena-robot-eyes,
+[data-testid="arena-status-icon"][data-reduced="true"] .arena-robot-pose,
+[data-testid="arena-status-icon"][data-reduced="true"] .arena-robot-head,
+[data-testid="arena-status-icon"][data-reduced="true"] .arena-robot-ear-left,
+[data-testid="arena-status-icon"][data-reduced="true"] .arena-robot-ear-right,
+[data-testid="arena-status-icon"][data-reduced="true"] .arena-robot-antenna,
+[data-testid="arena-status-icon"][data-reduced="true"] .arena-robot-eyes {
+  animation: none;
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-testid="arena-status-icon"] .arena-robot-pose,
+  [data-testid="arena-status-icon"] .arena-robot-head,
+  [data-testid="arena-status-icon"] .arena-robot-ear-left,
+  [data-testid="arena-status-icon"] .arena-robot-ear-right,
+  [data-testid="arena-status-icon"] .arena-robot-antenna,
+  [data-testid="arena-status-icon"] .arena-robot-eyes,
   [data-testid="arena-status-icon"] [data-testid="arena-status-icon-core"] {
     animation: none !important;
+    transform: none !important;
   }
 }
