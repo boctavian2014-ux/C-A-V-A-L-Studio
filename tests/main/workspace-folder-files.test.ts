@@ -58,4 +58,10 @@ describe("listFolderFiles", () => {
       fs.rmSync(cacheOnly, { recursive: true, force: true });
     }
   });
+
+  it("returns no files when the workspace root is the context-cache directory", async () => {
+    const cacheRoot = path.join(workspace, ".caval", "context-cache");
+    const files = await listFolderFiles(cacheRoot, 20);
+    expect(files).toEqual([]);
+  });
 });

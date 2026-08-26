@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   isInternalWorkspaceDirName,
   isInternalWorkspacePath,
+  isInternalWorkspaceRoot,
   pickWorkspaceStartupFile,
 } from "../shared/internal-workspace-paths";
 import { languageFromRelativePath } from "./path-security";
@@ -26,6 +27,8 @@ export async function listFolderFiles(
   limit = 80,
   preferredFilePath?: string
 ): Promise<ListedWorkspaceFile[]> {
+  if (isInternalWorkspaceRoot(folderPath)) return [];
+
   const files: ListedWorkspaceFile[] = [];
 
   const walk = async (dir: string): Promise<void> => {

@@ -264,7 +264,23 @@ export function migrateThreadsOnRehydrate(
   return threads.map((t) => ({
     ...t,
     archived: t.id !== activeThreadId,
+    messages: t.messages.map(finalizePersistedChatMessage),
   }));
+}
+
+/** Drop leftover streaming / Memory-active flags so history cannot look like the live turn. */
+export function finalizePersistedChatMessage(message: ChatMessage): ChatMessage {
+  const wasLive =
+    Boolean(message.isStreaming) ||
+    Boolean(message.multiAgentSteps?.some((step) => step.status === "active"));
+  return {
+    ...message,
+    isStreaming: false,
+    multiAgentSteps: message.multiAgentSteps?.map((step) =>
+      step.status === "active" ? { ...step, status: "done" as const } : step
+    ),
+    multiAgentStatus: wasLive && message.multiAgentStatus !== "Oprit" ? undefined : message.multiAgentStatus,
+  };
 }
 
 type IncludeMode = 'file' | 'project' | 'selection';
@@ -1091,9 +1107,15 @@ export const useAIStore = create<AIStore>()(
       },
 
       sendMessage: async (userText) => {
+        if (get().isStreaming && !get().messages.some((m) => m.isStreaming)) {
+          set({ isStreaming: false });
+        }
         if (get().isStreaming && isChatStopIntent(userText)) {
           get().stopStreaming();
           return;
+        }
+        if (get().isStreaming && userText.trim() && !isChatStopIntent(userText)) {
+          get().stopStreaming();
         }
 
         let continueWorkspaceAugment: string | undefined;
@@ -2764,20 +2786,16 @@ export const useAIStore = create<AIStore>()(
         }));
         const thread = state.threads.find((t) => t.id === state.activeThreadId);
         if (thread) {
-          state.messages = thread.messages;
+          state.messages = thread.messages.map(finalizePersistedChatMessage);
           state.ideContextMode = thread.ideContextMode ?? 'enabled';
         } else {
           state.ideContextMode = 'enabled';
         }
         state.isStreaming = false;
-        state.messages = state.messages.map((m) =>
-          m.isStreaming ? { ...m, isStreaming: false } : m
-        );
+        state.messages = state.messages.map(finalizePersistedChatMessage);
         state.threads = state.threads.map((t) => ({
           ...t,
-          messages: t.messages.map((m) =>
-            m.isStreaming ? { ...m, isStreaming: false } : m
-          ),
+          messages: t.messages.map(finalizePersistedChatMessage),
         }));
         // Migrate legacy Code threads that used the multi-agent pipeline
         if (state.agentMode === 'code') {

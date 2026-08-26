@@ -96,6 +96,23 @@ function detectLanguage(filename: string): string {
 
 export const AI_PREVIEW_TAB_ID = 'caval-ai-live-preview';
 
+function tabIsInternal(tab: EditorTab, projectPath: string | null): boolean {
+  if (tab.isAiPreview || tab.path.startsWith('untitled:')) return false;
+  const rel = toWorkspaceRelativePath(projectPath, tab.path) ?? tab.path;
+  return isInternalWorkspacePath(rel, projectPath);
+}
+
+function dropInternalTabs(
+  tabs: EditorTab[],
+  projectPath: string | null,
+  activeTabId: string | null
+): { tabs: EditorTab[]; activeTabId: string | null } {
+  const nextTabs = tabs.filter((tab) => tab.id === AI_PREVIEW_TAB_ID || !tabIsInternal(tab, projectPath));
+  const nextActive =
+    nextTabs.some((tab) => tab.id === activeTabId) ? activeTabId : nextTabs[0]?.id ?? null;
+  return { tabs: nextTabs, activeTabId: nextActive };
+}
+
 let untitledCounter = 0;
 
 // ──────────────────────────────────────────────
@@ -148,8 +165,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const withoutPreview = tabs.filter((t) => t.id !== AI_PREVIEW_TAB_ID);
     const relative = toWorkspaceRelativePath(projectPath, filePath);
 
-    const keepLastValidDocument = (code: 'OUTSIDE_WORKSPACE' | 'INTERNAL_PATH' | 'NOT_FOUND' | 'NOT_A_FILE' | 'READ_FAILED' | 'NO_WORKSPACE', displayRel: string) => {
-      if (code === 'INTERNAL_PATH' || withoutPreview.length > 0) {
+    const keepLastValidDocument = (code: 'OUTSIDE_WORKSPACE' | 'NOT_FOUND' | 'NOT_A_FILE' | 'READ_FAILED' | 'NO_WORKSPACE', displayRel: string) => {
+      if (withoutPreview.length > 0) {
         return;
       }
       useAiWorkCanvasStore.getState().setEditorFileReadError({
@@ -164,7 +181,18 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
 
     if (isInternalWorkspacePath(relative, projectPath)) {
-      keepLastValidDocument('INTERNAL_PATH', relative);
+      const current = get();
+      const cleaned = dropInternalTabs(
+        current.tabs.filter((tab) => tab.id !== AI_PREVIEW_TAB_ID),
+        projectPath,
+        current.activeTabId
+      );
+      set({
+        tabs: cleaned.tabs,
+        activeTabId: cleaned.activeTabId,
+        editorSelection: cleaned.activeTabId ? current.editorSelection : null,
+        activeSymbol: cleaned.activeTabId ? current.activeSymbol : null,
+      });
       return;
     }
 

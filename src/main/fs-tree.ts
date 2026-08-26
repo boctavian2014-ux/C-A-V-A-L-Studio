@@ -1,21 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-const IGNORE = new Set([
-  "node_modules",
-  ".git",
-  "dist",
-  ".next",
-  "__pycache__",
-  ".DS_Store",
-  "coverage",
-  ".turbo",
-  ".cache",
-  ".caval",
-  ".cavalo",
-  ".agent",
-  "context-cache",
-]);
+import { isInternalWorkspaceDirName } from "../shared/internal-workspace-paths";
 
 export interface FileNode {
   id: string;
@@ -33,7 +19,7 @@ export function readDirTree(dirPath: string, rootPath: string, depth = 0): FileN
     const nodes: FileNode[] = [];
 
     for (const entry of entries) {
-      if (IGNORE.has(entry.name)) continue;
+      if (entry.name === ".DS_Store" || isInternalWorkspaceDirName(entry.name)) continue;
 
       const fullPath = path.join(dirPath, entry.name);
       const relPath = path.relative(rootPath, fullPath);

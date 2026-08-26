@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { isInternalWorkspaceDirName } from "../../../src/shared/internal-workspace-paths";
+
 import { createTasksForFile } from "./parallel-batching";
 import { priorityForFile } from "./parallel-priority";
 import { parallelScheduler, type ParallelScheduler } from "./parallel-scheduler";
@@ -80,15 +82,7 @@ export class ParallelContextLoader {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (collected.length >= limit) break;
-      if (
-        entry.name === "node_modules" ||
-        entry.name === "dist" ||
-        entry.name === ".git" ||
-        entry.name === ".caval" ||
-        entry.name === ".cavalo" ||
-        entry.name === ".agent" ||
-        entry.name === "context-cache"
-      ) {
+      if (isInternalWorkspaceDirName(entry.name)) {
         continue;
       }
       const fullPath = path.join(dir, entry.name);

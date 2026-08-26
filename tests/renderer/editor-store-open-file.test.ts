@@ -88,6 +88,53 @@ describe("editor-store openFile internal cache", () => {
     expect(useAiWorkCanvasStore.getState().editorFileReadError).toBeNull();
   });
 
+  it("clears an internal tab when restore points at context-cache documents.json", async () => {
+    useEditorStore.setState({
+      tabs: [
+        {
+          id: "cache",
+          name: "documents.json",
+          path: String.raw`C:\Users\octav\Desktop\WEBSITE CAVALLO\.caval\context-cache\documents.json`,
+          content: "[]",
+          language: "json",
+          isDirty: false,
+        },
+      ],
+      activeTabId: "cache",
+      editorSelection: {
+        text: "{}",
+        path: String.raw`C:\Users\octav\Desktop\WEBSITE CAVALLO\.caval\context-cache\documents.json`,
+        startLine: 1,
+        endLine: 1,
+        startColumn: 1,
+        endColumn: 2,
+      },
+      activeSymbol: "documents",
+    });
+
+    await useEditorStore.getState().openFile(".caval/context-cache/documents.json");
+
+    expect(useEditorStore.getState().tabs).toEqual([]);
+    expect(useEditorStore.getState().activeTabId).toBeNull();
+    expect(useEditorStore.getState().editorSelection).toBeNull();
+    expect(useEditorStore.getState().activeSymbol).toBeNull();
+  });
+
+  it("opens a real workspace file after an internal restore is ignored", async () => {
+    readFile.mockResolvedValue({
+      ok: true,
+      path: "README.md",
+      content: "# CAVAL",
+      language: "markdown",
+    });
+    useEditorStore.setState({ tabs: [], activeTabId: null });
+    await useEditorStore.getState().openFile(".caval/context-cache/documents.json");
+    await useEditorStore.getState().openFile("README.md");
+
+    expect(useEditorStore.getState().activeTabId?.replace(/\\/g, "/")).toContain("README.md");
+    expect(useEditorStore.getState().tabs[0]?.content).toContain("# CAVAL");
+  });
+
   it("invalidates the active document when the workspace changes", () => {
     useEditorStore.getState().setEditorSelection({
       text: "App",

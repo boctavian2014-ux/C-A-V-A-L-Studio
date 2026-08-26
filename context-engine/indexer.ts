@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isInternalWorkspaceDirName } from "../src/shared/internal-workspace-paths";
 import type { ContextChunk, IndexedDocument } from "./types";
 
 const DEFAULT_INCLUDE = new Set([".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".css", ".html"]);
@@ -73,7 +74,7 @@ export class ProjectIndexer {
     const files: string[] = [];
 
     for (const entry of entries) {
-      if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git" || entry.name === ".caval") {
+      if (isInternalWorkspaceDirName(entry.name)) {
         continue;
       }
 
