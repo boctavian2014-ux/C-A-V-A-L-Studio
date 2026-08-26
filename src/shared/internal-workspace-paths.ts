@@ -126,3 +126,12 @@ export function pickWorkspaceStartupFile<T extends WorkspaceStartupFile>(
 
   return userFiles[0];
 }
+
+/** Re-hydrate a startup file only when the editor has no real document yet. */
+export function shouldHydrateStartupDocument(
+  tabs: { id: string; isAiPreview?: boolean }[],
+  activeTabId: string | null
+): boolean {
+  if (!activeTabId) return true;
+  return !tabs.some((tab) => tab.id === activeTabId && !tab.isAiPreview);
+}

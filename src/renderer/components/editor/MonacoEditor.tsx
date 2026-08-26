@@ -24,6 +24,7 @@ import {
 import { ensureLiveAiEditStyles } from '../../../../ai/composer/live-ai-edit-styles';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { useAiWorkCanvasStore } from '../../store/ai-work-canvas-store';
+import { resolveEditorCenterState } from './editor-center-state';
 
 // ──────────────────────────────────────────────
 //  Tema Monaco customizată după Caval dark theme
@@ -315,14 +316,15 @@ export function MonacoEditor() {
     editorRef.current.focus();
   }, [activeTabId]);
 
-  const handleMount: OnMount = useCallback((editor) => {
+  const handleMount: OnMount = useCallback((editor, monacoFromLoader) => {
     editorRef.current = editor;
     setMonacoMounted(true);
     setLoadTimedOut(false);
     setEditorLoadErrorPath(null);
     registerMonacoEditor(editor);
+    const monacoApi = monacoFromLoader as typeof MonacoType | undefined;
+    if (!monacoApi) return;
 
-    const monacoApi = monaco as typeof MonacoType;
     editor.addCommand(
       monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS,
       () => {
@@ -587,7 +589,7 @@ export function MonacoEditor() {
       refactorSelectionAction.dispose();
       registerMonacoEditor(null);
     });
-  }, [monaco, saveTab, setEditorLoadErrorPath]);
+  }, [saveTab, setEditorLoadErrorPath]);
 
   useEffect(() => {
     const onRevealLine = (e: Event) => {
@@ -625,15 +627,92 @@ export function MonacoEditor() {
   }, [activeTabId, updateTabContent]);
 
   const cadStlUrl = useEngineeringCadStore((s) => s.stlUrl);
+  const center = resolveEditorCenterState({
+    hasActiveTab: Boolean(activeTab),
+    projectPath,
+    hasFileReadError: Boolean(editorFileReadError),
+    loadTimedOut,
+    monacoMounted,
+    cadStlUrl,
+    isStreaming,
+  });
 
-  // ── Ecran gol când nu e niciun tab deschis ──
+  if (center === 'cad') {
+    return <EngineeringCadPreview />;
+  }
+  if (center === 'ai-canvas') {
+    return <AiWorkCanvas />;
+  }
+  if (center === 'welcome') {
+    return <WelcomeWorkspacePanel />;
+  }
+  if (center === 'file-error' && editorFileReadError) {
+    return (
+      <div
+        data-testid="editor-file-read-error"
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+          background: '#0D1117',
+          color: 'var(--caval-text-muted)',
+          fontFamily: "'Inter', sans-serif",
+          fontSize: 12,
+          padding: 24,
+        }}
+      >
+        <p style={{ margin: 0 }}>
+          {t('workCanvas.fileReadError', { path: editorFileReadError.relativePath })}
+        </p>
+        <button
+          type="button"
+          data-testid="editor-file-read-retry"
+          onClick={() => {
+            clearEditorFileReadError();
+            void useEditorStore.getState().openFile(editorFileReadError.relativePath);
+          }}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 6,
+            border: '1px solid var(--caval-border)',
+            background: 'transparent',
+            color: 'var(--caval-text)',
+            cursor: 'pointer',
+          }}
+        >
+          {t('workCanvas.retryOpen')}
+        </button>
+      </div>
+    );
+  }
+  if (center === 'empty-workspace') {
+    return (
+      <div
+        data-testid="editor-empty-open-workspace"
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          background: '#0D1117',
+          color: 'var(--caval-text-muted)',
+          fontFamily: "'Inter', sans-serif",
+          fontSize: 13,
+          padding: 24,
+        }}
+      >
+        <p style={{ margin: 0 }}>{t('editor.selectFile')}</p>
+        <p style={{ margin: 0, fontSize: 12, opacity: 0.8 }}>{t('editor.selectFileHint')}</p>
+      </div>
+    );
+  }
+
   if (!activeTab) {
-    if (cadStlUrl) {
-      return <EngineeringCadPreview />;
-    }
-    if (isStreaming) {
-      return <AiWorkCanvas />;
-    }
     return <WelcomeWorkspacePanel />;
   }
 
@@ -776,6 +855,10 @@ export function MonacoEditor() {
           </button>
         </div>
       ) : (
+      <div
+        data-testid="monaco-editor-host"
+        style={{ flex: 1, minHeight: 0, height: '100%', overflow: 'hidden' }}
+      >
       <Editor
         key={activeTabId}
         height="100%"
@@ -802,6 +885,7 @@ export function MonacoEditor() {
           </div>
         }
       />
+      </div>
       )}
     </div>
   );

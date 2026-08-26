@@ -11,6 +11,7 @@ const bound = new Map<number, string>();
 const onOpen = vi.fn(async (senderId: number, _sender: unknown, root: string) => {
   bound.set(senderId, root);
 });
+const onCachedOpen = vi.fn(async () => undefined);
 
 vi.mock("electron", () => ({
   ipcMain: harness.ipcMain,
@@ -26,6 +27,7 @@ describe("SEC-IPC-WS-BINDING-001 workspace bind", () => {
     harness.sender.mainFrame.url = "file:///caval-renderer/index.html";
     bound.clear();
     onOpen.mockClear();
+    onCachedOpen.mockClear();
     vi.resetModules();
     workspace = fs.mkdtempSync(path.join(os.tmpdir(), "caval-ws-bind-"));
     filePath = path.join(workspace, "not-a-dir.txt");
@@ -41,6 +43,7 @@ describe("SEC-IPC-WS-BINDING-001 workspace bind", () => {
       getBoundRoot: (senderId) => bound.get(senderId),
       addRecentWorkspace: vi.fn(),
       onOpen,
+      onCachedOpen,
     });
   });
 
@@ -101,6 +104,26 @@ describe("SEC-IPC-WS-BINDING-001 workspace bind", () => {
     expect(result.path).toBe(path.resolve(workspace));
     expect(bound.get(harness.sender.id)).toBe(path.resolve(workspace));
     expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("caval:workspace-open still hydrates the renderer when the root is already bound", async () => {
+    const first = await harness.invoke<{ ok: boolean; cached?: boolean }>(
+      "caval:workspace-open",
+      workspace
+    );
+    expect(first.ok).toBe(true);
+    expect(first.cached).toBeUndefined();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onCachedOpen).not.toHaveBeenCalled();
+
+    const second = await harness.invoke<{ ok: boolean; cached?: boolean }>(
+      "caval:workspace-open",
+      workspace
+    );
+    expect(second.ok).toBe(true);
+    expect(second.cached).toBe(true);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onCachedOpen).toHaveBeenCalledTimes(1);
   });
 
   it("caval:workspace-sync binds a real directory for a trusted sender", async () => {

@@ -4,6 +4,7 @@ import {
   isInternalWorkspacePath,
   isInternalWorkspaceRoot,
   pickWorkspaceStartupFile,
+  shouldHydrateStartupDocument,
 } from "../../src/shared/internal-workspace-paths";
 
 describe("internal workspace paths", () => {
@@ -55,5 +56,21 @@ describe("internal workspace paths", () => {
     expect(isInternalWorkspacePath("documents.json", cacheRoot)).toBe(true);
     expect(isInternalWorkspacePath(`${cacheRoot}\\documents.json`, cacheRoot)).toBe(true);
     expect(isInternalWorkspaceRoot(root)).toBe(false);
+  });
+
+  it("hydrates a startup file only when no real document is open", () => {
+    expect(shouldHydrateStartupDocument([], null)).toBe(true);
+    expect(
+      shouldHydrateStartupDocument(
+        [{ id: "preview", isAiPreview: true }],
+        "preview"
+      )
+    ).toBe(true);
+    expect(
+      shouldHydrateStartupDocument(
+        [{ id: String.raw`C:\proj\README.md` }],
+        String.raw`C:\proj\README.md`
+      )
+    ).toBe(false);
   });
 });

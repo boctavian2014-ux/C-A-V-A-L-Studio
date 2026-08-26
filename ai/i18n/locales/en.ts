@@ -818,6 +818,8 @@ export const en = {
   "workCanvas.fileReadError":
     "Could not read {{path}} from the workspace. Check the path and folder state before continuing.",
   "workCanvas.retryOpen": "Try again",
+  "editor.selectFile": "Select a file in Explorer to open it.",
+  "editor.selectFileHint": "The folder is open, but no document is loaded in the editor.",
 
   "ai.details.show": "Details",
   "ai.details.hide": "Hide details",

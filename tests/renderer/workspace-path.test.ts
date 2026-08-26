@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isFileTreeNodeActive,
   toWorkspaceDisplayPath,
   toWorkspaceRelativePath,
 } from "../../src/renderer/utils/workspace-path";
@@ -27,5 +28,21 @@ describe("workspace-path utils", () => {
     expect(toWorkspaceDisplayPath(root, "README.md")).toBe(
       "C:\\Users\\dev\\fashion-matching-engine\\README.md"
     );
+  });
+
+  it("highlights the explorer node when the tab id is the absolute display path", () => {
+    const node = {
+      type: "file",
+      id: "src\\App.tsx",
+      path: "C:\\Users\\dev\\fashion-matching-engine\\src\\App.tsx",
+    };
+    expect(
+      isFileTreeNodeActive(
+        node,
+        "C:\\Users\\dev\\fashion-matching-engine\\src\\App.tsx",
+        root
+      )
+    ).toBe(true);
+    expect(isFileTreeNodeActive(node, null, root)).toBe(false);
   });
 });

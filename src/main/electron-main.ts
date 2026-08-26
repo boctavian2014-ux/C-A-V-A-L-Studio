@@ -447,6 +447,22 @@ const sendWorkspaceToRenderer = async (
   preloadForContext(inferPreloadContext(folderPath, files.map((f) => f.path)));
 };
 
+/** Renderer reload / re-open of the already-bound folder: hydrate files without wiping chat. */
+const resyncWorkspaceToRenderer = async (
+  webContentsId: number,
+  sender: Electron.WebContents,
+  folderPath: string,
+  source: RecentWorkspaceSource = "folder"
+): Promise<void> => {
+  bindWorkspace(webContentsId, folderPath);
+  addRecentWorkspace(folderPath, source);
+  const files = await listFolderFiles(folderPath, 240);
+  sender.send("caval:folder-opened", {
+    path: folderPath,
+    files,
+  });
+};
+
 const appMenuHandlers = {
   sendMenuCommand,
   createWindow,
@@ -1063,6 +1079,7 @@ registerWorkspaceBindingHandlers({
   getBoundRoot: (id) => workspaceRoots.get(id),
   addRecentWorkspace,
   onOpen: sendWorkspaceToRenderer,
+  onCachedOpen: resyncWorkspaceToRenderer,
 });
 registerWorkspaceDiscoveryHandlers(getBoundWorkspaceRoot);
 

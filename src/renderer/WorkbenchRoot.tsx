@@ -42,7 +42,7 @@ import { useAiWorkCanvasController } from './hooks/use-ai-work-canvas';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
-import { pickWorkspaceStartupFile } from '../shared/internal-workspace-paths';
+import { pickWorkspaceStartupFile, shouldHydrateStartupDocument } from '../shared/internal-workspace-paths';
 import {
   IconGit,
   IconSparkle,
@@ -539,6 +539,8 @@ export function WorkbenchRoot() {
       setFileTree(tree);
       void useGitStore.getState().refresh();
       useAIStore.getState().setIncludeMode('project');
+      const editor = useEditorStore.getState();
+      if (!shouldHydrateStartupDocument(editor.tabs, editor.activeTabId)) return;
       const startup = pickWorkspaceStartupFile(folder.files ?? []);
       if (startup?.path) {
         void openFile(startup.label?.trim() || startup.path);
