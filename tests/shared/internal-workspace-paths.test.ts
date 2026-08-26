@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isInternalWorkspacePath,
+  isInternalWorkspaceRoot,
   pickWorkspaceStartupFile,
 } from "../../src/shared/internal-workspace-paths";
 
@@ -46,5 +47,13 @@ describe("internal workspace paths", () => {
       { path: `${root}\\.cavalo\\ai\\workspace-index.json`, label: ".cavalo\\ai\\workspace-index.json" },
     ]);
     expect(picked).toBeUndefined();
+  });
+
+  it("treats a context-cache folder bound as the workspace root as internal", () => {
+    const cacheRoot = `${root}\\.caval\\context-cache`;
+    expect(isInternalWorkspaceRoot(cacheRoot)).toBe(true);
+    expect(isInternalWorkspacePath("documents.json", cacheRoot)).toBe(true);
+    expect(isInternalWorkspacePath(`${cacheRoot}\\documents.json`, cacheRoot)).toBe(true);
+    expect(isInternalWorkspaceRoot(root)).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import type { ChatMessage, ChatThread } from '../../ai/composer/ai-store';
 import {
   archiveThreadInList,
   archiveThreadsForWorkspaceSwitch,
+  finalizePersistedChatMessage,
   migrateThreadsOnRehydrate,
   visibleThreadForWorkspace,
 } from '../../ai/composer/ai-store';
@@ -61,5 +62,21 @@ describe('chat thread archive helpers', () => {
     expect(next.filter((t) => !t.archived)).toHaveLength(1);
     expect(next.find((t) => !t.archived)?.id).toBe('b');
     expect(next).toHaveLength(3);
+  });
+
+  it('finalizePersistedChatMessage clears leftover Memory/streaming so history is not the live turn', () => {
+    const next = finalizePersistedChatMessage({
+      id: 'asst-1',
+      role: 'assistant',
+      content: 'old answer',
+      timestamp: 1,
+      isStreaming: true,
+      multiAgentStatus: 'Memory…',
+      multiAgentSteps: [{ phase: 'memory', status: 'active', at: 1 }],
+    });
+    expect(next.isStreaming).toBe(false);
+    expect(next.multiAgentStatus).toBeUndefined();
+    expect(next.multiAgentSteps?.[0]?.status).toBe('done');
+    expect(next.content).toBe('old answer');
   });
 });

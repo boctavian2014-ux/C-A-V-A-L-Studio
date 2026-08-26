@@ -181,7 +181,6 @@ function DiffBlock({ message }: { message: ChatMessage }) {
 // ──────────────────────────────────────────────
 
 function ArenaWorkPanel({ message }: { message: ChatMessage }) {
-  const globalStreaming = useAIStore((s) => s.isStreaming);
   const projectPath = useEditorStore((s) => s.projectPath);
   const activeFileLabel = useEditorStore((s) => {
     const id = s.activeTabId;
@@ -205,16 +204,13 @@ function ArenaWorkPanel({ message }: { message: ChatMessage }) {
   }, [projectPath]);
 
   const messageStreaming = Boolean(message.isStreaming);
-  const pipelineActive = Boolean(
-    message.multiAgentSteps?.some((step) => step.status === 'active')
-  );
   const wasStopped = message.multiAgentStatus === 'Oprit';
-  const isStreaming = messageStreaming || globalStreaming;
+  const isStreaming = messageStreaming;
   const showWait =
     cfg.showHorseWaitAnimation &&
     !message.recap &&
     !wasStopped &&
-    (isStreaming || pipelineActive);
+    isStreaming;
   const projectTitle = workspaceFolderTitle(message.workspacePath ?? projectPath);
   const fileCount = message.writtenFiles?.length ?? 0;
   const needsReview = Boolean(
@@ -416,6 +412,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       ? `${selectionLabel} → ${resolvedLabel}`
       : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
   const messageWasStopped = message.multiAgentStatus === 'Oprit';
+  const pipelineLive = Boolean(
+    message.isStreaming ||
+      message.multiAgentSteps?.some((step) => step.status === 'active')
+  );
 
   const senderLabel = isUser ? t('ai.chat.userLabel') : t('ai.chat.agenticSender');
 
@@ -580,7 +580,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <SuggestedCommandsCard commands={shellCommands} />
         )}
 
-        {!isUser && !message.isStreaming && !message.error && !messageWasStopped && (
+        {!isUser && !message.isStreaming && !message.error && !messageWasStopped && !pipelineLive && (
           <MessageFeedbackButtons messageId={message.id} streamId={message.streamId} />
         )}
 
@@ -956,18 +956,17 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (isStreaming) {
-      if (isChatStopIntent(text)) {
-        stopStreaming();
-        setInput('');
-        setTextareaHeight(ARENA_INPUT_MIN_HEIGHT);
-        if (textareaRef.current) {
-          textareaRef.current.style.height = `${ARENA_INPUT_MIN_HEIGHT}px`;
-        }
+    if (isStreaming && (!text || isChatStopIntent(text))) {
+      stopStreaming();
+      setInput('');
+      setTextareaHeight(ARENA_INPUT_MIN_HEIGHT);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = `${ARENA_INPUT_MIN_HEIGHT}px`;
       }
       return;
     }
     if (!text && attachedFiles.length === 0) return;
+    useAiHistoryStore.setState({ activeHistoryId: null });
     setInput('');
     setTextareaHeight(ARENA_INPUT_MIN_HEIGHT);
     if (textareaRef.current) {
