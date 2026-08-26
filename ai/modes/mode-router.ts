@@ -87,12 +87,24 @@ export function resolveEffectiveMode(
     return { mode: normalized, switched: false };
   }
 
+  // Manual Code selection is sticky — never auto-downgrade to Ask mid-create.
+  if (!shouldPersistAutoModeSwitch(normalized, detection.mode)) {
+    return { mode: normalized, switched: false };
+  }
+
   return {
     mode: detection.mode,
     switched: true,
     switchReason: detection.reason,
     fromMode: normalized,
   };
+}
+
+/** Auto-switch may not persist a Code → Ask downgrade. */
+export function shouldPersistAutoModeSwitch(from: AgentModeId, to: AgentModeId): boolean {
+  if (from === to) return false;
+  if (from === 'code' && to === 'ask') return false;
+  return true;
 }
 
 /** Build strict CAVALLO system prompt for direct modes. Agentic uses CODING_ARENA separately. */

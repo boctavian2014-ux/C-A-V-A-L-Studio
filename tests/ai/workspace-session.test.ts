@@ -11,7 +11,8 @@ describe('workspace-session', () => {
     expect(isStaleWorkspace('/proj/a', '/proj/a')).toBe(false);
     expect(isStaleWorkspace(null, null)).toBe(false);
     expect(isStaleWorkspace('/proj/a', null)).toBe(true);
-    expect(isStaleWorkspace(null, '/proj/a')).toBe(true);
+    expect(isStaleWorkspace(null, '/proj/a')).toBe(false);
+    expect(isStaleWorkspace('C:\\proj\\app', 'C:/proj/app')).toBe(false);
   });
 
   it('workspaceFolderTitle uses last path segment', () => {

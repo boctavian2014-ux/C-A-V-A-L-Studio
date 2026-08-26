@@ -39,4 +39,12 @@ describe('mode-router', () => {
     expect(result.mode).toBe('code');
     expect(result.switched).toBe(false);
   });
+
+  it('does not switch Code to Ask on a create/scaffold website prompt', () => {
+    const prompt =
+      'Creează un website de prezentare pentru CAVAL Studio, în folderul curent. Vreau un site modern, dark, orientat către developeri, cu fundal negru, accent cyan/mov, logo CAVAL în header, secțiuni Hero, Funcționalități, Cum funcționează, Beneficii, Call to Action și Footer. Creează toate fișierele necesare pentru a putea porni și previzualiza proiectul local. Nu răspunde doar cu explicații: scrie efectiv fișierele proiectului în workspace.';
+    const result = resolveEffectiveMode('code', prompt);
+    expect(result.mode).toBe('code');
+    expect(result.switched).toBe(false);
+  });
 });

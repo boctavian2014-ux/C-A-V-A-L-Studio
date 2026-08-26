@@ -72,6 +72,22 @@ describe("main-owned write capability gate", () => {
     await expect(fs.stat(path.join(root, "src", "pwn.ts"))).rejects.toThrow();
   });
 
+  it("SCAFFOLD create-and-write grants write_file", async () => {
+    const { root, registry } = await tempRegistry();
+    roots.push(root);
+    const capability = resolveTrustedExecutionCapability({
+      userMessage: "Creează un index.html simplu. Scrie efectiv fișierele în workspace.",
+    });
+    expect(capability.effective).toBe("SCAFFOLD");
+    expect(allowsDiskWrites(capability.effective)).toBe(true);
+    expect(shouldGrantChatWriteTurn(capability)).toBe(true);
+    expect(applyTrustedWriteGate(registry, "stream-scaffold", capability)).toBe("granted");
+
+    const result = await registry.execute(WRITE_ARGS, { turnId: "stream-scaffold" });
+    expect(result.ok).toBe(true);
+    expect(await fs.readFile(path.join(root, "src", "pwn.ts"), "utf8")).toContain("pwn = 1");
+  });
+
   it("PROPOSE_EDIT never writes disk before Accept", async () => {
     const { root, registry } = await tempRegistry();
     roots.push(root);

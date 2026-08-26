@@ -29,7 +29,7 @@ interface Signal {
 
 const SIGNALS: Signal[] = [
   { mode: 'plan', weight: 3, label: 'plan keyword', pattern: /\b(?:plan|strategie|strateg(y|ia)|arhitectur[ăa]|roadmap|design\s+system|milestone|kpi)\b/i },
-  { mode: 'code', weight: 3, label: 'code keyword', pattern: /\b(?:scrie\s+cod|genereaz[ăa]\s+cod|implementeaz[ăa]|implementare|programare|cod\s+pentru|build\s+this|write\s+code|generate\s+code|create\s+(?:the\s+)?(?:app|api|module|component))\b/i },
+  { mode: 'code', weight: 3, label: 'code keyword', pattern: /\b(?:scrie\s+cod|genereaz[ăa]\s+cod|implementeaz[ăa]|implementare|programare|cod\s+pentru|build\s+this|write\s+code|generate\s+code|create\s+(?:the\s+)?(?:app|api|module|component)|creeaz[ăa]|website|scaffold|scrie\s+efectiv)\b/i },
   { mode: 'ask', weight: 2, label: 'ask keyword', pattern: /\b(?:explic[ăa]|ce\s+înseamn[ăa]|cum\s+func(?:ț|t)ioneaz[ăa]|întrebare|what\s+is|how\s+does|explain|tell\s+me\s+about)\b/i },
   { mode: 'debug', weight: 3, label: 'debug keyword', pattern: /\b(?:debug|rezolv[ăa]\s+eroarea|analizeaz[ăa]\s+codul|de\s+ce\s+nu\s+merge|error|bug|stack\s+trace|fix\s+this|nu\s+merge)\b/i },
 ];

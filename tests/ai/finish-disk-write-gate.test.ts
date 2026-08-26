@@ -87,14 +87,25 @@ describe("P0.4 finish() disk-write gate", () => {
     expect(plan.autoInstallDependencies).toBe(false);
   });
 
-  it("approved APPLY_EDIT still must not apply fences from finish() — tools own the grant", () => {
+  it("approved APPLY_EDIT applies fences from finish() but not invented fallback", () => {
     const plan = planFinishDiskWrites({
       hasProposedWrites: false,
       effectiveMode: "APPLY_EDIT",
       writeTurnGranted: true,
     });
-    expect(plan.applyParsedFences).toBe(false);
+    expect(plan.applyParsedFences).toBe(true);
     expect(plan.applyFallbackScaffold).toBe(false);
+    expect(plan.autoInstallDependencies).toBe(true);
+    expect(plan.allowWriteFollowup).toBe(true);
+  });
+
+  it("SCAFFOLD create-and-write applies fences and fallback from finish()", () => {
+    const plan = planFinishDiskWritesForUserMessage({
+      userMessage:
+        "Creează un index.html simplu. Scrie efectiv fișierele în workspace.",
+    });
+    expect(plan.applyParsedFences).toBe(true);
+    expect(plan.applyFallbackScaffold).toBe(true);
     expect(plan.autoInstallDependencies).toBe(true);
     expect(plan.allowWriteFollowup).toBe(true);
   });
@@ -156,5 +167,10 @@ describe("P0.4 auto-create Desktop workspace", () => {
 
   it("still allows auto-create only for write-capable apply/repair/scaffold messages", () => {
     expect(shouldAutoCreateDesktopWorkspace("Aplică schimbarea")).toBe(true);
+    expect(
+      shouldAutoCreateDesktopWorkspace(
+        "Creează un index.html simplu. Scrie efectiv fișierele în workspace."
+      )
+    ).toBe(true);
   });
 });

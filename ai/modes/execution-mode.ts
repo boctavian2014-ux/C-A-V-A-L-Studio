@@ -15,7 +15,7 @@ export type ExecutionMode =
   | "SCAFFOLD";
 
 const READ_ONLY_RE =
-  /(?:^|[\s"'„”])(?:explic[ăa]|explain|ce\s+face|ce\s+rol|rolul\s+(?:fi[șs]ierului|lui)|what\s+(?:does|is)|how\s+does|analizeaz[ăa]|analyze|analys[e]?|inspect|cite[șs]te|read(?:\s+the)?|arat[ăa]-mi|show\s+me|spune-mi|tell\s+me|întrebare|descrie|describe|unde\s+(?:ai\s+)?r[ăa]mas|where\s+(?:you\s+|we\s+)?left\s+off|verific[ăa]\s+folderul|check\s+the\s+folder)/i;
+  /(?:^|[\s"'„”])(?:explic[ăa](?!ții)|explain|ce\s+face|ce\s+rol|rolul\s+(?:fi[șs]ierului|lui)|what\s+(?:does|is)|how\s+does|analizeaz[ăa]|analyze|analys[e]?|inspect|cite[șs]te|read(?:\s+the)?|arat[ăa]-mi|show\s+me|spune-mi|tell\s+me|întrebare|descrie|describe|unde\s+(?:ai\s+)?r[ăa]mas|where\s+(?:you\s+|we\s+)?left\s+off|verific[ăa]\s+folderul|check\s+the\s+folder)/i;
 
 const APPLY_RE =
   /(?:^|[\s"'„”])(?:aplic[ăa](?:\s+(?:schimbarea|modificarea|diff(?:-ul)?|schimb[ăa]rile))?|accept(?:\s+(?:the\s+)?(?:change|diff|write))?|apply(?:\s+the\s+)?(?:change|diff)?)/i;
@@ -24,12 +24,26 @@ const APPLY_RE =
 const CREATE_RE =
   /(?:^|[\s"'„”])(?:te\s+rog\s+(?:s[ăa]\s+)?)?(?:[îi]mi\s+)?(?:creeaz|genereaz|implementeaz|construie[șs]t|create|scaffold|from\s+scratch|proiect\s+nou|app\s+complet|full\s+app|landing|toate\s+fi[șs]ierele|build(?:\s+(?:me\s+)?(?:a|an|the|app|full))?|make\s+(?:me\s+)?(?:a|an|the)\b|adaug[ăa]\s+(?:un|o|fi[șs]ier))/i;
 
+/** Explicit request to materialize files in the open workspace (not propose-only). */
+const EXPLICIT_WRITE_RE =
+  /(?:scrie\s+efectiv|write\s+(?:the\s+)?files|pe\s+disc|on\s+disk|în\s+(?:folderul\s+curent|workspace)|in\s+(?:the\s+)?(?:current\s+)?(?:folder|workspace)|toate\s+fi[șs]ierele(?:\s+necesare)?|nu\s+r[ăa]spunde\s+doar\s+cu\s+explica[țt]ii|previzualiza|preview\s+local)/i;
+
 export function allowsDiskWrites(mode: ExecutionMode): boolean {
   return mode === "APPLY_EDIT" || mode === "AGENTIC_REPAIR" || mode === "SCAFFOLD";
 }
 
 export function looksLikeExplicitCreate(message: string): boolean {
   return CREATE_RE.test(message.trim());
+}
+
+export function looksLikeExplicitWriteRequest(message: string): boolean {
+  return EXPLICIT_WRITE_RE.test(message.trim());
+}
+
+/** Create/scaffold a project and write files — not the propose-first edit path. */
+export function looksLikeScaffoldCreate(message: string): boolean {
+  const text = message.trim();
+  return looksLikeExplicitCreate(text) && looksLikeExplicitWriteRequest(text);
 }
 
 /**
@@ -51,6 +65,7 @@ export function resolveExecutionMode(message: string): ExecutionMode {
     return "SCAFFOLD";
   }
   if (APPLY_RE.test(text)) return "APPLY_EDIT";
+  if (looksLikeScaffoldCreate(text)) return "SCAFFOLD";
   if (READ_ONLY_RE.test(text)) return "READ_ONLY";
   if (looksLikeExplicitCreate(text)) return "PROPOSE_EDIT";
   return "READ_ONLY";

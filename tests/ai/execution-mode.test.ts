@@ -3,11 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   allowsDiskWrites,
   looksLikeExplicitCreate,
+  looksLikeExplicitWriteRequest,
+  looksLikeScaffoldCreate,
   resolveExecutionMode,
   resolveTrustedExecutionCapability,
+  shouldGrantChatWriteTurn,
   stricterExecutionMode,
 } from "../../ai/modes/execution-mode";
 import { buildAgenticRepairMessage } from "../../ai/prompts/agentic-repair";
+
+const WEBSITE_CREATE_WRITE =
+  "Creează un website de prezentare pentru CAVAL Studio, în folderul curent. Vreau un site modern, dark, orientat către developeri, cu fundal negru, accent cyan/mov, logo CAVAL în header, secțiuni Hero, Funcționalități, Cum funcționează, Beneficii, Call to Action și Footer. Creează toate fișierele necesare pentru a putea porni și previzualiza proiectul local. Nu răspunde doar cu explicații: scrie efectiv fișierele proiectului în workspace.";
 
 describe("execution-mode", () => {
   it("routes explanation and inspect requests to READ_ONLY", () => {
@@ -36,6 +42,29 @@ describe("execution-mode", () => {
     expect(allowsDiskWrites(resolveExecutionMode("Aplică schimbarea"))).toBe(true);
   });
 
+  it("routes create-and-write to SCAFFOLD, not PROPOSE_EDIT", () => {
+    const simpleWrite =
+      "Creează un index.html simplu. Scrie efectiv fișierele în workspace.";
+    expect(looksLikeExplicitWriteRequest(simpleWrite)).toBe(true);
+    expect(looksLikeScaffoldCreate(simpleWrite)).toBe(true);
+    expect(resolveExecutionMode(simpleWrite)).toBe("SCAFFOLD");
+    expect(allowsDiskWrites(resolveExecutionMode(simpleWrite))).toBe(true);
+    expect(shouldGrantChatWriteTurn(resolveTrustedExecutionCapability({ userMessage: simpleWrite }))).toBe(
+      true
+    );
+
+    expect(looksLikeScaffoldCreate(WEBSITE_CREATE_WRITE)).toBe(true);
+    expect(resolveExecutionMode(WEBSITE_CREATE_WRITE)).toBe("SCAFFOLD");
+    expect(allowsDiskWrites(resolveExecutionMode(WEBSITE_CREATE_WRITE))).toBe(true);
+    expect(
+      shouldGrantChatWriteTurn(resolveTrustedExecutionCapability({ userMessage: WEBSITE_CREATE_WRITE }))
+    ).toBe(true);
+  });
+
+  it("does not treat 'nu răspunde doar cu explicații' as READ_ONLY", () => {
+    expect(resolveExecutionMode(WEBSITE_CREATE_WRITE)).not.toBe("READ_ONLY");
+  });
+
   it("routes internal repair continue to AGENTIC_REPAIR", () => {
     expect(resolveExecutionMode(buildAgenticRepairMessage({ wave: 0 }))).toBe("AGENTIC_REPAIR");
     expect(allowsDiskWrites(resolveExecutionMode(buildAgenticRepairMessage({ wave: 0 })))).toBe(true);
@@ -51,3 +80,4 @@ describe("execution-mode", () => {
     expect(spoof.effective).toBe("READ_ONLY");
   });
 });
+

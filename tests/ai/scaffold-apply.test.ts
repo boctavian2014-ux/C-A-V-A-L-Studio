@@ -34,6 +34,16 @@ describe("applyScaffoldToWorkspace", () => {
     );
   });
 
+  it("skips internal workspace metadata paths", async () => {
+    const result = await applyScaffoldToWorkspace("C:\\proj", [
+      { path: ".caval/context-cache/documents.json", content: "{}\n" },
+      { path: ".cavalo/ai/history.db", content: "x" },
+      { path: "index.html", content: "<html></html>\n" },
+    ]);
+    expect(result.written).toEqual(["index.html"]);
+    expect(result.skipped).toBe(2);
+  });
+
   it("surfaces workspace sync failure", async () => {
     (window as unknown as { caval: { workspaceSync: ReturnType<typeof vi.fn> } }).caval.workspaceSync =
       vi.fn(async () => ({ ok: false, error: "denied" }));

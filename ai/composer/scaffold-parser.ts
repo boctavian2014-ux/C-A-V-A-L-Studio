@@ -132,6 +132,7 @@ import {
   FORBIDDEN_USER_PACKAGE_NAMES,
 } from '../scaffolds/workspace-forbidden-paths';
 import { isFashionDuplicateScaffoldPath, isJunkScaffoldPath } from '../scaffolds/workspace-rules';
+import { isInternalWorkspacePath } from '../../src/shared/internal-workspace-paths';
 
 /** Paths that collide with built-in CAVALLO modules — never scaffold here. */
 const BLOCKED_SCAFFOLD_PATH_RE = FORBIDDEN_USER_WORKSPACE_PATH_RE;
@@ -143,7 +144,8 @@ export function isBlockedScaffoldPath(path: string): boolean {
   return (
     BLOCKED_SCAFFOLD_PATH_RE.test(normalized) ||
     isJunkScaffoldPath(normalized) ||
-    isFashionDuplicateScaffoldPath(normalized)
+    isFashionDuplicateScaffoldPath(normalized) ||
+    isInternalWorkspacePath(normalized)
   );
 }
 

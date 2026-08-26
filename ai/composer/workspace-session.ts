@@ -13,7 +13,17 @@ export function isStaleWorkspace(
   bound: string | null,
   current: string | null
 ): boolean {
-  return bound !== current;
+  const a = normalizeWorkspacePath(bound);
+  const b = normalizeWorkspacePath(current);
+  if (a === b) return false;
+  // Stream started before the folder finished binding — apply to the newly opened root.
+  if (!a && b) return false;
+  return true;
+}
+
+function normalizeWorkspacePath(value: string | null): string | null {
+  if (!value?.trim()) return null;
+  return value.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
 export function workspaceFolderTitle(path: string | null): string {

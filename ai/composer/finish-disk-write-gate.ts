@@ -1,6 +1,7 @@
 /**
- * P0.4 — finish() must not write disk outside the #45 trusted-turn gate.
- * Fences, fallback scaffold, and timeout cleanup are not write capability.
+ * P0.4 — finish() may write disk only when the #45 trusted-turn gate grants it.
+ * Scaffold/create-and-write applies fences, then fallback if nothing landed.
+ * Timeout, errors, and propose-only turns still never write from finish().
  */
 import {
   allowsDiskWrites,
@@ -11,9 +12,9 @@ import {
 import { TURN_WATCHDOG_ABORT_REASON } from "../../src/shared/turn-watchdog";
 
 export interface FinishDiskWritePlan {
-  /** Parsed ```lang:path fences from the model. Always false in finish(). */
+  /** Parsed ```lang:path fences from the model — only when the turn may write. */
   applyParsedFences: boolean;
-  /** Invented Vite/package.json fallback. Always false in finish(). */
+  /** Minimal Vite/package.json fallback — SCAFFOLD create-and-write only. */
   applyFallbackScaffold: boolean;
   /** npm/verify auto-install after files already written by a granted tool turn. */
   autoInstallDependencies: boolean;
@@ -39,16 +40,18 @@ function writeCapable(input: FinishDiskWriteInput): boolean {
 
 /**
  * Disk mutations that finish() is allowed to perform.
- * Fence-only and fallback never write; timeout/error never write.
+ * Timeout/error/proposedWrites never write. Granted write turns apply fences;
+ * SCAFFOLD also applies fallback when fences are missing or fail.
  */
 export function planFinishDiskWrites(input: FinishDiskWriteInput): FinishDiskWritePlan {
   const closed = turnIsClosed(input);
   const capable = writeCapable(input);
+  const mayWrite = !closed && capable;
   return {
-    applyParsedFences: false,
-    applyFallbackScaffold: false,
-    autoInstallDependencies: !closed && capable,
-    allowWriteFollowup: !closed && capable,
+    applyParsedFences: mayWrite,
+    applyFallbackScaffold: mayWrite && input.effectiveMode === "SCAFFOLD",
+    autoInstallDependencies: mayWrite,
+    allowWriteFollowup: mayWrite,
   };
 }
 

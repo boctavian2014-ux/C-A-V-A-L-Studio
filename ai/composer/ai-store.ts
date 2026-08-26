@@ -8,7 +8,7 @@ import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { isAskChatMode, shouldAttachHeavyChatContext } from '../../src/shared/ai-context-prepare';
 import { getAgentMode, isAgenticPipelineMode, AGENT_MODES, type AgentModeId, DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { loadCavalConfigFromClient, resolveModelForMode } from '../config/caval-config-shared';
-import { resolveEffectiveMode, isCavalloModesTestRequest } from '../modes/mode-router';
+import { resolveEffectiveMode, isCavalloModesTestRequest, shouldPersistAutoModeSwitch } from '../modes/mode-router';
 import { CAVALLO_MODES_TEST_FIXTURE } from '../prompts/cavallo-mode-protocol';
 import { normalizeAgentModeId } from '../modes/intent-detector';
 import {
@@ -1303,7 +1303,11 @@ export const useAIStore = create<AIStore>()(
             autoSwitch: cavalloCfg?.autoModeSwitch !== false,
             explicitTriggers: cavalloCfg?.explicitTriggers !== false,
           });
-          if (resolved.switched && resolved.mode !== agentMode) {
+          if (
+            resolved.switched &&
+            resolved.mode !== agentMode &&
+            shouldPersistAutoModeSwitch(agentMode, resolved.mode)
+          ) {
             get().setAgentMode(resolved.mode);
             ({
               selectedModel,
@@ -1625,9 +1629,7 @@ export const useAIStore = create<AIStore>()(
           closeTurnNonceAndControllers();
 
           const projectPath = useEditorStore.getState().projectPath;
-          const appliesScaffold = modeSupportsFileApply(agentMode);
           const skipScaffold =
-            !appliesScaffold ||
             !projectPath ||
             extra?.error ||
             isWatchdogTimeoutError(extra?.error) ||
@@ -1753,7 +1755,7 @@ export const useAIStore = create<AIStore>()(
               if (
                 diskPlan.allowWriteFollowup &&
                 scaffoldParsed > 0 &&
-                modeSupportsFileApply(agentMode) &&
+                (modeSupportsFileApply(agentMode) || diskPlan.applyParsedFences) &&
                 fullDelivery.autonomousFinish &&
                 canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
                 !isSessionStale()
