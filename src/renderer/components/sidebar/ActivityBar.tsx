@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 
 import {
   IconExplorer,
@@ -17,6 +17,38 @@ import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 export type ActivityTab = "explorer" | "search" | "git" | "extensions" | "settings";
 export type ArenaStatusIconState = "idle" | "open" | "active";
+export type ArenaStatusMotionMode = "active" | "static";
+
+export function arenaStatusMotionMode(
+  state: ArenaStatusIconState,
+  prefersReducedMotion: boolean
+): ArenaStatusMotionMode {
+  return state === "active" && !prefersReducedMotion ? "active" : "static";
+}
+
+function subscribePrefersReducedMotion(onStoreChange: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => undefined;
+  }
+  const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+  media.addEventListener("change", onStoreChange);
+  return () => media.removeEventListener("change", onStoreChange);
+}
+
+function getPrefersReducedMotionSnapshot() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function usePrefersReducedMotion() {
+  return useSyncExternalStore(
+    subscribePrefersReducedMotion,
+    getPrefersReducedMotionSnapshot,
+    () => false
+  );
+}
 
 export const ACTIVITY_BAR_WIDTH = 48;
 const ACTIVITY_BTN = 38;
@@ -112,10 +144,14 @@ function ArenaStatusIcon({
   state: ArenaStatusIconState;
   children: React.ReactNode;
 }) {
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const motion = arenaStatusMotionMode(state, prefersReducedMotion);
   return (
     <span
       data-testid="arena-status-icon"
       data-state={state}
+      data-motion={motion}
+      data-reduced={prefersReducedMotion ? "true" : "false"}
       aria-hidden="true"
       style={{
         display: "inline-flex",
@@ -124,8 +160,9 @@ function ArenaStatusIcon({
         width: ACTIVITY_ICON,
         height: ACTIVITY_ICON,
         lineHeight: 0,
+        overflow: "hidden",
+        flexShrink: 0,
         transition: "none",
-        animation: "none",
       }}
     >
       <span
@@ -135,9 +172,10 @@ function ArenaStatusIcon({
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
+          width: ACTIVITY_ICON,
+          height: ACTIVITY_ICON,
           lineHeight: 0,
           transition: "none",
-          animation: "none",
         }}
       >
         {children}
