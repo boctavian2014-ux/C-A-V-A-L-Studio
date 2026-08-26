@@ -16,6 +16,7 @@ import type { PreviewStatus, PreviewTarget } from "../../../shared/preview-contr
 import { useTranslation } from "../../../../ai/i18n/useTranslation";
 
 export type ActivityTab = "explorer" | "search" | "git" | "extensions" | "settings";
+export type ArenaStatusIconState = "idle" | "open" | "active";
 
 export const ACTIVITY_BAR_WIDTH = 48;
 const ACTIVITY_BTN = 38;
@@ -101,6 +102,47 @@ function TopRightBadge({
         boxShadow: "0 0 0 1px rgba(14,14,15,0.9)",
       }}
     />
+  );
+}
+
+function ArenaStatusIcon({
+  state,
+  children,
+}: {
+  state: ArenaStatusIconState;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      data-testid="arena-status-icon"
+      data-state={state}
+      aria-hidden="true"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: ACTIVITY_ICON,
+        height: ACTIVITY_ICON,
+        lineHeight: 0,
+        transition: "none",
+        animation: "none",
+      }}
+    >
+      <span
+        data-testid="arena-status-icon-core"
+        data-active={state === "active" ? "true" : "false"}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          lineHeight: 0,
+          transition: "none",
+          animation: "none",
+        }}
+      >
+        {children}
+      </span>
+    </span>
   );
 }
 
@@ -249,6 +291,7 @@ export function ActivityBar({
   gitChangesCount,
   engineeringOpen,
   onToggleEngineering,
+  arenaStatus = "idle",
 }: {
   active: ActivityTab;
   onChange: (tab: ActivityTab) => void;
@@ -257,6 +300,7 @@ export function ActivityBar({
   gitChangesCount: number;
   engineeringOpen: boolean;
   onToggleEngineering: () => void;
+  arenaStatus?: ArenaStatusIconState;
 }) {
   const { t } = useTranslation();
   const activePreview = usePreviewStore((s) => s.activePreview);
@@ -354,9 +398,9 @@ export function ActivityBar({
           onClick={onToggleAI}
           testId="activity-ai"
         >
-          <span data-icon="ai">
+          <ArenaStatusIcon state={arenaStatus === "active" ? "active" : aiPanelOpen ? "open" : "idle"}>
             <IconSparkle size={ACTIVITY_ICON} />
-          </span>
+          </ArenaStatusIcon>
         </ActivityBarItem>
 
         <ActivityBarItem

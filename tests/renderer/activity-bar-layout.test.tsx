@@ -61,7 +61,7 @@ describe("ActivityBar layout", () => {
     vi.restoreAllMocks();
   });
 
-  function renderBar() {
+  function renderBar(overrides?: Partial<React.ComponentProps<typeof ActivityBar>>) {
     const result = mount(
       <ActivityBar
         active="explorer"
@@ -71,6 +71,7 @@ describe("ActivityBar layout", () => {
         gitChangesCount={0}
         engineeringOpen={false}
         onToggleEngineering={() => undefined}
+        {...overrides}
       />
     );
     mounted = result;
@@ -119,6 +120,37 @@ describe("ActivityBar layout", () => {
     const { container } = renderBar();
     expect(container.querySelector('[data-testid="header-account-credits"]')).toBeNull();
     expect(container.querySelector(".glass-status-dot")).toBeNull();
+  });
+
+  it("mounts one arena status icon wrapper in the Coding Arena activity", () => {
+    const { container } = renderBar();
+    const ai = container.querySelector('[data-testid="activity-ai"]');
+    const wrappers = container.querySelectorAll('[data-testid="arena-status-icon"]');
+
+    expect(wrappers).toHaveLength(1);
+    expect(ai?.contains(wrappers[0])).toBe(true);
+    expect(wrappers[0]?.getAttribute("data-state")).toBe("idle");
+    expect(container.querySelector('[data-testid="arena-status-icon-core"]')).toBeTruthy();
+  });
+
+  it("updates the arena status wrapper from panel-open to active", () => {
+    const open = renderBar({ aiPanelOpen: true, arenaStatus: "idle" });
+    expect(
+      open.container
+        .querySelector('[data-testid="arena-status-icon"]')
+        ?.getAttribute("data-state")
+    ).toBe("open");
+    open.unmount();
+    mounted = undefined;
+
+    const active = renderBar({ aiPanelOpen: true, arenaStatus: "active" });
+    const wrapper = active.container.querySelector('[data-testid="arena-status-icon"]');
+    expect(wrapper?.getAttribute("data-state")).toBe("active");
+    expect(
+      active.container
+        .querySelector('[data-testid="arena-status-icon-core"]')
+        ?.getAttribute("data-active")
+    ).toBe("true");
   });
 });
 

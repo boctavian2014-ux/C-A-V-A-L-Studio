@@ -272,6 +272,7 @@ export function WorkbenchRoot() {
   const navIndexRef = useRef(-1);
   const { saveTab, activeTabId, setProjectPath, setFileTree, openFile, projectPath, activeSymbol } = useEditorStore();
   const { runWorkspaceVerifyAndReport, runBuildAndReport, queueChatFromPanel } = useAIStore();
+  const isAiStreaming = useAIStore((s) => s.isStreaming);
   const gitChangesCount = useGitStore((s) => s.files.length);
 
   const toggleAI = useCallback(() => setAiPanelOpen((v) => !v), []);
@@ -1324,6 +1325,7 @@ export function WorkbenchRoot() {
                 gitChangesCount={gitChangesCount}
                 engineeringOpen={engineeringOpen}
                 onToggleEngineering={toggleEngineering}
+                arenaStatus={isAiStreaming ? "active" : "open"}
               />
 
               {sidebarOpen && activeActivity === 'explorer' && (
@@ -1380,6 +1382,7 @@ export function WorkbenchRoot() {
             gitChangesCount={gitChangesCount}
             engineeringOpen={engineeringOpen}
             onToggleEngineering={toggleEngineering}
+            arenaStatus={isAiStreaming ? "active" : aiPanelOpen ? "open" : "idle"}
           />
 
           {/* Primary sidebar — Cursor order */}
