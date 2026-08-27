@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } from "electron";
+import { applyNativeWindowChrome, browserWindowChromeOptions, hideNativeMenuBar } from "./window-chrome";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
@@ -68,6 +69,8 @@ import {
 import {
   buildRendererContextMenu,
   installApplicationMenu as installLocalizedApplicationMenu,
+  listApplicationMenuTopLevel,
+  popupApplicationSubmenu,
 } from "./app-menu";
 import { LOCALE_SETTING_KEY } from "../shared/i18n-contract";
 import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
@@ -139,6 +142,7 @@ import { probeCustomProviderConnection } from "../../ai/providers/custom-openai-
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
+applyNativeWindowChrome();
 
 /** Q1-F: headless boot check — no .env keys, no CAD cloud, no live providers. */
 function isElectronSmokeMode(): boolean {
@@ -261,7 +265,7 @@ const createWindow = (): BrowserWindow => {
     maximizable: true,
     title: "CAVAL",
     ...(fsSync.existsSync(iconPath) ? { icon: iconPath } : {}),
-    backgroundColor: "#090B12",
+    ...browserWindowChromeOptions(),
     webPreferences: getRendererWebPreferences(path.join(__dirname, "preload.js")),
   });
 
@@ -342,6 +346,7 @@ const createWindow = (): BrowserWindow => {
   });
 
   installRendererContextMenu(window);
+  hideNativeMenuBar(window);
 
   if (!app.isPackaged && !isElectronSmokeMode()) {
     void window.webContents.session.clearCache().then(loadRenderer);
@@ -480,7 +485,43 @@ const appMenuHandlers = {
 
 const installApplicationMenu = (): void => {
   installLocalizedApplicationMenu(resolveUiLocale(), appMenuHandlers);
+  for (const window of BrowserWindow.getAllWindows()) {
+    hideNativeMenuBar(window);
+  }
 };
+
+function asFiniteCoord(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(-4000, Math.min(8000, value));
+}
+
+ipcMain.handle("caval:app-menu-top-level", (event) => {
+  assertTrustedSender(event);
+  return listApplicationMenuTopLevel();
+});
+
+ipcMain.handle(
+  "caval:app-menu-popup",
+  (event, request: { index?: unknown; x?: unknown; y?: unknown }) => {
+    assertTrustedSender(event);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const index = request?.index;
+    const x = asFiniteCoord(request?.x);
+    const y = asFiniteCoord(request?.y);
+    if (
+      !window ||
+      typeof index !== "number" ||
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index > 32 ||
+      x === null ||
+      y === null
+    ) {
+      return { ok: false as const };
+    }
+    return { ok: popupApplicationSubmenu(window, index, x, y) };
+  },
+);
 
 ipcMain.handle("caval:save-file", async (event, request: { path?: string; content: string; saveAs?: boolean }) => {
   assertTrustedSender(event);
@@ -1724,6 +1765,7 @@ ipcMain.handle(
 );
 
 app.whenReady().then(() => {
+  applyNativeWindowChrome();
   app.setName("CAVAL");
   installRendererSessionPolicy();
   installWebContentsSecurity();

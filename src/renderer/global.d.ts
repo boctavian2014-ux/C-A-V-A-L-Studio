@@ -453,6 +453,11 @@ interface CavalBridge {
   productName?: string;
   ready?: () => void;
   onMenuCommand?: (callback: (command: string) => void) => () => void;
+  appMenu?: {
+    usesInRendererBar?: boolean;
+    topLevel?: () => Promise<Array<{ index: number; label: string }>>;
+    popup?: (input: { index: number; x: number; y: number }) => Promise<{ ok: boolean }>;
+  };
   onFileOpened?: (callback: (file: { path: string; label: string; language: string; content: string }) => void) => () => void;
   onFolderOpened?: (callback: (folder: { path: string; files: Array<{ path: string; label: string; language: string; content: string }> }) => void) => () => void;
   saveFile?: (request: { path?: string; content: string; saveAs?: boolean }) => Promise<{ canceled?: boolean; path?: string; label?: string; language?: string }>;

@@ -18,6 +18,45 @@
   border: 1px solid var(--caval-glass-border);
 }
 
+/* Top chrome (logo + toolbar) — opaque graphite, same token as window/body. */
+.workbench-header {
+  background: var(--caval-bg, #0E0E0F);
+  color: var(--caval-text-muted, #8a95a6);
+}
+
+.workbench-menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  padding: 0 8px;
+  background: var(--caval-bg, #0E0E0F);
+  color: var(--caval-text-muted, #8a95a6);
+  border-bottom: 1px solid var(--caval-border, rgba(255,255,255,0.08));
+  flex-shrink: 0;
+  z-index: 16;
+}
+
+.workbench-menubar-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.workbench-menubar-item:hover,
+.workbench-menubar-item:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--caval-text, #f5f7fa);
+  outline: none;
+}
+
 /* Sticlă mai opacă pentru elemente active / hover */
 .glass-panel-interactive {
   background: var(--caval-glass-bg-strong);

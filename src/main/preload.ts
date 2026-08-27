@@ -305,6 +305,12 @@ contextBridge.exposeInMainWorld("caval", {
     ipcRenderer.on("caval:menu-command", listener);
     return () => ipcRenderer.removeListener("caval:menu-command", listener);
   },
+  appMenu: {
+    usesInRendererBar: process.platform !== "darwin",
+    topLevel: () => ipcRenderer.invoke("caval:app-menu-top-level") as Promise<Array<{ index: number; label: string }>>,
+    popup: (input: { index: number; x: number; y: number }) =>
+      ipcRenderer.invoke("caval:app-menu-popup", input) as Promise<{ ok: boolean }>,
+  },
   onFileOpened: (callback: (file: CavalOpenedFile) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, file: CavalOpenedFile) => callback(file);
     ipcRenderer.on("caval:file-opened", listener);
