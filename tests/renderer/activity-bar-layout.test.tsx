@@ -426,6 +426,12 @@ describe("WorkbenchHeader account control", () => {
         onOpenAccount={onOpenAccount}
       />
     );
+    const header = container.querySelector('[data-testid="workbench-header"]');
+    expect(header).toBeTruthy();
+    expect(header?.classList.contains("workbench-header")).toBe(true);
+    expect(header?.classList.contains("glass-panel")).toBe(false);
+    expect(container.querySelector('[data-testid="workbench-header-brand"]')).toBeTruthy();
+
     const accountBtn = container.querySelector('[data-testid="header-account-credits"]');
     expect(accountBtn).toBeTruthy();
     const navButtons = Array.from(container.querySelectorAll("nav button"));

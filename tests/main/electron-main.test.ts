@@ -78,3 +78,14 @@ describe("electron-main window-all-closed lifecycle", () => {
     expect(stopMarketplaceServer()).toBeUndefined();
   });
 });
+
+describe("electron-main window chrome", () => {
+  const source = fs.readFileSync(ELECTRON_MAIN, "utf8");
+
+  it("applies dark native chrome and graphite window background", () => {
+    expect(source).toContain("applyNativeWindowChrome");
+    expect(source).toContain("browserWindowChromeOptions");
+    expect(source).toContain("hideNativeMenuBar");
+    expect(source).not.toMatch(/backgroundColor:\s*"#090B12"/);
+  });
+});

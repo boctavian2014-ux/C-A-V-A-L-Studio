@@ -206,6 +206,26 @@ export function installApplicationMenu(localeInput: string | null | undefined, h
   return locale;
 }
 
+export function listApplicationMenuTopLevel(): Array<{ index: number; label: string }> {
+  const menu = Menu.getApplicationMenu();
+  if (!menu) return [];
+  return menu.items
+    .map((item, index) => ({ index, label: (item.label ?? "").trim() }))
+    .filter((item) => item.label.length > 0);
+}
+
+export function popupApplicationSubmenu(
+  window: BrowserWindow,
+  index: number,
+  x: number,
+  y: number,
+): boolean {
+  const item = Menu.getApplicationMenu()?.items[index];
+  if (!item?.submenu) return false;
+  item.submenu.popup({ window, x: Math.round(x), y: Math.round(y) });
+  return true;
+}
+
 export function buildRendererContextMenu(
   localeInput: string | null | undefined,
   params: ContextMenuParams

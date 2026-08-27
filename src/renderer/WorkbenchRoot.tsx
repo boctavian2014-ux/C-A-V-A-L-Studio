@@ -37,6 +37,7 @@ import { tActive } from '../../ai/i18n/active-locale';
 import { useTranslation } from '../../ai/i18n/useTranslation';
 import { useProblemsStore } from './store/problems-store';
 import { WorkbenchHeader } from './components/workbench/WorkbenchHeader';
+import { WorkbenchMenuBar } from './components/workbench/WorkbenchMenuBar';
 import { ConnectionStatusIndicator } from './components/workbench/ConnectionStatusIndicator';
 import { useAiWorkCanvasController } from './hooks/use-ai-work-canvas';
 import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
@@ -1303,6 +1304,7 @@ export function WorkbenchRoot() {
         height: '100vh', overflow: 'hidden',
         fontFamily: "'Inter', ui-sans-serif, system-ui, sans-serif",
       }}>
+        <WorkbenchMenuBar />
         <WorkbenchHeader
           engineeringOpen={engineeringOpen}
           onToggleEngineering={toggleEngineering}

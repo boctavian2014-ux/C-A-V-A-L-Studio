@@ -24,7 +24,8 @@ export function WorkbenchHeader({
 
   return (
     <header
-      className="glass-panel"
+      className="workbench-header"
+      data-testid="workbench-header"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -32,7 +33,8 @@ export function WorkbenchHeader({
         gap: 14,
         padding: '0 14px 0 12px',
         minHeight: 46,
-        borderBottom: '1px solid var(--caval-glass-border, rgba(255,255,255,0.08))',
+        background: 'var(--caval-bg, #0E0E0F)',
+        borderBottom: '1px solid var(--caval-border, rgba(255,255,255,0.08))',
         borderTop: 'none',
         borderLeft: 'none',
         borderRight: 'none',
@@ -43,12 +45,14 @@ export function WorkbenchHeader({
       }}
     >
       <div
+        data-testid="workbench-header-brand"
         style={{
           display: 'flex',
           alignItems: 'center',
           paddingTop: 2,
           minWidth: 0,
           flex: 1,
+          background: 'transparent',
         }}
       >
         <CavaloLogo height={28} />
