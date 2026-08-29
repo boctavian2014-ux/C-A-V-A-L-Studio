@@ -55,6 +55,13 @@ export interface CompleteModelTextInput {
   abortParentId?: string;
 }
 
+/** Code / Agentic / Debug: run write_file when a registry is attached. */
+export function shouldRunCompletionWithTools(
+  input: Pick<CompleteModelTextInput, "useTools" | "toolRegistry" | "capability">
+): boolean {
+  return input.useTools !== false && Boolean(input.toolRegistry);
+}
+
 export type CompleteModelTextResult =
   | { ok: true; text: string; resolvedModel: string; provider: string }
   | { ok: false; error: string };
@@ -394,7 +401,7 @@ export async function executeModelCompletion(
     try {
       const modelRequest = buildModelRequest(input, modelId, requestId);
 
-      if (input.useTools !== false && input.toolRegistry && input.capability !== 'code') {
+      if (shouldRunCompletionWithTools(input)) {
         try {
           const toolResult = await runCompletionWithTools({
             aiClient,

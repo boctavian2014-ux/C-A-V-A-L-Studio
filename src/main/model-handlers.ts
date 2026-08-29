@@ -10,7 +10,6 @@ import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { clearOpenRouterCache } from "../../ai/models/openrouter-catalog";
 
 import { resolveModelSelection } from "../../ai/models/auto-router";
-import { getModelProfile } from "../../ai/model-profiles";
 
 import {
 
@@ -40,6 +39,7 @@ import { isDirectChatMode } from "../../ai/modes/intent-detector";
 import {
   allowsProposedOrWritePipeline,
   resolveTrustedExecutionCapability,
+  shouldGrantChatWriteTurn,
   type ExecutionMode,
 } from "../../ai/modes/execution-mode";
 import { stageDirectChatScaffoldProposal } from "../../ai/composer/direct-chat-propose";
@@ -444,10 +444,15 @@ function injectProjectContextIntoMessages(
 }
 
 function trustedCapabilityForRequest(request: CavalChatStreamRequest) {
-  return resolveTrustedExecutionCapability({
+  const capability = resolveTrustedExecutionCapability({
     userMessage: request.message,
     rendererRequestedMode: request.executionMode,
+    agentMode: request.mode,
   });
+  console.log(
+    `[CHAT] capability ${capability.effective} write=${shouldGrantChatWriteTurn(capability)} mode=${request.mode ?? "ask"}`
+  );
+  return capability;
 }
 
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
@@ -594,10 +599,7 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 export function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
   if (!workspaceRoot?.trim()) return false;
   if (mode !== "code" && mode !== "debug" && mode !== "agentic") return false;
-  if (!model || model === "ollama-local") return false;
-  if (model.startsWith("caval-auto/free")) return false;
-  const profile = getModelProfile(model);
-  if (profile?.provider === "open_source" || profile?.costEstimate === "local") return false;
+  if (!model?.trim()) return false;
   return true;
 }
 
