@@ -1,0 +1,16 @@
+{
+  "name": "CAVAL Studio",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "webpack-dev",
+      "command": "npm run dev",
+      "description": "Webpack development watch build (main + renderer + node-services). Rebuilds dist/ on change."
+    }
+  ],
+  "ports": [
+    { "name": "marketplace", "port": 8787 },
+    { "name": "billing", "port": 8790 },
+    { "name": "cad", "port": 8791 }
+  ]
+}
