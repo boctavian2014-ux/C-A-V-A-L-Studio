@@ -90,6 +90,7 @@ import {
   planFinishDiskWritesForUserMessage,
   shouldAutoCreateDesktopWorkspace,
 } from './finish-disk-write-gate';
+import { shouldBlockScaffoldApplyOnDiff } from './finish-scaffold-guard';
 import {
   applyFallbackScaffold,
   buildFallbackScaffoldTimelineEvent,
@@ -1635,7 +1636,7 @@ export const useAIStore = create<AIStore>()(
           const skipScaffold =
             !projectPath ||
             (!diskPlan.applyParsedFences && !diskPlan.applyFallbackScaffold);
-          const blockOnDiff = Boolean(diff) && !diskPlan.timeoutRecovery;
+          const blockOnDiff = shouldBlockScaffoldApplyOnDiff(diskPlan, Boolean(diff));
           if (skipScaffold || blockOnDiff) {
             // Tool/pipeline writes already on disk — mark live strip done; keep until next chat.
             for (const f of earlyDiskWrites) {
