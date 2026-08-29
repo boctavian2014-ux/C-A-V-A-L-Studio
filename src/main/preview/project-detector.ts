@@ -210,3 +210,43 @@ export function detectPreviewWorkspace(workspaceRoot: string): PreviewWorkspaceD
 
   return { workspaceRoot, web, mobile };
 }
+
+const SIMPLE_ROOT_FILE_RE = /\.(txt|md)$/i;
+
+/** Root-only notes/docs — not a web/mobile app. Preview must not demand package.json. */
+export function workspaceIsSimpleFilesOnly(workspaceRoot: string): boolean {
+  if (existsSync(join(workspaceRoot, "package.json"))) return false;
+  let names: string[] = [];
+  try {
+    names = readdirSync(workspaceRoot, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+      .map((entry) => entry.name);
+  } catch {
+    return false;
+  }
+  return names.length > 0 && names.every((name) => SIMPLE_ROOT_FILE_RE.test(name));
+}
+
+/** Human-readable reason when Open Web/Mobile cannot start. */
+export function describeMissingPreview(target: PreviewTarget, workspaceRoot: string): string {
+  const layout = detectPreviewWorkspace(workspaceRoot);
+  const detected = target === "web" ? layout.web : layout.mobile;
+  const hasPackageJson = existsSync(join(workspaceRoot, "package.json"));
+
+  if (workspaceIsSimpleFilesOnly(workspaceRoot)) {
+    return (
+      `No ${target} app to preview in ${workspaceRoot}. ` +
+      `This folder only has simple files — open them in the editor. Preview is for Vite/Next/Expo.`
+    );
+  }
+
+  if (!hasPackageJson && !detected) {
+    const kind = target === "web" ? "web (Vite/Next)" : "mobile (Expo)";
+    return (
+      `No ${target} app in ${workspaceRoot}. Missing package.json / ${kind} project. ` +
+      `Finish scaffolding first — preview in caval.jsonc cannot start an empty folder.`
+    );
+  }
+
+  return `No preview command detected for ${target} in ${workspaceRoot}`;
+}

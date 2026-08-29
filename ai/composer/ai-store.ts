@@ -92,6 +92,11 @@ import {
 } from './finish-disk-write-gate';
 import { shouldBlockScaffoldApplyOnDiff } from './finish-scaffold-guard';
 import {
+  shouldRetryScaffoldOnEmptyFences,
+  shouldSkipGenericViteFallback,
+} from './code-mode-done-contract';
+import { looksLikeExplicitCreate } from '../modes/execution-mode';
+import {
   applyFallbackScaffold,
   buildFallbackScaffoldTimelineEvent,
   FALLBACK_SCAFFOLD_TOAST,
@@ -1806,14 +1811,18 @@ export const useAIStore = create<AIStore>()(
 
             if (writtenFiles.length === 0) {
               useEditorStore.getState().closeAiPreview();
-              // Retry AI emission only when fences existed but apply failed.
+              const createIntent =
+                looksLikeFileCreationPrompt(userText) || looksLikeExplicitCreate(userText);
               if (
-                diskPlan.allowWriteFollowup &&
-                scaffoldParsed > 0 &&
-                (modeSupportsFileApply(agentMode) || diskPlan.applyParsedFences) &&
-                fullDelivery.autonomousFinish &&
-                canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
-                !isSessionStale()
+                shouldRetryScaffoldOnEmptyFences({
+                  allowWriteFollowup: diskPlan.allowWriteFollowup,
+                  scaffoldParsed,
+                  createIntent,
+                  canApply: modeSupportsFileApply(agentMode) || diskPlan.applyParsedFences,
+                  autonomousFinish: fullDelivery.autonomousFinish,
+                  canContinueRepair:
+                    canAutoContinueRepair(agenticRepairWave, fullDelivery) && !isSessionStale(),
+                })
               ) {
                 agenticRepairWave += 1;
                 updateAssistant({
@@ -1824,7 +1833,7 @@ export const useAIStore = create<AIStore>()(
                 return;
               }
 
-              if (diskPlan.applyFallbackScaffold) {
+              if (diskPlan.applyFallbackScaffold && !shouldSkipGenericViteFallback(userText)) {
                 const fallback = await applyFallbackScaffold(projectPath, {
                   projectName: workspaceFolderTitle(projectPath),
                 });
@@ -1873,6 +1882,12 @@ export const useAIStore = create<AIStore>()(
                   });
                   return;
                 }
+              } else if (createIntent || scaffoldParsed > 0) {
+                updateAssistant({
+                  error:
+                    'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc. Retrimite sau cere explicit path-ul fișierului — nu generez un proiect Vite pentru un singur fișier.',
+                });
+                return;
               } else {
                 return;
               }
@@ -1882,6 +1897,7 @@ export const useAIStore = create<AIStore>()(
             if (
               diskPlan.applyFallbackScaffold &&
               writtenFiles.length > 0 &&
+              !shouldSkipGenericViteFallback(userText, writtenFiles) &&
               !(await workspaceHasRunnableWebProject(projectPath))
             ) {
               const filled = await applyFallbackScaffold(projectPath, {

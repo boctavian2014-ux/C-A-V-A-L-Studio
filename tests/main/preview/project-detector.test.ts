@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  describeMissingPreview,
   detectPreviewWorkspace,
   detectProject,
 } from "../../../src/main/preview/project-detector";
@@ -162,5 +163,24 @@ describe("project-detector", () => {
     const layout = detectPreviewWorkspace(root);
     expect(layout.web?.kind).toBe("next");
     expect(layout.web?.cwd).toBe(root);
+  });
+
+  it("describeMissingPreview does not demand package.json for a single simple file", () => {
+    const root = mkDir("just-txt");
+    fs.writeFileSync(path.join(root, "hello.txt"), "Hello", "utf8");
+    expect(describeMissingPreview("web", root)).not.toMatch(/Missing package\.json/);
+    expect(describeMissingPreview("web", root)).toMatch(/simple files/i);
+  });
+
+  it("describeMissingPreview explains empty folders instead of caval.jsonc", () => {
+    const root = mkDir("no-app");
+    expect(describeMissingPreview("web", root)).toMatch(/Missing package\.json/);
+    expect(describeMissingPreview("web", root)).not.toMatch(/No preview command detected/);
+  });
+
+  it("describeMissingPreview keeps command-detection wording when package.json exists", () => {
+    const root = mkDir("pkg-only");
+    writePkg(root, { name: "x" });
+    expect(describeMissingPreview("web", root)).toMatch(/No preview command detected for web/);
   });
 });

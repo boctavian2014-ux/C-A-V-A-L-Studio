@@ -22,6 +22,34 @@ describe('delivery-orchestrator', () => {
     ).toBe(true);
   });
 
+  it('isDeliveryIncomplete when src leftovers exist without package.json', () => {
+    expect(
+      isDeliveryIncomplete({
+        writtenFiles: ['src/api/matching.ts', 'src/types.ts'],
+        taskCount: 0,
+      })
+    ).toBe(true);
+  });
+
+  it('is not orphan-incomplete when package.json was written with sources', () => {
+    expect(
+      isDeliveryIncomplete({
+        writtenFiles: ['package.json', 'src/App.tsx', 'src/main.tsx', 'index.html'],
+        taskCount: 0,
+      })
+    ).toBe(false);
+  });
+
+  it('is complete for a single standalone txt file', () => {
+    expect(
+      isDeliveryIncomplete({
+        writtenFiles: ['hello.txt'],
+        taskCount: 0,
+        parseSource: 'Here is hello.txt without fences',
+      })
+    ).toBe(false);
+  });
+
   it('isDeliveryIncomplete when too few files vs tasks', () => {
     expect(
       isDeliveryIncomplete({
