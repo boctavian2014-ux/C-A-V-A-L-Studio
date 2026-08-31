@@ -560,6 +560,8 @@ export const en = {
   "ai.providers.gemini.desc": "Gemini models via Google AI API key",
   "ai.providers.openrouter.label": "OpenRouter",
   "ai.providers.openrouter.desc": "Multi-model gateway via OpenRouter API key",
+  "ai.providers.nvidia.label": "NVIDIA NIM",
+  "ai.providers.nvidia.desc": "OpenAI-compatible models via NVIDIA NIM (integrate.api.nvidia.com)",
   "ai.providers.custom.label": "Custom (OpenAI-compatible)",
   "ai.providers.custom.desc": "Local or remote OpenAI-compatible endpoint",
 

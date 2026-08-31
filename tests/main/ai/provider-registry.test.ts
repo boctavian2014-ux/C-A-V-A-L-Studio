@@ -101,7 +101,7 @@ describe("7f.1 provider status mapping", () => {
 });
 
 describe("7f.1 provider registry", () => {
-  it("returns all six providers with Ollama first; custom is selectable", async () => {
+  it("returns all seven providers with Ollama first; NVIDIA NIM and custom are selectable", async () => {
     const snapshot = await buildAiProvidersSnapshot({
       configured: {
         OPENAI_API_KEY: true,
@@ -125,6 +125,10 @@ describe("7f.1 provider registry", () => {
     expect(snapshot.providers[0]?.status).toBe("configured");
     expect(snapshot.providers.find((p) => p.id === "openai")?.status).toBe("configured");
     expect(snapshot.providers.find((p) => p.id === "openrouter")?.status).toBe("not-configured");
+    const nvidia = snapshot.providers.find((p) => p.id === "nvidia");
+    expect(nvidia?.selectable).toBe(true);
+    expect(nvidia?.secretKey).toBe("NVIDIA_API_KEY");
+    expect(nvidia?.status).toBe("not-configured");
     const custom = snapshot.providers.find((p) => p.id === "custom");
     expect(custom?.comingSoon).toBeFalsy();
     expect(custom?.selectable).toBe(true);
