@@ -599,6 +599,10 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
     temperature: request.temperature,
 
     timeoutMs: request.timeoutMs ?? (request.jsonMode ? 120_000 : undefined),
+    chatMode:
+      request.mode === "agentic" || request.mode === "code" || request.mode === "ask"
+        ? request.mode
+        : undefined,
 
   };
 
@@ -1831,10 +1835,15 @@ async function streamToRenderer(
     });
     stream.send({
       type: "error",
-      error: result.code === "AGENTIC_PROVIDER_REQUIRED"
-        ? result.error ?? "AGENTIC_PROVIDER_REQUIRED"
-        : safeErrorMessageForUi(result.error ?? "Stream failed"),
+      error:
+        result.code === "AGENTIC_PROVIDER_REQUIRED" || result.code === "AGENTIC_PROVIDER_UNAVAILABLE"
+          ? result.error ?? result.code
+          : safeErrorMessageForUi(result.error ?? "Stream failed"),
       ...(result.code ? { code: result.code, action: result.action } : {}),
+      ...(result.providerId ? { provider: result.providerId } : {}),
+      ...(typeof result.cooldownRemainingMs === "number"
+        ? { cooldownRemainingMs: result.cooldownRemainingMs }
+        : {}),
     });
 
   } finally {

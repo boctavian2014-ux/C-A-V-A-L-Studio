@@ -147,6 +147,7 @@ export interface CavalStreamChunk {
   /** Structured routing/provider error (never includes API keys). */
   code?: string;
   action?: string;
+  cooldownRemainingMs?: number;
   timedOut?: boolean;
   resolvedModel?: string;
   reason?: string;

@@ -20,6 +20,15 @@ import {
   toAgenticUiError,
   isForbiddenAgenticFallback,
 } from '../models/agentic-routing-policy';
+import { DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
+import { DEFAULT_MODEL_FALLBACK } from '../config/model-fallback-chain';
+import {
+  executeModeAwareFallback,
+  isAgenticProviderUnavailableError,
+  modelIdsForRegistryProvider,
+  toUnavailableUiError,
+} from '../providers/fallback-executor';
+import { getSharedCircuitBreaker } from '../providers/circuit-breaker';
 import { MODELS, createProvider, type ApiKeys, type AIMessage, type ModelId } from '../multi-model/provider';
 import type { RoutingIntent, ModelRequest } from '../types';
 import type { ToolRegistry } from '../tools/tool-registry';
@@ -62,6 +71,8 @@ export interface CompleteModelTextInput {
   signal?: AbortSignal;
   /** Chat abort root — tool-loop registers as a child of this id. */
   abortParentId?: string;
+  /** Chat UI mode — drives NVIDIA ↔ Ollama fallback policy. */
+  chatMode?: "ask" | "code" | "agentic" | "plan" | "debug";
 }
 
 /** Code / Agentic / Debug: run write_file when a registry is attached. */
@@ -74,8 +85,22 @@ export function shouldRunCompletionWithTools(
 }
 
 export type CompleteModelTextResult =
-  | { ok: true; text: string; resolvedModel: string; provider: string }
-  | { ok: false; error: string; code?: string; action?: string };
+  | {
+      ok: true;
+      text: string;
+      resolvedModel: string;
+      provider: string;
+      fallbackFrom?: string;
+      fallbackReason?: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      code?: string;
+      action?: string;
+      providerId?: string;
+      cooldownRemainingMs?: number;
+    };
 
 export interface CompletionStreamCallbacks {
   onMeta?: (resolvedModel: string, reason: string) => void;
@@ -107,7 +132,9 @@ function buildModelRequest(
     stream: true,
     temperature: input.temperature,
     maxTokens: input.maxTokens,
-    timeoutMs: input.timeoutMs ?? (input.jsonMode ? 120_000 : undefined),
+    timeoutMs:
+      input.timeoutMs ??
+      (input.jsonMode ? 120_000 : DEFAULT_MODEL_FALLBACK.triggers.timeoutMs),
     signal: input.signal,
     metadata: {
       requestId,
@@ -283,6 +310,18 @@ function formatCompletionError(
   }
 
   return ['Modelul nu a răspuns.', '', errors.join('\n')].join('\n');
+}
+
+function inferFallbackChatMode(
+  input: CompleteModelTextInput
+): "agentic" | "code" | "ask" | null {
+  if (input.chatMode === "agentic" || input.chatMode === "code" || input.chatMode === "ask") {
+    return input.chatMode;
+  }
+  if (isAgenticRoutingIntent(input.intent)) return "agentic";
+  if (input.capability === "code") return "code";
+  if (input.capability === "debug" || input.capability === "planning") return null;
+  return "ask";
 }
 
 export async function executeModelCompletion(
@@ -476,9 +515,8 @@ export async function executeModelCompletion(
       return toAgenticUiError(new AgenticProviderRequiredError());
     }
   }
-  const errors: string[] = [];
 
-  for (const modelId of modelIdsToTry) {
+  const attemptModel = async (modelId: string): Promise<CompleteModelTextResult> => {
     if (signal?.aborted) {
       return { ok: false, error: 'Generare anulată.' };
     }
@@ -515,12 +553,9 @@ export async function executeModelCompletion(
               provider: profile?.provider ?? 'open_source',
             };
           }
-
-          errors.push(`${modelId}: ${toolResult.error}`);
         } catch (err) {
-          errors.push(`${modelId}: ${err instanceof Error ? err.message : String(err)}`);
+          throw err instanceof Error ? err : new Error(String(err));
         }
-        // Fall through: stream without tools (code blocks)
       }
 
       const streamMessages =
@@ -591,6 +626,63 @@ export async function executeModelCompletion(
         resolvedModel: modelId,
         provider: profile?.provider ?? 'open_source',
       };
+    } catch (error) {
+      if (signal?.aborted) {
+        return { ok: false, error: 'Generare anulată.' };
+      }
+      throw error;
+    }
+  };
+
+  const fallbackMode = inferFallbackChatMode(input);
+  if (fallbackMode) {
+    const fallbackConfig =
+      DEFAULT_CAVAL_CONFIG.models?.fallback ?? DEFAULT_MODEL_FALLBACK;
+    const breaker = getSharedCircuitBreaker("caval-fallback", {
+      failureThreshold: fallbackConfig.circuitBreaker.failureThreshold,
+      cooldownMs: fallbackConfig.circuitBreaker.cooldownMs,
+    });
+    try {
+      const executed = await executeModeAwareFallback({
+        mode: fallbackMode,
+        config: fallbackConfig,
+        breaker,
+        execute: async (providerId) => {
+          const modelId = modelIdsForRegistryProvider(providerId)[0];
+          if (!modelId) {
+            throw new Error(`No model mapped for provider ${providerId}`);
+          }
+          const one = await attemptModel(modelId);
+          if (!one.ok) {
+            throw new Error(one.error);
+          }
+          return one;
+        },
+      });
+      return {
+        ...executed.value,
+        fallbackFrom: executed.fallbackFrom,
+        fallbackReason: executed.fallbackReason,
+      };
+    } catch (error) {
+      if (signal?.aborted) {
+        return { ok: false, error: 'Generare anulată.' };
+      }
+      if (isAgenticProviderUnavailableError(error)) {
+        return toUnavailableUiError(error);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: formatCompletionError(input.model, [message]) };
+    }
+  }
+
+  const errors: string[] = [];
+
+  for (const modelId of modelIdsToTry) {
+    try {
+      const one = await attemptModel(modelId);
+      if (one.ok) return one;
+      errors.push(`${modelId}: ${one.error}`);
     } catch (error) {
       if (signal?.aborted) {
         return { ok: false, error: 'Generare anulată.' };

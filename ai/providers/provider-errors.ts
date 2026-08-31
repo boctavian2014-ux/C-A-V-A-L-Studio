@@ -3,6 +3,7 @@
  */
 import { redactSensitiveText } from "../../src/shared/command-output-redaction";
 import { isAgenticProviderRequiredError } from "../models/agentic-routing-policy";
+import { isAgenticProviderUnavailableError } from "./fallback-executor";
 import { parseRetryAfterMs } from "./circuit-breaker";
 
 export type ProviderErrorCode =
@@ -145,7 +146,7 @@ const IPC_SECURITY_ERROR =
   /Untrusted IPC sender|Cross-sender|Cross-workspace|No workspace open|Deschide un folder/i;
 
 export function safeErrorMessageForUi(error: unknown): string {
-  if (isAgenticProviderRequiredError(error)) {
+  if (isAgenticProviderRequiredError(error) || isAgenticProviderUnavailableError(error)) {
     return redactSensitiveText(error instanceof Error ? error.message : String(error));
   }
   const raw = error instanceof Error ? error.message : String(error);
