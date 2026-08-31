@@ -2,6 +2,7 @@
  * Lot C5.1 — Safe provider error codes for logs/UI (never raw response bodies).
  */
 import { redactSensitiveText } from "../../src/shared/command-output-redaction";
+import { isAgenticProviderRequiredError } from "../models/agentic-routing-policy";
 
 export type ProviderErrorCode =
   | "auth_failed"
@@ -134,6 +135,9 @@ const IPC_SECURITY_ERROR =
   /Untrusted IPC sender|Cross-sender|Cross-workspace|No workspace open|Deschide un folder/i;
 
 export function safeErrorMessageForUi(error: unknown): string {
+  if (isAgenticProviderRequiredError(error)) {
+    return redactSensitiveText(error instanceof Error ? error.message : String(error));
+  }
   const raw = error instanceof Error ? error.message : String(error);
   if (IPC_SECURITY_ERROR.test(raw)) {
     return redactSensitiveText(raw);

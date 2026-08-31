@@ -11,6 +11,15 @@ import { isAutoTier, type ModelSelectionId } from '../models/model-catalog';
 import { isByokModel, hasOpenRouterKey } from '../models/model-readiness';
 import { resolveByokApiKeysFromEnv, isPersistableSecret } from '../models/api-secrets';
 import { getModelProfile } from '../model-profiles';
+import {
+  AgenticProviderRequiredError,
+  isAgenticProviderRequiredError,
+  isAgenticRoutingIntent,
+  orderAgenticTryList,
+  assertAgenticProvidersReady,
+  toAgenticUiError,
+  isForbiddenAgenticFallback,
+} from '../models/agentic-routing-policy';
 import { MODELS, createProvider, type ApiKeys, type AIMessage, type ModelId } from '../multi-model/provider';
 import type { RoutingIntent, ModelRequest } from '../types';
 import type { ToolRegistry } from '../tools/tool-registry';
@@ -58,13 +67,15 @@ export interface CompleteModelTextInput {
 /** Code / Agentic / Debug: run write_file when a registry is attached. */
 export function shouldRunCompletionWithTools(
   input: Pick<CompleteModelTextInput, "useTools" | "toolRegistry" | "capability">
-): boolean {
+): input is Pick<CompleteModelTextInput, "useTools" | "capability"> & {
+  toolRegistry: ToolRegistry;
+} {
   return input.useTools !== false && Boolean(input.toolRegistry);
 }
 
 export type CompleteModelTextResult =
   | { ok: true; text: string; resolvedModel: string; provider: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: string; action?: string };
 
 export interface CompletionStreamCallbacks {
   onMeta?: (resolvedModel: string, reason: string) => void;
@@ -173,6 +184,10 @@ async function getModelsToTry(
   resolvedModelId: string,
   intent: RoutingIntent = 'kilocode'
 ): Promise<string[]> {
+  if (isAgenticRoutingIntent(intent)) {
+    return orderAgenticTryList(resolvedModelId).filter((id) => !isForbiddenAgenticFallback(id));
+  }
+
   let ids: string[];
   if (selectionId === 'caval-auto/free' || !hasOpenRouterKey()) {
     const candidates = await getAutoFreeModelCandidates();
@@ -283,7 +298,21 @@ export async function executeModelCompletion(
     return { ok: false, error: 'Generare anulată.' };
   }
 
+  if (isAgenticRoutingIntent(intent)) {
+    try {
+      assertAgenticProvidersReady();
+    } catch (error) {
+      if (isAgenticProviderRequiredError(error)) {
+        return toAgenticUiError(error);
+      }
+      throw error;
+    }
+  }
+
   if (isByokModel(input.model)) {
+    if (isAgenticRoutingIntent(intent) && (input.model === 'ollama-local' || isForbiddenAgenticFallback(input.model))) {
+      return toAgenticUiError(new AgenticProviderRequiredError());
+    }
     // BYOK keys only from main process env (applyStoredSecretsToEnv) — ignore renderer.
     const apiKeys = resolveByokApiKeysFromEnv();
     const meta = MODELS.find((m) => m.id === input.model);
@@ -324,7 +353,55 @@ export async function executeModelCompletion(
     callbacks.onStatus?.('route', 'active');
   }
 
-  const resolved = await resolveModelSelection(input.model, intent);
+  let resolved;
+  try {
+    resolved = await resolveModelSelection(input.model, intent);
+  } catch (error) {
+    if (isAgenticProviderRequiredError(error)) {
+      return toAgenticUiError(error);
+    }
+    throw error;
+  }
+
+  if (isAgenticRoutingIntent(intent) && isForbiddenAgenticFallback(resolved.modelId)) {
+    return toAgenticUiError(new AgenticProviderRequiredError());
+  }
+
+  if (isByokModel(resolved.modelId)) {
+    const apiKeys = resolveByokApiKeysFromEnv();
+    const meta = MODELS.find((m) => m.id === resolved.modelId);
+    const needed =
+      meta?.provider === 'anthropic'
+        ? apiKeys.anthropic
+        : meta?.provider === 'openai'
+          ? apiKeys.openai
+          : meta?.provider === 'google'
+            ? apiKeys.google
+            : 'ok';
+    if (meta?.provider !== 'ollama' && !isPersistableSecret(needed)) {
+      return {
+        ok: false,
+        error: [
+          `Cheie API lipsă pentru ${meta?.provider ?? 'BYOK'}.`,
+          '',
+          'Settings → AI & Chei API → salvează cheia, apoi repornește aplicația.',
+        ].join('\n'),
+      };
+    }
+    if (isChat) {
+      callbacks.onStatus?.('route', 'active');
+      callbacks.onStatus?.('route', 'done', resolved.modelId);
+      callbacks.onStatus?.('connect', 'active');
+    }
+    return streamByokModel(
+      resolved.modelId as ModelId,
+      apiKeys,
+      input.messages,
+      callbacks,
+      isChat,
+      signal
+    );
+  }
 
   if (isChat) {
     callbacks.onStatus?.('route', 'done', resolved.modelId);
@@ -342,6 +419,7 @@ export async function executeModelCompletion(
   }
 
   if (
+    !isAgenticRoutingIntent(intent) &&
     !isChat &&
     input.model === 'caval-auto/free' &&
     !hasOpenRouterKey() &&
@@ -351,6 +429,7 @@ export async function executeModelCompletion(
   }
 
   if (
+    !isAgenticRoutingIntent(intent) &&
     (input.model === 'caval-auto/balanced' ||
       input.model === 'caval-auto/frontier' ||
       input.model.startsWith('openrouter:')) &&
@@ -368,7 +447,12 @@ export async function executeModelCompletion(
     };
   }
 
-  if (input.model === 'caval-auto/free' && !hasOpenRouterKey() && !(await isOllamaReachable())) {
+  if (
+    !isAgenticRoutingIntent(intent) &&
+    input.model === 'caval-auto/free' &&
+    !hasOpenRouterKey() &&
+    !(await isOllamaReachable())
+  ) {
     return { ok: false, error: OLLAMA_SETUP_ERROR };
   }
 
@@ -380,12 +464,18 @@ export async function executeModelCompletion(
     !hasOpenRouterKey() ||
     input.model === 'caval-auto/free';
 
-  const modelIdsToTry = needsModelFallback
+  let modelIdsToTry = needsModelFallback
     ? (await getModelsToTry(input.model, resolved.modelId, intent)).slice(
         0,
         input.jsonMode ? 6 : 5
       )
     : [resolved.modelId];
+  if (isAgenticRoutingIntent(intent)) {
+    modelIdsToTry = modelIdsToTry.filter((id) => !isForbiddenAgenticFallback(id));
+    if (modelIdsToTry.length === 0) {
+      return toAgenticUiError(new AgenticProviderRequiredError());
+    }
+  }
   const errors: string[] = [];
 
   for (const modelId of modelIdsToTry) {
@@ -401,11 +491,12 @@ export async function executeModelCompletion(
     try {
       const modelRequest = buildModelRequest(input, modelId, requestId);
 
-      if (shouldRunCompletionWithTools(input)) {
+      const toolRegistry = input.toolRegistry;
+      if (shouldRunCompletionWithTools(input) && toolRegistry) {
         try {
           const toolResult = await runCompletionWithTools({
             aiClient,
-            registry: input.toolRegistry,
+            registry: toolRegistry,
             baseRequest: modelRequest,
             initialMessages: input.messages,
             modelId,

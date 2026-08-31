@@ -162,6 +162,8 @@ export interface ChatMessage {
   resolvedModel?: string;
   isStreaming?: boolean;
   error?: string;
+  errorCode?: string;
+  errorAction?: string;
   /** Watchdog timeout recovered a scaffold/project on disk — not a successful model completion. */
   timeoutRecovered?: boolean;
   diff?: DetectedDiff;
@@ -2217,7 +2219,11 @@ export const useAIStore = create<AIStore>()(
           }
           if (chunk.type === 'error') {
             if (userStoppedStream || chunk.error === 'Aborted') return;
-            finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error }, activeTabPath);
+            finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, {
+              error: chunk.error,
+              errorCode: chunk.code,
+              errorAction: chunk.action,
+            }, activeTabPath);
             streamCleanup?.();
             streamCleanup = null;
           }

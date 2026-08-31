@@ -11,6 +11,12 @@ import { isOllamaReachable } from "./ollama-client";
 import { OLLAMA_TAGS_URL } from "../../src/shared/local-ai-contract";
 
 import { hasOpenRouterKey } from "./model-readiness";
+import {
+  AgenticProviderRequiredError,
+  isAgenticRoutingIntent,
+  listAgenticEligibleModelIds,
+  assertAgenticProvidersReady,
+} from "./agentic-routing-policy";
 
 export { isOllamaReachable } from "./ollama-client";
 export interface ResolvedModel {
@@ -135,11 +141,30 @@ export function getAutoBalancedModelCandidates(intent: RoutingIntent = "kilocode
 
 export const FAST_CHAT_MODEL_ID = "stepfun-step-3-7-flash";
 
+function resolveAgenticAuto(tier: AutoTierId): ResolvedModel {
+  assertAgenticProvidersReady();
+  const modelId = listAgenticEligibleModelIds()[0];
+  if (!modelId) {
+    throw new AgenticProviderRequiredError();
+  }
+  const profile = getModelProfile(modelId);
+  return {
+    selectionId: tier,
+    modelId,
+    provider: profile?.provider ?? "nvidia",
+    reason: `Agentic: ${profile?.displayName ?? modelId} (tool-capable cloud)`,
+  };
+}
+
 export async function resolveAutoModel(
   tier: AutoTierId,
   intent: RoutingIntent = "kilocode"
 ): Promise<ResolvedModel> {
   const router = new ModelRouter();
+
+  if (isAgenticRoutingIntent(intent)) {
+    return resolveAgenticAuto(tier);
+  }
 
   if (tier === "caval-auto/free" || !hasOpenRouterKey()) {
     const local = await resolveLocalOllama(tier);
@@ -201,6 +226,9 @@ export async function resolveAutoModel(
 
   const best = filtered[0] ?? ranked[0];
   if (!best) {
+    if (isAgenticRoutingIntent(intent)) {
+      throw new AgenticProviderRequiredError();
+    }
     const fallback = localFreeProfiles()[0];
     return {
       selectionId: tier,
@@ -246,6 +274,9 @@ async function resolveModelSelectionUncached(
 
   const profile = getModelProfile(selectionId);
   if (profile) {
+    if (isAgenticRoutingIntent(intent) && (profile.provider === "open_source" || !profile.supportsToolCalling)) {
+      throw new AgenticProviderRequiredError();
+    }
     return {
       selectionId,
       modelId: profile.id,

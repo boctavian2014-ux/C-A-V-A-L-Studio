@@ -144,6 +144,9 @@ export interface CavalStreamChunk {
   kind?: import("../shared/chat-stream-visibility").ChatStreamItemKind;
   reasoningDelta?: string;
   error?: string;
+  /** Structured routing/provider error (never includes API keys). */
+  code?: string;
+  action?: string;
   timedOut?: boolean;
   resolvedModel?: string;
   reason?: string;

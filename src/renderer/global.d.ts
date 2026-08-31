@@ -162,6 +162,8 @@ interface CavalStreamChunk {
   kind?: import('../../src/shared/chat-stream-visibility').ChatStreamItemKind;
   reasoningDelta?: string;
   error?: string;
+  code?: string;
+  action?: string;
   timedOut?: boolean;
   resolvedModel?: string;
   reason?: string;

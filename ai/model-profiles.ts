@@ -182,7 +182,7 @@ export const modelProfiles: ModelProfile[] = [
     contextWindow: 32_000,
     supportsStreaming: true,
     supportsToolCalling: false,
-    preferredIntents: ["fallback", "kilocode"],
+    preferredIntents: ["fallback", "autocomplete", "fast"],
     endpoint: OLLAMA_ENDPOINT,
     speed: "balanced",
     costEstimate: "local",

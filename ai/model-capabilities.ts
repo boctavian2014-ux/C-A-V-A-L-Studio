@@ -28,15 +28,15 @@ export const capabilityRoutes: Record<RoutingIntent, CapabilityRoute> = {
   },
   agent: {
     intent: "agent",
-    primaryModel: "stepfun-step-3-7-flash",
-    fallbackModels: ["nex-n2-pro", "qwen2.5-coder:7b"],
-    reason: "Agent workflows prefer fast tool-aware planning."
+    primaryModel: "nvidia-deepseek-v4-flash",
+    fallbackModels: ["nvidia-qwen3.5-122b", "stepfun-step-3-7-flash", "nex-n2-pro"],
+    reason: "Agentic execution uses NVIDIA DeepSeek V4 Flash, then NVIDIA Qwen 3.5; never local 7B."
   },
   tool_use: {
     intent: "tool_use",
-    primaryModel: "stepfun-step-3-7-flash",
-    fallbackModels: ["nex-n2-pro"],
-    reason: "Tool calling requires provider-native tool support."
+    primaryModel: "nvidia-deepseek-v4-flash",
+    fallbackModels: ["nvidia-qwen3.5-122b", "stepfun-step-3-7-flash", "nex-n2-pro"],
+    reason: "Tool calling requires supportsTools cloud models; local 7B is not agentic-capable."
   },
   planning: {
     intent: "planning",
