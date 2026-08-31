@@ -9,6 +9,23 @@
       "agentic": "caval-auto/balanced",
       "plan": "caval-auto/frontier",
       "debug": "caval-auto/balanced"
+    },
+    "fallback": {
+      "chains": {
+        "agentic": ["nvidia", "openrouter"],
+        "code": ["nvidia", "ollama"],
+        "ask": ["nvidia", "ollama"]
+      },
+      "triggers": {
+        "http429": true,
+        "timeoutMs": 55000,
+        "connectionRefused": true
+      },
+      "circuitBreaker": {
+        "cooldownMs": 30000,
+        "failureThreshold": 3
+      },
+      "maxRetriesPerProvider": 1
     }
   },
   "cavalloModes": {

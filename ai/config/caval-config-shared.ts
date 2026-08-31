@@ -5,6 +5,7 @@ import {
 } from '../modes/agent-modes';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { hasProviderCredentials } from '../models/provider-credentials';
+import { mergeModelFallbackConfig } from './model-fallback-chain';
 
 export function stripJsonc(raw: string): string {
   let result = "";
@@ -58,10 +59,15 @@ export function stripJsonc(raw: string): string {
 }
 
 export function mergeCavalConfig(parsed: Partial<CavalConfig>): CavalConfig {
+  const modelsParsed = parsed.models;
   return {
     ...DEFAULT_CAVAL_CONFIG,
     ...parsed,
-    models: { ...DEFAULT_CAVAL_CONFIG.models, ...parsed.models },
+    models: {
+      ...DEFAULT_CAVAL_CONFIG.models,
+      ...modelsParsed,
+      fallback: mergeModelFallbackConfig(modelsParsed?.fallback ?? DEFAULT_CAVAL_CONFIG.models?.fallback),
+    },
     cavalloModes: { ...DEFAULT_CAVAL_CONFIG.cavalloModes, ...parsed.cavalloModes },
     autocomplete: { ...DEFAULT_CAVAL_CONFIG.autocomplete, ...parsed.autocomplete },
     mcp: parsed.mcp ?? DEFAULT_CAVAL_CONFIG.mcp,

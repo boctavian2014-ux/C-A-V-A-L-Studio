@@ -5,6 +5,10 @@
 import type { RoutingIntent } from "../types";
 import type { ModelSelectionId } from "../models/model-catalog";
 import type { CavalloModesConfig } from "./mode-router";
+import {
+  DEFAULT_MODEL_FALLBACK,
+  type ModelFallbackConfig,
+} from "../config/model-fallback-chain";
 
 export type AgentModeId = "ask" | "plan" | "code" | "debug" | "agentic";
 
@@ -75,6 +79,7 @@ export interface CavalConfig {
   models?: {
     default?: ModelSelectionId;
     perMode?: Partial<Record<AgentModeId | "architect", ModelSelectionId>>;
+    fallback?: ModelFallbackConfig;
   };
   cavalloModes?: CavalloModesConfig;
   mcp?: {
@@ -103,6 +108,7 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
       plan: "caval-auto/frontier",
       debug: "caval-auto/balanced",
     },
+    fallback: DEFAULT_MODEL_FALLBACK,
   },
   cavalloModes: {
     autoModeSwitch: true,
