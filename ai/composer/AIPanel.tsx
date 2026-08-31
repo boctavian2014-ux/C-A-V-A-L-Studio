@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAIStore, getModelDisplayLabel, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
+import { ChatFallbackStatus } from './ChatFallbackStatus';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
@@ -1054,6 +1055,7 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
             <span className="chat-panel-context">
               {isAgentic ? t('ai.panel.headerContext') : modeDef.label}
             </span>
+            <ChatFallbackStatus />
           </div>
           <div className="chat-panel-header-actions">
         <button

@@ -21,6 +21,7 @@ import {
   looksLikeFileCreationPrompt,
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
+import { useFallbackStatusStore } from './fallback-status-store';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
 import { isArenaContinueRequest } from '../prompts/arena-continue';
 import { isAgenticRepairRequest, buildAgenticRepairMessage } from '../prompts/agentic-repair';
@@ -2162,6 +2163,9 @@ export const useAIStore = create<AIStore>()(
           if (chunk.type === 'meta' && chunk.resolvedModel) {
             updateAssistant({ resolvedModel: chunk.resolvedModel });
             set({ activeResolvedModel: chunk.resolvedModel });
+            if (chunk.provider) {
+              useFallbackStatusStore.getState().noteProvider(chunk.provider, chunk.fallbackFrom);
+            }
           }
           if (chunk.type === 'tool' && chunk.toolName === 'write_file') {
             if (isSessionStale()) return;
@@ -2224,12 +2228,21 @@ export const useAIStore = create<AIStore>()(
               errorCode: chunk.code,
               errorAction: chunk.action,
             }, activeTabPath);
+            if (chunk.code === 'AGENTIC_PROVIDER_UNAVAILABLE') {
+              useFallbackStatusStore.getState().noteAgenticUnavailable(
+                chunk.provider ?? 'nvidia',
+                chunk.cooldownRemainingMs ?? 30_000
+              );
+            }
             streamCleanup?.();
             streamCleanup = null;
           }
           if (chunk.type === 'done') {
             const resolved = chunk.model ?? get().messages.find((m) => m.id === assistantMsgId)?.resolvedModel;
             if (resolved) set({ activeResolvedModel: resolved });
+            if (chunk.provider) {
+              useFallbackStatusStore.getState().noteProvider(chunk.provider, chunk.fallbackFrom);
+            }
             if (chunk.runId) {
               updateAssistant({ pipelineRunId: chunk.runId });
             }

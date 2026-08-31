@@ -1819,6 +1819,7 @@ async function streamToRenderer(
       type: "done",
       model: result.resolvedModel,
       provider: result.provider,
+      fallbackFrom: result.fallbackFrom,
       writtenFiles: [],
       proposedWrites,
       proposeStageKey: proposedWrites.length > 0 ? streamId : undefined,

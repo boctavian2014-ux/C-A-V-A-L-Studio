@@ -566,6 +566,8 @@ export const ro = {
   "ai.agentic.providerRequired":
     "Modul Agentic necesită un provider cloud cu tools (NVIDIA NIM, OpenRouter sau BYOK). Qwen 7B local este doar pentru Ask, Code de bază, autocomplete și offline. Deschide Settings → AI Providers pentru NVIDIA NIM.",
   "ai.agentic.configureNvidia": "Configurează NVIDIA NIM",
+  "ai.fallback.retry": "Reîncearcă",
+  "ai.fallback.retryIn": "Reîncearcă ({{seconds}}s)",
   "ai.providers.custom.label": "Custom (compatibil OpenAI)",
   "ai.providers.custom.desc": "Endpoint local sau remote compatibil OpenAI",
 

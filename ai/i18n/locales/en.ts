@@ -565,6 +565,8 @@ export const en = {
   "ai.agentic.providerRequired":
     "Agentic mode needs a tool-capable cloud provider (NVIDIA NIM, OpenRouter, or BYOK). Local Qwen 7B is for Ask, basic Code, autocomplete, and offline only. Open Settings → AI Providers to configure NVIDIA NIM.",
   "ai.agentic.configureNvidia": "Configure NVIDIA NIM",
+  "ai.fallback.retry": "Retry",
+  "ai.fallback.retryIn": "Retry ({{seconds}}s)",
   "ai.providers.custom.label": "Custom (OpenAI-compatible)",
   "ai.providers.custom.desc": "Local or remote OpenAI-compatible endpoint",
 

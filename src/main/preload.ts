@@ -148,6 +148,7 @@ export interface CavalStreamChunk {
   code?: string;
   action?: string;
   cooldownRemainingMs?: number;
+  fallbackFrom?: string;
   timedOut?: boolean;
   resolvedModel?: string;
   reason?: string;
