@@ -3,6 +3,7 @@
  */
 import { redactSensitiveText } from "../../src/shared/command-output-redaction";
 import { isAgenticProviderRequiredError } from "../models/agentic-routing-policy";
+import { parseRetryAfterMs } from "./circuit-breaker";
 
 export type ProviderErrorCode =
   | "auth_failed"
@@ -19,13 +20,19 @@ export class SafeProviderError extends Error {
   readonly code: ProviderErrorCode;
   readonly httpStatus?: number;
   readonly retryable: boolean;
+  readonly retryAfterMs?: number;
 
-  constructor(code: ProviderErrorCode, message: string, opts?: { httpStatus?: number; retryable?: boolean }) {
+  constructor(
+    code: ProviderErrorCode,
+    message: string,
+    opts?: { httpStatus?: number; retryable?: boolean; retryAfterMs?: number }
+  ) {
     super(redactSensitiveText(message));
     this.name = "SafeProviderError";
     this.code = code;
     this.httpStatus = opts?.httpStatus;
     this.retryable = opts?.retryable ?? false;
+    this.retryAfterMs = opts?.retryAfterMs;
   }
 }
 
@@ -69,8 +76,10 @@ export function isTransientRetryableError(error: unknown): boolean {
 export function safeErrorFromHttpStatus(
   providerName: string,
   status: number,
-  _rawBodyIgnored?: string
+  _rawBodyIgnored?: string,
+  headers?: Headers | null
 ): SafeProviderError {
+  const retryAfterMs = parseRetryAfterMs(headers?.get("retry-after") ?? headers?.get("Retry-After"));
   const code = mapHttpStatusToProviderCode(status);
   if (status === 401 || status === 403) {
     return new SafeProviderError("auth_failed", `${providerName} authentication failed`, {
@@ -82,6 +91,7 @@ export function safeErrorFromHttpStatus(
     return new SafeProviderError("rate_limited", `${providerName} rate limited`, {
       httpStatus: status,
       retryable: true,
+      retryAfterMs,
     });
   }
   if (code === "provider_unavailable") {
