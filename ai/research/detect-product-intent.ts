@@ -1,7 +1,4 @@
-import {
-  looksLikeChecklistOrAuditRequest,
-  looksLikeExplicitCreate,
-} from "../modes/create-intent";
+import { looksLikeExplicitCreate } from "../modes/execution-mode";
 import { detectSoftwareCategories } from "../tools/auto-web-context";
 import { detectPlatforms } from "../tools/platform-context";
 import type {
@@ -23,6 +20,13 @@ const EXPLAIN_RE =
 
 const SMALL_EDIT_RE =
   /redenumeste|\brename\b|schimba\s+culoarea|change\s+the\s+color|adauga\s+un\s+console\.log|\btypo\b|whitespace|\bindent\b/i;
+
+const AUDIT_LIST_RE =
+  /(?:^|[\s"'„”])(?:verific[ăa]\s+proiect(?:ul)?|check\s+(?:the\s+)?project|f[ăa]\s+o\s+list[ăa]|fa\s+o\s+lista|make\s+a\s+list|checklist|ce\s+mai\s+avem\s+de\s+f[ăa]cut|ce\s+lipse[șs]te|remaining\s+work|p[âa]n[ăa]\s+la\s+production|until\s+production|production[-\s]?ready|go[\s-]?live|audit(?:eaz[ăa])?\s+(?:proiect(?:ul)?|the\s+project))/i;
+
+function looksLikeChecklistOrAuditRequest(message: string): boolean {
+  return AUDIT_LIST_RE.test(message.trim());
+}
 
 const LANDING_RE =
   /landing\s*page|pagina\s+de\s+prezentare|pagina\s+de\s+vanzare|hero\s+page/i;
