@@ -39,6 +39,7 @@ import { useLiveAiEdits } from './use-live-ai-edits';
 import { joinWorkspaceRelativePath } from './written-files';
 import { dispatchOpenExplorerSidebar } from '../../src/renderer/components/engineering/bootstrap-robotics-project';
 import { usePreviewStore } from '../../src/renderer/store/preview-store';
+import { ProductResearchCard } from './ProductResearchCard';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
 
@@ -540,6 +541,18 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               {effectiveModelId ? <ModelProfileChips modelId={effectiveModelId} /> : null}
             </AiMessageDetails>
           </>
+        ) : null}
+
+        {!isUser && message.productResearch ? (
+          <ProductResearchCard
+            pending={message.productResearch}
+            onBuild={() => {
+              void useAIStore.getState().acceptProductResearchAndBuild();
+            }}
+            onSaveBrief={() => {
+              void useAIStore.getState().saveProductResearchBrief();
+            }}
+          />
         ) : null}
 
         {/* Diff block dacă există */}

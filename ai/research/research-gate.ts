@@ -1,0 +1,91 @@
+import { hasAgenticCloudProvider } from "../models/agentic-routing-policy";
+import { isProductPromptClear } from "./detect-product-intent";
+import { applyDirectionRefinement, isBuildConfirmText, isDirectionRefinementText } from "./product-brief";
+import { runProductResearch } from "./research-orchestrator";
+import { recordBriefAccepted, recordGenerationStarted } from "./research-metrics";
+import type { PendingProductResearch, ProductIntentClassifier, ProductResearchBrief, ProductWorkspaceContext } from "./types";
+import type { WebResearchHost, WebResearchProvider } from "./web-research-provider";
+
+export type ProductResearchGate =
+  | { action: "generate"; brief: ProductResearchBrief | null; prompt: string }
+  | { action: "show-brief"; pending: PendingProductResearch; content: string }
+  | { action: "update-brief"; pending: PendingProductResearch; content: string };
+
+function cardCopy(brief: ProductResearchBrief): string {
+  const status =
+    brief.researchStatus === "unavailable" || brief.researchStatus === "timeout"
+      ? "Research unavailable"
+      : brief.researchStatus === "empty"
+        ? "Research unavailable"
+        : "";
+  const question = brief.clarifyingQuestion ? `\n\n${brief.clarifyingQuestion}` : "";
+  return [
+    "Am înțeles produsul.",
+    status,
+    question,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function shouldUseCodeInsteadOfAgentic(mode: string): boolean {
+  return mode === "agentic" && !hasAgenticCloudProvider();
+}
+
+export function resolveProductBuildMode(mode: string): "code" | typeof mode {
+  return shouldUseCodeInsteadOfAgentic(mode) ? "code" : mode;
+}
+
+export async function resolveProductResearchGate(input: {
+  userText: string;
+  pending: PendingProductResearch | null;
+  workspaceContext?: string | ProductWorkspaceContext;
+  classify?: ProductIntentClassifier;
+  provider?: WebResearchProvider | null;
+  host?: WebResearchHost;
+  messageId: string;
+}): Promise<ProductResearchGate> {
+  const pending = input.pending;
+  if (pending?.phase === "accepted") {
+    recordGenerationStarted();
+    return { action: "generate", brief: pending.brief, prompt: pending.originalPrompt };
+  }
+
+  if (pending?.phase === "awaiting-confirm") {
+    if (isBuildConfirmText(input.userText)) {
+      recordBriefAccepted();
+      recordGenerationStarted();
+      return {
+        action: "generate",
+        brief: pending.brief,
+        prompt: pending.originalPrompt,
+      };
+    }
+    if (isDirectionRefinementText(input.userText)) {
+      const brief = applyDirectionRefinement(pending.brief, input.userText);
+      const next: PendingProductResearch = { ...pending, brief };
+      return { action: "update-brief", pending: next, content: cardCopy(brief) };
+    }
+  }
+
+  const run = await runProductResearch({
+    prompt: input.userText,
+    workspaceContext: input.workspaceContext,
+    classify: input.classify,
+    provider: input.provider,
+    host: input.host,
+  });
+
+  if (!run.intent.shouldResearch || !run.brief) {
+    return { action: "generate", brief: null, prompt: input.userText };
+  }
+
+  const next: PendingProductResearch = {
+    originalPrompt: input.userText,
+    intent: run.intent,
+    brief: run.brief,
+    phase: isProductPromptClear(run.intent) ? "awaiting-confirm" : "awaiting-confirm",
+    messageId: input.messageId,
+  };
+  return { action: "show-brief", pending: next, content: cardCopy(run.brief) };
+}
