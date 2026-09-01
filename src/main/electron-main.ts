@@ -25,9 +25,11 @@ import { assertShellCommandAllowed } from "./shell-security";
 import { ensureLatestPowerShellInstalled } from "./powershell-shell";
 import { registerGitHandlers } from "./git-handlers";
 import { registerProblemsHandlers } from "./problems-handlers";
-import { registerTasksHandlers, shutdownAllTasksSync } from "./tasks-handlers";
-import { registerTerminalHandlers, stopAllInteractiveTerminalsSync } from "./terminal-handlers";
-import { registerPreviewHandlers, shutdownAllPreviewSync } from "./preview/preview-handlers";
+import { registerTasksHandlers } from "./tasks-handlers";
+import { registerTerminalHandlers } from "./terminal-handlers";
+import { registerPreviewHandlers } from "./preview/preview-handlers";
+import { installAppShutdownLifecycle } from "./app-shutdown";
+import { shutdownMark } from "./shutdown-diagnostics";
 import {
   addRecentWorkspace,
   listRecentWorkspaces,
@@ -42,7 +44,6 @@ import { registerMcpHandlers } from "./mcp-handlers";
 import { registerConnectionHealthHandlers } from "./connection-health-handlers";
 import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
 import { registerAiHistoryHandlers } from "./ai/ai-history-handlers";
-import { closeAllAiPersistence } from "./ai/timeline-persistence";
 import { registerAiSettingsHandlers } from "./ai/ai-settings-handlers";
 import { registerWorkspaceIndexHandlers } from "./workspace/workspace-index-handlers";
 import { registerWorkspaceSearchHandlers } from "./workspace/workspace-search-handlers";
@@ -62,7 +63,7 @@ import {
   CAD_URL_SETTING_KEY,
 } from "../shared/cad-connection-settings-contract";
 import { registerRoboticsLibraryHandlers } from "./robotics-library-handlers";
-import { ensureCadLocalServer, stopCadLocalServer } from "./cad-local-server";
+import { ensureCadLocalServer } from "./cad-local-server";
 import {
   applyLocaleToSettings,
   resolveLocalePreference,
@@ -74,7 +75,7 @@ import {
   popupApplicationSubmenu,
 } from "./app-menu";
 import { LOCALE_SETTING_KEY } from "../shared/i18n-contract";
-import { startMarketplaceServer, stopMarketplaceServer } from "./marketplace-server";
+import { startMarketplaceServer } from "./marketplace-server";
 import { setMcpSecretsProvider } from "../../ai/tools/tool-runtime";
 import { applyCadCloudEnvDefaults, isCadCloudOnly } from "./cad-config";
 
@@ -126,7 +127,6 @@ import {
   ensureLocalAiRuntime,
   ensureOllamaOnBoot,
   getLocalAiStatus,
-  stopManagedOllamaIfStarted,
   installOllamaRuntimeOnly,
   pullModelWithProgress,
   cancelActiveModelPull,
@@ -326,7 +326,6 @@ const createWindow = (): BrowserWindow => {
       }
       console.info("[caval-smoke] complete");
       setTimeout(() => {
-        closeAllAiPersistence();
         if (!window.isDestroyed()) window.close();
         app.quit();
       }, 250);
@@ -1851,20 +1850,10 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("before-quit", () => {
-  closeAllAiPersistence();
-  stopManagedOllamaIfStarted();
-});
+installAppShutdownLifecycle(app);
 
 app.on("window-all-closed", () => {
-  shutdownAllPreviewSync();
-  stopAllInteractiveTerminalsSync();
-  shutdownAllTasksSync();
-  // CAD: sync child.kill. Marketplace: Server.close() starts teardown;
-  // the listen socket is reaped when this process exits.
-  stopCadLocalServer();
-  stopMarketplaceServer();
-  stopManagedOllamaIfStarted();
+  shutdownMark("window-all-closed");
   if (process.platform !== "darwin") {
     app.quit();
   }

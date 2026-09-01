@@ -11,6 +11,7 @@ import type {
   ParallelWorkerResponse,
 } from "./parallel-types";
 import { PARALLEL_LOG_PREFIX } from "./parallel-types";
+import { shutdownMark } from "../../../src/main/shutdown-diagnostics";
 
 interface PendingTask {
   task: ParallelTaskInput;
@@ -29,6 +30,7 @@ export class ParallelScheduler {
   private readonly pending = new Map<string, PendingTask>();
   private readonly cancelledTokens = new Set<string>();
   private inlineDraining = false;
+  private closed = false;
   private completed = 0;
   private failed = 0;
 
@@ -90,6 +92,12 @@ export class ParallelScheduler {
   }
 
   async dispose(): Promise<void> {
+    if (this.closed) {
+      shutdownMark("parallel-workers-already-stopped");
+      return;
+    }
+    this.closed = true;
+    shutdownMark("parallel-workers-stop", { workers: this.workers.length });
     await Promise.all(this.workers.map((slot) => slot.worker.terminate().catch(() => 0)));
     this.workers.length = 0;
     this.queue.length = 0;

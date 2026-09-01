@@ -22,6 +22,8 @@ import {
   type OllamaModelPullResult,
   isConfirmedTrue,
 } from "../shared/local-ai-contract";
+import { shutdownMark } from "./shutdown-diagnostics";
+import { waitForChildExit } from "./wait-for-exit";
 
 export type {
   LocalAiStatus,
@@ -60,6 +62,7 @@ let installInFlight = false;
 /** Child we spawned with `ollama serve` — kill only this on quit. */
 let managedOllamaChild: ChildProcess | null = null;
 let weStartedOllama = false;
+let ollamaStopped = false;
 let bootPhase: LocalAiPhase = "unavailable";
 let lastOllamaError: string | undefined;
 let lastEmittedFingerprint: string | null = null;
@@ -347,6 +350,7 @@ export function spawnOllamaServe(runtimePath: string): ChildProcess {
   });
   managedOllamaChild = child;
   weStartedOllama = true;
+  ollamaStopped = false;
   child.on("error", (err) => {
     console.warn("[ollama] failed:", err.message);
     lastOllamaError = "Ollama failed to start";
@@ -436,11 +440,18 @@ async function startOllamaService(runtimePath: string): Promise<void> {
  * Stop Ollama only if Caval spawned it. Pre-existing instances are left alone.
  */
 export function stopManagedOllamaIfStarted(): void {
+  if (ollamaStopped) {
+    shutdownMark("ollama-already-stopped");
+    return;
+  }
+  ollamaStopped = true;
   if (!weStartedOllama || !managedOllamaChild) {
+    shutdownMark("ollama-leave-preexisting");
     console.info("[ollama] quit: leaving pre-existing instance alone");
     return;
   }
   const child = managedOllamaChild;
+  shutdownMark("ollama-stop-managed", { pid: child.pid ?? null });
   console.info("[ollama] quit: stopping process we started (pid=%s)", child.pid ?? "?");
   try {
     child.kill();
@@ -470,10 +481,21 @@ export function stopManagedOllamaIfStarted(): void {
   }
 }
 
+export async function stopManagedOllamaIfStartedAndWait(timeoutMs = 5_000): Promise<void> {
+  const child = managedOllamaChild;
+  const started = weStartedOllama;
+  stopManagedOllamaIfStarted();
+  if (started && child) {
+    const result = await waitForChildExit(child, timeoutMs);
+    shutdownMark("ollama-child-exit", { result, pid: child.pid ?? null });
+  }
+}
+
 /** Test helpers — reset process tracking between unit tests. */
 export function __resetOllamaProcessTrackingForTests(): void {
   managedOllamaChild = null;
   weStartedOllama = false;
+  ollamaStopped = false;
   bootPhase = "unavailable";
   lastOllamaError = undefined;
   setupInFlight = null;

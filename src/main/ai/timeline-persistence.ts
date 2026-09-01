@@ -9,6 +9,7 @@ import {
   createAiPersistence,
   type AiPersistence,
 } from "../db/ai-persistence";
+import { shutdownMark } from "../shutdown-diagnostics";
 import { clearTimelineBuffer, flushTimeline } from "./timeline-emit";
 
 const persistenceByRoot = new Map<string, AiPersistence>();
@@ -28,11 +29,15 @@ export function getAiPersistence(workspaceRoot: string): AiPersistence {
 }
 
 export function closeAllAiPersistence(): void {
-  for (const db of persistenceByRoot.values()) {
+  shutdownMark("sqlite-close-all", { count: persistenceByRoot.size });
+  for (const [root, db] of persistenceByRoot.entries()) {
     try {
       db.close();
-    } catch {
-      // already closed or native teardown already started
+    } catch (error) {
+      shutdownMark("sqlite-close-all-error", {
+        root,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   persistenceByRoot.clear();

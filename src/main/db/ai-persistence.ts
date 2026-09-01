@@ -15,6 +15,7 @@ import {
   type TimelineEventInput,
 } from "../../shared/ai-timeline-contract";
 import { loadAiSettingsSync } from "../ai/ai-settings";
+import { shutdownMark } from "../shutdown-diagnostics";
 
 export const AI_PERSIST_MESSAGE_MAX_BYTES = 32 * 1024;
 export const AI_PERSIST_SNAPSHOT_MAX_BYTES = 64 * 1024;
@@ -220,6 +221,7 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   const db = new Database(dbPath);
+  let closed = false;
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_SQL);
@@ -698,7 +700,21 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
     },
 
     close(): void {
-      db.close();
+      if (closed) {
+        shutdownMark("sqlite-already-closed", { path: dbPath });
+        return;
+      }
+      closed = true;
+      shutdownMark("sqlite-close", { path: dbPath });
+      try {
+        db.close();
+      } catch (error) {
+        shutdownMark("sqlite-close-error", {
+          path: dbPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     },
   };
 

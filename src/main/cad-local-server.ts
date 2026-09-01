@@ -2,11 +2,15 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fsSync from "node:fs";
 import path from "node:path";
 
+import { shutdownMark } from "./shutdown-diagnostics";
+import { waitForChildExit } from "./wait-for-exit";
+
 const DEFAULT_PORT = Number(process.env.CAD_PORT ?? 8791);
 const LOCAL_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 
 let cadChild: ChildProcess | null = null;
 let starting: Promise<boolean> | null = null;
+let cadStopped = false;
 
 async function probeHealth(baseUrl: string, timeoutMs = 1_500): Promise<boolean> {
   try {
@@ -73,6 +77,7 @@ export async function ensureCadLocalServer(): Promise<boolean> {
     const { command, args, shell } = resolveTsxLaunch();
     console.info(`[cad] starting local server: ${command} ${args.join(" ")}`);
 
+    cadStopped = false;
     cadChild = spawn(command, args, {
       cwd: process.cwd(),
       env: {
@@ -121,12 +126,19 @@ export async function ensureCadLocalServer(): Promise<boolean> {
 }
 
 export function stopCadLocalServer(): void {
+  if (cadStopped) {
+    shutdownMark("cad-child-already-stopped");
+    return;
+  }
+  cadStopped = true;
   const child = cadChild;
   cadChild = null;
   if (!child || child.killed) {
+    shutdownMark("cad-child-stop", { alreadyGone: true });
     return;
   }
   const pid = child.pid;
+  shutdownMark("cad-child-stop", { pid: pid ?? null });
   if (typeof pid === "number" && pid > 1 && process.platform === "win32") {
     spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
       windowsHide: true,
@@ -138,6 +150,15 @@ export function stopCadLocalServer(): void {
     child.kill();
   } catch {
     // already gone
+  }
+}
+
+export async function stopCadLocalServerAndWait(timeoutMs = 8_000): Promise<void> {
+  const child = cadChild;
+  stopCadLocalServer();
+  if (child) {
+    const result = await waitForChildExit(child, timeoutMs);
+    shutdownMark("cad-child-exit", { result, pid: child.pid ?? null });
   }
 }
 
