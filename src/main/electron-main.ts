@@ -42,6 +42,7 @@ import { registerMcpHandlers } from "./mcp-handlers";
 import { registerConnectionHealthHandlers } from "./connection-health-handlers";
 import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
 import { registerAiHistoryHandlers } from "./ai/ai-history-handlers";
+import { closeAllAiPersistence } from "./ai/timeline-persistence";
 import { registerAiSettingsHandlers } from "./ai/ai-settings-handlers";
 import { registerWorkspaceIndexHandlers } from "./workspace/workspace-index-handlers";
 import { registerWorkspaceSearchHandlers } from "./workspace/workspace-search-handlers";
@@ -320,6 +321,7 @@ const createWindow = (): BrowserWindow => {
       }
       console.info("[caval-smoke] complete");
       setTimeout(() => {
+        closeAllAiPersistence();
         if (!window.isDestroyed()) window.close();
         app.quit();
       }, 250);
@@ -1836,6 +1838,7 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  closeAllAiPersistence();
   stopManagedOllamaIfStarted();
 });
 

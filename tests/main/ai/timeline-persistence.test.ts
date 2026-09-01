@@ -12,6 +12,7 @@ import {
   resetTimelineBuffersForTests,
 } from "../../../src/main/ai/timeline-emit";
 import {
+  closeAllAiPersistence,
   discardIncompleteStreamTimeline,
   persistAssistantMessageAndFlush,
   resetAiPersistenceCacheForTests,
@@ -189,5 +190,10 @@ describe("7a.2 timeline flush at message completion", () => {
     emitTimelineEvent(stream, "s-clear", { type: "error", label: "cancelled", success: false });
     clearTimelineBuffer("s-clear");
     expect(peekTimelineBuffer("s-clear")).toEqual([]);
+  });
+
+  it("closeAllAiPersistence is safe to call twice with no open databases", () => {
+    expect(() => closeAllAiPersistence()).not.toThrow();
+    expect(() => closeAllAiPersistence()).not.toThrow();
   });
 });
