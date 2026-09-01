@@ -1,4 +1,3 @@
-import { hasAgenticCloudProvider } from "../models/agentic-routing-policy";
 import type { AgentModeId } from "../modes/agent-modes";
 import { isProductPromptClear } from "./detect-product-intent";
 import { applyDirectionRefinement, isBuildConfirmText, isDirectionRefinementText } from "./product-brief";
@@ -6,6 +5,10 @@ import { runProductResearch } from "./research-orchestrator";
 import { recordBriefAccepted, recordGenerationStarted } from "./research-metrics";
 import type { PendingProductResearch, ProductIntentClassifier, ProductResearchBrief, ProductWorkspaceContext } from "./types";
 import type { WebResearchHost, WebResearchProvider } from "./web-research-provider";
+
+export type AgenticAvailabilityHost = {
+  getAgenticAvailability?: () => Promise<{ ok?: boolean; available?: boolean }>;
+};
 
 export type ProductResearchGate =
   | { action: "generate"; brief: ProductResearchBrief | null; prompt: string }
@@ -29,12 +32,36 @@ function cardCopy(brief: ProductResearchBrief): string {
     .join(" ");
 }
 
-export function shouldUseCodeInsteadOfAgentic(mode: string): boolean {
-  return mode === "agentic" && !hasAgenticCloudProvider();
+function rendererCaval(): AgenticAvailabilityHost | undefined {
+  const g = globalThis as { caval?: AgenticAvailabilityHost };
+  return g.caval;
 }
 
-export function resolveProductBuildMode(mode: AgentModeId): AgentModeId {
-  return shouldUseCodeInsteadOfAgentic(mode) ? "code" : mode;
+/** Safe default is unavailable (Code mode) when IPC is missing or fails. */
+export async function queryAgenticCloudProviderAvailable(
+  host?: AgenticAvailabilityHost
+): Promise<boolean> {
+  const api = host ?? rendererCaval();
+  if (!api?.getAgenticAvailability) return false;
+  try {
+    const result = await api.getAgenticAvailability();
+    return result?.ok === true && result.available === true;
+  } catch {
+    return false;
+  }
+}
+
+export function shouldUseCodeInsteadOfAgentic(mode: string, hasCloud: boolean): boolean {
+  return mode === "agentic" && !hasCloud;
+}
+
+export async function resolveProductBuildMode(
+  mode: AgentModeId,
+  host?: AgenticAvailabilityHost
+): Promise<AgentModeId> {
+  if (mode !== "agentic") return mode;
+  const available = await queryAgenticCloudProviderAvailable(host);
+  return shouldUseCodeInsteadOfAgentic(mode, available) ? "code" : mode;
 }
 
 export async function resolveProductResearchGate(input: {

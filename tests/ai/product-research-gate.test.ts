@@ -1,33 +1,47 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { resolveProductBuildMode } from "../../ai/research/research-gate";
+import {
+  queryAgenticCloudProviderAvailable,
+  resolveProductBuildMode,
+  shouldUseCodeInsteadOfAgentic,
+} from "../../ai/research/research-gate";
 
 describe("product build mode", () => {
-  it("keeps Code mode when Agentic has no tool-capable cloud provider", () => {
-    const prevNv = process.env.NVIDIA_API_KEY;
-    const prevOr = process.env.OPENROUTER_API_KEY;
-    const prevOa = process.env.OPENAI_API_KEY;
-    const prevAn = process.env.ANTHROPIC_API_KEY;
-    const prevGo = process.env.GOOGLE_API_KEY;
-    delete process.env.NVIDIA_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.GOOGLE_API_KEY;
-    try {
-      expect(resolveProductBuildMode("agentic")).toBe("code");
-      expect(resolveProductBuildMode("code")).toBe("code");
-    } finally {
-      if (prevNv === undefined) delete process.env.NVIDIA_API_KEY;
-      else process.env.NVIDIA_API_KEY = prevNv;
-      if (prevOr === undefined) delete process.env.OPENROUTER_API_KEY;
-      else process.env.OPENROUTER_API_KEY = prevOr;
-      if (prevOa === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = prevOa;
-      if (prevAn === undefined) delete process.env.ANTHROPIC_API_KEY;
-      else process.env.ANTHROPIC_API_KEY = prevAn;
-      if (prevGo === undefined) delete process.env.GOOGLE_API_KEY;
-      else process.env.GOOGLE_API_KEY = prevGo;
-    }
+  it("does not read process.env or agentic-routing-policy from the renderer gate", () => {
+    const source = readFileSync(
+      path.join(__dirname, "../../ai/research/research-gate.ts"),
+      "utf8"
+    );
+    expect(source).not.toMatch(/process\.env/);
+    expect(source).not.toMatch(/hasAgenticCloudProvider/);
+    expect(source).not.toMatch(/agentic-routing-policy/);
+  });
+
+  it("keeps Code mode when Agentic IPC reports no cloud provider", async () => {
+    const none = { getAgenticAvailability: async () => ({ ok: true, available: false }) };
+    expect(await resolveProductBuildMode("agentic", none)).toBe("code");
+    expect(await resolveProductBuildMode("code", none)).toBe("code");
+    expect(shouldUseCodeInsteadOfAgentic("agentic", false)).toBe(true);
+  });
+
+  it("keeps Agentic when main reports a configured cloud provider", async () => {
+    const nvidia = { getAgenticAvailability: async () => ({ ok: true, available: true }) };
+    expect(await resolveProductBuildMode("agentic", nvidia)).toBe("agentic");
+    expect(shouldUseCodeInsteadOfAgentic("agentic", true)).toBe(false);
+  });
+
+  it("falls back to Code when IPC is missing or throws", async () => {
+    expect(await resolveProductBuildMode("agentic")).toBe("code");
+    expect(await resolveProductBuildMode("agentic", {})).toBe("code");
+    expect(
+      await resolveProductBuildMode("agentic", {
+        getAgenticAvailability: async () => {
+          throw new Error("ipc down");
+        },
+      })
+    ).toBe("code");
+    expect(await queryAgenticCloudProviderAvailable()).toBe(false);
   });
 });

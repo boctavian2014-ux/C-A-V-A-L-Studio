@@ -6,8 +6,10 @@ export { formatProductResearchContext, mergeProjectContextWithResearchBrief } fr
 export {
   resolveProductResearchGate,
   resolveProductBuildMode,
+  queryAgenticCloudProviderAvailable,
   shouldUseCodeInsteadOfAgentic,
 } from "./research-gate";
+export type { AgenticAvailabilityHost } from "./research-gate";
 export { canonicalizeResearchUrl, dedupeResearchHits, looksLikeCopiedHtml } from "./research-dedupe";
 export { hashResearchKey, clearResearchCache, readResearchCache, writeResearchCache } from "./research-cache";
 export {

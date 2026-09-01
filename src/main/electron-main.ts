@@ -139,6 +139,11 @@ import {
 } from "./ai/provider-registry";
 import { getOllamaLoopbackUrl, OLLAMA_CHAT_URL } from "../shared/local-ai-contract";
 import { isAllowedCustomUrl } from "../shared/ai-provider-contract";
+import { AGENTIC_AVAILABILITY_CHANNEL } from "../shared/agentic-availability";
+import {
+  readAgenticCloudAvailability,
+  toDeniedAgenticAvailability,
+} from "./agentic-availability";
 import { probeCustomProviderConnection } from "../../ai/providers/custom-openai-compatible";
 import { probeNvidiaNimConnection } from "../../ai/providers/nvidia";
 
@@ -1671,6 +1676,15 @@ ipcMain.handle("caval:ai-providers-list", async (event) => {
       error: error instanceof Error ? error.message : String(error),
     };
   }
+});
+
+ipcMain.handle(AGENTIC_AVAILABILITY_CHANNEL, (event) => {
+  try {
+    assertTrustedSender(event);
+  } catch (error) {
+    return toDeniedAgenticAvailability(error);
+  }
+  return readAgenticCloudAvailability();
 });
 
 ipcMain.handle(

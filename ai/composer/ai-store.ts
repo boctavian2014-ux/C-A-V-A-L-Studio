@@ -1100,7 +1100,7 @@ export const useAIStore = create<AIStore>()(
         const pending = get().pendingProductResearch;
         if (!pending) return;
         recordBriefAccepted();
-        const nextMode = resolveProductBuildMode(get().agentMode);
+        const nextMode = await resolveProductBuildMode(get().agentMode);
         if (nextMode !== get().agentMode) {
           get().setAgentMode(nextMode);
         }
@@ -1447,7 +1447,7 @@ export const useAIStore = create<AIStore>()(
         }
 
         if (productResearchBrief) {
-          const buildMode = resolveProductBuildMode(agentMode);
+          const buildMode = await resolveProductBuildMode(agentMode);
           if (buildMode !== agentMode) {
             get().setAgentMode(buildMode);
             agentMode = buildMode;
