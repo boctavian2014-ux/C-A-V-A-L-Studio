@@ -1,6 +1,8 @@
 import { clipResearchNote, canonicalizeResearchUrl } from "./research-dedupe";
 import type { ResearchSourceHit, WebResearchProvider, WebResearchQuery } from "./types";
 
+export type { WebResearchProvider };
+
 type McpServerLite = {
   id?: string;
   running?: boolean;
@@ -8,7 +10,7 @@ type McpServerLite = {
 };
 
 export interface WebResearchHost {
-  mcpEnsureReady?: () => Promise<{ ok?: boolean; servers?: McpServerLite[] }>;
+  mcpEnsureReady?: () => Promise<{ ok?: boolean; servers?: unknown }>;
   toolExecute?: (input: { name: string; arguments: Record<string, unknown> }) => Promise<{
     ok: boolean;
     output?: unknown;
@@ -16,14 +18,17 @@ export interface WebResearchHost {
   }>;
 }
 
-function firecrawlReady(servers: McpServerLite[] | undefined): boolean {
-  return Boolean(
-    servers?.some(
-      (s) =>
-        (s.id === "firecrawl" || s.id === "fetch") &&
-        s.running &&
-        (s.tools?.length ?? 0) > 0
-    )
+function asMcpServers(servers: unknown): McpServerLite[] {
+  if (!Array.isArray(servers)) return [];
+  return servers.filter((s): s is McpServerLite => Boolean(s) && typeof s === "object");
+}
+
+function firecrawlReady(servers: unknown): boolean {
+  return asMcpServers(servers).some(
+    (s) =>
+      (s.id === "firecrawl" || s.id === "fetch") &&
+      s.running &&
+      (s.tools?.length ?? 0) > 0
   );
 }
 

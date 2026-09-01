@@ -1,4 +1,5 @@
 import { hasAgenticCloudProvider } from "../models/agentic-routing-policy";
+import type { AgentModeId } from "../modes/agent-modes";
 import { isProductPromptClear } from "./detect-product-intent";
 import { applyDirectionRefinement, isBuildConfirmText, isDirectionRefinementText } from "./product-brief";
 import { runProductResearch } from "./research-orchestrator";
@@ -32,7 +33,7 @@ export function shouldUseCodeInsteadOfAgentic(mode: string): boolean {
   return mode === "agentic" && !hasAgenticCloudProvider();
 }
 
-export function resolveProductBuildMode(mode: string): "code" | typeof mode {
+export function resolveProductBuildMode(mode: AgentModeId): AgentModeId {
   return shouldUseCodeInsteadOfAgentic(mode) ? "code" : mode;
 }
 

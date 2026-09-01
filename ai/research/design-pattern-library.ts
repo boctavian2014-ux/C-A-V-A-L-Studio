@@ -110,7 +110,9 @@ export function selectDesignPatterns(intent: ProductIntent): DesignPattern[] {
   const category = intent.category;
   const goal = intent.primaryGoal;
   if (!category) return [];
-  const preferred = goal ? GOAL_PRIORITY[goal] : ["hero-cta", "navigation", "catalog"];
+  const preferred: DesignPatternId[] = goal
+    ? GOAL_PRIORITY[goal]
+    : ["hero-cta", "navigation", "catalog"];
   const picked: DesignPattern[] = [];
   const used = new Set<DesignPatternId>();
 
@@ -151,7 +153,9 @@ export function selectVisualTraits(intent: ProductIntent): {
 
   const keep = wanted.slice(0, 2);
   if (intent.primaryGoal === "booking" || intent.primaryGoal === "checkout") {
-    const filtered = keep.filter((t) => t !== "3d" && t !== "heavy-animation" && t !== "bento-grid");
+    const filtered: CompetingVisualTrait[] = keep.filter(
+      (t) => t !== "3d" && t !== "heavy-animation" && t !== "bento-grid"
+    );
     const rejected = COMPETING_VISUAL_TRAITS.filter((t) => !filtered.includes(t));
     return { traits: filtered, rejectedTraits: rejected };
   }
