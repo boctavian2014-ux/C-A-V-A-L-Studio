@@ -100,8 +100,8 @@ describe("runAppShutdown", () => {
     expect(stopCadOrphanScan).toHaveBeenCalledTimes(1);
     expect(clearAllTurnWatchdogs).toHaveBeenCalledTimes(1);
     expect(workspaceClose).toHaveBeenCalledTimes(1);
-    expect(preloadDispose).toHaveBeenCalledTimes(1);
-    expect(parallelDispose).toHaveBeenCalledTimes(1);
+    expect(preloadDispose).not.toHaveBeenCalled();
+    expect(parallelDispose).not.toHaveBeenCalled();
     expect(shutdownAllPreviewSync).toHaveBeenCalledTimes(1);
     expect(stopAllInteractiveTerminalsSync).toHaveBeenCalledTimes(1);
     expect(shutdownAllTasksSync).toHaveBeenCalledTimes(1);
@@ -126,6 +126,6 @@ describe("runAppShutdown", () => {
 
     expect(closeAllAiPersistence).toHaveBeenCalledTimes(1);
     expect(stopManagedOllamaIfStartedAndWait).toHaveBeenCalledTimes(1);
-    expect(preloadDispose).toHaveBeenCalledTimes(1);
+    expect(preloadDispose).not.toHaveBeenCalled();
   });
 });

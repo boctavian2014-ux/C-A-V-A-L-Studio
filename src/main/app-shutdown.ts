@@ -6,7 +6,6 @@
 
 import type { App } from "electron";
 
-import { parallelScheduler } from "../../ai/context/parallel/parallel-scheduler";
 import { closeAllAiPersistence } from "./ai/timeline-persistence";
 import { clearAllTurnWatchdogs } from "./ai/turn-watchdog-runtime";
 import { stopCadOrphanScan } from "./cad-handlers";
@@ -15,15 +14,11 @@ import {
   stopManagedOllamaIfStartedAndWait,
 } from "./local-ai-setup";
 import { stopMarketplaceServerAndWait } from "./marketplace-server";
-import { preloadManager } from "./preload-handlers";
 import { shutdownAllPreviewSync } from "./preview/preview-handlers";
 import { logRuntimeVersions, shutdownMark } from "./shutdown-diagnostics";
 import { shutdownAllTasksSync } from "./tasks-handlers";
 import { stopAllInteractiveTerminalsSync } from "./terminal-handlers";
-import { withTimeout } from "./wait-for-exit";
 import { workspaceIndexService } from "./workspace/workspace-index-service";
-
-const WORKER_STOP_MS = 5_000;
 
 let completed = false;
 let inFlight: Promise<void> | null = null;
@@ -73,18 +68,11 @@ export async function runAppShutdown(reason: string): Promise<void> {
       clearAllTurnWatchdogs();
     });
     await step("workspace-index-close", () => workspaceIndexService.close());
-    await step("preload-worker-stop", async () => {
-      const result = await withTimeout(preloadManager.dispose(), WORKER_STOP_MS);
-      if (result === "timeout") {
-        shutdownMark("preload-worker-stop-timeout");
-      }
-    });
-    await step("parallel-workers-stop", async () => {
-      const result = await withTimeout(parallelScheduler.dispose(), WORKER_STOP_MS);
-      if (result === "timeout") {
-        shutdownMark("parallel-workers-stop-timeout");
-      }
-    });
+    // Do not Worker.terminate() here. CI smoke on Linux (#77) threw Napi::Error
+    // after [shutdown] complete when preload/parallel workers were terminated
+    // during quit. The process exit path reaps worker_threads.
+    shutdownMark("preload-worker-stop", { skipped: "process-exit-reaps" });
+    shutdownMark("parallel-workers-stop", { skipped: "process-exit-reaps" });
     await step("preview-stop", () => {
       shutdownAllPreviewSync();
     });
