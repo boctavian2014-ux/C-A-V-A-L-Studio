@@ -46,13 +46,26 @@ export function looksLikeScaffoldCreate(message: string): boolean {
   return looksLikeExplicitCreate(text) && looksLikeExplicitWriteRequest(text);
 }
 
+/** Checklists stay in Plan; simple explain stays in Ask. */
+const AUDIT_LIST_RE =
+  /(?:^|[\s"'„”])(?:verific[ăa]\s+proiect(?:ul)?|check\s+(?:the\s+)?project|f[ăa]\s+o\s+list[ăa]|fa\s+o\s+lista|make\s+a\s+list|checklist|ce\s+mai\s+avem\s+de\s+f[ăa]cut|ce\s+lipse[șs]te|remaining\s+work|p[âa]n[ăa]\s+la\s+production|until\s+production|production[-\s]?ready|go[\s-]?live|audit(?:eaz[ăa])?\s+(?:proiect(?:ul)?|the\s+project))/i;
+
+export function promptModeForReadOnlyRequest(message: string): "ask" | "plan" {
+  return AUDIT_LIST_RE.test(message.trim()) ? "plan" : "ask";
+}
+
+/** Code / Agentic / Debug: create turns write; Ask / Plan stay explain + propose. */
+export function uiModeGrantsCreateWrites(agentMode?: string): boolean {
+  return agentMode === "code" || agentMode === "agentic" || agentMode === "debug";
+}
+
 /**
- * Main-owned intent from the original user message. Do not pass UI agent mode —
- * it is not a write-capability signal.
+ * Main-owned intent from the original user message.
+ * UI Code / Agentic / Debug may grant a write turn; Ask / Plan cannot raise privileges.
  */
-export function resolveExecutionMode(message: string): ExecutionMode {
+export function resolveExecutionMode(message: string, agentMode?: string): ExecutionMode {
   const text = message.trim();
-  if (!text) return "READ_ONLY";
+  if (!text) return uiModeGrantsCreateWrites(agentMode) ? "SCAFFOLD" : "READ_ONLY";
 
   if (isAgenticRepairRequest(text)) {
     return "AGENTIC_REPAIR";
@@ -65,8 +78,9 @@ export function resolveExecutionMode(message: string): ExecutionMode {
     return "SCAFFOLD";
   }
   if (APPLY_RE.test(text)) return "APPLY_EDIT";
+  if (uiModeGrantsCreateWrites(agentMode)) return "SCAFFOLD";
   if (looksLikeScaffoldCreate(text)) return "SCAFFOLD";
-  if (READ_ONLY_RE.test(text)) return "READ_ONLY";
+  if (READ_ONLY_RE.test(text) || AUDIT_LIST_RE.test(text)) return "READ_ONLY";
   if (looksLikeExplicitCreate(text)) return "PROPOSE_EDIT";
   return "READ_ONLY";
 }
@@ -111,8 +125,9 @@ export function stricterExecutionMode(a: ExecutionMode, b: ExecutionMode): Execu
 export function resolveTrustedExecutionCapability(input: {
   userMessage: string;
   rendererRequestedMode?: unknown;
+  agentMode?: string;
 }): TrustedExecutionCapability {
-  const mainResolved = resolveExecutionMode(input.userMessage);
+  const mainResolved = resolveExecutionMode(input.userMessage, input.agentMode);
   const rendererRequested = parseRendererExecutionMode(input.rendererRequestedMode);
   return {
     mainResolved,

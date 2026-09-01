@@ -13,6 +13,10 @@ import { PoolsideProvider } from "./providers/poolside";
 import type { ModelCapability, ModelDescriptor, ModelProvider, ModelRequest, ModelResponse, ModelStreamChunk } from "./types";
 import type { AITaskDescriptor } from "./models/model-types";
 import { preloadModel } from "./models/model-preload";
+import {
+  AgenticProviderRequiredError,
+  requestLooksAgentic,
+} from "./models/agentic-routing-policy";
 
 export interface RouterOptions {
   maxAttempts: number;
@@ -116,6 +120,14 @@ export class ModelRouter {
       .filter((model) => model.capabilities.includes(request.capability))
       .filter((model) => hasProviderCredentials(model.provider))
       .filter((model) => this.options.fallbackEnabled || model.provider !== "open_source")
+      .filter((model) => {
+        if (!requestLooksAgentic(request)) return true;
+        return (
+          model.supportsToolCalling &&
+          model.provider !== "open_source" &&
+          model.costEstimate !== "local"
+        );
+      })
       .map((model) => {
         const breakdown = this.scorer.score(model, request);
         const ranked = {
@@ -160,6 +172,9 @@ export class ModelRouter {
   select(request: ModelRequest): ModelSelection {
     const [best] = this.rank(request);
     if (!best) {
+      if (requestLooksAgentic(request)) {
+        throw new AgenticProviderRequiredError();
+      }
       throw new Error(`No Caval model profile can satisfy capability: ${request.capability}`);
     }
 

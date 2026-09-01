@@ -9,6 +9,7 @@ export const AI_PROVIDER_IDS = [
   "anthropic",
   "gemini",
   "openrouter",
+  "nvidia",
   "custom",
 ] as const;
 
@@ -166,6 +167,35 @@ export function getCustomProviderStatus(configured: {
   return configured.CUSTOM_PROVIDER_BASE_URL && configured.CUSTOM_PROVIDER_MODEL_ID
     ? "configured"
     : "not-configured";
+}
+
+/**
+ * AI Provider Execution Interface
+ */
+export interface AIProvider {
+  id: AiProviderId;
+  execute(request: AIRequest): Promise<AIResponse>;
+  cancel?(requestId: string): void;
+}
+
+export interface AIRequest {
+  turnId: string;
+  prompt: string;
+  context: string[];
+  timeoutMs?: number;
+}
+
+export interface AIResponse {
+  turnId: string;
+  content: string;
+  isComplete: boolean;
+}
+
+export class TurnTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TurnTimeoutError';
+  }
 }
 
 export function normalizeCustomBaseUrl(url: string): string {

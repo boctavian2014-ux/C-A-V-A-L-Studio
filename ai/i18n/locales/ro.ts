@@ -561,6 +561,13 @@ export const ro = {
   "ai.providers.gemini.desc": "Modele Gemini prin cheie Google AI",
   "ai.providers.openrouter.label": "OpenRouter",
   "ai.providers.openrouter.desc": "Gateway multi-model prin cheie OpenRouter",
+  "ai.providers.nvidia.label": "NVIDIA NIM",
+  "ai.providers.nvidia.desc": "Modele compatibile OpenAI prin NVIDIA NIM (integrate.api.nvidia.com)",
+  "ai.agentic.providerRequired":
+    "Modul Agentic necesită un provider cloud cu tools (NVIDIA NIM, OpenRouter sau BYOK). Qwen 7B local este doar pentru Ask, Code de bază, autocomplete și offline. Deschide Settings → AI Providers pentru NVIDIA NIM.",
+  "ai.agentic.configureNvidia": "Configurează NVIDIA NIM",
+  "ai.fallback.retry": "Reîncearcă",
+  "ai.fallback.retryIn": "Reîncearcă ({{seconds}}s)",
   "ai.providers.custom.label": "Custom (compatibil OpenAI)",
   "ai.providers.custom.desc": "Endpoint local sau remote compatibil OpenAI",
 

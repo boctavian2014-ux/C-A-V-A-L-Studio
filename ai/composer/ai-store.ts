@@ -21,6 +21,7 @@ import {
   looksLikeFileCreationPrompt,
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
+import { useFallbackStatusStore } from './fallback-status-store';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
 import { isArenaContinueRequest } from '../prompts/arena-continue';
 import { isAgenticRepairRequest, buildAgenticRepairMessage } from '../prompts/agentic-repair';
@@ -90,6 +91,12 @@ import {
   planFinishDiskWritesForUserMessage,
   shouldAutoCreateDesktopWorkspace,
 } from './finish-disk-write-gate';
+import { shouldBlockScaffoldApplyOnDiff } from './finish-scaffold-guard';
+import {
+  shouldRetryScaffoldOnEmptyFences,
+  shouldSkipGenericViteFallback,
+} from './code-mode-done-contract';
+import { looksLikeExplicitCreate } from '../modes/execution-mode';
 import {
   applyFallbackScaffold,
   buildFallbackScaffoldTimelineEvent,
@@ -156,6 +163,8 @@ export interface ChatMessage {
   resolvedModel?: string;
   isStreaming?: boolean;
   error?: string;
+  errorCode?: string;
+  errorAction?: string;
   /** Watchdog timeout recovered a scaffold/project on disk — not a successful model completion. */
   timeoutRecovered?: boolean;
   diff?: DetectedDiff;
@@ -1635,7 +1644,7 @@ export const useAIStore = create<AIStore>()(
           const skipScaffold =
             !projectPath ||
             (!diskPlan.applyParsedFences && !diskPlan.applyFallbackScaffold);
-          const blockOnDiff = Boolean(diff) && !diskPlan.timeoutRecovery;
+          const blockOnDiff = shouldBlockScaffoldApplyOnDiff(diskPlan, Boolean(diff));
           if (skipScaffold || blockOnDiff) {
             // Tool/pipeline writes already on disk — mark live strip done; keep until next chat.
             for (const f of earlyDiskWrites) {
@@ -1805,14 +1814,18 @@ export const useAIStore = create<AIStore>()(
 
             if (writtenFiles.length === 0) {
               useEditorStore.getState().closeAiPreview();
-              // Retry AI emission only when fences existed but apply failed.
+              const createIntent =
+                looksLikeFileCreationPrompt(userText) || looksLikeExplicitCreate(userText);
               if (
-                diskPlan.allowWriteFollowup &&
-                scaffoldParsed > 0 &&
-                (modeSupportsFileApply(agentMode) || diskPlan.applyParsedFences) &&
-                fullDelivery.autonomousFinish &&
-                canAutoContinueRepair(agenticRepairWave, fullDelivery) &&
-                !isSessionStale()
+                shouldRetryScaffoldOnEmptyFences({
+                  allowWriteFollowup: diskPlan.allowWriteFollowup,
+                  scaffoldParsed,
+                  createIntent,
+                  canApply: modeSupportsFileApply(agentMode) || diskPlan.applyParsedFences,
+                  autonomousFinish: fullDelivery.autonomousFinish,
+                  canContinueRepair:
+                    canAutoContinueRepair(agenticRepairWave, fullDelivery) && !isSessionStale(),
+                })
               ) {
                 agenticRepairWave += 1;
                 updateAssistant({
@@ -1823,7 +1836,7 @@ export const useAIStore = create<AIStore>()(
                 return;
               }
 
-              if (diskPlan.applyFallbackScaffold) {
+              if (diskPlan.applyFallbackScaffold && !shouldSkipGenericViteFallback(userText)) {
                 const fallback = await applyFallbackScaffold(projectPath, {
                   projectName: workspaceFolderTitle(projectPath),
                 });
@@ -1872,6 +1885,12 @@ export const useAIStore = create<AIStore>()(
                   });
                   return;
                 }
+              } else if (createIntent || scaffoldParsed > 0) {
+                updateAssistant({
+                  error:
+                    'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc. Retrimite sau cere explicit path-ul fișierului — nu generez un proiect Vite pentru un singur fișier.',
+                });
+                return;
               } else {
                 return;
               }
@@ -1881,6 +1900,7 @@ export const useAIStore = create<AIStore>()(
             if (
               diskPlan.applyFallbackScaffold &&
               writtenFiles.length > 0 &&
+              !shouldSkipGenericViteFallback(userText, writtenFiles) &&
               !(await workspaceHasRunnableWebProject(projectPath))
             ) {
               const filled = await applyFallbackScaffold(projectPath, {
@@ -2143,6 +2163,9 @@ export const useAIStore = create<AIStore>()(
           if (chunk.type === 'meta' && chunk.resolvedModel) {
             updateAssistant({ resolvedModel: chunk.resolvedModel });
             set({ activeResolvedModel: chunk.resolvedModel });
+            if (chunk.provider) {
+              useFallbackStatusStore.getState().noteProvider(chunk.provider, chunk.fallbackFrom);
+            }
           }
           if (chunk.type === 'tool' && chunk.toolName === 'write_file') {
             if (isSessionStale()) return;
@@ -2200,13 +2223,26 @@ export const useAIStore = create<AIStore>()(
           }
           if (chunk.type === 'error') {
             if (userStoppedStream || chunk.error === 'Aborted') return;
-            finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, { error: chunk.error }, activeTabPath);
+            finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, {
+              error: chunk.error,
+              errorCode: chunk.code,
+              errorAction: chunk.action,
+            }, activeTabPath);
+            if (chunk.code === 'AGENTIC_PROVIDER_UNAVAILABLE') {
+              useFallbackStatusStore.getState().noteAgenticUnavailable(
+                chunk.provider ?? 'nvidia',
+                chunk.cooldownRemainingMs ?? 30_000
+              );
+            }
             streamCleanup?.();
             streamCleanup = null;
           }
           if (chunk.type === 'done') {
             const resolved = chunk.model ?? get().messages.find((m) => m.id === assistantMsgId)?.resolvedModel;
             if (resolved) set({ activeResolvedModel: resolved });
+            if (chunk.provider) {
+              useFallbackStatusStore.getState().noteProvider(chunk.provider, chunk.fallbackFrom);
+            }
             if (chunk.runId) {
               updateAssistant({ pipelineRunId: chunk.runId });
             }

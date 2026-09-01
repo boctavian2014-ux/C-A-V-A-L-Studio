@@ -51,7 +51,7 @@ export abstract class HttpChatProvider implements ModelProvider {
     if (!response.ok) {
       // Lot C5.1: never attach response.text() to Error (may echo secrets).
       await response.text().catch(() => "");
-      throw safeErrorFromHttpStatus(this.name, response.status);
+      throw safeErrorFromHttpStatus(this.name, response.status, undefined, response.headers);
     }
 
     const json = await response.json() as {
@@ -109,7 +109,7 @@ export abstract class HttpChatProvider implements ModelProvider {
 
     if (!response.ok || !response.body) {
       await response.text().catch(() => "");
-      throw safeErrorFromHttpStatus(this.name, response.status || 502);
+      throw safeErrorFromHttpStatus(this.name, response.status || 502, undefined, response.headers);
     }
 
     const reader = response.body.getReader();

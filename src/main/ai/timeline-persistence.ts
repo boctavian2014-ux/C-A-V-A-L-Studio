@@ -27,15 +27,19 @@ export function getAiPersistence(workspaceRoot: string): AiPersistence {
   return db;
 }
 
-export function resetAiPersistenceCacheForTests(): void {
+export function closeAllAiPersistence(): void {
   for (const db of persistenceByRoot.values()) {
     try {
       db.close();
     } catch {
-      // already closed
+      // already closed or native teardown already started
     }
   }
   persistenceByRoot.clear();
+}
+
+export function resetAiPersistenceCacheForTests(): void {
+  closeAllAiPersistence();
 }
 
 export function persistAssistantMessageAndFlush(input: {

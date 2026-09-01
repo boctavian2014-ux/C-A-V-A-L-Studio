@@ -10,7 +10,12 @@ import { warmOpenRouterConnection } from "../../ai/models/openrouter-warm";
 import { clearOpenRouterCache } from "../../ai/models/openrouter-catalog";
 
 import { resolveModelSelection } from "../../ai/models/auto-router";
-import { getModelProfile } from "../../ai/model-profiles";
+import {
+  isAgenticExecution,
+  isAgenticProviderRequiredError,
+  assertAgenticProvidersReady,
+  toAgenticUiError,
+} from "../../ai/models/agentic-routing-policy";
 
 import {
 
@@ -31,6 +36,7 @@ import {
   registerTrustedChatTurn,
 } from "./ai/trusted-chat-turn";
 import { enrichChatWithZeroLatency } from "./zl-handlers";
+import { resolveAuthoritativeWorkspaceRoot } from "../shared/workspace-isolation";
 import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
 import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
@@ -39,7 +45,9 @@ import { ASK_COMPLETION_MAX_TOKENS, getCavalloSystemPrompt } from "../../ai/mode
 import { isDirectChatMode } from "../../ai/modes/intent-detector";
 import {
   allowsProposedOrWritePipeline,
+  promptModeForReadOnlyRequest,
   resolveTrustedExecutionCapability,
+  shouldGrantChatWriteTurn,
   type ExecutionMode,
 } from "../../ai/modes/execution-mode";
 import { stageDirectChatScaffoldProposal } from "../../ai/composer/direct-chat-propose";
@@ -279,9 +287,11 @@ function modeToIntent(mode?: string): RoutingIntent {
 
     case "code":
 
+      return "kilocode";
+
     case "agentic":
 
-      return "kilocode";
+      return "agent";
 
     default:
 
@@ -301,7 +311,7 @@ function capabilityForMode(mode?: string): CompleteModelTextInput["capability"] 
 
   if (mode === "code") return "code";
 
-  if (mode === "agentic") return "chat";
+  if (mode === "agentic") return "tool_use";
 
   return "chat";
 
@@ -444,10 +454,15 @@ function injectProjectContextIntoMessages(
 }
 
 function trustedCapabilityForRequest(request: CavalChatStreamRequest) {
-  return resolveTrustedExecutionCapability({
+  const capability = resolveTrustedExecutionCapability({
     userMessage: request.message,
     rendererRequestedMode: request.executionMode,
+    agentMode: request.mode,
   });
+  console.log(
+    `[CHAT] capability ${capability.effective} write=${shouldGrantChatWriteTurn(capability)} mode=${request.mode ?? "ask"}`
+  );
+  return capability;
 }
 
 function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
@@ -584,6 +599,10 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
     temperature: request.temperature,
 
     timeoutMs: request.timeoutMs ?? (request.jsonMode ? 120_000 : undefined),
+    chatMode:
+      request.mode === "agentic" || request.mode === "code" || request.mode === "ask"
+        ? request.mode
+        : undefined,
 
   };
 
@@ -594,10 +613,7 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 export function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
   if (!workspaceRoot?.trim()) return false;
   if (mode !== "code" && mode !== "debug" && mode !== "agentic") return false;
-  if (!model || model === "ollama-local") return false;
-  if (model.startsWith("caval-auto/free")) return false;
-  const profile = getModelProfile(model);
-  if (profile?.provider === "open_source" || profile?.costEstimate === "local") return false;
+  if (!model?.trim()) return false;
   return true;
 }
 
@@ -611,7 +627,8 @@ async function resolveEffectiveChatModel(model: string, mode?: string): Promise<
   }
 }
 
-function agentCompleteUsesTools(model: string): boolean {
+function agentCompleteUsesTools(model: string, intent?: RoutingIntent): boolean {
+  if (intent === "agent" || intent === "tool_use") return true;
   if (model === "caval-auto/free" || model === "ollama-local") return false;
   return true;
 }
@@ -1317,9 +1334,12 @@ async function streamToRenderer(
   let workspaceRoot = "";
   try {
   const explicitRoot = request.workspaceRoot?.trim();
-  const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim();
-  const userBoundWorkspace = Boolean(explicitRoot || boundRoot);
-  workspaceRoot = explicitRoot || boundRoot || getWorkspaceRoot(senderId);
+  const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim() || getWorkspaceRoot(senderId)?.trim();
+  workspaceRoot = resolveAuthoritativeWorkspaceRoot({
+    boundRoot,
+    rendererRoot: explicitRoot,
+  });
+  const userBoundWorkspace = Boolean(workspaceRoot);
   const multiAgentConfig = workspaceRoot?.trim()
     ? loadMultiAgentConfig(workspaceRoot)
     : undefined;
@@ -1489,7 +1509,44 @@ async function streamToRenderer(
   }
 
   const capability = trustedCapabilityForRequest(request);
-  request = { ...request, executionMode: capability.effective };
+  request = {
+    ...request,
+    executionMode: capability.effective,
+    ...(capability.effective === "READ_ONLY"
+      ? { mode: promptModeForReadOnlyRequest(request.message) }
+      : {}),
+  };
+
+  if (
+    isAgenticExecution({
+      mode: request.mode,
+      intent: request.intent ?? modeToIntent(request.mode),
+      capability: capabilityForMode(request.mode),
+    })
+  ) {
+    try {
+      assertAgenticProvidersReady();
+    } catch (error) {
+      if (isAgenticProviderRequiredError(error) && stream.isAlive()) {
+        markOperationTerminal(streamId, "failed");
+        const ui = toAgenticUiError(error);
+        emitTimelineEvent(stream, streamId, {
+          type: "error",
+          label: "Agentic provider required",
+          success: false,
+          detail: ui.error,
+        });
+        stream.send({
+          type: "error",
+          error: ui.error,
+          code: ui.code,
+          action: ui.action,
+        });
+      }
+      return;
+    }
+  }
+
   registerTrustedChatTurn({
     senderId,
     streamId,
@@ -1762,6 +1819,7 @@ async function streamToRenderer(
       type: "done",
       model: result.resolvedModel,
       provider: result.provider,
+      fallbackFrom: result.fallbackFrom,
       writtenFiles: [],
       proposedWrites,
       proposeStageKey: proposedWrites.length > 0 ? streamId : undefined,
@@ -1778,7 +1836,15 @@ async function streamToRenderer(
     });
     stream.send({
       type: "error",
-      error: safeErrorMessageForUi(result.error ?? "Stream failed"),
+      error:
+        result.code === "AGENTIC_PROVIDER_REQUIRED" || result.code === "AGENTIC_PROVIDER_UNAVAILABLE"
+          ? result.error ?? result.code
+          : safeErrorMessageForUi(result.error ?? "Stream failed"),
+      ...(result.code ? { code: result.code, action: result.action } : {}),
+      ...(result.providerId ? { provider: result.providerId } : {}),
+      ...(typeof result.cooldownRemainingMs === "number"
+        ? { cooldownRemainingMs: result.cooldownRemainingMs }
+        : {}),
     });
 
   } finally {
@@ -2061,10 +2127,10 @@ export function registerModelHandlers(
 
   ipcMain.handle("caval:ai-chat-stream", async (event, request: CavalChatStreamRequest) => {
     assertTrustedSender(event);
-    const boundRoot =
-      getBoundWorkspaceRoot?.(event.sender.id)?.trim() ||
-      request.workspaceRoot?.trim() ||
-      getWorkspaceRoot(event.sender.id);
+    const boundRoot = resolveAuthoritativeWorkspaceRoot({
+      boundRoot: getBoundWorkspaceRoot?.(event.sender.id)?.trim() || getWorkspaceRoot(event.sender.id),
+      rendererRoot: request.workspaceRoot,
+    });
     const limit = consumeAiRateLimit("stream_start", event.sender.id, boundRoot);
     if (!limit.ok) {
       return {
@@ -2252,7 +2318,7 @@ export function registerModelHandlers(
       };
       void _ignoredApiKeys;
       const workspaceRoot = safeInput.workspaceRoot ?? getWorkspaceRoot(event.sender.id);
-      const useTools = safeInput.jsonMode ? false : agentCompleteUsesTools(safeInput.model);
+      const useTools = safeInput.jsonMode ? false : agentCompleteUsesTools(safeInput.model, safeInput.intent);
       if (useTools) {
         await ensureMcpServersReady(workspaceRoot).catch(() => undefined);
       }
@@ -2266,17 +2332,24 @@ export function registerModelHandlers(
         apiKeys: undefined,
       });
     } catch (error) {
+      if (isAgenticProviderRequiredError(error)) {
+        return toAgenticUiError(error);
+      }
       return { ok: false as const, error: safeErrorMessageForUi(error) };
     }
   });
 
 
   ipcMain.handle("caval:resolve-model", async (_event, input: { model: string; intent?: RoutingIntent }) => {
-
-    const resolved = await resolveModelSelection(input.model, input.intent ?? "kilocode");
-
-    return { ok: true, resolved };
-
+    try {
+      const resolved = await resolveModelSelection(input.model, input.intent ?? "kilocode");
+      return { ok: true, resolved };
+    } catch (error) {
+      if (isAgenticProviderRequiredError(error)) {
+        return toAgenticUiError(error);
+      }
+      return { ok: false as const, error: safeErrorMessageForUi(error) };
+    }
   });
 
 }

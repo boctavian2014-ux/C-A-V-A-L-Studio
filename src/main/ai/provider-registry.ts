@@ -56,6 +56,12 @@ const CLOUD_PROVIDERS: Array<{
     description: "Multi-model hub via your API key",
     secretKey: "OPENROUTER_API_KEY",
   },
+  {
+    id: "nvidia",
+    label: "NVIDIA NIM",
+    description: "OpenAI-compatible models via NVIDIA NIM",
+    secretKey: "NVIDIA_API_KEY",
+  },
 ];
 
 export function resolvePreferredProviderId(

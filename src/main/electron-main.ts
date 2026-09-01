@@ -42,6 +42,7 @@ import { registerMcpHandlers } from "./mcp-handlers";
 import { registerConnectionHealthHandlers } from "./connection-health-handlers";
 import { registerChatApplyHandlers } from "./ai/chat-apply-handlers";
 import { registerAiHistoryHandlers } from "./ai/ai-history-handlers";
+import { closeAllAiPersistence } from "./ai/timeline-persistence";
 import { registerAiSettingsHandlers } from "./ai/ai-settings-handlers";
 import { registerWorkspaceIndexHandlers } from "./workspace/workspace-index-handlers";
 import { registerWorkspaceSearchHandlers } from "./workspace/workspace-search-handlers";
@@ -139,6 +140,7 @@ import {
 import { getOllamaLoopbackUrl, OLLAMA_CHAT_URL } from "../shared/local-ai-contract";
 import { isAllowedCustomUrl } from "../shared/ai-provider-contract";
 import { probeCustomProviderConnection } from "../../ai/providers/custom-openai-compatible";
+import { probeNvidiaNimConnection } from "../../ai/providers/nvidia";
 
 // Raise renderer/main V8 heap before Chromium boots (mitigates OOM on large bundles).
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=4096");
@@ -319,6 +321,7 @@ const createWindow = (): BrowserWindow => {
       }
       console.info("[caval-smoke] complete");
       setTimeout(() => {
+        closeAllAiPersistence();
         if (!window.isDestroyed()) window.close();
         app.quit();
       }, 250);
@@ -1729,6 +1732,25 @@ ipcMain.handle(
       return { ok: false, result: "unreachable" as const, error: "rate_limited" };
     }
 
+    if (input?.providerId === "nvidia") {
+      const secrets = normalizeSecretsMap(readApiSecrets());
+      const draftKey = input.draft?.apiKey?.trim();
+      const storedKey = secrets.NVIDIA_API_KEY?.trim();
+      const apiKey = draftKey || storedKey;
+      if (!apiKey) {
+        return { ok: false, result: "invalid" as const };
+      }
+      const format = validateSecretFormat("NVIDIA_API_KEY", apiKey);
+      if (!format.ok) {
+        return { ok: false, result: "invalid" as const };
+      }
+      const probe = await probeNvidiaNimConnection({ apiKey });
+      if (!probe.ok) {
+        return { ok: false, result: probe.result };
+      }
+      return { ok: true, result: "valid" as const };
+    }
+
     if (input?.providerId === "custom") {
       const secrets = normalizeSecretsMap(readApiSecrets());
       const baseUrl = (input.draft?.baseUrl ?? secrets.CUSTOM_PROVIDER_BASE_URL ?? "").trim();
@@ -1816,6 +1838,7 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  closeAllAiPersistence();
   stopManagedOllamaIfStarted();
 });
 

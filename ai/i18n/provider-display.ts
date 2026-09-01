@@ -7,6 +7,7 @@ const PROVIDER_LABEL_KEYS: Record<AiProviderId, MessageKey> = {
   anthropic: "ai.providers.anthropic.label",
   gemini: "ai.providers.gemini.label",
   openrouter: "ai.providers.openrouter.label",
+  nvidia: "ai.providers.nvidia.label",
   custom: "ai.providers.custom.label",
 };
 
@@ -16,6 +17,7 @@ const PROVIDER_DESC_KEYS: Record<AiProviderId, MessageKey> = {
   anthropic: "ai.providers.anthropic.desc",
   gemini: "ai.providers.gemini.desc",
   openrouter: "ai.providers.openrouter.desc",
+  nvidia: "ai.providers.nvidia.desc",
   custom: "ai.providers.custom.desc",
 };
 

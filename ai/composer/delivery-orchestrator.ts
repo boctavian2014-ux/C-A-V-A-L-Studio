@@ -1,6 +1,7 @@
 import type { FullDeliveryConfig } from './multi-agent/types';
 import { DEFAULT_FULL_DELIVERY_CONFIG } from './multi-agent/types';
 import type { CompletionGateResult } from './completion-gate-types';
+import { areSimpleStandaloneWrittenFiles } from './code-mode-done-contract';
 
 export const DEFAULT_FULL_DELIVERY: FullDeliveryConfig = DEFAULT_FULL_DELIVERY_CONFIG;
 
@@ -16,9 +17,23 @@ function fenceCount(text: string): number {
   return Math.floor((text.match(/```/g)?.length ?? 0) / 2);
 }
 
+export function hasWrittenPackageJson(writtenFiles: string[]): boolean {
+  return writtenFiles.some((file) => /(^|\/)package\.json$/i.test(file.replace(/\\/g, "/")));
+}
+
+/** Isolated src/* leftovers without a root package.json — 7B abandoned scaffold. */
+export function hasOrphanScaffoldSources(writtenFiles: string[]): boolean {
+  return writtenFiles.some((file) => {
+    const normalized = file.replace(/\\/g, "/");
+    return /(^|\/)src\//.test(normalized) && /\.(ts|tsx|js|jsx)$/i.test(normalized);
+  });
+}
+
 export function isDeliveryIncomplete(input: DeliveryIncompleteInput): boolean {
   const { writtenFiles, recap, taskCount, moduleHintCount, parseSource } = input;
   if (writtenFiles.length === 0) return true;
+  if (areSimpleStandaloneWrittenFiles(writtenFiles)) return false;
+  if (hasOrphanScaffoldSources(writtenFiles) && !hasWrittenPackageJson(writtenFiles)) return true;
   if (parseSource && fenceCount(parseSource) === 0 && writtenFiles.length < 2) return true;
 
   const recapLower = (recap ?? '').toLowerCase();

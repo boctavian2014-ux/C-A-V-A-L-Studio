@@ -83,9 +83,11 @@ export function planFinishDiskWritesForUserMessage(input: {
   error?: string | null;
   timedOut?: boolean;
   hasProposedWrites?: boolean;
+  agentMode?: string;
 }): FinishDiskWritePlan {
   const capability = resolveTrustedExecutionCapability({
     userMessage: input.userMessage,
+    agentMode: input.agentMode,
   });
   const timedOut = Boolean(input.timedOut) || isWatchdogTimeoutError(input.error);
   return planFinishDiskWrites({

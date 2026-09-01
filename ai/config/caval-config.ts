@@ -2,8 +2,8 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 
 import type { CavalConfig } from '../modes/agent-modes';
-import { DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { mergeCavalConfig, stripJsonc } from './caval-config-shared';
+import { FallbackChainConfigError } from './model-fallback-chain';
 
 let extraSearchPaths: string[] = [];
 
@@ -29,7 +29,10 @@ async function readCavalJsoncAt(configPath: string): Promise<CavalConfig | null>
     const raw = await fs.readFile(configPath, 'utf8');
     const parsed = JSON.parse(stripJsonc(raw)) as Partial<CavalConfig>;
     return mergeCavalConfig(parsed);
-  } catch {
+  } catch (error) {
+    if (error instanceof FallbackChainConfigError) {
+      throw error;
+    }
     return null;
   }
 }
@@ -40,7 +43,12 @@ export async function loadCavalConfig(workspaceRoot?: string | null): Promise<Ca
     const config = await readCavalJsoncAt(configPath);
     if (config) return config;
   }
-  return DEFAULT_CAVAL_CONFIG;
+  return mergeCavalConfig({});
+}
+
+/** Boot: load + validate fallback chains (throws FallbackChainConfigError). */
+export async function validateCavalConfigOnBoot(workspaceRoot?: string | null): Promise<CavalConfig> {
+  return loadCavalConfig(workspaceRoot);
 }
 
 export {
@@ -50,3 +58,4 @@ export {
   resolveModelForMode,
   stripJsonc,
 } from './caval-config-shared';
+export { FallbackChainConfigError, DEFAULT_MODEL_FALLBACK } from './model-fallback-chain';

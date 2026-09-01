@@ -26,4 +26,15 @@ describe("ModelFallbackPlanner", () => {
     const first = planner.candidatesFor(request, ["qwen2.5-coder:7b"]);
     expect(first.candidates.some((c) => c.id === "qwen2.5-coder:7b")).toBe(false);
   });
+
+  it("excludes local 7B from agent fallback chain", () => {
+    const planner = new ModelFallbackPlanner();
+    const request: ModelRequest = {
+      prompt: "agent task",
+      capability: "chat",
+      intent: "agent",
+    };
+    const result = planner.candidatesFor(request);
+    expect(result.candidates.some((c) => c.id === "qwen2.5-coder:7b")).toBe(false);
+  });
 });

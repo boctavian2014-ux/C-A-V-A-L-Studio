@@ -1,6 +1,7 @@
 import { getCapabilityRoute } from "./model-capabilities";
 import { getModelProfile, modelProfiles, type ModelProfile } from "./model-profiles";
 import type { ModelRequest } from "./types";
+import { requestLooksAgentic } from "./models/agentic-routing-policy";
 
 export interface FallbackDecision {
   candidates: ModelProfile[];
@@ -56,6 +57,15 @@ export class ModelFallbackPlanner {
   }
 
   private intentFallbackAllowed(profile: ModelProfile, request: ModelRequest): boolean {
+    if (requestLooksAgentic(request)) {
+      return (
+        profile.supportsToolCalling &&
+        profile.provider !== "open_source" &&
+        profile.costEstimate !== "local" &&
+        profile.capabilities.includes(request.capability)
+      );
+    }
+
     if (request.tools?.length && !profile.supportsToolCalling) {
       return profile.provider === "open_source" ? false : profile.capabilities.includes(request.capability);
     }
