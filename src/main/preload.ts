@@ -6,6 +6,7 @@ import {
   CAD_API_URL_CLEAR_VALUE,
 } from "../shared/cad-connection-settings-contract";
 import type { ConnectionHealthSnapshot } from "../shared/connection-health-contract";
+import { AGENTIC_AVAILABILITY_CHANNEL } from "../shared/agentic-availability";
 import { gitApi } from "./preload-git";
 import { problemsApi } from "./preload-problems";
 import { tasksApi } from "./preload-tasks";
@@ -979,6 +980,11 @@ contextBridge.exposeInMainWorld("caval", {
       preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
       error?: string;
     }>,
+  /** Boolean only — whether a tool-capable cloud provider is configured. No env/keys. */
+  getAgenticAvailability: () =>
+    ipcRenderer.invoke(
+      AGENTIC_AVAILABILITY_CHANNEL
+    ) as Promise<import("../shared/agentic-availability").AgenticAvailabilityResponse>,
   /** Pas 7f.2 — live local AI status (sanitized; no paths/process handles). */
   localAiOnStatusChanged: (
     listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void

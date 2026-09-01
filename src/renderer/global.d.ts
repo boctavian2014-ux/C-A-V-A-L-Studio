@@ -722,6 +722,9 @@ interface CavalBridge {
     preferredProviderId?: import("../shared/ai-provider-contract").AiProviderId;
     error?: string;
   }>;
+  getAgenticAvailability?: () => Promise<
+    import("../shared/agentic-availability").AgenticAvailabilityResponse
+  >;
   /** Pas 7f.2 — subscribe to live local AI status (optional; UI falls back to refresh). */
   localAiOnStatusChanged?: (
     listener: (status: import("../shared/local-ai-contract").LocalAiStatus) => void

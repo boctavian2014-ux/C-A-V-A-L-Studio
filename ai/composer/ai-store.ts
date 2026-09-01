@@ -111,6 +111,18 @@ import {
   mergeProjectContextWithWebContext,
 } from '../tools/auto-web-context';
 import {
+  mergeProjectContextWithResearchBrief,
+  resolveProductBuildMode,
+  resolveProductResearchGate,
+  sanitizePendingResearch,
+  serializeProductBrief,
+  productBriefWorkspacePath,
+  recordBriefAccepted,
+  type PendingProductResearch,
+  type ProductIntent,
+  type ProductResearchBrief,
+} from '../research';
+import {
   buildFashionMatchingAssistantReply,
   detectFashionArchetype,
   fashionMatchingSeedPrompt,
@@ -193,6 +205,9 @@ export interface ChatMessage {
   pipelineRunId?: string;
   streamId?: string;
   pipelineRecapMeta?: PipelineRecapMeta;
+  /** Compact product-research artifact — never scraped HTML. */
+  productResearch?: PendingProductResearch;
+  productIntent?: ProductIntent;
 }
 
 export interface ChatPrepareState {
@@ -292,6 +307,7 @@ export function finalizePersistedChatMessage(message: ChatMessage): ChatMessage 
       step.status === "active" ? { ...step, status: "done" as const } : step
     ),
     multiAgentStatus: wasLive && message.multiAgentStatus !== "Oprit" ? undefined : message.multiAgentStatus,
+    productResearch: sanitizePendingResearch(message.productResearch),
   };
 }
 
@@ -583,7 +599,10 @@ interface AIStore {
   deleteThread: (id: string) => void;
   onWorkspaceChanged: (nextPath: string | null) => void;
 
+  pendingProductResearch: PendingProductResearch | null;
   sendMessage: (userText: string) => Promise<void>;
+  acceptProductResearchAndBuild: () => Promise<void>;
+  saveProductResearchBrief: () => Promise<void>;
   chatPrepareDraft: (input: {
     text: string;
     projectPath: string | null;
@@ -838,6 +857,7 @@ export const useAIStore = create<AIStore>()(
       pendingChatDraft: null,
       pendingAutoSend: false,
       verifyInFlight: 'none' as const,
+      pendingProductResearch: null,
 
       setModel: (id) => {
         set({ selectedModel: id, activeResolvedModel: null });
@@ -980,6 +1000,7 @@ export const useAIStore = create<AIStore>()(
             activeThreadId: thread.id,
             messages: [],
             ideContextMode: thread.ideContextMode ?? 'enabled',
+            pendingProductResearch: null,
           };
         });
       },
@@ -1073,6 +1094,26 @@ export const useAIStore = create<AIStore>()(
           prepareTokenId = null;
         }
         set({ prepareState: null, prepareInFlight: false });
+      },
+
+      acceptProductResearchAndBuild: async () => {
+        const pending = get().pendingProductResearch;
+        if (!pending) return;
+        recordBriefAccepted();
+        const nextMode = await resolveProductBuildMode(get().agentMode);
+        if (nextMode !== get().agentMode) {
+          get().setAgentMode(nextMode);
+        }
+        set({ pendingProductResearch: { ...pending, phase: 'accepted' } });
+        await get().sendMessage(pending.originalPrompt);
+      },
+
+      saveProductResearchBrief: async () => {
+        const pending = get().pendingProductResearch;
+        const brief = pending?.brief;
+        const projectPath = useEditorStore.getState().projectPath;
+        if (!brief || !projectPath) return;
+        await getCaval()?.fs?.writeFile?.(productBriefWorkspacePath(), serializeProductBrief(brief));
       },
 
       chatPrepareDraft: async ({ text, projectPath, activeFile, openFiles }) => {
@@ -1339,6 +1380,54 @@ export const useAIStore = create<AIStore>()(
 
         const attachmentsSnapshot = [...attachedFiles];
         let apiPrompt = continueWorkspaceAugment ?? userText;
+        let productResearchBrief: ProductResearchBrief | null = null;
+        const researchMessageId = generateId();
+        const researchGate = await resolveProductResearchGate({
+          userText,
+          pending: get().pendingProductResearch,
+          workspaceContext: editorState.projectPath ?? undefined,
+          host: getCaval(),
+          messageId: researchMessageId,
+        });
+        if (researchGate.action === 'show-brief' || researchGate.action === 'update-brief') {
+          const userMsg: ChatMessage = {
+            id: generateId(),
+            role: 'user',
+            content: userText,
+            timestamp: Date.now(),
+            productIntent: researchGate.pending.intent,
+          };
+          const assistantMsg: ChatMessage = {
+            id: researchMessageId,
+            role: 'assistant',
+            content: researchGate.content,
+            timestamp: Date.now(),
+            model: selectedModel,
+            productResearch: researchGate.pending,
+            productIntent: researchGate.pending.intent,
+          };
+          set((s) => {
+            const nextMessages = [...s.messages, userMsg, assistantMsg];
+            return {
+              messages: nextMessages,
+              pendingProductResearch: researchGate.pending,
+              isStreaming: false,
+              threads: s.threads.map((t) =>
+                t.id === s.activeThreadId ? { ...t, messages: nextMessages, updatedAt: Date.now() } : t
+              ),
+            };
+          });
+          return;
+        }
+        if (researchGate.action === 'generate') {
+          productResearchBrief = researchGate.brief;
+          if (get().pendingProductResearch) {
+            set({ pendingProductResearch: null });
+          }
+          if (researchGate.prompt !== userText) {
+            apiPrompt = continueWorkspaceAugment ?? researchGate.prompt;
+          }
+        }
         let fashionSeeded = false;
         let fashionSeedCount = 0;
 
@@ -1354,6 +1443,14 @@ export const useAIStore = create<AIStore>()(
             void editorState.openFile(pipelinePath);
             apiPrompt = `${fashionMatchingSeedPrompt(fashionArchetype)}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
             set({ agentMode: 'agentic', includeMode: 'project' });
+          }
+        }
+
+        if (productResearchBrief) {
+          const buildMode = await resolveProductBuildMode(agentMode);
+          if (buildMode !== agentMode) {
+            get().setAgentMode(buildMode);
+            agentMode = buildMode;
           }
         }
 
@@ -2499,6 +2596,9 @@ export const useAIStore = create<AIStore>()(
         } catch {
           /* ignore detection failures */
         }
+        if (productResearchBrief) {
+          projectContext = mergeProjectContextWithResearchBrief(projectContext, productResearchBrief);
+        }
 
         const mentionFiles =
           uniqueMentions.length > 0 && caval?.fs?.readFile
@@ -2610,7 +2710,7 @@ export const useAIStore = create<AIStore>()(
           const updatedThreads = s.threads.map((t) =>
             t.id === s.activeThreadId ? { ...t, messages: [], title: tActive('ai.panel.newChat') } : t
           );
-          return { messages: [], threads: updatedThreads };
+          return { messages: [], threads: updatedThreads, pendingProductResearch: null };
         });
       },
 
