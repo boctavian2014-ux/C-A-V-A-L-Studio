@@ -1798,8 +1798,11 @@ export const useAIStore = create<AIStore>()(
 
             if (diskPlan.timeoutRecovery) {
               let usedFallback = false;
+              // Same compound gate as the zero-fence path: never silent Vite on timeout.
               if (
                 diskPlan.applyFallbackScaffold &&
+                isExplicitMinimalViteScaffoldRequest(userText) &&
+                !shouldSkipGenericViteFallback(userText, writtenFiles) &&
                 !(await workspaceHasRunnableWebProject(projectPath))
               ) {
                 const fallback = await applyFallbackScaffold(projectPath, {
@@ -1813,6 +1816,8 @@ export const useAIStore = create<AIStore>()(
                 } else if (writtenFiles.length === 0) {
                   scaffoldErrors = [...scaffoldErrors, ...fallback.errors];
                 }
+              } else if (writtenFiles.length === 0) {
+                scaffoldErrors = [...scaffoldErrors, buildZeroFenceWriteError(userText)];
               }
               const recovery = buildTimeoutScaffoldRecoveryPatch({
                 written: writtenFiles,

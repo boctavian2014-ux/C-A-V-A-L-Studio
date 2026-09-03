@@ -70,13 +70,41 @@ describe("timeout scaffold recovery apply", () => {
     expect(filesOnDisk.get("index.html")).toContain("CAVAL Hero");
   });
 
-  it("writes Vite fallback when timeout has no usable fences", async () => {
-    const plan = planFinishDiskWritesForUserMessage({
+  it("keeps Vite fallback available in the plan, but only explicit Vite requests may run it on timeout", async () => {
+    const {
+      isExplicitMinimalViteScaffoldRequest,
+      shouldSkipGenericViteFallback,
+    } = await import("../../ai/composer/code-mode-done-contract");
+
+    const productPlan = planFinishDiskWritesForUserMessage({
       userMessage: CREATE_WRITE,
       timedOut: true,
       error: TURN_WATCHDOG_ABORT_REASON,
     });
-    expect(plan.applyFallbackScaffold).toBe(true);
+    expect(productPlan.applyFallbackScaffold).toBe(true);
+    expect(isExplicitMinimalViteScaffoldRequest(CREATE_WRITE)).toBe(false);
+    // ai-store timeout path uses this compound gate — product briefs must not silent-Vite.
+    expect(
+      productPlan.applyFallbackScaffold &&
+        isExplicitMinimalViteScaffoldRequest(CREATE_WRITE) &&
+        !shouldSkipGenericViteFallback(CREATE_WRITE)
+    ).toBe(false);
+
+    const explicit = "Creează scaffold Vite minim";
+    const explicitPlan = planFinishDiskWritesForUserMessage({
+      userMessage: explicit,
+      timedOut: true,
+      error: TURN_WATCHDOG_ABORT_REASON,
+      agentMode: "code",
+    });
+    expect(explicitPlan.applyFallbackScaffold).toBe(true);
+    expect(isExplicitMinimalViteScaffoldRequest(explicit)).toBe(true);
+    expect(
+      explicitPlan.applyFallbackScaffold &&
+        isExplicitMinimalViteScaffoldRequest(explicit) &&
+        !shouldSkipGenericViteFallback(explicit)
+    ).toBe(true);
+
     const result = await applyFallbackScaffold("C:\\proj", { projectName: "caval-e2e" });
     expect(result.written).toEqual(
       expect.arrayContaining([
