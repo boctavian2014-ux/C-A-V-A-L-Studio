@@ -10,6 +10,14 @@ export function shutdownMark(phase: string, extra?: Record<string, unknown>): vo
   console.info(`[shutdown] ${ts} ${phase}${suffix}`);
 }
 
+/** Per-step teardown failure. Teardown continues; do not treat as fatal by itself. */
+export function shutdownStepError(step: string, error: unknown): void {
+  const err = error instanceof Error ? error : new Error(String(error));
+  const stack = err.stack ?? err.message;
+  console.error(`[shutdown:error] ${step} ${stack}`);
+  shutdownMark(`${step}-error`, { error: err.message });
+}
+
 export function logRuntimeVersions(): void {
   shutdownMark("runtime", {
     electron: process.versions.electron ?? null,

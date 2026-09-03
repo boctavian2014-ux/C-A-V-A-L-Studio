@@ -38,4 +38,15 @@ describe("shutdown diagnostics markers", () => {
     expect(line).toContain('"modules"');
     expect(line).toContain('"node"');
   });
+
+  it("prints [shutdown:error] with step name and stack", async () => {
+    const { shutdownStepError } = await import("../../src/main/shutdown-diagnostics");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    shutdownStepError("ollama-shutdown", new Error("child wait failed"));
+    const line = String(error.mock.calls[0]?.[0]);
+    expect(line).toMatch(/^\[shutdown:error\] ollama-shutdown /);
+    expect(line).toContain("child wait failed");
+    expect(line).toContain("Error:");
+  });
 });

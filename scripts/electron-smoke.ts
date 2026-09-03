@@ -12,7 +12,9 @@ import {
 
 const ROOT = path.resolve(__dirname, "..");
 const SMOKE_TIMEOUT_MS = 60_000;
-const ARTIFACT_DIR = path.join(ROOT, ".cicd-artifacts");
+const ARTIFACT_DIR = process.env.CAVAL_SMOKE_LOG_DIR?.trim()
+  ? path.resolve(process.env.CAVAL_SMOKE_LOG_DIR)
+  : path.join(ROOT, ".cicd-artifacts");
 
 function fail(message: string): never {
   console.error(`[electron-smoke] ${message}`);
@@ -62,7 +64,8 @@ async function main(): Promise<void> {
   }
 
   const electronBin = resolveElectronBinary();
-  const args = [".", "--disable-gpu"];
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "caval-smoke-user-"));
+  const args = [".", "--disable-gpu", `--user-data-dir=${userData}`];
   if (process.platform === "linux") args.push("--no-sandbox");
 
   let stdout = "";
@@ -89,15 +92,21 @@ async function main(): Promise<void> {
     child.kill();
   }, SMOKE_TIMEOUT_MS);
 
-  let exitCode = 1;
+  let exitCode: number | null = 1;
+  let exitSignal: NodeJS.Signals | null = null;
   try {
-    exitCode = await new Promise<number>((resolve, reject) => {
-      child.once("error", (err) => reject(err));
-      child.once("exit", (code) => resolve(code ?? 1));
-    });
+    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        child.once("error", (err) => reject(err));
+        child.once("exit", (code, signal) => resolve({ code, signal }));
+      }
+    );
+    exitCode = result.code;
+    exitSignal = result.signal;
   } finally {
     clearTimeout(timeout);
     fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(userData, { recursive: true, force: true });
   }
 
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
@@ -105,6 +114,9 @@ async function main(): Promise<void> {
   fs.writeFileSync(path.join(ARTIFACT_DIR, "electron-smoke-stdout.txt"), redactSensitiveText(stdout), "utf8");
   fs.writeFileSync(path.join(ARTIFACT_DIR, "electron-smoke-stderr.txt"), redactSensitiveText(stderr), "utf8");
   fs.writeFileSync(path.join(ARTIFACT_DIR, "electron-smoke-combined.txt"), combined, "utf8");
+  const summary = `[electron-smoke] child-exit code=${exitCode} signal=${exitSignal}\n`;
+  fs.writeFileSync(path.join(ARTIFACT_DIR, "electron-smoke-exit.txt"), summary, "utf8");
+  process.stdout.write(summary);
 
   const lines = combined.split(/\r?\n/);
   const fatals = lines.filter((line) => isFatalSmokeLine(line));
@@ -121,7 +133,7 @@ async function main(): Promise<void> {
     fail("missing [caval-smoke] complete marker — process may have hung");
   }
   if (exitCode !== 0) {
-    fail(`Electron exited with code ${exitCode}`);
+    fail(`Electron exited with code ${exitCode} signal ${exitSignal}`);
   }
   console.log("[electron-smoke] ok");
 }

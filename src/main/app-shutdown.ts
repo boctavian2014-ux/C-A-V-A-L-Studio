@@ -15,7 +15,7 @@ import {
 } from "./local-ai-setup";
 import { stopMarketplaceServerAndWait } from "./marketplace-server";
 import { shutdownAllPreviewSync } from "./preview/preview-handlers";
-import { logRuntimeVersions, shutdownMark } from "./shutdown-diagnostics";
+import { logRuntimeVersions, shutdownMark, shutdownStepError } from "./shutdown-diagnostics";
 import { shutdownAllTasksSync } from "./tasks-handlers";
 import { stopAllInteractiveTerminalsSync } from "./terminal-handlers";
 import { workspaceIndexService } from "./workspace/workspace-index-service";
@@ -39,9 +39,7 @@ async function step(phase: string, fn: () => void | Promise<void>): Promise<void
   try {
     await fn();
   } catch (error) {
-    shutdownMark(`${phase}-error`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    shutdownStepError(phase, error);
   }
 }
 
@@ -95,8 +93,33 @@ export async function runAppShutdown(reason: string): Promise<void> {
   return inFlight;
 }
 
+function installProcessExitDiagnostics(): void {
+  process.on("exit", (code) => {
+    // Cannot be async. Logs the numeric code Electron actually used after [shutdown] quit.
+    shutdownMark("process-exit", { code });
+  });
+
+  // There was previously no listener. Node/Electron default is: print and exit non-zero.
+  // Log first. After [shutdown] complete do not process.exit(1) — that would be a second
+  // quit path on top of app.quit(). Before complete, keep the old non-zero exit.
+  process.on("uncaughtException", (error) => {
+    shutdownStepError("uncaughtException", error);
+    if (!completed) {
+      process.exit(1);
+    }
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    shutdownStepError("unhandledRejection", reason);
+    if (!completed) {
+      process.exit(1);
+    }
+  });
+}
+
 export function installAppShutdownLifecycle(electronApp: App): void {
   logRuntimeVersions();
+  installProcessExitDiagnostics();
 
   electronApp.on("before-quit", (event) => {
     shutdownMark("before-quit");
@@ -110,9 +133,7 @@ export function installAppShutdownLifecycle(electronApp: App): void {
     quitGate = "running";
     void runAppShutdown("before-quit")
       .catch((error) => {
-        shutdownMark("error", {
-          error: error instanceof Error ? error.message : String(error),
-        });
+        shutdownStepError("runAppShutdown", error);
       })
       .finally(() => {
         quitGate = "ready";
@@ -124,7 +145,7 @@ export function installAppShutdownLifecycle(electronApp: App): void {
     shutdownMark("will-quit");
   });
 
-  electronApp.on("quit", () => {
-    shutdownMark("quit");
+  electronApp.on("quit", (_event, exitCode) => {
+    shutdownMark("quit", { exitCode });
   });
 }

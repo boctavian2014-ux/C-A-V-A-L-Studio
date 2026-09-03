@@ -128,4 +128,26 @@ describe("runAppShutdown", () => {
     expect(stopManagedOllamaIfStartedAndWait).toHaveBeenCalledTimes(1);
     expect(preloadDispose).not.toHaveBeenCalled();
   });
+
+  it("logs [shutdown:error] with stack and continues later steps", async () => {
+    closeAllAiPersistence.mockImplementation(() => {
+      throw new Error("sqlite boom");
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { runAppShutdown, isAppShutdownComplete, __resetAppShutdownForTests } =
+      await import("../../src/main/app-shutdown");
+    __resetAppShutdownForTests();
+
+    await runAppShutdown("test");
+
+    expect(stopManagedOllamaIfStartedAndWait).toHaveBeenCalledTimes(1);
+    expect(isAppShutdownComplete()).toBe(true);
+    const errLine = error.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(errLine).toContain("[shutdown:error] sqlite-close-all");
+    expect(errLine).toContain("sqlite boom");
+    expect(
+      info.mock.calls.some((call) => String(call[0]).includes("[shutdown]") && String(call[0]).includes(" complete"))
+    ).toBe(true);
+  });
 });
