@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AIMessage, ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { isByokModel, checkModelReadiness } from '../models/model-readiness';
+import { isByokModel, checkModelReadiness, shouldDowngradeAutoTierToFree, hasCloudChatConfigured } from '../models/model-readiness';
 import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { isAskChatMode, shouldAttachHeavyChatContext } from '../../src/shared/ai-context-prepare';
@@ -93,8 +93,10 @@ import {
 } from './finish-disk-write-gate';
 import { shouldBlockScaffoldApplyOnDiff } from './finish-scaffold-guard';
 import {
+  buildZeroFenceWriteError,
   shouldRetryScaffoldOnEmptyFences,
   shouldSkipGenericViteFallback,
+  isExplicitMinimalViteScaffoldRequest,
 } from './code-mode-done-contract';
 import { looksLikeExplicitCreate } from '../modes/execution-mode';
 import {
@@ -1255,7 +1257,7 @@ export const useAIStore = create<AIStore>()(
             isFashionMatchingEngineRequest(userText)) &&
           !boundWorkspace?.trim()
         ) {
-          if (isSystemContinue || !shouldAutoCreateDesktopWorkspace(userText)) {
+          if (isSystemContinue || !shouldAutoCreateDesktopWorkspace(userText, get().agentMode)) {
             const userMsg: ChatMessage = {
               id: generateId(),
               role: 'user',
@@ -1375,6 +1377,10 @@ export const useAIStore = create<AIStore>()(
             set({
               modeSwitchNotice: `Auto → ${getAgentMode(agentMode).label}${resolved.switchReason ? ` (${resolved.switchReason})` : ''}`,
             });
+          } else if (resolved.mode !== agentMode && resolved.switchReason) {
+            set({
+              modeSwitchNotice: `Sugestie: ${getAgentMode(resolved.mode).label}${resolved.switchReason ? ` (${resolved.switchReason})` : ''}. Modul rămâne ${getAgentMode(agentMode).label} până îl schimbi explicit.`,
+            });
           }
         }
 
@@ -1388,6 +1394,7 @@ export const useAIStore = create<AIStore>()(
           workspaceContext: editorState.projectPath ?? undefined,
           host: getCaval(),
           messageId: researchMessageId,
+          agentMode,
         });
         if (researchGate.action === 'show-brief' || researchGate.action === 'update-brief') {
           const userMsg: ChatMessage = {
@@ -1442,7 +1449,7 @@ export const useAIStore = create<AIStore>()(
             const pipelinePath = `${editorState.projectPath}${sep}fashion-matching-engine${sep}src${sep}fashion_matching${sep}pipeline.py`;
             void editorState.openFile(pipelinePath);
             apiPrompt = `${fashionMatchingSeedPrompt(fashionArchetype)}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
-            set({ agentMode: 'agentic', includeMode: 'project' });
+            set({ includeMode: 'project' });
           }
         }
 
@@ -1713,6 +1720,7 @@ export const useAIStore = create<AIStore>()(
             error: extra?.error,
             timedOut: isWatchdogTimeoutError(extra?.error),
             hasProposedWrites: Boolean(extra?.proposedWrites?.length),
+            agentMode,
           });
           const earlyDiskWrites = [
             ...new Set([
@@ -1933,7 +1941,11 @@ export const useAIStore = create<AIStore>()(
                 return;
               }
 
-              if (diskPlan.applyFallbackScaffold && !shouldSkipGenericViteFallback(userText)) {
+              if (
+                diskPlan.applyFallbackScaffold &&
+                isExplicitMinimalViteScaffoldRequest(userText) &&
+                !shouldSkipGenericViteFallback(userText)
+              ) {
                 const fallback = await applyFallbackScaffold(projectPath, {
                   projectName: workspaceFolderTitle(projectPath),
                 });
@@ -1977,15 +1989,14 @@ export const useAIStore = create<AIStore>()(
                         : '');
                   updateAssistant({
                     error: hadReasoningPlan
-                      ? `AI a planificat, dar nu a scris fișiere valide în workspace.${detail ? `\n${detail}` : ''}\nReformulează promptul (cere explicit fișiere cu path) sau retrimite.`
-                      : `Niciun fișier scris în workspace (folder: ${workspaceFolderTitle(projectPath)}).${detail ? `\n${detail}` : ''}\nRetrimite promptul sau cere „creează fișierele în proiect”.`,
+                      ? `AI a planificat, dar nu a scris fișiere valide în workspace.${detail ? `\n${detail}` : ''}\nRetrimite — Caval inferă și scrie singur arborele de fișiere (nu lista path-uri).`
+                      : `Niciun fișier scris în workspace (folder: ${workspaceFolderTitle(projectPath)}).${detail ? `\n${detail}` : ''}\nRetrimite promptul — Caval completează singur fișierele necesare.`,
                   });
                   return;
                 }
               } else if (createIntent || scaffoldParsed > 0) {
                 updateAssistant({
-                  error:
-                    'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc. Retrimite sau cere explicit path-ul fișierului — nu generez un proiect Vite pentru un singur fișier.',
+                  error: buildZeroFenceWriteError(userText),
                 });
                 return;
               } else {
@@ -2134,7 +2145,7 @@ export const useAIStore = create<AIStore>()(
         if (
           isFashionMatchingEngineRequest(userText) &&
           !editorState.projectPath &&
-          shouldAutoCreateDesktopWorkspace(userText)
+          shouldAutoCreateDesktopWorkspace(userText, agentMode)
         ) {
           const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
           if (!ensured.ok || !ensured.path) {
@@ -2152,7 +2163,7 @@ export const useAIStore = create<AIStore>()(
           isAgenticPipelineMode(agentMode) &&
           !editorState.projectPath &&
           !fashionSeeded &&
-          shouldAutoCreateDesktopWorkspace(userText)
+          shouldAutoCreateDesktopWorkspace(userText, agentMode)
         ) {
           const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
           if (!ensured.ok || !ensured.path) {
@@ -2960,13 +2971,24 @@ export const useAIStore = create<AIStore>()(
         if (state.includeMode === 'file') {
           state.includeMode = 'project';
         }
-        // Keep caval-auto/free as default for users without cloud keys.
+        // Keep caval-auto/free only when no cloud provider is configured (NVIDIA, OpenRouter, or BYOK).
+        // Code + Auto Free with NVIDIA/OpenRouter present was a stuck local-7B path.
         if (
           state.selectedModel === 'caval-auto/balanced' ||
-          state.selectedModel === 'caval-auto/frontier'
+          state.selectedModel === 'caval-auto/frontier' ||
+          state.selectedModel === 'caval-auto/free'
         ) {
           void getCaval()?.secretsGet?.().then((res) => {
-            if (!res?.configured?.OPENROUTER_API_KEY) {
+            const configured = res?.configured;
+            if (
+              state.agentMode === 'code' &&
+              state.selectedModel === 'caval-auto/free' &&
+              hasCloudChatConfigured(configured)
+            ) {
+              useAIStore.setState({ selectedModel: 'caval-auto/balanced' });
+              return;
+            }
+            if (shouldDowngradeAutoTierToFree(state.selectedModel, configured)) {
               useAIStore.setState({ selectedModel: 'caval-auto/free' });
             }
           });
@@ -2989,20 +3011,6 @@ export const useAIStore = create<AIStore>()(
           ...t,
           messages: t.messages.map(finalizePersistedChatMessage),
         }));
-        // Migrate legacy Code threads that used the multi-agent pipeline
-        if (state.agentMode === 'code') {
-          const hasPipelineArtifacts = state.threads.some((t) =>
-            t.messages.some(
-              (m) =>
-                (m.multiAgentSteps?.length ?? 0) > 0 ||
-                Boolean(m.reasoningBrief) ||
-                Boolean(m.recap)
-            )
-          );
-          if (hasPipelineArtifacts) {
-            state.agentMode = 'agentic';
-          }
-        }
         const legacyMode = state.agentMode as string;
         if (legacyMode === 'architect') {
           state.agentMode = 'plan';

@@ -53,6 +53,10 @@ export interface ResolveEffectiveModeOptions {
   requireHighConfidence?: boolean;
 }
 
+function isStickyUserSelectedReadOnlyMode(mode: AgentModeId): boolean {
+  return mode === 'ask' || mode === 'plan';
+}
+
 /** Resolve mode from current selection + user message. Never changes agentic. */
 export function resolveEffectiveMode(
   currentMode: string,
@@ -63,6 +67,12 @@ export function resolveEffectiveMode(
 
   if (isAgenticPipelineMode(normalized)) {
     return { mode: 'agentic', switched: false };
+  }
+
+  // Explicit Ask / Plan selection is sticky: we may infer build intent for suggestions,
+  // but we never auto-escalate the selected mode.
+  if (isStickyUserSelectedReadOnlyMode(normalized)) {
+    return { mode: normalized, switched: false };
   }
 
   if (isCavalloModesTestRequest(message)) {
@@ -100,10 +110,11 @@ export function resolveEffectiveMode(
   };
 }
 
-/** Auto-switch may not persist a Code → Ask downgrade. */
+/** Auto-switch suggestions never persist from Ask / Plan. */
 export function shouldPersistAutoModeSwitch(from: AgentModeId, to: AgentModeId): boolean {
   if (from === to) return false;
-  if (from === 'code' && to === 'ask') return false;
+  if (from === 'ask' || from === 'plan') return false;
+  if (from === 'code' && (to === 'ask' || to === 'agentic')) return false;
   return true;
 }
 

@@ -1,14 +1,16 @@
 import { looksLikeFileCreationPrompt } from "../context-engine/context-builder";
-import { looksLikeExplicitCreate } from "../modes/execution-mode";
+import { looksLikeExplicitCreate, looksLikeProductBuildIntent } from "../modes/execution-mode";
 
 const SIMPLE_FILE_RE = /[\w./\\-]+\.(txt|md)\b/gi;
 const MULTI_PROJECT_RE =
-  /\b(proiect(?:\s+nou)?|app complet|fullstack|vite|expo|next\.js|landing|toate fi[șs]ierele)\b/i;
+  /\b(proiect(?:\s+nou)?|app complet|fullstack|vite|expo|next\.js|landing|website|site|magazin|shop|store|aplica[țt]ie|toate fi[șs]ierele)\b/i;
+const MINIMAL_VITE_SCAFFOLD_RE =
+  /\b(?:creeaz[ăa]|create|genereaz[ăa]|build)\s+(?:un\s+)?scaffold\s+vite\s+minim\b/i;
 
 export function isSimpleSingleFileCreateRequest(message: string): boolean {
   const text = message.trim();
   if (!looksLikeFileCreationPrompt(text) && !looksLikeExplicitCreate(text)) return false;
-  if (MULTI_PROJECT_RE.test(text)) return false;
+  if (looksLikeProductBuildIntent(text) || MULTI_PROJECT_RE.test(text)) return false;
   const named = text.match(SIMPLE_FILE_RE) ?? [];
   return named.length === 1;
 }
@@ -48,4 +50,15 @@ export function shouldSkipGenericViteFallback(
   return (
     isSimpleSingleFileCreateRequest(userMessage) || areSimpleStandaloneWrittenFiles(writtenFiles)
   );
+}
+
+export function isExplicitMinimalViteScaffoldRequest(userMessage: string): boolean {
+  return MINIMAL_VITE_SCAFFOLD_RE.test(userMessage.trim());
+}
+
+export function buildZeroFenceWriteError(userMessage: string): string {
+  if (shouldSkipGenericViteFallback(userMessage)) {
+    return "Răspunsul nu conține blocuri ```lang:path``` de scris pe disc. Retrimite — pentru un singur fișier .txt/.md nu generez un proiect Vite.";
+  }
+  return "Nu am primit fișiere valide de la model. Reîncearcă, schimbă modelul sau deschide în Code. Pentru scaffold explicit, cere „Creează scaffold Vite minim”.";
 }

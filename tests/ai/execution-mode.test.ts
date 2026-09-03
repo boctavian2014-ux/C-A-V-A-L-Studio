@@ -4,6 +4,7 @@ import {
   allowsDiskWrites,
   looksLikeExplicitCreate,
   looksLikeExplicitWriteRequest,
+  looksLikeProductBuildIntent,
   looksLikeScaffoldCreate,
   resolveExecutionMode,
   resolveTrustedExecutionCapability,
@@ -78,6 +79,47 @@ describe("execution-mode", () => {
       rendererRequestedMode: "SCAFFOLD",
     });
     expect(spoof.effective).toBe("READ_ONLY");
+  });
+
+  it("treats vague product briefs as create intent without file paths", () => {
+    const briefs = [
+      "fă un landing page",
+      "fă un magazin",
+      "fă un site de baschet",
+      "creează proiectul",
+      "fa un app",
+    ];
+    for (const text of briefs) {
+      expect(looksLikeProductBuildIntent(text), text).toBe(true);
+      expect(looksLikeExplicitCreate(text), text).toBe(true);
+      expect(resolveExecutionMode(text, "code"), text).toBe("SCAFFOLD");
+      expect(
+        shouldGrantChatWriteTurn(resolveTrustedExecutionCapability({ userMessage: text, agentMode: "code" })),
+        text
+      ).toBe(true);
+    }
+    expect(looksLikeProductBuildIntent("Explică-mi rolul fișierului index.html.")).toBe(false);
+    expect(looksLikeProductBuildIntent("Creează hello.txt cu Hello")).toBe(false);
+    expect(looksLikeProductBuildIntent("fă o listă")).toBe(false);
+  });
+
+  it("keeps Ask and Plan read-only even for explicit write prompts", () => {
+    const productPrompt = "fă un magazin de baschet";
+    const writePrompt = "Creează un index.html simplu. Scrie efectiv fișierele în workspace.";
+    expect(resolveExecutionMode(productPrompt, "ask")).toBe("READ_ONLY");
+    expect(resolveExecutionMode(productPrompt, "plan")).toBe("READ_ONLY");
+    expect(resolveExecutionMode(writePrompt, "ask")).toBe("READ_ONLY");
+    expect(resolveExecutionMode(writePrompt, "plan")).toBe("READ_ONLY");
+    expect(
+      shouldGrantChatWriteTurn(
+        resolveTrustedExecutionCapability({ userMessage: productPrompt, agentMode: "ask" })
+      )
+    ).toBe(false);
+    expect(
+      shouldGrantChatWriteTurn(
+        resolveTrustedExecutionCapability({ userMessage: writePrompt, agentMode: "plan" })
+      )
+    ).toBe(false);
   });
 });
 
