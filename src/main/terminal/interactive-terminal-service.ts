@@ -63,6 +63,17 @@ export interface InteractiveTerminalServiceOptions {
   killDeps?: PtyKillDeps;
 }
 
+function disposePtyHandle(sessionPty: InteractivePty, platform: NodeJS.Platform): void {
+  // node-pty WindowsTerminal.kill(signal) throws "Signals not supported on windows"
+  // from a deferred socket callback — the throw is uncaught after [shutdown] complete
+  // and was the Electron child exit 1 on Windows smoke (#77).
+  if (platform === "win32") {
+    sessionPty.kill();
+    return;
+  }
+  sessionPty.kill("SIGKILL");
+}
+
 /**
  * Kill a PTY and its descendants.
  * Windows: taskkill /T /F while the PTY is still alive so shell children are not orphaned.
@@ -81,7 +92,7 @@ export function killPtyProcess(sessionPty: InteractivePty, deps: PtyKillDeps = {
         timeout: 8_000,
       });
       try {
-        sessionPty.kill("SIGKILL");
+        disposePtyHandle(sessionPty, platform);
       } catch {
         // PTY handle already gone
       }
@@ -97,15 +108,15 @@ export function killPtyProcess(sessionPty: InteractivePty, deps: PtyKillDeps = {
       try {
         killGroup(pid, "SIGKILL");
       } catch {
-        sessionPty.kill("SIGKILL");
+        disposePtyHandle(sessionPty, platform);
         return;
       }
     }
 
-    sessionPty.kill("SIGKILL");
+    disposePtyHandle(sessionPty, platform);
   } catch {
     try {
-      sessionPty.kill("SIGKILL");
+      disposePtyHandle(sessionPty, platform);
     } catch {
       // best-effort
     }

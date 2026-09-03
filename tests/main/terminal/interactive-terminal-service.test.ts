@@ -10,14 +10,16 @@ import {
   type InteractivePty,
 } from "../../../src/main/terminal/interactive-terminal-service";
 
-function createFakePty(pid?: number): InteractivePty & { killed: boolean } {
+function createFakePty(pid?: number): InteractivePty & { killed: boolean; lastSignal?: string } {
   return {
     pid,
     killed: false,
+    lastSignal: undefined,
     write: vi.fn(),
     resize: vi.fn(),
-    kill() {
+    kill(signal?: string) {
       this.killed = true;
+      this.lastSignal = signal;
     },
     onData: vi.fn(),
   };
@@ -59,6 +61,7 @@ describe("killPtyProcess", () => {
       expect.objectContaining({ stdio: "ignore" })
     );
     expect(sessionPty.killed).toBe(true);
+    expect(sessionPty.lastSignal).toBeUndefined();
   });
 
   it("on POSIX tries process.kill(-pid) and falls back to pty.kill()", () => {
