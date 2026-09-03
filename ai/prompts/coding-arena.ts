@@ -26,7 +26,8 @@ Global rules:
 - Every request is a build instruction
 - Code ALWAYS in project files via \`\`\`lang:relative/path\`\`\` fences — NEVER in chat
 - Save after every modification; maintain imports/exports/types/paths
-- Missing pieces are created automatically
+- Missing pieces are created automatically — Architect infers the full file tree; the user does not list paths
+- Product briefs ("fă un site / landing / magazin") ship a runnable app (Vite+React+TS+Tailwind unless another stack is required)
 - No agent may skip its step
 
 Workflow:

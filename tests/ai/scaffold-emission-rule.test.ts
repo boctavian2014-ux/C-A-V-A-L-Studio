@@ -10,6 +10,9 @@ describe('scaffold-emission-rule', () => {
   it('defines emission rule with lang:path requirement', () => {
     expect(SCAFFOLD_EMISSION_RULE).toContain('lang:relative/path');
     expect(SCAFFOLD_EMISSION_RULE).toContain('parseScaffoldFiles');
+    expect(SCAFFOLD_EMISSION_RULE).toMatch(/AUTO FILE TREE/i);
+    expect(SCAFFOLD_EMISSION_RULE).toContain('package.json');
+    expect(SCAFFOLD_EMISSION_RULE).toContain('src/App.tsx');
   });
 
   it('buildScaffoldContinueUserMessage includes marker and plan ref', () => {

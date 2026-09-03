@@ -2,6 +2,7 @@ export const FULL_DELIVERY_RULE = `
 FULL DELIVERY — READY-TO-USE (obligatoriu în Agentic / Code Mode):
 - Nu opri după o singură etapă sau primul set de fișiere.
 - Livrează proiect RULABIL: structură, cod, teste, README cu pași de start, configs, .env.example, CI/CD când e relevant.
+- Userul nu listează fișiere — inferă arborele complet (Vite+React+TS+Tailwind implicit) și scrie tot până Preview pornește.
 - UI: modern, dark, responsive — aplicat automat fără întrebare user când lipsesc specificații.
 - Nu declara livrare finală până nu trec: Supervisor APPROVED, debug/fix issue-uri critice, teste + workspace verify.
 - Reasoning/Plan fără fence-uri valide = delivery INCOMPLET — continuă compose până există fișiere \`\`\`lang:path\`\`\`.

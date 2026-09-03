@@ -103,7 +103,7 @@ export const DEFAULT_CAVAL_CONFIG: CavalConfig = {
     default: "caval-auto/balanced",
     perMode: {
       ask: "caval-auto/balanced",
-      code: "caval-auto/free",
+      code: "caval-auto/balanced",
       agentic: "caval-auto/balanced",
       plan: "caval-auto/frontier",
       debug: "caval-auto/balanced",
