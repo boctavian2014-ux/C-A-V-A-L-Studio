@@ -12,9 +12,11 @@ describe('model coding guide', () => {
     expect(modeSupportsFileApply('plan')).toBe(false);
   });
 
-  it('code mode guide mentions workspace', () => {
+  it('code mode guide stays on direct chat, not the Agentic pipeline', () => {
     const guide = getModelCodingGuide('caval-auto/balanced', 'code');
     expect(guide.canCode).toBe(true);
-    expect(guide.hint.toLowerCase()).toMatch(/fence|workspace|path/);
+    expect(guide.path).toBe('tools');
+    expect(guide.hint.toLowerCase()).toMatch(/tools|fence/);
+    expect(guide.path).not.toBe('agentic-pipeline');
   });
 });
