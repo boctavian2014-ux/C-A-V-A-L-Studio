@@ -541,6 +541,7 @@ interface CavalBridge {
   onRendererRecovered?: (
     callback: (payload: { reason: string; recoveredAt: string }) => void
   ) => () => void;
+  getDevRuntimeBuildStatus?: () => Promise<import('../shared/dev-runtime-build').DevRuntimeBuildStatus>;
   getRecentPipelineCompletion?: (workspaceRoot: string) => Promise<{
     ok: boolean;
     completion?: {

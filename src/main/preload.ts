@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import fs from "node:fs";
 import type { CadHealthSnapshot } from "../shared/cad-health-contract";
 import type { CadConnectionSettingsSnapshot } from "../shared/cad-connection-settings-contract";
 import {
@@ -12,6 +13,7 @@ import { problemsApi } from "./preload-problems";
 import { tasksApi } from "./preload-tasks";
 import { previewApi } from "./preload-preview";
 import { cavalTerminalPreload } from "./preload-terminal";
+import type { DevRuntimeBuildStatus } from "../shared/dev-runtime-build";
 
 export interface CavalOpenedFile {
   path: string;
@@ -23,6 +25,40 @@ export interface CavalOpenedFile {
 export interface CavalWorkspaceFolder {
   path: string;
   files: CavalOpenedFile[];
+}
+
+function fileSignature(filePath: string | undefined): string {
+  if (!filePath?.trim()) return "";
+  try {
+    const stat = fs.statSync(filePath);
+    const name = filePath.split(/[/\\]/).pop() ?? filePath;
+    return `${name}:${Math.trunc(stat.mtimeMs)}:${stat.size}`;
+  } catch {
+    return "";
+  }
+}
+
+function mainRuntimeEntryPath(): string {
+  return process.argv[1] ?? "";
+}
+
+const PRELOAD_RUNTIME_PATH = __filename;
+const MAIN_RUNTIME_PATH = mainRuntimeEntryPath();
+const RUNTIME_BUILD_HASH = [fileSignature(MAIN_RUNTIME_PATH), fileSignature(PRELOAD_RUNTIME_PATH)]
+  .filter(Boolean)
+  .join("|");
+
+function getDevRuntimeBuildStatus(): DevRuntimeBuildStatus {
+  const latestHash = [fileSignature(MAIN_RUNTIME_PATH), fileSignature(PRELOAD_RUNTIME_PATH)]
+    .filter(Boolean)
+    .join("|");
+  const isDev = process.env.NODE_ENV !== "production";
+  return {
+    isDev,
+    runningHash: RUNTIME_BUILD_HASH,
+    latestHash,
+    needsRestart: Boolean(isDev && latestHash && latestHash !== RUNTIME_BUILD_HASH),
+  };
 }
 
 export interface CavalSaveRequest {
@@ -479,6 +515,7 @@ contextBridge.exposeInMainWorld("caval", {
         finishedAt: string;
       } | null;
     }>,
+  getDevRuntimeBuildStatus: async () => getDevRuntimeBuildStatus(),
   chatApplyAccept: (input: {
     stageKey?: string;
     writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];

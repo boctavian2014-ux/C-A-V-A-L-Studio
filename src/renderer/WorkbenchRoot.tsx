@@ -44,6 +44,7 @@ import { SidebarCloseButton } from './components/workbench/SidebarCloseButton';
 import { useOpenWorkspace } from './hooks/useOpenWorkspace';
 import { useSettingsStore } from './store/settings-store';
 import { pickWorkspaceStartupFile, shouldHydrateStartupDocument } from '../shared/internal-workspace-paths';
+import { DEV_RESTART_TOAST, shouldNotifyRuntimeRestart } from '../shared/dev-runtime-build';
 import {
   IconGit,
   IconSparkle,
@@ -61,6 +62,7 @@ const ENGINEERING_PANEL_WIDTH = 360;
 const AI_PANEL_DEFAULT_WIDTH = 340;
 const NARROW_WINDOW_THRESHOLD = 1100;
 const MIN_EDITOR_WIDTH = 300;
+const DEV_RUNTIME_BUILD_HASH_KEY = "caval-dev-runtime-build-hash";
 
 function readAiPanelWidth(): number {
   try {
@@ -490,6 +492,38 @@ export function WorkbenchRoot() {
       })();
     });
     return () => unsub?.();
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const checkRuntimeBuild = async () => {
+      const status = await window.caval?.getDevRuntimeBuildStatus?.();
+      if (disposed || !status) return;
+      let lastSeenHash: string | null = null;
+      try {
+        lastSeenHash = window.localStorage.getItem(DEV_RUNTIME_BUILD_HASH_KEY);
+      } catch {
+        lastSeenHash = null;
+      }
+      if (!shouldNotifyRuntimeRestart(status, lastSeenHash)) return;
+      showWorkbenchToast(DEV_RESTART_TOAST, 5000);
+      try {
+        window.localStorage.setItem(DEV_RUNTIME_BUILD_HASH_KEY, status.latestHash);
+      } catch {
+        /* ignore storage failures */
+      }
+    };
+
+    void checkRuntimeBuild();
+    const timer = window.setInterval(() => {
+      void checkRuntimeBuild();
+    }, 4000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
