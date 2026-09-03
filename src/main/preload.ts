@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from "electron";
-import fs from "node:fs";
 import type { CadHealthSnapshot } from "../shared/cad-health-contract";
 import type { CadConnectionSettingsSnapshot } from "../shared/cad-connection-settings-contract";
 import {
@@ -14,6 +13,7 @@ import { tasksApi } from "./preload-tasks";
 import { previewApi } from "./preload-preview";
 import { cavalTerminalPreload } from "./preload-terminal";
 import type { DevRuntimeBuildStatus } from "../shared/dev-runtime-build";
+import { DEV_RUNTIME_BUILD_STATUS_CHANNEL } from "./dev-runtime-ipc-channel";
 
 export interface CavalOpenedFile {
   path: string;
@@ -25,40 +25,6 @@ export interface CavalOpenedFile {
 export interface CavalWorkspaceFolder {
   path: string;
   files: CavalOpenedFile[];
-}
-
-function fileSignature(filePath: string | undefined): string {
-  if (!filePath?.trim()) return "";
-  try {
-    const stat = fs.statSync(filePath);
-    const name = filePath.split(/[/\\]/).pop() ?? filePath;
-    return `${name}:${Math.trunc(stat.mtimeMs)}:${stat.size}`;
-  } catch {
-    return "";
-  }
-}
-
-function mainRuntimeEntryPath(): string {
-  return process.argv[1] ?? "";
-}
-
-const PRELOAD_RUNTIME_PATH = __filename;
-const MAIN_RUNTIME_PATH = mainRuntimeEntryPath();
-const RUNTIME_BUILD_HASH = [fileSignature(MAIN_RUNTIME_PATH), fileSignature(PRELOAD_RUNTIME_PATH)]
-  .filter(Boolean)
-  .join("|");
-
-function getDevRuntimeBuildStatus(): DevRuntimeBuildStatus {
-  const latestHash = [fileSignature(MAIN_RUNTIME_PATH), fileSignature(PRELOAD_RUNTIME_PATH)]
-    .filter(Boolean)
-    .join("|");
-  const isDev = process.env.NODE_ENV !== "production";
-  return {
-    isDev,
-    runningHash: RUNTIME_BUILD_HASH,
-    latestHash,
-    needsRestart: Boolean(isDev && latestHash && latestHash !== RUNTIME_BUILD_HASH),
-  };
 }
 
 export interface CavalSaveRequest {
@@ -515,7 +481,18 @@ contextBridge.exposeInMainWorld("caval", {
         finishedAt: string;
       } | null;
     }>,
-  getDevRuntimeBuildStatus: async () => getDevRuntimeBuildStatus(),
+  getDevRuntimeBuildStatus: async (): Promise<DevRuntimeBuildStatus> => {
+    try {
+      const result = (await ipcRenderer.invoke(DEV_RUNTIME_BUILD_STATUS_CHANNEL)) as
+        | { ok: true; status: DevRuntimeBuildStatus }
+        | { ok: false; error?: string }
+        | undefined;
+      if (result?.ok && result.status) return result.status;
+    } catch {
+      /* ignore — toast poller treats empty status as no-op */
+    }
+    return { isDev: false, runningHash: "", latestHash: "", needsRestart: false };
+  },
   chatApplyAccept: (input: {
     stageKey?: string;
     writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];

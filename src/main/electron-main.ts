@@ -49,6 +49,7 @@ import { registerWorkspaceSearchHandlers } from "./workspace/workspace-search-ha
 import { workspaceIndexService } from "./workspace/workspace-index-service";
 import { registerPreloadHandlers, preloadManager } from "./preload-handlers";
 import { registerZLHandlers, zeroLatencyFusion } from "./zl-handlers";
+import { registerDevRuntimeHandlers } from "./dev-runtime-ipc";
 import { registerCadHandlers } from "./cad-handlers";
 import {
   applyCadConnectionSave,
@@ -221,6 +222,7 @@ registerMcpHandlers(getBoundWorkspaceRoot);
 registerConnectionHealthHandlers(getBoundWorkspaceRoot);
 registerPreloadHandlers(workspaceFor);
 registerZLHandlers(workspaceFor);
+registerDevRuntimeHandlers();
 registerCadHandlers(getBoundWorkspaceRoot);
 registerRoboticsLibraryHandlers(getBoundWorkspaceRoot);
 registerSchematicHandlers(workspaceFor);
@@ -324,12 +326,50 @@ const createWindow = (): BrowserWindow => {
         bindWorkspace(window.webContents.id, smokeWorkspace);
         console.info("[caval-smoke] workspace-bound");
       }
-      console.info("[caval-smoke] complete");
-      setTimeout(() => {
-        closeAllAiPersistence();
-        if (!window.isDestroyed()) window.close();
-        app.quit();
-      }, 250);
+      void window.webContents
+        .executeJavaScript(
+          `(() => {
+            const bridge = window.caval;
+            const hasFn = typeof bridge?.getDevRuntimeBuildStatus === "function";
+            return { hasBridge: Boolean(bridge), hasFn };
+          })()`
+        )
+        .then(async (probe: { hasBridge?: boolean; hasFn?: boolean }) => {
+          if (!probe?.hasBridge || !probe?.hasFn) {
+            console.error("[caval-smoke] fatal: window.caval.getDevRuntimeBuildStatus missing");
+            return;
+          }
+          try {
+            const status = await window.webContents.executeJavaScript(
+              `window.caval.getDevRuntimeBuildStatus()`
+            );
+            if (!status || typeof status !== "object") {
+              console.error("[caval-smoke] fatal: getDevRuntimeBuildStatus returned invalid status");
+              return;
+            }
+            console.info("[caval-smoke] bridge-ready");
+          } catch (error) {
+            console.error(
+              "[caval-smoke] fatal: getDevRuntimeBuildStatus failed:",
+              error instanceof Error ? error.message : String(error)
+            );
+          }
+        })
+        .catch((error) => {
+          console.error(
+            "[caval-smoke] fatal: bridge probe failed:",
+            error instanceof Error ? error.message : String(error)
+          );
+        })
+        .finally(() => {
+          console.info("[caval-smoke] complete");
+          setTimeout(() => {
+            closeAllAiPersistence();
+            if (!window.isDestroyed()) window.close();
+            app.quit();
+          }, 250);
+        });
+      return;
     }
     if (rendererRecoveryPending && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       rendererRecoveryPending = false;
