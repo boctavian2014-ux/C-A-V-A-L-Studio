@@ -55,6 +55,7 @@ export function isFatalSmokeLine(line: string): boolean {
   if (isAllowedSmokeWarning(line)) return false;
   return (
     /\[caval-smoke\] fatal/i.test(line) ||
+    /Unable to load preload script/i.test(line) ||
     /Cannot find module/i.test(line) ||
     /Renderer process gone/i.test(line) ||
     /Renderer failed to load/i.test(line) ||

@@ -228,5 +228,9 @@ describe("P0.4 auto-create Desktop workspace", () => {
         "Creează un index.html simplu. Scrie efectiv fișierele în workspace."
       )
     ).toBe(true);
+    expect(shouldAutoCreateDesktopWorkspace("fă un landing page")).toBe(false);
+    expect(shouldAutoCreateDesktopWorkspace("fă un site de baschet", "code")).toBe(true);
+    expect(shouldAutoCreateDesktopWorkspace("fă un site de baschet", "ask")).toBe(false);
+    expect(shouldAutoCreateDesktopWorkspace("fă un site de baschet", "plan")).toBe(false);
   });
 });

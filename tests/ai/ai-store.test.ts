@@ -122,4 +122,50 @@ describe("ai-store sendMessage readiness gate", () => {
     expect(last?.error).toMatch(/Desktop|Downloads/i);
     editorState.projectPath = "/proj/demo";
   });
+
+  it("keeps Ask read-only for a product brief with no workspace", async () => {
+    editorState.projectPath = null;
+    const win = (globalThis as unknown as { window: { caval: Record<string, unknown> } }).window;
+    const createOnDesktop = vi.fn();
+    const chatStream = vi.fn();
+    win.caval.workspace = { createOnDesktop };
+    win.caval.chatStream = chatStream;
+
+    const { useAIStore } = await import("../../ai/composer/ai-store.js");
+    useAIStore.setState({ agentMode: "ask", messages: [], pendingProductResearch: null });
+    const beforeMode = useAIStore.getState().agentMode;
+
+    await useAIStore.getState().sendMessage("fă un magazin de baschet");
+
+    expect(beforeMode).toBe("ask");
+    expect(useAIStore.getState().agentMode).toBe("ask");
+    expect(createOnDesktop).not.toHaveBeenCalled();
+    expect(chatStream).not.toHaveBeenCalled();
+    const last = useAIStore.getState().messages.at(-1);
+    expect(last?.role).toBe("assistant");
+    expect(last?.content).toMatch(/schimbă în Code|Open in Code/i);
+    editorState.projectPath = "/proj/demo";
+  });
+
+  it("keeps Plan read-only for a product brief with no workspace", async () => {
+    editorState.projectPath = null;
+    const win = (globalThis as unknown as { window: { caval: Record<string, unknown> } }).window;
+    const createOnDesktop = vi.fn();
+    const chatStream = vi.fn();
+    win.caval.workspace = { createOnDesktop };
+    win.caval.chatStream = chatStream;
+
+    const { useAIStore } = await import("../../ai/composer/ai-store.js");
+    useAIStore.setState({ agentMode: "plan", messages: [], pendingProductResearch: null });
+
+    await useAIStore.getState().sendMessage("fă un magazin de baschet");
+
+    expect(useAIStore.getState().agentMode).toBe("plan");
+    expect(createOnDesktop).not.toHaveBeenCalled();
+    expect(chatStream).not.toHaveBeenCalled();
+    const last = useAIStore.getState().messages.at(-1);
+    expect(last?.role).toBe("assistant");
+    expect(last?.content).toMatch(/schimbă în Code|Open in Code/i);
+    editorState.projectPath = "/proj/demo";
+  });
 });

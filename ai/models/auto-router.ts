@@ -11,12 +11,19 @@ import { isOllamaReachable } from "./ollama-client";
 import { OLLAMA_TAGS_URL } from "../../src/shared/local-ai-contract";
 
 import { hasOpenRouterKey } from "./model-readiness";
+import { hasProviderCredentials } from "./provider-credentials";
 import {
   AgenticProviderRequiredError,
+  hasAgenticByokCredentials,
   isAgenticRoutingIntent,
   listAgenticEligibleModelIds,
   assertAgenticProvidersReady,
 } from "./agentic-routing-policy";
+import {
+  AGENTIC_NVIDIA_FALLBACK_PROFILE_ID,
+  AGENTIC_NVIDIA_PRIMARY_PROFILE_ID,
+  NVIDIA_FAST_PROFILE_ID,
+} from "./nvidia-nim-catalog";
 
 export { isOllamaReachable } from "./ollama-client";
 export interface ResolvedModel {
@@ -77,7 +84,7 @@ async function resolveLocalOllama(tier: AutoTierId): Promise<ResolvedModel | nul
   const reachable = await isOllamaReachable();
   if (!reachable) return null;
   const installed = await getInstalledOllamaModels();
-  const ranked = rankLocalFree(installed);
+  const ranked = rankInstalledLocal(installed);
   const best = ranked[0];
   if (!best) return null;
   return {
@@ -88,15 +95,49 @@ async function resolveLocalOllama(tier: AutoTierId): Promise<ResolvedModel | nul
   };
 }
 
+function rankInstalledLocal(installed: string[]): ModelProfile[] {
+  return sortForAutoFree(localFreeProfiles().filter((p) => ollamaNameMatches(installed, p.id)));
+}
+
 function rankLocalFree(installed: string[]): ModelProfile[] {
-  const locals = localFreeProfiles();
-  const installedAvailable = locals.filter((p) => ollamaNameMatches(installed, p.id));
+  const installedAvailable = rankInstalledLocal(installed);
   if (installedAvailable.length > 0) {
-    return sortForAutoFree(installedAvailable);
+    return installedAvailable;
   }
   // Ollama down sau fără modele — sugerează 7B, nu cel mai mare
-  const default7b = locals.find((p) => p.id === "qwen2.5-coder:7b");
-  return default7b ? [default7b] : sortForAutoFree(locals);
+  const default7b = localFreeProfiles().find((p) => p.id === "qwen2.5-coder:7b");
+  return default7b ? [default7b] : sortForAutoFree(localFreeProfiles());
+}
+
+function nvidiaCodeModelIds(): string[] {
+  if (!hasProviderCredentials("nvidia")) return [];
+  return [
+    AGENTIC_NVIDIA_PRIMARY_PROFILE_ID,
+    NVIDIA_FAST_PROFILE_ID,
+    AGENTIC_NVIDIA_FALLBACK_PROFILE_ID,
+  ];
+}
+
+export function getNvidiaCodeModelCandidates(): string[] {
+  return nvidiaCodeModelIds();
+}
+
+function resolveNvidiaCodeModel(tier: AutoTierId): ResolvedModel | null {
+  const modelId = nvidiaCodeModelIds()[0];
+  if (!modelId) return null;
+  const profile = getModelProfile(modelId);
+  return {
+    selectionId: tier,
+    modelId,
+    provider: profile?.provider ?? "nvidia",
+    reason: `Auto ${tier.split("/")[1]}: ${profile?.displayName ?? modelId} (NVIDIA)`,
+  };
+}
+
+function hasCloudChatForAuto(): boolean {
+  return (
+    hasProviderCredentials("nvidia") || hasOpenRouterKey() || hasAgenticByokCredentials()
+  );
 }
 
 /** Modele locale instalate în Ollama (pentru fallback) */
@@ -107,17 +148,24 @@ export async function getInstalledLocalModelCandidates(): Promise<string[]> {
 
 /** Lista ordonată de încercat pentru Auto Free (cu fallback) */
 export async function getAutoFreeModelCandidates(): Promise<string[]> {
-  const installed = await getInstalledOllamaModels();
-  const local = rankLocalFree(installed).map((p) => p.id);
-  if (local.length > 0) {
-    return local;
-  }
+  const reachable = await isOllamaReachable();
+  const installed = reachable ? await getInstalledOllamaModels() : [];
+  const local = rankInstalledLocal(installed).map((p) => p.id);
+  const cloud: string[] = [...nvidiaCodeModelIds()];
   if (hasOpenRouterKey()) {
-    return [
+    cloud.push(
       "stepfun-step-3-7-flash",
-      ...getAutoBalancedModelCandidates().filter((id) => id !== "stepfun-step-3-7-flash"),
-    ];
+      ...getAutoBalancedModelCandidates().filter((id) => id !== "stepfun-step-3-7-flash")
+    );
   }
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const id of [...local, ...cloud]) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  if (ids.length > 0) return ids;
   return ["qwen2.5-coder:7b"];
 }
 
@@ -166,10 +214,12 @@ export async function resolveAutoModel(
     return resolveAgenticAuto(tier);
   }
 
-  if (tier === "caval-auto/free" || !hasOpenRouterKey()) {
+  if (tier === "caval-auto/free") {
     const local = await resolveLocalOllama(tier);
     if (local) return local;
-    if (tier === "caval-auto/free" && hasOpenRouterKey()) {
+    const nvidia = resolveNvidiaCodeModel(tier);
+    if (nvidia) return nvidia;
+    if (hasOpenRouterKey()) {
       return {
         selectionId: tier,
         modelId: "stepfun-step-3-7-flash",
@@ -183,6 +233,22 @@ export async function resolveAutoModel(
       provider: "open_source",
       reason: "Auto: Ollama nu răspunde — activează Local AI din Settings",
     };
+  }
+
+  // Balanced/Frontier without OpenRouter used to dump to Ollama. Prefer NVIDIA when present.
+  if (!hasOpenRouterKey()) {
+    const nvidia = resolveNvidiaCodeModel(tier);
+    if (nvidia) return nvidia;
+    const local = await resolveLocalOllama(tier);
+    if (local) return local;
+    if (!hasCloudChatForAuto()) {
+      return {
+        selectionId: tier,
+        modelId: "qwen2.5-coder:7b",
+        provider: "open_source",
+        reason: "Auto: Ollama nu răspunde — activează Local AI din Settings",
+      };
+    }
   }
 
   if (tier === "caval-auto/balanced" && hasOpenRouterKey()) {

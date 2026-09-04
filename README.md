@@ -20,6 +20,12 @@ Teste: `npm test`
 
 Config proiect: [`caval.jsonc`](caval.jsonc) (modele, multi-agent, zero-latency, MCP).
 
+## Development
+
+- Schimbările doar în renderer pot apărea după refresh-ul ferestrei.
+- Schimbările în `main`, `preload` sau IPC cer rebuild și restart complet al Electron.
+- Hot reload-ul simplu nu actualizează procesul main Node deja pornit; după un build nou vei vedea un toast care cere restart pentru ultimele execution gates și IPC.
+
 ---
 
 ## Structura proiectului

@@ -24,6 +24,19 @@ const APPLY_RE =
 const CREATE_RE =
   /(?:^|[\s"'„”])(?:te\s+rog\s+(?:s[ăa]\s+)?)?(?:[îi]mi\s+)?(?:creeaz|genereaz|implementeaz|construie[șs]t|create|scaffold|from\s+scratch|proiect\s+nou|app\s+complet|full\s+app|landing|toate\s+fi[șs]ierele|build(?:\s+(?:me\s+)?(?:a|an|the|app|full))?|make\s+(?:me\s+)?(?:a|an|the)\b|adaug[ăa]\s+(?:un|o|fi[șs]ier))/i;
 
+/**
+ * Product/app brief — user names the deliverable, not file paths.
+ * "fă un site / magazin / landing" is enough; do not require "Creează src/App.tsx".
+ */
+const PRODUCT_NOUN =
+  "(?:site|website|landing|magazin|shop|store|app|aplica[țt]ie|proiect|pagin[ăa]|portal|platform[ăa])";
+const PRODUCT_BUILD_RE = new RegExp(
+  `(?:f[ăa]|fa)\\s+(?:un|o|mi|mie)\\s+${PRODUCT_NOUN}` +
+    `|(?:creeaz|genereaz|construie[șs]t|implementeaz|create|build|make)\\w*\\s+(?:(?:un|o|a|an|the|mi)\\s+)?${PRODUCT_NOUN}` +
+    `|\\b(?:landing\\s*page|pagin[ăa]\\s+de\\s+prezentare|site\\s+de|magazin\\s+online|e-?commerce|web\\s*app|proiect\\s+nou|app\\s+complet|creeaz[ăa]\\s+proiectul)\\b`,
+  "i"
+);
+
 /** Explicit request to materialize files in the open workspace (not propose-only). */
 const EXPLICIT_WRITE_RE =
   /(?:scrie\s+efectiv|write\s+(?:the\s+)?files|pe\s+disc|on\s+disk|în\s+(?:folderul\s+curent|workspace)|in\s+(?:the\s+)?(?:current\s+)?(?:folder|workspace)|toate\s+fi[șs]ierele(?:\s+necesare)?|nu\s+r[ăa]spunde\s+doar\s+cu\s+explica[țt]ii|previzualiza|preview\s+local)/i;
@@ -32,8 +45,14 @@ export function allowsDiskWrites(mode: ExecutionMode): boolean {
   return mode === "APPLY_EDIT" || mode === "AGENTIC_REPAIR" || mode === "SCAFFOLD";
 }
 
+/** Vague product brief — Caval infers the file tree; user does not list paths. */
+export function looksLikeProductBuildIntent(message: string): boolean {
+  return PRODUCT_BUILD_RE.test(message.trim());
+}
+
 export function looksLikeExplicitCreate(message: string): boolean {
-  return CREATE_RE.test(message.trim());
+  const text = message.trim();
+  return CREATE_RE.test(text) || looksLikeProductBuildIntent(text);
 }
 
 export function looksLikeExplicitWriteRequest(message: string): boolean {
@@ -59,12 +78,17 @@ export function uiModeGrantsCreateWrites(agentMode?: string): boolean {
   return agentMode === "code" || agentMode === "agentic" || agentMode === "debug";
 }
 
+export function isStrictReadOnlyUiMode(agentMode?: string): boolean {
+  return agentMode === "ask" || agentMode === "plan";
+}
+
 /**
  * Main-owned intent from the original user message.
  * UI Code / Agentic / Debug may grant a write turn; Ask / Plan cannot raise privileges.
  */
 export function resolveExecutionMode(message: string, agentMode?: string): ExecutionMode {
   const text = message.trim();
+  if (isStrictReadOnlyUiMode(agentMode)) return "READ_ONLY";
   if (!text) return uiModeGrantsCreateWrites(agentMode) ? "SCAFFOLD" : "READ_ONLY";
 
   if (isAgenticRepairRequest(text)) {

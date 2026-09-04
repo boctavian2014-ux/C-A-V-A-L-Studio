@@ -31,13 +31,14 @@ function looksLikeChecklistOrAuditRequest(message: string): boolean {
 const LANDING_RE =
   /landing\s*page|pagina\s+de\s+prezentare|pagina\s+de\s+vanzare|hero\s+page/i;
 const WEBSITE_RE =
-  /website|web\s*site|site\s+web|site\s+(pentru|for)|portofoliu|portfolio\s+site/i;
+  /website|web\s*site|site\s+web|site(?:\s+(?:pentru|for|de))?|\bweb\b|portofoliu|portfolio\s+site/i;
 const WEB_APP_RE = /web\s*app|aplicatie\s+web|\bsaas\b/i;
 const MOBILE_RE =
   /mobile\s*app|aplicatie\s+mobila|mobila|ios|android|react\s*native|flutter|\bexpo\b/i;
 const MARKET_RE =
   /marketplace|piata|two-?sided|cumparatori\s+[sș]i\s+vanzatori/i;
 const DASH_RE = /dashboard|admin\s+panel|panou\s+admin|analytics\s+ui/i;
+const STORE_RE = /magazin|shop|store|e-?commerce/i;
 
 const BOOKING_RE = /rezerv|booking|appointment|programar|calendar\s+de\s+program/i;
 const CHECKOUT_RE = /checkout|cos\s+de\s+cumpar|cart\s+and\s+pay|\bplata\b/i;
@@ -98,10 +99,15 @@ function detectCategory(text: string): {
   category: ProductCategory | null;
   secondary?: ProductCategory;
 } {
+  // Conservative defaults for vague product briefs:
+  // "magazin" -> ecommerce web, "site" / "landing" -> web, "app" -> web-app.
+  // Mobile is selected only when the prompt explicitly asks for it.
   const mobile = MOBILE_RE.test(text);
   const market = MARKET_RE.test(text);
+  const store = STORE_RE.test(text);
   if (market && mobile) return { category: "marketplace", secondary: "mobile-app" };
   if (market) return { category: "marketplace" };
+  if (store) return { category: "marketplace" };
   if (LANDING_RE.test(text)) return { category: "landing" };
   if (DASH_RE.test(text)) return { category: "dashboard" };
   if (WEB_APP_RE.test(text)) return { category: "web-app" };

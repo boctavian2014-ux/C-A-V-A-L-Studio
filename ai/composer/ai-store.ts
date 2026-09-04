@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AIMessage, ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
-import { isByokModel, checkModelReadiness } from '../models/model-readiness';
+import { isByokModel, checkModelReadiness, shouldDowngradeAutoTierToFree, hasCloudChatConfigured } from '../models/model-readiness';
 import { apiKeysToSecrets, BYOK_TO_SECRET, CONFIGURED_MARKER, isPersistableSecret } from '../models/api-secrets';
 import { modeSupportsFileApply } from '../models/model-coding-guide';
 import { isAskChatMode, shouldAttachHeavyChatContext } from '../../src/shared/ai-context-prepare';
@@ -93,16 +93,20 @@ import {
 } from './finish-disk-write-gate';
 import { shouldBlockScaffoldApplyOnDiff } from './finish-scaffold-guard';
 import {
+  buildZeroFenceWriteError,
   shouldRetryScaffoldOnEmptyFences,
-  shouldSkipGenericViteFallback,
+  shouldSkipEmptyFenceRetry,
 } from './code-mode-done-contract';
 import { looksLikeExplicitCreate } from '../modes/execution-mode';
 import {
-  applyFallbackScaffold,
+  recoverDeterministicExplicitWrites,
+  filterParsedScaffoldFilesForUserMessage,
+  restrictWrittenFilesToUnambiguousPath,
+} from './deterministic-explicit-writes';
+import {
   buildFallbackScaffoldTimelineEvent,
   FALLBACK_SCAFFOLD_TOAST,
-  FALLBACK_RUNNABLE_TOAST,
-  workspaceHasRunnableWebProject,
+  INCOMPLETE_VITE_SCAFFOLD_ERROR,
 } from './fallback-scaffold';
 import { useLiveAiEditsStore } from './live-ai-edits-store';
 import { parseStreamingScaffold, peekStreamingScaffoldPath } from './scaffold-parser';
@@ -1255,7 +1259,7 @@ export const useAIStore = create<AIStore>()(
             isFashionMatchingEngineRequest(userText)) &&
           !boundWorkspace?.trim()
         ) {
-          if (isSystemContinue || !shouldAutoCreateDesktopWorkspace(userText)) {
+          if (isSystemContinue || !shouldAutoCreateDesktopWorkspace(userText, get().agentMode)) {
             const userMsg: ChatMessage = {
               id: generateId(),
               role: 'user',
@@ -1375,6 +1379,10 @@ export const useAIStore = create<AIStore>()(
             set({
               modeSwitchNotice: `Auto → ${getAgentMode(agentMode).label}${resolved.switchReason ? ` (${resolved.switchReason})` : ''}`,
             });
+          } else if (resolved.mode !== agentMode && resolved.switchReason) {
+            set({
+              modeSwitchNotice: `Sugestie: ${getAgentMode(resolved.mode).label}${resolved.switchReason ? ` (${resolved.switchReason})` : ''}. Modul rămâne ${getAgentMode(agentMode).label} până îl schimbi explicit.`,
+            });
           }
         }
 
@@ -1388,6 +1396,7 @@ export const useAIStore = create<AIStore>()(
           workspaceContext: editorState.projectPath ?? undefined,
           host: getCaval(),
           messageId: researchMessageId,
+          agentMode,
         });
         if (researchGate.action === 'show-brief' || researchGate.action === 'update-brief') {
           const userMsg: ChatMessage = {
@@ -1442,7 +1451,7 @@ export const useAIStore = create<AIStore>()(
             const pipelinePath = `${editorState.projectPath}${sep}fashion-matching-engine${sep}src${sep}fashion_matching${sep}pipeline.py`;
             void editorState.openFile(pipelinePath);
             apiPrompt = `${fashionMatchingSeedPrompt(fashionArchetype)}\n\n--- SPEC ---\n${userText.slice(0, 12000)}`;
-            set({ agentMode: 'agentic', includeMode: 'project' });
+            set({ includeMode: 'project' });
           }
         }
 
@@ -1713,6 +1722,7 @@ export const useAIStore = create<AIStore>()(
             error: extra?.error,
             timedOut: isWatchdogTimeoutError(extra?.error),
             hasProposedWrites: Boolean(extra?.proposedWrites?.length),
+            agentMode,
           });
           const earlyDiskWrites = [
             ...new Set([
@@ -1762,9 +1772,11 @@ export const useAIStore = create<AIStore>()(
 
             let scaffoldErrors: string[] = [];
             let scaffoldParsed = 0;
-            let scaffoldSkipped = 0;
             if (pipelineWrittenFiles.length === 0 && diskPlan.applyParsedFences) {
-              const parsed = parseScaffoldFiles(parseSource);
+              const parsed = filterParsedScaffoldFilesForUserMessage(
+                parseScaffoldFiles(parseSource),
+                userText
+              );
               scaffoldParsed = parsed.length;
               if (parsed.length > 0) {
                 for (const f of parsed) {
@@ -1773,7 +1785,6 @@ export const useAIStore = create<AIStore>()(
                 const applied = await applyScaffoldToWorkspace(projectPath, parsed);
                 writtenFiles = [...writtenFiles, ...applied.written];
                 scaffoldErrors = applied.errors;
-                scaffoldSkipped = applied.skipped;
                 for (const w of applied.written) {
                   useLiveAiEditsStore.getState().completeEdit(w);
                 }
@@ -1785,26 +1796,57 @@ export const useAIStore = create<AIStore>()(
             } else if (pipelineWrittenFiles.length === 0) {
               scaffoldParsed = parseScaffoldFiles(parseSource).length;
             }
-            writtenFiles = [...new Set(writtenFiles)];
+            writtenFiles = restrictWrittenFilesToUnambiguousPath(
+              [...new Set(writtenFiles)],
+              userText
+            );
             await useEditorStore.getState().refreshTree();
 
             if (diskPlan.timeoutRecovery) {
               let usedFallback = false;
-              if (
-                diskPlan.applyFallbackScaffold &&
-                !(await workspaceHasRunnableWebProject(projectPath))
-              ) {
-                const fallback = await applyFallbackScaffold(projectPath, {
-                  projectName: workspaceFolderTitle(projectPath),
-                });
-                if (fallback.written.length > 0) {
-                  usedFallback = true;
-                  writtenFiles = [...new Set([...writtenFiles, ...fallback.written])];
-                  scaffoldErrors = [...scaffoldErrors, ...fallback.errors];
-                  await useEditorStore.getState().refreshTree();
-                } else if (writtenFiles.length === 0) {
-                  scaffoldErrors = [...scaffoldErrors, ...fallback.errors];
+              const recovered = diskPlan.applyFallbackScaffold
+                ? await recoverDeterministicExplicitWrites({
+                    userMessage: userText,
+                    projectPath,
+                    writtenFiles,
+                    projectName: workspaceFolderTitle(projectPath),
+                  })
+                : null;
+              if (recovered?.kind === 'vite') {
+                writtenFiles = [...new Set([...writtenFiles, ...recovered.written])];
+                scaffoldErrors = [...scaffoldErrors, ...recovered.errors];
+                await useEditorStore.getState().refreshTree();
+                if (!recovered.complete) {
+                  updateAssistant({
+                    error: recovered.errorMessage || INCOMPLETE_VITE_SCAFFOLD_ERROR,
+                    content: recovered.errorMessage || INCOMPLETE_VITE_SCAFFOLD_ERROR,
+                    writtenFiles: writtenFiles.length ? writtenFiles : undefined,
+                  });
+                  useEditorStore.getState().closeAiPreview();
+                  return;
                 }
+                usedFallback = recovered.usedViteGenerator;
+                showWorkbenchToast(FALLBACK_SCAFFOLD_TOAST);
+              } else if (recovered?.kind === 'single-file') {
+                writtenFiles = restrictWrittenFilesToUnambiguousPath(
+                  [...new Set([...writtenFiles, ...recovered.written])],
+                  userText
+                );
+                scaffoldErrors = [...scaffoldErrors, ...recovered.errors];
+                await useEditorStore.getState().refreshTree();
+                if (!recovered.complete) {
+                  updateAssistant({
+                    error: recovered.errorMessage || buildZeroFenceWriteError(userText),
+                    writtenFiles: writtenFiles.length ? writtenFiles : undefined,
+                  });
+                  useEditorStore.getState().closeAiPreview();
+                  return;
+                }
+              } else if (writtenFiles.length === 0) {
+                scaffoldErrors = [
+                  ...scaffoldErrors,
+                  recovered?.errorMessage || buildZeroFenceWriteError(userText),
+                ];
               }
               const recovery = buildTimeoutScaffoldRecoveryPatch({
                 written: writtenFiles,
@@ -1818,10 +1860,11 @@ export const useAIStore = create<AIStore>()(
                 error: recovery.error,
                 timeoutRecovered: recovery.timeoutRecovered,
                 writtenFiles: recovery.writtenFiles.length ? recovery.writtenFiles : undefined,
-                timelineEvents: recovery.timeoutRecovered
-                  ? [...prevTl, buildFallbackScaffoldTimelineEvent()]
-                  : prevTl,
-                timelineExpanded: recovery.timeoutRecovered,
+                timelineEvents:
+                  recovery.timeoutRecovered && usedFallback
+                    ? [...prevTl, buildFallbackScaffoldTimelineEvent()]
+                    : prevTl,
+                timelineExpanded: recovery.timeoutRecovered && usedFallback,
               });
               for (const f of writtenFiles) {
                 useLiveAiEditsStore.getState().completeEdit(f);
@@ -1914,6 +1957,7 @@ export const useAIStore = create<AIStore>()(
               const createIntent =
                 looksLikeFileCreationPrompt(userText) || looksLikeExplicitCreate(userText);
               if (
+                !shouldSkipEmptyFenceRetry(userText) &&
                 shouldRetryScaffoldOnEmptyFences({
                   allowWriteFollowup: diskPlan.allowWriteFollowup,
                   scaffoldParsed,
@@ -1933,14 +1977,25 @@ export const useAIStore = create<AIStore>()(
                 return;
               }
 
-              if (diskPlan.applyFallbackScaffold && !shouldSkipGenericViteFallback(userText)) {
-                const fallback = await applyFallbackScaffold(projectPath, {
+              if (diskPlan.applyFallbackScaffold) {
+                const recovered = await recoverDeterministicExplicitWrites({
+                  userMessage: userText,
+                  projectPath,
+                  writtenFiles,
                   projectName: workspaceFolderTitle(projectPath),
                 });
-                if (fallback.written.length > 0) {
+                if (recovered.kind === 'vite') {
+                  if (!recovered.complete) {
+                    updateAssistant({
+                      error: recovered.errorMessage || INCOMPLETE_VITE_SCAFFOLD_ERROR,
+                      content: recovered.errorMessage || INCOMPLETE_VITE_SCAFFOLD_ERROR,
+                      writtenFiles: recovered.written.length ? recovered.written : undefined,
+                    });
+                    return;
+                  }
                   writtenFiles = [
-                    ...fallback.written.filter((f) => f !== 'src/App.tsx'),
-                    ...(fallback.written.includes('src/App.tsx') ? ['src/App.tsx'] : []),
+                    ...recovered.written.filter((f) => f !== 'src/App.tsx'),
+                    ...(recovered.written.includes('src/App.tsx') ? ['src/App.tsx'] : []),
                   ];
                   showWorkbenchToast(FALLBACK_SCAFFOLD_TOAST);
                   const prevTl =
@@ -1953,39 +2008,29 @@ export const useAIStore = create<AIStore>()(
                     timelineExpanded: true,
                   });
                   await useEditorStore.getState().refreshTree();
-                } else {
-                  const hadReasoningPlan = Boolean(
-                    reasoningWithFences ||
-                      msgForParse?.reasoning?.trim() ||
-                      capturedReasoningBrief
-                  );
-                  const expectsDelivery =
-                    looksLikeFileCreationPrompt(userText) ||
-                    hadReasoningPlan ||
-                    scaffoldParsed > 0 ||
-                    isScaffoldContinueRequest(userText);
-                  if (!expectsDelivery) {
+                } else if (recovered.kind === 'single-file') {
+                  if (!recovered.complete) {
+                    updateAssistant({
+                      error: recovered.errorMessage || buildZeroFenceWriteError(userText),
+                    });
                     return;
                   }
-                  const detail =
-                    fallback.errors[0] ||
-                    scaffoldErrors[0] ||
-                    (scaffoldParsed > 0 && scaffoldSkipped === scaffoldParsed
-                      ? 'Blocurile de cod au fost filtrate (path invalid / fragment / junk).'
-                      : scaffoldParsed === 0
-                        ? 'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc.'
-                        : '');
+                  writtenFiles = restrictWrittenFilesToUnambiguousPath(
+                    recovered.written,
+                    userText
+                  );
+                  await useEditorStore.getState().refreshTree();
+                } else if (createIntent || scaffoldParsed > 0) {
                   updateAssistant({
-                    error: hadReasoningPlan
-                      ? `AI a planificat, dar nu a scris fișiere valide în workspace.${detail ? `\n${detail}` : ''}\nReformulează promptul (cere explicit fișiere cu path) sau retrimite.`
-                      : `Niciun fișier scris în workspace (folder: ${workspaceFolderTitle(projectPath)}).${detail ? `\n${detail}` : ''}\nRetrimite promptul sau cere „creează fișierele în proiect”.`,
+                    error: recovered.errorMessage || buildZeroFenceWriteError(userText),
                   });
+                  return;
+                } else {
                   return;
                 }
               } else if (createIntent || scaffoldParsed > 0) {
                 updateAssistant({
-                  error:
-                    'Răspunsul nu conține blocuri ```lang:path``` de scris pe disc. Retrimite sau cere explicit path-ul fișierului — nu generez un proiect Vite pentru un singur fișier.',
+                  error: buildZeroFenceWriteError(userText),
                 });
                 return;
               } else {
@@ -1993,19 +2038,45 @@ export const useAIStore = create<AIStore>()(
               }
             }
 
-            // AI wrote sources but forgot package.json / scripts.dev → make Preview runnable.
-            if (
-              diskPlan.applyFallbackScaffold &&
-              writtenFiles.length > 0 &&
-              !shouldSkipGenericViteFallback(userText, writtenFiles) &&
-              !(await workspaceHasRunnableWebProject(projectPath))
-            ) {
-              const filled = await applyFallbackScaffold(projectPath, {
+            // Explicit Vite only: complete missing manifest files. Never silent-Vite a product brief.
+            if (diskPlan.applyFallbackScaffold && writtenFiles.length > 0) {
+              const recovered = await recoverDeterministicExplicitWrites({
+                userMessage: userText,
+                projectPath,
+                writtenFiles,
                 projectName: workspaceFolderTitle(projectPath),
               });
-              if (filled.written.length > 0) {
-                writtenFiles = [...new Set([...writtenFiles, ...filled.written])];
-                showWorkbenchToast(FALLBACK_RUNNABLE_TOAST);
+              if (recovered.kind === 'vite') {
+                writtenFiles = [...new Set([...writtenFiles, ...recovered.written])];
+                if (!recovered.complete) {
+                  updateAssistant({
+                    error: recovered.errorMessage || INCOMPLETE_VITE_SCAFFOLD_ERROR,
+                    content: recovered.errorMessage || INCOMPLETE_VITE_SCAFFOLD_ERROR,
+                    writtenFiles,
+                  });
+                  useEditorStore.getState().closeAiPreview();
+                  return;
+                }
+                if (recovered.written.length > 0) {
+                  showWorkbenchToast(FALLBACK_SCAFFOLD_TOAST);
+                }
+                await useEditorStore.getState().refreshTree();
+              } else if (recovered.kind === 'single-file') {
+                writtenFiles = restrictWrittenFilesToUnambiguousPath(
+                  [...writtenFiles, ...recovered.written],
+                  userText
+                );
+                if (!recovered.complete) {
+                  updateAssistant({
+                    error: recovered.errorMessage || buildZeroFenceWriteError(userText),
+                    writtenFiles: writtenFiles.length ? writtenFiles : undefined,
+                  });
+                  useEditorStore.getState().closeAiPreview();
+                  return;
+                }
+                if (recovered.written.length > 0) {
+                  await useEditorStore.getState().refreshTree();
+                }
               }
             }
 
@@ -2134,7 +2205,7 @@ export const useAIStore = create<AIStore>()(
         if (
           isFashionMatchingEngineRequest(userText) &&
           !editorState.projectPath &&
-          shouldAutoCreateDesktopWorkspace(userText)
+          shouldAutoCreateDesktopWorkspace(userText, agentMode)
         ) {
           const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
           if (!ensured.ok || !ensured.path) {
@@ -2152,7 +2223,7 @@ export const useAIStore = create<AIStore>()(
           isAgenticPipelineMode(agentMode) &&
           !editorState.projectPath &&
           !fashionSeeded &&
-          shouldAutoCreateDesktopWorkspace(userText)
+          shouldAutoCreateDesktopWorkspace(userText, agentMode)
         ) {
           const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
           if (!ensured.ok || !ensured.path) {
@@ -2960,13 +3031,24 @@ export const useAIStore = create<AIStore>()(
         if (state.includeMode === 'file') {
           state.includeMode = 'project';
         }
-        // Keep caval-auto/free as default for users without cloud keys.
+        // Keep caval-auto/free only when no cloud provider is configured (NVIDIA, OpenRouter, or BYOK).
+        // Code + Auto Free with NVIDIA/OpenRouter present was a stuck local-7B path.
         if (
           state.selectedModel === 'caval-auto/balanced' ||
-          state.selectedModel === 'caval-auto/frontier'
+          state.selectedModel === 'caval-auto/frontier' ||
+          state.selectedModel === 'caval-auto/free'
         ) {
           void getCaval()?.secretsGet?.().then((res) => {
-            if (!res?.configured?.OPENROUTER_API_KEY) {
+            const configured = res?.configured;
+            if (
+              state.agentMode === 'code' &&
+              state.selectedModel === 'caval-auto/free' &&
+              hasCloudChatConfigured(configured)
+            ) {
+              useAIStore.setState({ selectedModel: 'caval-auto/balanced' });
+              return;
+            }
+            if (shouldDowngradeAutoTierToFree(state.selectedModel, configured)) {
               useAIStore.setState({ selectedModel: 'caval-auto/free' });
             }
           });
@@ -2989,20 +3071,6 @@ export const useAIStore = create<AIStore>()(
           ...t,
           messages: t.messages.map(finalizePersistedChatMessage),
         }));
-        // Migrate legacy Code threads that used the multi-agent pipeline
-        if (state.agentMode === 'code') {
-          const hasPipelineArtifacts = state.threads.some((t) =>
-            t.messages.some(
-              (m) =>
-                (m.multiAgentSteps?.length ?? 0) > 0 ||
-                Boolean(m.reasoningBrief) ||
-                Boolean(m.recap)
-            )
-          );
-          if (hasPipelineArtifacts) {
-            state.agentMode = 'agentic';
-          }
-        }
         const legacyMode = state.agentMode as string;
         if (legacyMode === 'architect') {
           state.agentMode = 'plan';

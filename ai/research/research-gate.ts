@@ -1,5 +1,5 @@
 import type { AgentModeId } from "../modes/agent-modes";
-import { isProductPromptClear } from "./detect-product-intent";
+import { isStrictReadOnlyUiMode, uiModeGrantsCreateWrites } from "../modes/execution-mode";
 import { applyDirectionRefinement, isBuildConfirmText, isDirectionRefinementText } from "./product-brief";
 import { runProductResearch } from "./research-orchestrator";
 import { recordBriefAccepted, recordGenerationStarted } from "./research-metrics";
@@ -15,7 +15,7 @@ export type ProductResearchGate =
   | { action: "show-brief"; pending: PendingProductResearch; content: string }
   | { action: "update-brief"; pending: PendingProductResearch; content: string };
 
-function cardCopy(brief: ProductResearchBrief): string {
+function cardCopy(brief: ProductResearchBrief, agentMode?: AgentModeId | string): string {
   const status =
     brief.researchStatus === "unavailable" || brief.researchStatus === "timeout"
       ? "Research unavailable"
@@ -23,10 +23,14 @@ function cardCopy(brief: ProductResearchBrief): string {
         ? "Research unavailable"
         : "";
   const question = brief.clarifyingQuestion ? `\n\n${brief.clarifyingQuestion}` : "";
+  const readOnlyHint = isStrictReadOnlyUiMode(agentMode)
+    ? "\n\nPentru a construi proiectul, schimbă în Code sau folosește o acțiune explicită „Open in Code”."
+    : "";
   return [
     "Am înțeles produsul.",
     status,
     question,
+    readOnlyHint,
   ]
     .filter(Boolean)
     .join(" ");
@@ -72,6 +76,7 @@ export async function resolveProductResearchGate(input: {
   provider?: WebResearchProvider | null;
   host?: WebResearchHost;
   messageId: string;
+  agentMode?: AgentModeId | string;
 }): Promise<ProductResearchGate> {
   const pending = input.pending;
   if (pending?.phase === "accepted") {
@@ -92,7 +97,7 @@ export async function resolveProductResearchGate(input: {
     if (isDirectionRefinementText(input.userText)) {
       const brief = applyDirectionRefinement(pending.brief, input.userText);
       const next: PendingProductResearch = { ...pending, brief };
-      return { action: "update-brief", pending: next, content: cardCopy(brief) };
+      return { action: "update-brief", pending: next, content: cardCopy(brief, input.agentMode) };
     }
   }
 
@@ -108,12 +113,18 @@ export async function resolveProductResearchGate(input: {
     return { action: "generate", brief: null, prompt: input.userText };
   }
 
+  // Code / Agentic / Debug: infer files and write immediately — do not wait for confirm.
+  if (uiModeGrantsCreateWrites(input.agentMode)) {
+    recordGenerationStarted();
+    return { action: "generate", brief: run.brief, prompt: input.userText };
+  }
+
   const next: PendingProductResearch = {
     originalPrompt: input.userText,
     intent: run.intent,
     brief: run.brief,
-    phase: isProductPromptClear(run.intent) ? "awaiting-confirm" : "awaiting-confirm",
+    phase: "awaiting-confirm",
     messageId: input.messageId,
   };
-  return { action: "show-brief", pending: next, content: cardCopy(run.brief) };
+  return { action: "show-brief", pending: next, content: cardCopy(run.brief, input.agentMode) };
 }

@@ -108,6 +108,15 @@ describe("agentic routing policy", () => {
     expect(resolved.provider).toBe("open_source");
   });
 
+  it("routes Code/kilocode to NVIDIA when OpenRouter is missing", async () => {
+    clearCloudKeys();
+    process.env.NVIDIA_API_KEY = "nvapi-test-not-a-real-key-code";
+    const resolved = await resolveAutoModel("caval-auto/balanced", "kilocode");
+    expect(resolved.provider).toBe("nvidia");
+    expect(resolved.modelId).toBe(AGENTIC_NVIDIA_PRIMARY_PROFILE_ID);
+    expect(resolved.modelId).not.toBe("qwen2.5-coder:7b");
+  });
+
   it("refuses Auto Agentic local 7B when no cloud keys", async () => {
     clearCloudKeys();
     await expect(resolveAutoModel("caval-auto/free", "agent")).rejects.toBeInstanceOf(

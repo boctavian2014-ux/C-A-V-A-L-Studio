@@ -170,6 +170,23 @@ describe('workspace-verify', () => {
     expect(result.summary).toBe('failed at npm install');
   });
 
+  it('runs npm install for a Vite-only scaffold even without build/test scripts', async () => {
+    const root = makeWorkspace({
+      'package.json': JSON.stringify({ name: 'vite-app', scripts: { dev: 'vite' } }),
+    });
+    vi.mocked(runAllowedWorkspaceCommand).mockResolvedValueOnce(
+      commandResult('npm install', true, 'added 80 packages')
+    );
+
+    const result = await runWorkspaceVerify(root, { autoInstall: true });
+
+    expect(runAllowedWorkspaceCommand).toHaveBeenCalledTimes(1);
+    expect(runAllowedWorkspaceCommand).toHaveBeenCalledWith('npm install', root, 180_000);
+    expect(result.ran).toBe(true);
+    expect(result.commands).toEqual([commandResult('npm install', true, 'added 80 packages')]);
+    expect(result.summary).toBe('npm install: ok');
+  });
+
   it('stops on first failed command', async () => {
     vi.mocked(runAllowedWorkspaceCommand)
       .mockResolvedValueOnce({

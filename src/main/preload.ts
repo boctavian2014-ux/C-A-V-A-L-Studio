@@ -12,6 +12,8 @@ import { problemsApi } from "./preload-problems";
 import { tasksApi } from "./preload-tasks";
 import { previewApi } from "./preload-preview";
 import { cavalTerminalPreload } from "./preload-terminal";
+import type { DevRuntimeBuildStatus } from "../shared/dev-runtime-build";
+import { DEV_RUNTIME_BUILD_STATUS_CHANNEL } from "./dev-runtime-ipc-channel";
 
 export interface CavalOpenedFile {
   path: string;
@@ -479,6 +481,18 @@ contextBridge.exposeInMainWorld("caval", {
         finishedAt: string;
       } | null;
     }>,
+  getDevRuntimeBuildStatus: async (): Promise<DevRuntimeBuildStatus> => {
+    try {
+      const result = (await ipcRenderer.invoke(DEV_RUNTIME_BUILD_STATUS_CHANNEL)) as
+        | { ok: true; status: DevRuntimeBuildStatus }
+        | { ok: false; error?: string }
+        | undefined;
+      if (result?.ok && result.status) return result.status;
+    } catch {
+      /* ignore — toast poller treats empty status as no-op */
+    }
+    return { isDev: false, runningHash: "", latestHash: "", needsRestart: false };
+  },
   chatApplyAccept: (input: {
     stageKey?: string;
     writes?: import("../shared/ai-chat-apply-contract").ProposedWrite[];

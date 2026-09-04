@@ -14,6 +14,11 @@ describe('caval-config', () => {
     expect(resolveModelForMode('code', config)).toBe('caval-auto/free');
   });
 
+  it('defaults Code mode to Auto Balanced, not Auto Free', () => {
+    expect(DEFAULT_CAVAL_CONFIG.models?.perMode?.code).toBe('caval-auto/balanced');
+    expect(resolveModelForMode('code')).toBe('caval-auto/balanced');
+  });
+
   it('resolveAutocompleteModel falls back to Ollama when North key missing', () => {
     const prev = process.env.NORTH_API_KEY;
     delete process.env.NORTH_API_KEY;

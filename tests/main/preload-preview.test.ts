@@ -132,13 +132,14 @@ describe("preload-preview", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("does not import node:path or preview-security (Electron sandbox)", () => {
+  it("does not import node:path, node:fs, or preview-security (Electron sandbox)", () => {
     const files = ["preload.ts", "preload-preview.ts"].map((name) =>
       path.join(__dirname, "../../src/main", name)
     );
     for (const file of files) {
       const src = fs.readFileSync(file, "utf8");
       expect(src, file).not.toMatch(/from ["']node:path["']/);
+      expect(src, file).not.toMatch(/from ["']node:fs["']/);
       expect(src, file).not.toMatch(/preview-security/);
     }
   });
