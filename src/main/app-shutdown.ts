@@ -14,12 +14,14 @@ import { stopCadLocalServerAndWait } from "./cad-local-server";
 import {
   stopManagedOllamaIfStartedAndWait,
 } from "./local-ai-setup";
+import { stopAllLspSessions } from "./lsp-handlers";
 import { stopMarketplaceServerAndWait } from "./marketplace-server";
 import { shutdownAllPreviewSync } from "./preview/preview-handlers";
 import { logRuntimeVersions, shutdownMark, shutdownStepError } from "./shutdown-diagnostics";
 import { shutdownAllTasksSync } from "./tasks-handlers";
 import { stopAllInteractiveTerminalsSync } from "./terminal-handlers";
 import { workspaceIndexService } from "./workspace/workspace-index-service";
+import { stopAllMcpServers } from "../../ai/mcp/mcp-client";
 
 let completed = false;
 let inFlight: Promise<void> | null = null;
@@ -84,6 +86,8 @@ export async function runAppShutdown(reason: string): Promise<void> {
     await step("tasks-stop", () => {
       shutdownAllTasksSync();
     });
+    await step("mcp-stop-all", () => stopAllMcpServers());
+    await step("lsp-stop-all", () => stopAllLspSessions());
     await step("cad-child-stop", () => stopCadLocalServerAndWait());
     await step("marketplace-stop", () => stopMarketplaceServerAndWait());
     await step("ollama-shutdown", () => stopManagedOllamaIfStartedAndWait());

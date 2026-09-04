@@ -7,6 +7,8 @@ import { resolveMcpServerArgs, isGitRepository } from "./mcp-workspace-args";
 import { mcpToolId } from "./mcp-tool-names";
 import { MCP_REMOTE_ENABLED } from "./mcp-capabilities";
 import { isMcpServerStartAllowed } from "./mcp-trust";
+import { shutdownMark } from "../../src/main/shutdown-diagnostics";
+import { withTimeout } from "../../src/main/wait-for-exit";
 
 export interface McpServerConfig {
   id: string;
@@ -99,6 +101,38 @@ export const resolveMcpSpawn = (
   const resolvedCommand = resolveWindowsExecutable(command, env);
   return { command: resolvedCommand, args, env, cwd: options.cwd };
 };
+
+export const MCP_STOP_TIMEOUT_MS = 5_000;
+
+export type McpStdioTransportHandle = {
+  close?: () => Promise<void> | void;
+  pid?: number | null;
+};
+
+export async function closeMcpStdioTransport(
+  transport: McpStdioTransportHandle | null | undefined,
+  timeoutMs: number
+): Promise<"closed" | "killed" | "missing"> {
+  if (!transport) return "missing";
+  const pid = typeof transport.pid === "number" && transport.pid > 0 ? transport.pid : null;
+  if (transport.close) {
+    try {
+      const result = await withTimeout(Promise.resolve(transport.close()), timeoutMs);
+      if (result !== "timeout") return "closed";
+    } catch {
+      /* fall through to pid kill */
+    }
+  }
+  if (pid != null) {
+    try {
+      process.kill(pid);
+    } catch {
+      /* already gone */
+    }
+    return "killed";
+  }
+  return transport.close ? "killed" : "missing";
+}
 
 interface ServerEntry {
   config: McpServerConfig;
@@ -352,13 +386,45 @@ export class McpClientManager {
   }
 
   stop(serverId: string): void {
+    void this.stopAndWait(serverId).catch(() => undefined);
+  }
+
+  async stopAndWait(serverId: string, timeoutMs = MCP_STOP_TIMEOUT_MS): Promise<void> {
     const entry = this.servers.get(serverId);
     if (!entry) return;
-
-    void (entry.transport as { close?: () => Promise<void> } | null)?.close?.().catch(() => undefined);
+    const transport = entry.transport as McpStdioTransportHandle | null;
+    if (!entry.client && !transport) return;
     entry.client = null;
     entry.transport = null;
     entry.tools = [];
+    const pid = typeof transport?.pid === "number" ? transport.pid : null;
+    shutdownMark("mcp-stop", { serverId, pid });
+    const result = await closeMcpStdioTransport(transport, timeoutMs);
+    shutdownMark("mcp-stop-result", { serverId, result, pid });
+  }
+
+  async stopAll(timeoutMs = MCP_STOP_TIMEOUT_MS): Promise<void> {
+    const running = [...this.servers.entries()].filter(([, entry]) => entry.client || entry.transport);
+    shutdownMark("mcp-stop-all", { count: running.length });
+    await Promise.all(running.map(([id]) => this.stopAndWait(id, timeoutMs)));
+  }
+
+  /** Test seam: attach a running stdio transport without spawning MCP. */
+  attachTransportForTests(serverId: string, transport: McpStdioTransportHandle): void {
+    const existing = this.servers.get(serverId);
+    if (existing) {
+      existing.client = {};
+      existing.transport = transport;
+      existing.tools = [];
+      return;
+    }
+    this.servers.set(serverId, {
+      config: { id: serverId, name: serverId, command: "test" },
+      client: {},
+      transport,
+      tools: [],
+      stderrTail: "",
+    });
   }
 
   async callTool(
@@ -396,3 +462,7 @@ export class McpClientManager {
 }
 
 export const mcpManager = new McpClientManager();
+
+export async function stopAllMcpServers(timeoutMs = MCP_STOP_TIMEOUT_MS): Promise<void> {
+  await mcpManager.stopAll(timeoutMs);
+}

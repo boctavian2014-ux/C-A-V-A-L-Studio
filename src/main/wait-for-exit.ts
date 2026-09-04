@@ -5,6 +5,30 @@ export type ExitWaitable = {
   removeListener(event: "exit", listener: () => void): void;
 };
 
+export type KillableChild = ExitWaitable & {
+  kill(signal?: NodeJS.Signals): boolean;
+};
+
+/** SIGTERM (or Windows terminate), wait, then kill again if still alive. */
+export async function stopChildProcessAndWait(
+  child: KillableChild,
+  timeoutMs: number
+): Promise<"exit" | "killed"> {
+  try {
+    child.kill();
+  } catch {
+    /* already gone */
+  }
+  const result = await waitForChildExit(child, timeoutMs);
+  if (result === "exit") return "exit";
+  try {
+    child.kill();
+  } catch {
+    /* already gone */
+  }
+  return "killed";
+}
+
 export async function waitForChildExit(
   child: ExitWaitable,
   timeoutMs: number

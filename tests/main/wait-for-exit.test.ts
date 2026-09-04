@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
-import { waitForChildExit, withTimeout } from "../../src/main/wait-for-exit";
+import { waitForChildExit, withTimeout, stopChildProcessAndWait } from "../../src/main/wait-for-exit";
 
 describe("waitForChildExit", () => {
   it("resolves exit when the child already finished", async () => {
@@ -37,6 +37,35 @@ describe("waitForChildExit", () => {
       child.emit("exit");
     }, 10);
     await expect(pending).resolves.toBe("exit");
+  });
+});
+
+describe("stopChildProcessAndWait", () => {
+  it("returns exit when kill + exit happen before timeout", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill() {
+        this.exitCode = 1;
+        queueMicrotask(() => this.emit("exit"));
+        return true;
+      },
+    });
+    await expect(stopChildProcessAndWait(child, 200)).resolves.toBe("exit");
+  });
+
+  it("returns killed when the child ignores the first kill", async () => {
+    let kills = 0;
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill() {
+        kills += 1;
+        return true;
+      },
+    });
+    await expect(stopChildProcessAndWait(child, 20)).resolves.toBe("killed");
+    expect(kills).toBe(2);
   });
 });
 
