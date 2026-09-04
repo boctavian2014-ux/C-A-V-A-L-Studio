@@ -36,7 +36,10 @@ import {
   registerTrustedChatTurn,
 } from "./ai/trusted-chat-turn";
 import { enrichChatWithZeroLatency } from "./zl-handlers";
-import { resolveAuthoritativeWorkspaceRoot } from "../shared/workspace-isolation";
+import {
+  type BoundWorkspaceRootGetter,
+  resolveRequiredBoundWorkspace,
+} from "./bound-workspace";
 import type { ChatActivityPhase } from "../../ai/composer/chat-activity-types";
 import { REASONING_CHAT_ADDON } from "../../ai/prompts/reasoning-layer";
 import { SCAFFOLD_EMISSION_RULE } from "../../ai/prompts/scaffold-emission-rule";
@@ -1327,19 +1330,21 @@ async function streamToRenderer(
   senderId: number,
   streamId: string,
   request: CavalChatStreamRequest,
-  getWorkspaceRoot: (senderId: number) => string,
-  getBoundWorkspaceRoot?: (senderId: number) => string | undefined
+  getBoundWorkspaceRoot: BoundWorkspaceRootGetter
 ): Promise<void> {
-  trackActiveStream(senderId, streamId);
   const stream = createStreamChunkSender(sender, senderId, streamId);
-  let workspaceRoot = "";
+  const resolved = resolveRequiredBoundWorkspace(
+    getBoundWorkspaceRoot,
+    senderId,
+    request.workspaceRoot
+  );
+  if (!resolved.ok) {
+    stream.send({ type: "error", error: resolved.error, code: resolved.code });
+    return;
+  }
+  trackActiveStream(senderId, streamId);
+  const workspaceRoot = resolved.workspaceRoot;
   try {
-  const explicitRoot = request.workspaceRoot?.trim();
-  const boundRoot = getBoundWorkspaceRoot?.(senderId)?.trim() || getWorkspaceRoot(senderId)?.trim();
-  workspaceRoot = resolveAuthoritativeWorkspaceRoot({
-    boundRoot,
-    rendererRoot: explicitRoot,
-  });
   const userBoundWorkspace = Boolean(workspaceRoot);
   const multiAgentConfig = workspaceRoot?.trim()
     ? loadMultiAgentConfig(workspaceRoot)
@@ -2006,8 +2011,7 @@ async function streamResumeToRenderer(
 
 
 export function registerModelHandlers(
-  getWorkspaceRoot: (senderId: number) => string = () => process.cwd(),
-  getBoundWorkspaceRoot?: (senderId: number) => string | undefined
+  getBoundWorkspaceRoot: BoundWorkspaceRootGetter = () => undefined
 ): void {
 
   ipcMain.handle("caval:workspace-bootstrap", async (_event, workspaceRoot: string) => {
@@ -2128,10 +2132,15 @@ export function registerModelHandlers(
 
   ipcMain.handle("caval:ai-chat-stream", async (event, request: CavalChatStreamRequest) => {
     assertTrustedSender(event);
-    const boundRoot = resolveAuthoritativeWorkspaceRoot({
-      boundRoot: getBoundWorkspaceRoot?.(event.sender.id)?.trim() || getWorkspaceRoot(event.sender.id),
-      rendererRoot: request.workspaceRoot,
-    });
+    const resolved = resolveRequiredBoundWorkspace(
+      getBoundWorkspaceRoot,
+      event.sender.id,
+      request.workspaceRoot
+    );
+    if (!resolved.ok) {
+      return resolved;
+    }
+    const boundRoot = resolved.workspaceRoot;
     const limit = consumeAiRateLimit("stream_start", event.sender.id, boundRoot);
     if (!limit.ok) {
       return {
@@ -2142,7 +2151,7 @@ export function registerModelHandlers(
       };
     }
     warmOpenRouterConnection();
-    void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getWorkspaceRoot, getBoundWorkspaceRoot);
+    void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getBoundWorkspaceRoot);
     return { ok: true, started: true };
   });
 
@@ -2318,7 +2327,15 @@ export function registerModelHandlers(
         apiKeys?: unknown;
       };
       void _ignoredApiKeys;
-      const workspaceRoot = safeInput.workspaceRoot ?? getWorkspaceRoot(event.sender.id);
+      const resolved = resolveRequiredBoundWorkspace(
+        getBoundWorkspaceRoot,
+        event.sender.id,
+        safeInput.workspaceRoot
+      );
+      if (!resolved.ok) {
+        return resolved;
+      }
+      const workspaceRoot = resolved.workspaceRoot;
       const useTools = safeInput.jsonMode ? false : agentCompleteUsesTools(safeInput.model, safeInput.intent);
       if (useTools) {
         await ensureMcpServersReady(workspaceRoot).catch(() => undefined);

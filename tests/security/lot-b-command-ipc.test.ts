@@ -204,10 +204,7 @@ describe("Lot B Zone B — workspace-verify / tool paths", () => {
     boundRoots.set(harness.sender.id, workspace);
 
     const { registerModelHandlers } = await import("../../src/main/model-handlers.js");
-    registerModelHandlers(
-      () => process.cwd(),
-      (id) => boundRoots.get(id)
-    );
+    registerModelHandlers((id) => boundRoots.get(id));
     expect(parallelWorkerErrors).toEqual([]);
   });
 

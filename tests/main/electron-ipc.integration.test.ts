@@ -1,3 +1,4 @@
+import os from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createIpcHarness } from "./ipc-harness";
@@ -92,6 +93,8 @@ vi.mock("../../ai/models/model-preload", () => ({
 }));
 
 describe("Electron main IPC integration", () => {
+  const workspace = os.tmpdir();
+
   beforeEach(async () => {
     harness.reset();
     vi.resetModules();
@@ -106,8 +109,8 @@ describe("Electron main IPC integration", () => {
 
     const { registerModelHandlers } = await import("../../src/main/model-handlers.js");
     const { registerPreloadHandlers } = await import("../../src/main/preload-handlers.js");
-    registerModelHandlers();
-    registerPreloadHandlers(() => "/tmp/caval-workspace");
+    registerModelHandlers((id) => (id === harness.sender.id ? workspace : undefined));
+    registerPreloadHandlers(() => workspace);
   }, 30_000);
 
   it("caval:resolve-model returns resolved selection", async () => {

@@ -123,7 +123,8 @@ import {
   normalizeWorkspaceRoot,
   resolveSandboxedWorkspacePath,
 } from "./path-security";
-import { requireBoundWorkspaceRoot } from "./bound-workspace";
+import { peekBoundWorkspaceRoot, requireBoundWorkspaceRoot } from "./bound-workspace";
+import { NO_BOUND_WORKSPACE_ERROR } from "../shared/workspace-isolation";
 import { workspaceCommandMutex } from "../../ai/tools/workspace-execute-lock";
 import { runAllowedWorkspaceCommand } from "../../ai/tools/workspace-command-runner";
 import {
@@ -206,7 +207,8 @@ const debugAgent = new DebugAgent();
 const aiClient = new AIClient();
 const contextEngine = new ContextEngineApi();
 
-const workspaceFor = (senderId: number): string => workspaceRoots.get(senderId) ?? process.cwd();
+const workspaceFor = (senderId: number): string =>
+  requireBoundWorkspaceRoot(getBoundWorkspaceRoot, senderId, NO_BOUND_WORKSPACE_ERROR);
 
 function bindWorkspace(senderId: number, folderPath: string): void {
   const normalized = normalizeWorkspaceRoot(folderPath);
@@ -224,10 +226,7 @@ registerTasksHandlers(getBoundWorkspaceRoot);
 registerTerminalHandlers(getBoundWorkspaceRoot);
 registerPreviewHandlers(getBoundWorkspaceRoot);
 registerEngineeringHandlers(getBoundWorkspaceRoot);
-registerModelHandlers(
-  (id) => workspaceRoots.get(id) ?? process.cwd(),
-  getBoundWorkspaceRoot
-);
+registerModelHandlers(getBoundWorkspaceRoot);
 registerChatApplyHandlers(getBoundWorkspaceRoot);
 registerAiHistoryHandlers(getBoundWorkspaceRoot);
 registerAiSettingsHandlers(getBoundWorkspaceRoot);
@@ -645,7 +644,11 @@ ipcMain.handle("caval:save-file", async (event, request: { path?: string; conten
 });
 
 ipcMain.on("caval:renderer-ready", (event) => {
-  const folderPath = workspaceRoots.get(event.sender.id) ?? process.cwd();
+  const folderPath = peekBoundWorkspaceRoot(getBoundWorkspaceRoot, event.sender.id);
+  if (!folderPath) {
+    event.sender.send("caval:workspace-unbound", { workspaceRoot: null });
+    return;
+  }
   void sendWorkspaceToRenderer(event.sender.id, event.sender, folderPath);
 });
 
@@ -960,13 +963,22 @@ ipcMain.handle("caval:review-apply", async (event, input: { sessionId: string; o
 });
 
 ipcMain.handle("caval:logicflow-explain-node", async (event, request: LogicFlowExplainRequest): Promise<LogicFlowExplainResponse> => {
-  return logicFlowAgent.explainNode({
-    ...request,
-    context: {
-      ...request.context,
-      workspaceRoot: request.context?.workspaceRoot ?? workspaceFor(event.sender.id)
-    }
-  });
+  try {
+    const workspaceRoot = workspaceFor(event.sender.id);
+    return logicFlowAgent.explainNode({
+      ...request,
+      context: {
+        ...request.context,
+        workspaceRoot: request.context?.workspaceRoot ?? workspaceRoot
+      }
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      content: "",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 ipcMain.handle("caval:debug-suggest-fix", async (_event, input: {
@@ -1179,9 +1191,16 @@ ipcMain.handle("caval:mobile-build-fix", async (event, input: { command: string 
 });
 
 ipcMain.handle("caval:context-index", async (event) => {
-  const root = workspaceFor(event.sender.id);
-  const documents = await contextEngine.indexWorkspace(root);
-  return { ok: true, documentCount: documents.length };
+  try {
+    const root = workspaceFor(event.sender.id);
+    const documents = await contextEngine.indexWorkspace(root);
+    return { ok: true, documentCount: documents.length };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 registerWorkspaceBindingHandlers({
