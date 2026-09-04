@@ -139,6 +139,11 @@ describe("local-ai-setup ollama auto-start", () => {
     mod.stopManagedOllamaIfStarted();
     expect(child.kill).toHaveBeenCalled();
     expect(mod.__getOllamaProcessTrackingForTests().weStartedOllama).toBe(false);
+    info.mockClear();
+    mod.stopManagedOllamaIfStarted();
+    expect(info.mock.calls.some((c) => String(c[0]).includes("leaving pre-existing"))).toBe(
+      false
+    );
     info.mockRestore();
   });
 

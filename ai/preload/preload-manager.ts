@@ -15,6 +15,7 @@ import { createDefaultStrategies, mergeTargets } from "./preload-strategy";
 import type { WorkerRequest, WorkerResponse } from "./preload-worker";
 import { zeroLatencyFusion } from "../composer/zero-latency/zl-fusion";
 import { getOllamaLoopbackUrl } from "../../src/shared/local-ai-contract";
+import { shutdownMark } from "../../src/main/shutdown-diagnostics";
 
 export interface PreloadStatus {
   enabled: boolean;
@@ -59,6 +60,7 @@ export class PreloadManager {
   >();
   private pipelineUnsub: (() => void) | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
   private backgroundQueue: PreloadTask[] = [];
   private foregroundActive = 0;
   private backgroundActive = 0;
@@ -219,6 +221,12 @@ export class PreloadManager {
 
   /** Terminate worker and clear pending state so nothing is left open at teardown. */
   async dispose(): Promise<void> {
+    if (this.closed) {
+      shutdownMark("preload-worker-already-stopped");
+      return;
+    }
+    this.closed = true;
+    shutdownMark("preload-worker-stop");
     this.cancelAll();
     this.pipelineUnsub?.();
     this.pipelineUnsub = null;

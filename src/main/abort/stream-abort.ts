@@ -57,6 +57,17 @@ export function abortAbortableStream(streamId: string, reason = "user cancelled"
   return true;
 }
 
+/** Abort every in-flight chat/NVIDIA/HTTP stream. Safe to call during quit. */
+export function abortAllAbortableStreams(reason = "app shutdown"): number {
+  let aborted = 0;
+  for (const streamId of [...streamRoots.keys()]) {
+    if (abortAbortableStream(streamId, reason)) {
+      aborted += 1;
+    }
+  }
+  return aborted;
+}
+
 export function finishAbortableStream(streamId: string): void {
   const rootId = streamRoots.get(streamId);
   if (rootId) {

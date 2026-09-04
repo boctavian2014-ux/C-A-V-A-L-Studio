@@ -2,6 +2,7 @@ import {
   TURN_WATCHDOG_USER_MESSAGE,
   timeoutMsForAgentMode,
 } from "../../shared/turn-watchdog";
+import { shutdownMark } from "../shutdown-diagnostics";
 
 type TerminalSender = {
   send: (chunk: Record<string, unknown>) => boolean;
@@ -47,6 +48,11 @@ export function armTurnWatchdog(opts: {
   }, waitMs);
   timers.set(streamId, timer);
   return () => disarmTurnWatchdog(streamId);
+}
+
+export function clearAllTurnWatchdogs(): void {
+  shutdownMark("turn-watchdog-clear", { count: timers.size });
+  resetTurnWatchdogForTests();
 }
 
 export function disarmTurnWatchdog(streamId: string): void {

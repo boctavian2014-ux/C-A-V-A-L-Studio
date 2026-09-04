@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { abortRegistry } from "../../../src/main/abort/abort-registry";
 import {
   abortAbortableStream,
+  abortAllAbortableStreams,
   finishAbortableStream,
   getStreamAbortRootId,
   parseAbortStreamId,
@@ -144,6 +145,14 @@ describe("abort wiring", () => {
     expect(getStreamAbortRootId("s-done")).toBeUndefined();
     expect(streamAbortRootCountForTests()).toBe(0);
     expect(abortRegistry.size()).toBe(0);
+  });
+
+  it("abortAllAbortableStreams aborts every registered chat root", () => {
+    const a = startAbortableStream("s-a");
+    const b = startAbortableStream("s-b");
+    expect(abortAllAbortableStreams("app shutdown")).toBe(2);
+    expect(a.isAborted).toBe(true);
+    expect(b.isAborted).toBe(true);
   });
 
   it("abort on an unknown streamId is a no-op", () => {

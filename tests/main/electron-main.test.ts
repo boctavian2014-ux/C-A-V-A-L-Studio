@@ -52,18 +52,24 @@ describe("electron-main window-all-closed lifecycle", () => {
     expect(body).not.toMatch(/\bsetImmediate\b/);
   });
 
-  it("calls every persistent-process shutdown synchronously before app.quit()", () => {
-    const preview = indexOfCall(body, "shutdownAllPreviewSync");
-    const terminal = indexOfCall(body, "stopAllInteractiveTerminalsSync");
-    const tasks = indexOfCall(body, "shutdownAllTasksSync");
-    const cad = indexOfCall(body, "stopCadLocalServer");
-    const marketplace = indexOfCall(body, "stopMarketplaceServer");
+  it("delegates native teardown to the central shutdown path, then app.quit()", () => {
+    expect(source).toContain("installAppShutdownLifecycle");
+    expect(body).toContain('shutdownMark("window-all-closed")');
+    expect(body).not.toContain("closeAllAiPersistence");
+    expect(body).not.toContain("stopManagedOllamaIfStarted");
+    expect(body).not.toContain("shutdownAllPreviewSync");
+    expect(body).not.toContain("stopAllInteractiveTerminalsSync");
+    expect(body).not.toContain("shutdownAllTasksSync");
+    expect(body).not.toContain("stopCadLocalServer");
+    expect(body).not.toContain("stopMarketplaceServer");
     const quit = indexOfCall(body, "app.quit");
-    expect(preview).toBeLessThan(terminal);
-    expect(terminal).toBeLessThan(tasks);
-    expect(tasks).toBeLessThan(cad);
-    expect(cad).toBeLessThan(marketplace);
-    expect(marketplace).toBeLessThan(quit);
+    expect(quit).toBeGreaterThan(body.indexOf("window-all-closed"));
+  });
+
+  it("does not close sqlite from the smoke timer (before-quit owns teardown)", () => {
+    expect(source).not.toMatch(
+      /isElectronSmokeMode[\s\S]{0,800}closeAllAiPersistence/
+    );
   });
 
   it("does not keep a stale spawn terminals map beside InteractiveTerminalService", () => {

@@ -196,4 +196,10 @@ describe("7a.2 timeline flush at message completion", () => {
     expect(() => closeAllAiPersistence()).not.toThrow();
     expect(() => closeAllAiPersistence()).not.toThrow();
   });
+
+  it("AiPersistence.close is idempotent for an open database", () => {
+    const db = createAiPersistence(tempRoot());
+    expect(() => db.close()).not.toThrow();
+    expect(() => db.close()).not.toThrow();
+  });
 });

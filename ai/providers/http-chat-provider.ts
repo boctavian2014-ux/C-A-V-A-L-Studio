@@ -19,6 +19,20 @@ export interface HttpProviderConfig {
   defaultHeaders?: Record<string, string>;
 }
 
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? String((error as { name?: unknown }).name) : "";
+  return name === "AbortError";
+}
+
+async function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch {
+    /* already closed */
+  }
+}
+
 export abstract class HttpChatProvider implements ModelProvider {
   abstract readonly name: string;
 
@@ -45,6 +59,11 @@ export abstract class HttpChatProvider implements ModelProvider {
         body: JSON.stringify(this.payload(request, model, false))
       });
     } catch (err) {
+      if (options.signal?.aborted || isAbortError(err)) {
+        const abortErr = new Error("Aborted");
+        abortErr.name = "AbortError";
+        throw abortErr;
+      }
       throw toSafeProviderError(err, this.name);
     }
 
@@ -95,6 +114,9 @@ export abstract class HttpChatProvider implements ModelProvider {
 
   async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamChunk> {
     this.assertEndpointAllowed(model.endpoint);
+    if (options.signal?.aborted) {
+      return;
+    }
     let response: Response;
     try {
       response = await fetch(model.endpoint, {
@@ -104,6 +126,9 @@ export abstract class HttpChatProvider implements ModelProvider {
         body: JSON.stringify(this.payload(request, model, true))
       });
     } catch (err) {
+      if (options.signal?.aborted || isAbortError(err)) {
+        return;
+      }
       throw toSafeProviderError(err, this.name);
     }
 
@@ -116,46 +141,68 @@ export abstract class HttpChatProvider implements ModelProvider {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) {
-          continue;
+    try {
+      while (true) {
+        if (options.signal?.aborted) {
+          await cancelReader(reader);
+          return;
         }
-        const payload = trimmed.slice(5).trim();
-        if (!payload || payload === "[DONE]") {
-          continue;
-        }
+        let value: Uint8Array | undefined;
+        let done = false;
         try {
-          const json = JSON.parse(payload) as {
-            choices?: Array<{
-              delta?: Record<string, unknown>;
-              message?: { content?: string };
-            }>;
-          };
-          const deltaObj = json.choices?.[0]?.delta;
-          const reasoning = extractReasoningFromDelta(deltaObj);
-          if (reasoning) {
-            yield { kind: "reasoning", text: reasoning };
+          ({ value, done } = await reader.read());
+        } catch (err) {
+          if (options.signal?.aborted || isAbortError(err)) {
+            await cancelReader(reader);
+            return;
           }
-          const content =
-            (typeof deltaObj?.content === "string" ? deltaObj.content : undefined) ??
-            json.choices?.[0]?.message?.content;
-          if (content) {
-            yield { kind: "content", text: content };
-          }
-        } catch {
-          // ignore malformed SSE chunks
+          throw toSafeProviderError(err, this.name);
         }
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) {
+            continue;
+          }
+          const payload = trimmed.slice(5).trim();
+          if (!payload || payload === "[DONE]") {
+            continue;
+          }
+          try {
+            const json = JSON.parse(payload) as {
+              choices?: Array<{
+                delta?: Record<string, unknown>;
+                message?: { content?: string };
+              }>;
+            };
+            const deltaObj = json.choices?.[0]?.delta;
+            const reasoning = extractReasoningFromDelta(deltaObj);
+            if (reasoning) {
+              yield { kind: "reasoning", text: reasoning };
+            }
+            const content =
+              (typeof deltaObj?.content === "string" ? deltaObj.content : undefined) ??
+              json.choices?.[0]?.message?.content;
+            if (content) {
+              yield { kind: "content", text: content };
+            }
+          } catch {
+            // ignore malformed SSE chunks
+          }
+        }
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        /* already released */
       }
     }
   }

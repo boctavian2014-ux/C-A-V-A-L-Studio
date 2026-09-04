@@ -1,11 +1,13 @@
 import type { Server } from "node:http";
 
 import { createServer, seedMarketplace } from "../../marketplace/server/index";
+import { shutdownMark } from "./shutdown-diagnostics";
 
 const DEFAULT_PORT = Number(process.env.CAVAL_MARKETPLACE_PORT ?? 8787);
 
 let httpServer: Server | null = null;
 let starting: Promise<boolean> | null = null;
+let marketplaceClosed = false;
 
 export function getMarketplaceBaseUrl(port = DEFAULT_PORT): string {
   return `http://127.0.0.1:${port}`;
@@ -44,6 +46,7 @@ export async function startMarketplaceServer(): Promise<boolean> {
     }
 
     try {
+      marketplaceClosed = false;
       await seedMarketplace();
       const app = createServer();
 
@@ -91,9 +94,41 @@ export async function startMarketplaceServer(): Promise<boolean> {
 }
 
 export function stopMarketplaceServer(): void {
-  if (httpServer) {
-    httpServer.closeAllConnections?.();
-    httpServer.close();
-    httpServer = null;
+  if (marketplaceClosed) {
+    shutdownMark("marketplace-already-closed");
+    return;
   }
+  marketplaceClosed = true;
+  const server = httpServer;
+  httpServer = null;
+  if (!server) {
+    shutdownMark("marketplace-close", { alreadyNull: true });
+    return;
+  }
+  shutdownMark("marketplace-close");
+  server.closeAllConnections?.();
+  server.close();
+}
+
+export async function stopMarketplaceServerAndWait(timeoutMs = 5_000): Promise<void> {
+  if (marketplaceClosed) {
+    shutdownMark("marketplace-already-closed");
+    return;
+  }
+  marketplaceClosed = true;
+  const server = httpServer;
+  httpServer = null;
+  if (!server) {
+    shutdownMark("marketplace-close", { alreadyNull: true });
+    return;
+  }
+  shutdownMark("marketplace-close");
+  server.closeAllConnections?.();
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    server.close(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }

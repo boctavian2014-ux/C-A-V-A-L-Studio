@@ -41,7 +41,20 @@ import {
   mapCadTransportError,
 } from "../shared/cad-transport-error";
 
+import { shutdownMark } from "./shutdown-diagnostics";
+
 let resolvedBaseUrl: string | null = null;
+let cadOrphanTimer: ReturnType<typeof setInterval> | null = null;
+
+export function stopCadOrphanScan(): void {
+  if (!cadOrphanTimer) {
+    shutdownMark("cad-orphan-timer-already-cleared");
+    return;
+  }
+  shutdownMark("cad-orphan-timer-clear");
+  clearInterval(cadOrphanTimer);
+  cadOrphanTimer = null;
+}
 
 /** Clear cached URL so the next request re-resolves. */
 export function resetCadBaseUrlCache(): void {
@@ -350,32 +363,34 @@ export const registerCadHandlers = (
   };
 
   // Periodic orphan scan — heartbeat-based; does not kill healthy long jobs.
-  const orphanTimer = setInterval(() => {
-    const orphans = scanCadLockOrphans();
-    for (const lock of orphans) {
-      console.warn("[cad-lock] orphan candidate", {
-        operationId: lock.operationId,
-        jobId: lock.jobId,
-        workspaceRoot: lock.workspaceRoot,
-        lastHeartbeatAt: lock.lastHeartbeatAt,
-      });
-      if (lock.jobId) {
-        void cancelCadJobRemote(lock.jobId).finally(() => {
+  if (!cadOrphanTimer) {
+    cadOrphanTimer = setInterval(() => {
+      const orphans = scanCadLockOrphans();
+      for (const lock of orphans) {
+        console.warn("[cad-lock] orphan candidate", {
+          operationId: lock.operationId,
+          jobId: lock.jobId,
+          workspaceRoot: lock.workspaceRoot,
+          lastHeartbeatAt: lock.lastHeartbeatAt,
+        });
+        if (lock.jobId) {
+          void cancelCadJobRemote(lock.jobId).finally(() => {
+            releaseCadWorkspaceLock({
+              operationId: lock.operationId,
+              jobId: lock.jobId ?? undefined,
+              reason: "orphaned",
+            });
+          });
+        } else {
           releaseCadWorkspaceLock({
             operationId: lock.operationId,
-            jobId: lock.jobId ?? undefined,
             reason: "orphaned",
           });
-        });
-      } else {
-        releaseCadWorkspaceLock({
-          operationId: lock.operationId,
-          reason: "orphaned",
-        });
+        }
       }
-    }
-  }, 60_000);
-  orphanTimer.unref?.();
+    }, 60_000);
+    cadOrphanTimer.unref?.();
+  }
 
   handle("cad:isCloudOnly", () => ({
     cloudOnly: isCadCloudOnly(),
