@@ -31,10 +31,40 @@ export function isAppShutdownComplete(): boolean {
   return completed;
 }
 
+export function isQuitReady(): boolean {
+  return quitGate === "ready";
+}
+
+/** Open the NSIS/quitAndInstall path after teardown. Must run before installer quit proceeds. */
+export function markQuitReady(): void {
+  quitGate = "ready";
+}
+
 export function __resetAppShutdownForTests(): void {
   completed = false;
   inFlight = null;
   quitGate = "idle";
+}
+
+/**
+ * Run coordinator teardown for an update install, then open the quit gate.
+ * Call this before `autoUpdater.quitAndInstall()` so `before-quit` is a no-op
+ * and NSIS is not stuck behind `preventDefault`.
+ */
+export async function prepareQuitForUpdate(): Promise<void> {
+  if (quitGate === "ready") {
+    return;
+  }
+  if (quitGate === "idle") {
+    quitGate = "running";
+  }
+  try {
+    await runAppShutdown("quit-for-update");
+  } catch (error) {
+    shutdownStepError("runAppShutdown", error);
+  } finally {
+    markQuitReady();
+  }
 }
 
 async function step(phase: string, fn: () => void | Promise<void>): Promise<void> {
@@ -125,12 +155,17 @@ function installProcessExitDiagnostics(): void {
   });
 }
 
-export function installAppShutdownLifecycle(electronApp: App): void {
-  logRuntimeVersions();
-  installProcessExitDiagnostics();
+type QuitBarrierEvent = "before-quit" | "before-quit-for-update";
 
-  electronApp.on("before-quit", (event) => {
-    shutdownMark("before-quit");
+function installQuitBarrier(
+  electronApp: App,
+  eventName: QuitBarrierEvent,
+  options: { shutdownReason: string; afterReady: "quit" | "allow-installer" },
+): void {
+  // electron-updater / Squirrel emit before-quit-for-update instead of (or before)
+  // before-quit. Same gate markers as before-quit so #76 traces stay comparable.
+  electronApp.on(eventName as "before-quit", (event) => {
+    shutdownMark(eventName);
     if (quitGate === "ready") {
       return;
     }
@@ -139,15 +174,35 @@ export function installAppShutdownLifecycle(electronApp: App): void {
       return;
     }
     quitGate = "running";
-    void runAppShutdown("before-quit")
+    void runAppShutdown(options.shutdownReason)
       .catch((error) => {
         shutdownStepError("runAppShutdown", error);
       })
       .finally(() => {
-        quitGate = "ready";
-        electronApp.quit();
+        markQuitReady();
+        if (options.afterReady === "quit") {
+          electronApp.quit();
+        }
       });
   });
+}
+
+/** before-quit + before-quit-for-update. Exported for tests (no process.exit hooks). */
+export function installQuitBarriers(electronApp: App): void {
+  installQuitBarrier(electronApp, "before-quit", {
+    shutdownReason: "before-quit",
+    afterReady: "quit",
+  });
+  installQuitBarrier(electronApp, "before-quit-for-update", {
+    shutdownReason: "quit-for-update",
+    afterReady: "allow-installer",
+  });
+}
+
+export function installAppShutdownLifecycle(electronApp: App): void {
+  logRuntimeVersions();
+  installProcessExitDiagnostics();
+  installQuitBarriers(electronApp);
 
   electronApp.on("will-quit", () => {
     shutdownMark("will-quit");

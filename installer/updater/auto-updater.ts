@@ -1,5 +1,7 @@
 import { app, dialog } from "electron";
 import { autoUpdater } from "electron-updater";
+
+import { prepareQuitForUpdate } from "../../src/main/app-shutdown";
 import type { ReleaseChannel } from "./release-feed";
 
 export interface AutoUpdateOptions {
@@ -41,7 +43,7 @@ export class CavalAutoUpdater {
         detail: "Restart CAVALLO Studio to apply the update."
       });
       if (result.response === 0) {
-        autoUpdater.quitAndInstall();
+        await safeQuitAndInstall();
       }
     });
   }
@@ -53,4 +55,13 @@ export class CavalAutoUpdater {
 
     return autoUpdater.checkForUpdates();
   }
+}
+
+/**
+ * Teardown MCP/LSP/SQLite/Ollama first, open the quit gate, then hand off to NSIS.
+ * Calling quitAndInstall while before-quit still preventDefault-s blocks the installer.
+ */
+export async function safeQuitAndInstall(): Promise<void> {
+  await prepareQuitForUpdate();
+  autoUpdater.quitAndInstall();
 }
