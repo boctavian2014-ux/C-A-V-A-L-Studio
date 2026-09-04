@@ -67,9 +67,13 @@ describe("electron-main window-all-closed lifecycle", () => {
   });
 
   it("does not close sqlite from the smoke timer (before-quit owns teardown)", () => {
-    expect(source).not.toMatch(
-      /isElectronSmokeMode[\s\S]{0,800}closeAllAiPersistence/
-    );
+    expect(source).not.toContain("closeAllAiPersistence");
+    const smokeComplete = source.indexOf('[caval-smoke] complete');
+    expect(smokeComplete).toBeGreaterThan(-1);
+    const smokeQuit = source.slice(smokeComplete, source.indexOf("return;", smokeComplete));
+    expect(smokeQuit).toContain("window.close");
+    expect(smokeQuit).toContain("app.quit");
+    expect(smokeQuit).not.toContain("closeAllAiPersistence");
   });
 
   it("does not keep a stale spawn terminals map beside InteractiveTerminalService", () => {

@@ -29,7 +29,6 @@ import { registerTasksHandlers } from "./tasks-handlers";
 import { registerTerminalHandlers } from "./terminal-handlers";
 import { registerPreviewHandlers } from "./preview/preview-handlers";
 import { installAppShutdownLifecycle } from "./app-shutdown";
-import { closeAllAiPersistence } from "./ai/timeline-persistence";
 import {
   armNvidiaMidstreamQuitGate,
   isNvidiaMidstreamQuitGate,
@@ -378,7 +377,6 @@ const createWindow = (): BrowserWindow => {
         .finally(() => {
           console.info("[caval-smoke] complete");
           setTimeout(() => {
-            closeAllAiPersistence();
             if (!window.isDestroyed()) window.close();
             app.quit();
           }, 250);

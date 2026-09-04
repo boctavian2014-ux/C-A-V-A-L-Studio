@@ -709,9 +709,14 @@ export function createAiPersistence(workspaceRoot: string): AiPersistence {
       try {
         db.close();
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not open|already closed/i.test(message)) {
+          shutdownMark("sqlite-already-closed", { path: dbPath, native: true });
+          return;
+        }
         shutdownMark("sqlite-close-error", {
           path: dbPath,
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
         throw error;
       }

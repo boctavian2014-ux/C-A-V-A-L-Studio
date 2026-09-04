@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAiPersistence } from "../../../src/main/db/ai-persistence";
 import {
@@ -14,6 +15,7 @@ import {
 import {
   closeAllAiPersistence,
   discardIncompleteStreamTimeline,
+  getAiPersistence,
   persistAssistantMessageAndFlush,
   resetAiPersistenceCacheForTests,
 } from "../../../src/main/ai/timeline-persistence";
@@ -201,5 +203,35 @@ describe("7a.2 timeline flush at message completion", () => {
     const db = createAiPersistence(tempRoot());
     expect(() => db.close()).not.toThrow();
     expect(() => db.close()).not.toThrow();
+  });
+
+  it("closeAllAiPersistence closes the native handle once when called twice", () => {
+    const root = tempRoot();
+    getAiPersistence(root).createConversation(root, "owned");
+    const spy = vi.spyOn(Database.prototype, "close");
+    try {
+      closeAllAiPersistence();
+      closeAllAiPersistence();
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("AiPersistence.close swallows native already-closed errors", () => {
+    const persistence = createAiPersistence(tempRoot());
+    const original = Database.prototype.close;
+    const spy = vi.spyOn(Database.prototype, "close").mockImplementation(function (
+      this: InstanceType<typeof Database>
+    ) {
+      original.call(this);
+      throw new Error("The database connection is not open");
+    });
+    try {
+      expect(() => persistence.close()).not.toThrow();
+      expect(() => persistence.close()).not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
