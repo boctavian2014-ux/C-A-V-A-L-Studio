@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getCavalloSystemPrompt, resolveEffectiveMode } from '../../ai/modes/mode-router';
+import { getCavalloSystemPrompt, resolveEffectiveMode, shouldPersistAutoModeSwitch } from '../../ai/modes/mode-router';
 
 describe('mode-router', () => {
   it('maps legacy build mode to code prompt', () => {
@@ -46,5 +46,23 @@ describe('mode-router', () => {
     const result = resolveEffectiveMode('code', prompt);
     expect(result.mode).toBe('code');
     expect(result.switched).toBe(false);
+  });
+
+  it('does not persist Code → Agentic', () => {
+    expect(shouldPersistAutoModeSwitch('code', 'agentic')).toBe(false);
+    expect(shouldPersistAutoModeSwitch('code', 'ask')).toBe(false);
+  });
+
+  it("keeps explicit Ask and Plan sticky on product prompts", () => {
+    expect(resolveEffectiveMode("ask", "fă un magazin de baschet")).toEqual({
+      mode: "ask",
+      switched: false,
+    });
+    expect(resolveEffectiveMode("plan", "fă un magazin de baschet")).toEqual({
+      mode: "plan",
+      switched: false,
+    });
+    expect(shouldPersistAutoModeSwitch("ask", "code")).toBe(false);
+    expect(shouldPersistAutoModeSwitch("plan", "code")).toBe(false);
   });
 });

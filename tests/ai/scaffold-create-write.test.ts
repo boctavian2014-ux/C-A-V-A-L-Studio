@@ -76,8 +76,11 @@ describe("scaffold create-and-write contract", () => {
     expect(proposed).toEqual([]);
   });
 
-  it("falls back to a runnable Vite scaffold when fences are missing", async () => {
-    const plan = planFinishDiskWritesForUserMessage({ userMessage: WEBSITE_PROMPT });
+  it("creates minimal Vite scaffold only on explicit request", async () => {
+    const plan = planFinishDiskWritesForUserMessage({
+      userMessage: "Creează scaffold Vite minim",
+      agentMode: "code",
+    });
     expect(plan.applyFallbackScaffold).toBe(true);
     const result = await applyFallbackScaffold("C:\\proj", { projectName: "caval-e2e" });
     expect(result.written).toEqual(
@@ -110,6 +113,9 @@ describe("scaffold create-and-write contract", () => {
   it("keeps Code mode after a website create prompt", () => {
     expect(resolveEffectiveMode("code", WEBSITE_PROMPT).mode).toBe("code");
     expect(resolveEffectiveMode("code", WEBSITE_PROMPT).switched).toBe(false);
+    expect(resolveEffectiveMode("code", "fă un landing page").mode).toBe("code");
+    expect(resolveEffectiveMode("ask", "fă un site de baschet").mode).toBe("ask");
+    expect(resolveEffectiveMode("plan", "fă un site de baschet").mode).toBe("plan");
   });
 
   it("timeout on create-and-write still plans fence apply or Vite fallback", () => {

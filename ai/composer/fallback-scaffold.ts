@@ -2,6 +2,7 @@ import type { TimelineEvent } from "../../src/shared/ai-timeline-contract";
 import { sanitizeTimelineEvent } from "../../src/shared/ai-timeline-contract";
 import { applyScaffoldToWorkspace } from "./scaffold-apply";
 import type { ParsedScaffoldFile } from "./scaffold-parser";
+import { joinWorkspaceRelativePath } from "./written-files";
 
 export const FALLBACK_SCAFFOLD_TOAST =
   "Proiect creat cu scaffold minim — AI nu a generat fișiere. Editează src/App.tsx pentru a începe.";
@@ -12,17 +13,47 @@ export const FALLBACK_SCAFFOLD_TIMELINE_LABEL =
 export const FALLBACK_RUNNABLE_TOAST =
   "Am completat package.json ca Preview să poată rula (npm run dev).";
 
+/** Required files before an explicit Vite scaffold may report success. */
+export const MINIMAL_VITE_MANIFEST_PATHS = [
+  "package.json",
+  "index.html",
+  "src/main.tsx",
+  "src/App.tsx",
+] as const;
+
+export const INCOMPLETE_VITE_SCAFFOLD_ERROR =
+  "Scaffold incomplet: lipsesc fișiere din manifestul minim Vite. Nu raportez succes până nu există package.json, index.html, vite.config.*, src/main.tsx și src/App.tsx.";
+
+function normalizeRelPath(filePath: string): string {
+  return filePath.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+export function hasViteConfigFile(files: Iterable<string>): boolean {
+  return [...files].some((file) => /(^|\/)vite\.config\.(t|j|mj|cj)s$/i.test(normalizeRelPath(file)));
+}
+
+export function missingMinimalViteManifest(files: Iterable<string>): string[] {
+  const present = new Set([...files].map(normalizeRelPath));
+  const missing: string[] = MINIMAL_VITE_MANIFEST_PATHS.filter((path) => !present.has(path));
+  if (!hasViteConfigFile(present)) missing.push("vite.config.ts");
+  return missing;
+}
+
 async function readWorkspaceText(
-  _projectPath: string,
+  projectPath: string,
   relativePath: string
 ): Promise<string | null> {
   const caval = window.caval;
   if (!caval?.fs?.readFile) return null;
-  try {
-    const res = await caval.fs.readFile(relativePath.replace(/\\/g, '/'));
-    if (res?.ok && typeof res.content === 'string') return res.content;
-  } catch {
-    /* missing */
+  const rel = relativePath.replace(/\\/g, "/");
+  const abs = projectPath ? joinWorkspaceRelativePath(projectPath, rel) : rel;
+  for (const candidate of [rel, abs]) {
+    try {
+      const res = await caval.fs.readFile(candidate);
+      if (res?.ok && typeof res.content === "string") return res.content;
+    } catch {
+      /* missing */
+    }
   }
   return null;
 }
@@ -382,5 +413,52 @@ export async function applyFallbackScaffold(
     written: applied.written,
     errors: applied.errors,
     skippedBecauseExisting: false,
+  };
+}
+
+/**
+ * Explicit „Creează scaffold Vite minim”: always the internal Vite generator,
+ * never Express inference. Completes missing manifest files; does not treat a
+ * partial tree as success.
+ */
+export async function applyExplicitMinimalViteScaffold(
+  projectPath: string,
+  options?: { projectName?: string }
+): Promise<{ written: string[]; errors: string[]; missing: string[]; complete: boolean }> {
+  const templates = getMinimalViteReactScaffoldFiles(options?.projectName);
+  const present: string[] = [];
+  const toWrite: ParsedScaffoldFile[] = [];
+
+  for (const file of templates) {
+    const existing = await readWorkspaceText(projectPath, file.path);
+    if (existing) {
+      present.push(file.path);
+      if (file.path === "package.json") {
+        try {
+          const pkg = JSON.parse(existing) as { scripts?: Record<string, string> };
+          if (!pkg.scripts?.dev?.trim()) toWrite.push(file);
+        } catch {
+          toWrite.push(file);
+        }
+      }
+      continue;
+    }
+    toWrite.push(file);
+  }
+
+  let written: string[] = [];
+  let errors: string[] = [];
+  if (toWrite.length > 0) {
+    const applied = await applyScaffoldToWorkspace(projectPath, toWrite);
+    written = applied.written;
+    errors = applied.errors;
+  }
+
+  const missing = missingMinimalViteManifest([...present, ...written]);
+  return {
+    written,
+    errors,
+    missing,
+    complete: missing.length === 0 && errors.length === 0,
   };
 }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearResearchCache } from "../../ai/research/research-cache";
 import { resetProductResearchMetrics, getProductResearchMetrics } from "../../ai/research/research-metrics";
 import { runProductResearch } from "../../ai/research/research-orchestrator";
-import { resolveProductResearchGate } from "../../ai/research/research-gate";
+import { resolveProductBuildMode, resolveProductResearchGate } from "../../ai/research/research-gate";
 import type { ResearchSourceHit, WebResearchProvider } from "../../ai/research/types";
 
 const liveHit: ResearchSourceHit = {
@@ -137,5 +137,52 @@ describe("resolveProductResearchGate", () => {
     });
     expect(fix.action).toBe("generate");
     expect(fix.action === "generate" && fix.brief).toBeNull();
+  });
+
+  it("Code mode generates immediately for a product brief instead of waiting for confirm", async () => {
+    const landing = await resolveProductResearchGate({
+      userText: "fă un landing page",
+      pending: null,
+      provider: null,
+      messageId: "m-code",
+      agentMode: "code",
+    });
+    expect(landing.action).toBe("generate");
+    expect(landing.action === "generate" && landing.brief).toBeTruthy();
+  });
+
+  it("Ask and Plan stay read-only but receive a build hint for product briefs", async () => {
+    const ask = await resolveProductResearchGate({
+      userText: "fă un magazin de baschet",
+      pending: null,
+      provider: null,
+      messageId: "m-ask",
+      agentMode: "ask",
+    });
+    expect(ask.action).toBe("show-brief");
+    expect(ask.action === "show-brief" && ask.content).toMatch(/schimbă în Code|Open in Code/i);
+
+    const plan = await resolveProductResearchGate({
+      userText: "fă un magazin de baschet",
+      pending: null,
+      provider: null,
+      messageId: "m-plan",
+      agentMode: "plan",
+    });
+    expect(plan.action).toBe("show-brief");
+    expect(plan.action === "show-brief" && plan.content).toMatch(/schimbă în Code|Open in Code/i);
+  });
+
+  it("falls back Agentic to Code only when cloud tools are unavailable", async () => {
+    await expect(
+      resolveProductBuildMode("agentic", {
+        getAgenticAvailability: async () => ({ ok: true, available: false }),
+      })
+    ).resolves.toBe("code");
+    await expect(
+      resolveProductBuildMode("agentic", {
+        getAgenticAvailability: async () => ({ ok: true, available: true }),
+      })
+    ).resolves.toBe("agentic");
   });
 });

@@ -51,6 +51,10 @@ function readPackageScripts(workspaceRoot: string): Record<string, string> {
   return readPackageMeta(workspaceRoot)?.scripts ?? {};
 }
 
+function hasDevOnlyScaffold(scripts: Record<string, string>): boolean {
+  return Boolean(scripts.dev) && !scripts.typecheck && !scripts.build && !scripts.test;
+}
+
 /** Detect safe npm verify commands from package.json scripts. */
 export function detectVerifyCommands(workspaceRoot: string): string[] {
   const scripts = readPackageScripts(workspaceRoot);
@@ -80,8 +84,9 @@ async function runWorkspaceVerifyUnlocked(
     };
   }
 
+  const scripts = readPackageScripts(workspaceRoot);
   const planned = detectVerifyCommands(workspaceRoot);
-  if (!planned.length) {
+  if (!planned.length && !hasDevOnlyScaffold(scripts)) {
     return {
       ran: false,
       commands: [],
@@ -108,6 +113,21 @@ async function runWorkspaceVerifyUnlocked(
         summary: `failed at ${preInstall.command ?? 'npm install'}`,
       };
     }
+  }
+
+  if (!planned.length) {
+    if (commands.length > 0) {
+      return {
+        ran: true,
+        commands,
+        summary: formatVerifySummary({ ran: true, commands, summary: '' }),
+      };
+    }
+    return {
+      ran: false,
+      commands: [],
+      summary: 'no verify scripts (build/test/typecheck) in package.json',
+    };
   }
 
   for (const command of planned) {

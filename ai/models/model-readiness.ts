@@ -74,6 +74,31 @@ export function hasProviderKey(
   );
 }
 
+/** True when NVIDIA, OpenRouter, or BYOK is marked configured (no key material). */
+export function hasCloudChatConfigured(
+  configured?: Record<string, boolean | undefined> | null
+): boolean {
+  if (!configured) return false;
+  return Boolean(
+    configured.NVIDIA_API_KEY ||
+      configured.OPENROUTER_API_KEY ||
+      configured.ANTHROPIC_API_KEY ||
+      configured.OPENAI_API_KEY ||
+      configured.GOOGLE_API_KEY
+  );
+}
+
+/** Persist helper: Auto Balanced/Frontier → Free only when no cloud provider exists. */
+export function shouldDowngradeAutoTierToFree(
+  selectedModel: string,
+  configured?: Record<string, boolean | undefined> | null
+): boolean {
+  if (selectedModel !== 'caval-auto/balanced' && selectedModel !== 'caval-auto/frontier') {
+    return false;
+  }
+  return !hasCloudChatConfigured(configured);
+}
+
 export async function resolveSecretsFromClient(): Promise<Record<string, string>> {
   if (typeof window === 'undefined') return {};
   const w = window as {
@@ -192,13 +217,16 @@ export async function checkModelReadiness(
   if (modelId === 'caval-auto/free') {
     const ollamaUp = await isOllamaReachable();
     if (ollamaUp) return { ready: true, reason: 'Auto Free via Ollama' };
+    if (hasProviderKey('nvidia', mergedSecrets)) {
+      return { ready: true, reason: 'Auto Free via NVIDIA fallback' };
+    }
     if (hasOpenRouterKey(undefined, mergedSecrets)) {
       return { ready: true, reason: 'Auto Free via OpenRouter fallback' };
     }
     return {
       ready: false,
-      reason: 'Nici Ollama, nici OpenRouter',
-      hint: 'Pornește Ollama (ollama pull qwen2.5-coder:7b) sau adaugă OpenRouter API Key.',
+      reason: 'Nici Ollama, nici un provider cloud',
+      hint: 'Pornește Ollama (ollama pull qwen2.5-coder:7b) sau adaugă NVIDIA / OpenRouter API Key.',
     };
   }
 
@@ -206,12 +234,15 @@ export async function checkModelReadiness(
     if (hasOpenRouterKey(undefined, mergedSecrets)) {
       return { ready: true, reason: 'OpenRouter configurat' };
     }
+    if (hasProviderKey('nvidia', mergedSecrets)) {
+      return { ready: true, reason: 'NVIDIA NIM configurat' };
+    }
     const ollamaUp = await isOllamaReachable();
     if (ollamaUp) return { ready: true, reason: 'Fallback local Ollama' };
     return {
       ready: false,
-      reason: 'OpenRouter neconfigurat',
-      hint: PROVIDER_KEY_HINTS.openrouter,
+      reason: 'Niciun provider cloud configurat',
+      hint: PROVIDER_KEY_HINTS.nvidia,
     };
   }
 

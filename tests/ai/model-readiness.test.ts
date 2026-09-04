@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkModelReadiness, isByokModel, hasOpenRouterKey, hasProviderKey } from '../../ai/models/model-readiness';
+import { checkModelReadiness, isByokModel, hasOpenRouterKey, hasProviderKey, shouldDowngradeAutoTierToFree, hasCloudChatConfigured } from '../../ai/models/model-readiness';
 import { buildModelsHealthSnapshot, modelHealthLabel } from '../../ai/models/model-health';
 
 vi.mock('../../ai/models/ollama-client', () => ({
@@ -115,5 +115,26 @@ describe('hasProviderKey', () => {
   it('reads from secrets map', () => {
     expect(hasProviderKey('nvidia', { NVIDIA_API_KEY: 'nvapi-x' })).toBe(true);
     expect(hasProviderKey('nvidia', {})).toBe(false);
+  });
+});
+
+describe('shouldDowngradeAutoTierToFree', () => {
+  it('does not force Auto Free when NVIDIA is configured', () => {
+    expect(
+      shouldDowngradeAutoTierToFree('caval-auto/balanced', { NVIDIA_API_KEY: true })
+    ).toBe(false);
+    expect(
+      shouldDowngradeAutoTierToFree('caval-auto/balanced', { OPENROUTER_API_KEY: true })
+    ).toBe(false);
+  });
+
+  it('forces Auto Free only when no cloud provider is configured', () => {
+    expect(shouldDowngradeAutoTierToFree('caval-auto/balanced', {})).toBe(true);
+    expect(shouldDowngradeAutoTierToFree('caval-auto/free', {})).toBe(false);
+  });
+
+  it('treats NVIDIA as a cloud chat provider', () => {
+    expect(hasCloudChatConfigured({ NVIDIA_API_KEY: true })).toBe(true);
+    expect(hasCloudChatConfigured({})).toBe(false);
   });
 });

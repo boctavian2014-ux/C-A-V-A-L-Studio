@@ -5,10 +5,11 @@ import {
   getAutoFreeModelCandidates,
   getAutoBalancedModelCandidates,
   getInstalledLocalModelCandidates,
+  getNvidiaCodeModelCandidates,
   isOllamaReachable,
 } from '../models/auto-router';
 import { isAutoTier, type ModelSelectionId } from '../models/model-catalog';
-import { isByokModel, hasOpenRouterKey } from '../models/model-readiness';
+import { isByokModel, hasOpenRouterKey, hasProviderKey } from '../models/model-readiness';
 import { resolveByokApiKeysFromEnv, isPersistableSecret } from '../models/api-secrets';
 import { getModelProfile } from '../model-profiles';
 import {
@@ -19,6 +20,7 @@ import {
   assertAgenticProvidersReady,
   toAgenticUiError,
   isForbiddenAgenticFallback,
+  hasAgenticCloudProvider,
 } from '../models/agentic-routing-policy';
 import { DEFAULT_CAVAL_CONFIG } from '../modes/agent-modes';
 import { DEFAULT_MODEL_FALLBACK } from '../config/model-fallback-chain';
@@ -82,6 +84,24 @@ export function shouldRunCompletionWithTools(
   toolRegistry: ToolRegistry;
 } {
   return input.useTools !== false && Boolean(input.toolRegistry);
+}
+
+/**
+ * Fail-fast only when neither a cloud chat provider nor Ollama can serve Auto/OpenRouter.
+ * NVIDIA / BYOK in process.env (injected from secrets) must not look like "no provider".
+ */
+export function shouldAbortAutoCompletionWithoutBackend(
+  model: string,
+  ollamaReachable: boolean
+): boolean {
+  if (hasAgenticCloudProvider()) return false;
+  if (ollamaReachable) return false;
+  return (
+    model === "caval-auto/free" ||
+    model === "caval-auto/balanced" ||
+    model === "caval-auto/frontier" ||
+    model.startsWith("openrouter:")
+  );
 }
 
 export type CompleteModelTextResult =
@@ -216,7 +236,17 @@ async function getModelsToTry(
   }
 
   let ids: string[];
-  if (selectionId === 'caval-auto/free' || !hasOpenRouterKey()) {
+  const nvidiaCandidates = getNvidiaCodeModelCandidates();
+  if (selectionId === 'caval-auto/free') {
+    const candidates = await getAutoFreeModelCandidates();
+    ids = candidates.includes(resolvedModelId)
+      ? [resolvedModelId, ...candidates.filter((id) => id !== resolvedModelId)]
+      : candidates;
+  } else if (!hasOpenRouterKey() && nvidiaCandidates.length > 0) {
+    ids = nvidiaCandidates.includes(resolvedModelId)
+      ? [resolvedModelId, ...nvidiaCandidates.filter((id) => id !== resolvedModelId)]
+      : [resolvedModelId, ...nvidiaCandidates];
+  } else if (!hasOpenRouterKey()) {
     const candidates = await getAutoFreeModelCandidates();
     ids = candidates.includes(resolvedModelId)
       ? [resolvedModelId, ...candidates.filter((id) => id !== resolvedModelId)]
@@ -253,7 +283,11 @@ function formatCompletionError(
 ): string {
   const joined = errors.join('\n').toLowerCase();
 
-  if (joined.includes('ollama') || selectionId === 'caval-auto/free') {
+  if (
+    (joined.includes('ollama') || selectionId === 'caval-auto/free') &&
+    !hasProviderKey('nvidia') &&
+    !hasOpenRouterKey()
+  ) {
     return [
       'Niciun model local nu a răspuns.',
       '',
@@ -268,13 +302,14 @@ function formatCompletionError(
 
   if (
     !hasOpenRouterKey() &&
+    !hasProviderKey('nvidia') &&
     (isAutoTier(selectionId) || selectionId.startsWith('openrouter:'))
   ) {
     return [
       'Niciun provider cloud configurat, iar Local AI nu a răspuns.',
       '',
       'Settings → API Keys → Activează Local AI',
-      'sau adaugă o cheie OpenRouter (sk-or-...).',
+      'sau adaugă o cheie NVIDIA NIM / OpenRouter.',
     ].join('\n');
   }
 
@@ -459,40 +494,21 @@ export async function executeModelCompletion(
 
   if (
     !isAgenticRoutingIntent(intent) &&
-    !isChat &&
-    input.model === 'caval-auto/free' &&
-    !hasOpenRouterKey() &&
-    !(await isOllamaReachable())
+    !hasAgenticCloudProvider() &&
+    shouldAbortAutoCompletionWithoutBackend(input.model, await isOllamaReachable())
   ) {
-    return { ok: false, error: OLLAMA_SETUP_ERROR };
-  }
-
-  if (
-    !isAgenticRoutingIntent(intent) &&
-    (input.model === 'caval-auto/balanced' ||
-      input.model === 'caval-auto/frontier' ||
-      input.model.startsWith('openrouter:')) &&
-    !hasOpenRouterKey() &&
-    !(await isOllamaReachable())
-  ) {
+    if (input.model === 'caval-auto/free') {
+      return { ok: false, error: OLLAMA_SETUP_ERROR };
+    }
     return {
       ok: false,
       error: [
         'Niciun provider cloud configurat.',
         '',
         'Settings → API Keys → Activează Local AI (gratuit, Ollama),',
-        'sau adaugă o cheie OpenRouter (sk-or-...).',
+        'sau adaugă o cheie NVIDIA NIM / OpenRouter.',
       ].join('\n'),
     };
-  }
-
-  if (
-    !isAgenticRoutingIntent(intent) &&
-    input.model === 'caval-auto/free' &&
-    !hasOpenRouterKey() &&
-    !(await isOllamaReachable())
-  ) {
-    return { ok: false, error: OLLAMA_SETUP_ERROR };
   }
 
   const needsModelFallback =

@@ -53,4 +53,12 @@ describe("Q1-F Electron smoke env", () => {
   it("treats missing worker modules as fatal", () => {
     expect(isFatalSmokeLine("Cannot find module 'dist/main/parallel-worker.js'")).toBe(true);
   });
+
+  it("treats sandboxed preload load failures as fatal", () => {
+    expect(
+      isFatalSmokeLine(
+        "Unable to load preload script: C:/app/dist/main/preload.js"
+      )
+    ).toBe(true);
+  });
 });

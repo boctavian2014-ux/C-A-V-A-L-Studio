@@ -117,6 +117,9 @@ async function main(): Promise<void> {
   if (!/\[caval-smoke\] renderer-ready/.test(combined) && !/\[caval\] Renderer loaded/.test(combined)) {
     fail("missing renderer ready marker");
   }
+  if (!/\[caval-smoke\] bridge-ready/.test(combined)) {
+    fail("missing [caval-smoke] bridge-ready marker — preload/contextBridge may have failed");
+  }
   if (!/\[caval-smoke\] complete/.test(combined)) {
     fail("missing [caval-smoke] complete marker — process may have hung");
   }

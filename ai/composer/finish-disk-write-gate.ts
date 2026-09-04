@@ -7,6 +7,7 @@
  */
 import {
   allowsDiskWrites,
+  isStrictReadOnlyUiMode,
   resolveTrustedExecutionCapability,
   shouldGrantChatWriteTurn,
   type ExecutionMode,
@@ -126,7 +127,11 @@ export function buildTimeoutScaffoldRecoveryPatch(input: {
 }
 
 /** Creating a Desktop/Downloads folder is a disk write — same gate as finish(). */
-export function shouldAutoCreateDesktopWorkspace(userMessage: string): boolean {
-  const capability = resolveTrustedExecutionCapability({ userMessage });
+export function shouldAutoCreateDesktopWorkspace(
+  userMessage: string,
+  agentMode?: string
+): boolean {
+  if (isStrictReadOnlyUiMode(agentMode)) return false;
+  const capability = resolveTrustedExecutionCapability({ userMessage, agentMode });
   return shouldGrantChatWriteTurn(capability);
 }

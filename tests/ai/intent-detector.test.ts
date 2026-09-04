@@ -36,6 +36,13 @@ describe('intent-detector', () => {
     expect(r.confidence).toBe('low');
   });
 
+  it('routes vague product briefs to Code without listed files', () => {
+    for (const text of ['fă un landing page', 'fă un magazin', 'fă un site de baschet']) {
+      const r = detectIntent(text);
+      expect(r.mode, text).toBe('code');
+    }
+  });
+
   it('migrates architect to plan', () => {
     expect(normalizeAgentModeId('architect')).toBe('plan');
     expect(normalizeAgentModeId('code')).toBe('code');

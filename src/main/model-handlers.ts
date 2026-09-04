@@ -612,7 +612,8 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
 
 export function chatPanelUsesTools(mode?: string, workspaceRoot?: string, model?: string): boolean {
   if (!workspaceRoot?.trim()) return false;
-  if (mode !== "code" && mode !== "debug" && mode !== "agentic") return false;
+  // Code writes via fences, not the Agentic tool loop.
+  if (mode !== "debug" && mode !== "agentic") return false;
   if (!model?.trim()) return false;
   return true;
 }
