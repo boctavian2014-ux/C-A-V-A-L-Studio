@@ -6,6 +6,7 @@
 
 import type { App } from "electron";
 
+import { abortAllAbortableStreams } from "./abort/stream-abort";
 import { closeAllAiPersistence } from "./ai/timeline-persistence";
 import { clearAllTurnWatchdogs } from "./ai/turn-watchdog-runtime";
 import { stopCadOrphanScan } from "./cad-handlers";
@@ -56,6 +57,9 @@ export async function runAppShutdown(reason: string): Promise<void> {
   inFlight = (async () => {
     shutdownMark("begin", { reason });
 
+    await step("http-stream-abort", () => {
+      abortAllAbortableStreams("app shutdown");
+    });
     await step("sqlite-close-all", () => {
       closeAllAiPersistence();
     });

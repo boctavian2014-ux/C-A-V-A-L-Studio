@@ -29,6 +29,14 @@ import { registerTasksHandlers } from "./tasks-handlers";
 import { registerTerminalHandlers } from "./terminal-handlers";
 import { registerPreviewHandlers } from "./preview/preview-handlers";
 import { installAppShutdownLifecycle } from "./app-shutdown";
+import {
+  armNvidiaMidstreamQuitGate,
+  isNvidiaMidstreamQuitGate,
+} from "./nvidia-midstream-quit-gate";
+import {
+  armWorkspaceOllamaQuitGate,
+  isWorkspaceOllamaQuitGate,
+} from "./workspace-ollama-quit-gate";
 import { shutdownMark } from "./shutdown-diagnostics";
 import {
   addRecentWorkspace,
@@ -156,6 +164,12 @@ function isElectronSmokeMode(): boolean {
   return process.env.CAVAL_SMOKE === "1";
 }
 
+function skipInteractiveWindowChrome(): boolean {
+  return (
+    isElectronSmokeMode() || isNvidiaMidstreamQuitGate() || isWorkspaceOllamaQuitGate()
+  );
+}
+
 const loadLocalEnvFile = (): void => {
   if (isElectronSmokeMode()) return;
   const envPath = path.join(process.cwd(), ".env");
@@ -276,7 +290,7 @@ const createWindow = (): BrowserWindow => {
     webPreferences: getRendererWebPreferences(path.join(__dirname, "preload.js")),
   });
 
-  if (!isElectronSmokeMode()) {
+  if (!skipInteractiveWindowChrome()) {
     window.maximize();
   }
 
@@ -330,6 +344,12 @@ const createWindow = (): BrowserWindow => {
         app.quit();
       }, 250);
     }
+    if (isNvidiaMidstreamQuitGate()) {
+      armNvidiaMidstreamQuitGate(window, app, bindWorkspace);
+    }
+    if (isWorkspaceOllamaQuitGate()) {
+      armWorkspaceOllamaQuitGate(window, app, bindWorkspace);
+    }
     if (rendererRecoveryPending && !window.isDestroyed() && !window.webContents.isDestroyed()) {
       rendererRecoveryPending = false;
       window.webContents.send("caval:renderer-recovered", {
@@ -340,7 +360,7 @@ const createWindow = (): BrowserWindow => {
     }
   });
 
-  if (!app.isPackaged && !isElectronSmokeMode()) {
+  if (!app.isPackaged && !skipInteractiveWindowChrome()) {
     window.webContents.openDevTools({ mode: "detach" });
   }
 
@@ -355,7 +375,7 @@ const createWindow = (): BrowserWindow => {
   installRendererContextMenu(window);
   hideNativeMenuBar(window);
 
-  if (!app.isPackaged && !isElectronSmokeMode()) {
+  if (!app.isPackaged && !skipInteractiveWindowChrome()) {
     void window.webContents.session.clearCache().then(loadRenderer);
   } else {
     loadRenderer();

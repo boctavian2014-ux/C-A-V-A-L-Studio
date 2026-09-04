@@ -12,6 +12,7 @@ const shutdownAllTasksSync = vi.fn();
 const stopCadLocalServerAndWait = vi.fn(async () => undefined);
 const stopMarketplaceServerAndWait = vi.fn(async () => undefined);
 const stopManagedOllamaIfStartedAndWait = vi.fn(async () => undefined);
+const abortAllAbortableStreams = vi.fn(() => 0);
 
 vi.mock("electron", () => ({
   app: {
@@ -66,6 +67,9 @@ vi.mock("../../src/main/marketplace-server", () => ({
 vi.mock("../../src/main/local-ai-setup", () => ({
   stopManagedOllamaIfStartedAndWait: () => stopManagedOllamaIfStartedAndWait(),
 }));
+vi.mock("../../src/main/abort/stream-abort", () => ({
+  abortAllAbortableStreams: () => abortAllAbortableStreams(),
+}));
 
 describe("runAppShutdown", () => {
   beforeEach(async () => {
@@ -82,6 +86,7 @@ describe("runAppShutdown", () => {
     stopCadLocalServerAndWait.mockClear();
     stopMarketplaceServerAndWait.mockClear();
     stopManagedOllamaIfStartedAndWait.mockClear();
+    abortAllAbortableStreams.mockClear();
   });
 
   afterEach(() => {
@@ -96,6 +101,7 @@ describe("runAppShutdown", () => {
 
     await runAppShutdown("test");
 
+    expect(abortAllAbortableStreams).toHaveBeenCalledTimes(1);
     expect(closeAllAiPersistence).toHaveBeenCalledTimes(1);
     expect(stopCadOrphanScan).toHaveBeenCalledTimes(1);
     expect(clearAllTurnWatchdogs).toHaveBeenCalledTimes(1);
