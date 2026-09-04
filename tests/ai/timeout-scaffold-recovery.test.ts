@@ -3,6 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { recoverDeterministicExplicitWrites } from "../../ai/composer/deterministic-explicit-writes";
 import { applyFallbackScaffold } from "../../ai/composer/fallback-scaffold";
 import {
   buildTimeoutScaffoldRecoveryPatch,
@@ -105,8 +106,16 @@ describe("timeout scaffold recovery apply", () => {
         !shouldSkipGenericViteFallback(explicit)
     ).toBe(true);
 
-    const result = await applyFallbackScaffold("C:\\proj", { projectName: "caval-e2e" });
-    expect(result.written).toEqual(
+    const recovered = await recoverDeterministicExplicitWrites({
+      userMessage: explicit,
+      projectPath: "C:\\proj",
+      writtenFiles: ["src/App.tsx"],
+      projectName: "caval-e2e",
+    });
+    expect(recovered.kind).toBe("vite");
+    expect(recovered.complete).toBe(true);
+    expect(recovered.usedViteGenerator).toBe(true);
+    expect(recovered.written).toEqual(
       expect.arrayContaining([
         "package.json",
         "index.html",
@@ -117,7 +126,7 @@ describe("timeout scaffold recovery apply", () => {
       ])
     );
     const patch = buildTimeoutScaffoldRecoveryPatch({
-      written: result.written,
+      written: recovered.written,
       usedFallback: true,
     });
     expect(patch.timeoutRecovered).toBe(true);

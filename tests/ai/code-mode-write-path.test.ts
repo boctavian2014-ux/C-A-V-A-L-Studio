@@ -97,6 +97,16 @@ describe("Code Mode scaffold write path", () => {
     expect(shouldSkipGenericViteFallback("Creează un proiect Vite complet")).toBe(false);
   });
 
+  it("parses unambiguous hello.txt for deterministic timeout writes", async () => {
+    const { parseUnambiguousSingleFileCreate } = await import(
+      "../../ai/composer/code-mode-done-contract"
+    );
+    expect(parseUnambiguousSingleFileCreate("Creează hello.txt cu Hello")).toEqual({
+      path: "hello.txt",
+      content: "Hello",
+    });
+  });
+
   it("uses actionable zero-fence errors after the final retry", () => {
     expect(
       shouldRetryScaffoldOnEmptyFences({
