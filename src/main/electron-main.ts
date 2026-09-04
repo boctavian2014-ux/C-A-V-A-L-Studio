@@ -29,6 +29,7 @@ import { registerTasksHandlers } from "./tasks-handlers";
 import { registerTerminalHandlers } from "./terminal-handlers";
 import { registerPreviewHandlers } from "./preview/preview-handlers";
 import { installAppShutdownLifecycle } from "./app-shutdown";
+import { wirePackagedAutoUpdater } from "./packaged-auto-updater";
 import {
   armNvidiaMidstreamQuitGate,
   isNvidiaMidstreamQuitGate,
@@ -1930,6 +1931,7 @@ app.whenReady().then(() => {
 });
 
 installAppShutdownLifecycle(app);
+wirePackagedAutoUpdater();
 
 app.on("window-all-closed", () => {
   shutdownMark("window-all-closed");

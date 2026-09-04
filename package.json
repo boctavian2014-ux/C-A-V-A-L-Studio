@@ -59,6 +59,10 @@
   ],
   "author": "\"Dev AI\" EOOD <contact@devaieood.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boctavian2014-ux/C-A-V-A-L-Studio.git"
+  },
   "build": {
     "productName": "CAVAL",
     "mac": {

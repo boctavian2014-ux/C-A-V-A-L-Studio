@@ -58,6 +58,8 @@ module.exports = [
       "node-pty": "commonjs2 node-pty",
       // Native addon — must resolve from node_modules at runtime (not webpack dist paths).
       "better-sqlite3": "commonjs2 better-sqlite3",
+      // electron-updater reads app-update.yml / GitHub feed at runtime; do not bundle.
+      "electron-updater": "commonjs2 electron-updater",
     },
     entry: {
       "main/electron-main": "./src/main/electron-main.ts",

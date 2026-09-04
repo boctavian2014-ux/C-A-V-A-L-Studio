@@ -71,3 +71,7 @@ linux:
       arch:
         - x64
 electronUpdaterCompatibility: ">=6.0.0"
+publish:
+  provider: github
+  owner: boctavian2014-ux
+  repo: C-A-V-A-L-Studio
