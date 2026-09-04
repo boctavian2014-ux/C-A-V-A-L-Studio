@@ -95,3 +95,42 @@ describe("electron-main window chrome", () => {
     expect(source).not.toMatch(/backgroundColor:\s*"#090B12"/);
   });
 });
+
+describe("electron-main bound workspace (P0.1)", () => {
+  const source = fs.readFileSync(ELECTRON_MAIN, "utf8");
+
+  it("never falls back to process.cwd() as a bound workspace root", () => {
+    expect(source).not.toMatch(/workspaceRoots\.get\([^)]+\)\s*\?\?\s*process\.cwd\(\)/);
+    expect(source).not.toMatch(/registerModelHandlers\(\s*\([^)]*\)\s*=>\s*workspaceRoots\.get/);
+  });
+
+  it("renderer-ready skips cwd and does not auto-bind the launch directory", () => {
+    const start = source.indexOf('ipcMain.on("caval:renderer-ready"');
+    expect(start).toBeGreaterThan(0);
+    const body = source.slice(start, start + 650);
+    expect(body).toContain("peekBoundWorkspaceRoot");
+    expect(body).toContain("caval:workspace-unbound");
+    expect(body).toContain("workspaceRoot: null");
+    expect(body).not.toMatch(/process\.cwd\(\)/);
+    expect(body).toContain("sendWorkspaceToRenderer");
+  });
+});
+
+describe("model-handlers bound workspace (P0.1)", () => {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, "../../src/main/model-handlers.ts"),
+    "utf8"
+  );
+
+  it("does not default the workspace getter to process.cwd()", () => {
+    expect(source).not.toMatch(/=\s*\(\)\s*=>\s*process\.cwd\(\)/);
+    expect(source).toContain("resolveRequiredBoundWorkspace");
+  });
+
+  it("refuses streamToRenderer before tracking or fetching when unbound", () => {
+    const start = source.indexOf("async function streamToRenderer");
+    const body = source.slice(start, start + 900);
+    expect(body.indexOf("resolveRequiredBoundWorkspace")).toBeGreaterThan(0);
+    expect(body.indexOf("resolveRequiredBoundWorkspace")).toBeLessThan(body.indexOf("trackActiveStream"));
+  });
+});

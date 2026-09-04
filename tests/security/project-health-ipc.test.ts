@@ -68,10 +68,7 @@ describe("project-health IPC security", () => {
 
     vi.resetModules();
     const { registerModelHandlers } = await import("../../src/main/model-handlers.js");
-    registerModelHandlers(
-      () => process.cwd(),
-      (senderId) => boundRoots.get(senderId)
-    );
+    registerModelHandlers((senderId) => boundRoots.get(senderId));
   });
 
   afterEach(() => {
