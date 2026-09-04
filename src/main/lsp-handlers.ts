@@ -8,6 +8,8 @@ import {
   type BoundWorkspaceRootGetter,
 } from "./bound-workspace";
 import { sanitizeEnvForTerminal } from "./subprocess-env";
+import { shutdownMark } from "./shutdown-diagnostics";
+import { stopChildProcessAndWait } from "./wait-for-exit";
 
 interface LspSession {
   id: string;
@@ -19,6 +21,41 @@ interface LspSession {
 }
 
 const sessions = new Map<string, LspSession>();
+
+export const LSP_STOP_TIMEOUT_MS = 8_000;
+
+async function stopLspSession(session: LspSession, timeoutMs: number): Promise<void> {
+  const child = session.process;
+  if (!child) {
+    session.running = false;
+    return;
+  }
+  shutdownMark("lsp-stop", { sessionId: session.id, pid: child.pid ?? null });
+  const result = await stopChildProcessAndWait(child, timeoutMs);
+  shutdownMark("lsp-stop-result", { sessionId: session.id, result, pid: child.pid ?? null });
+  session.running = false;
+  session.process = null;
+}
+
+export async function stopAllLspSessions(timeoutMs = LSP_STOP_TIMEOUT_MS): Promise<void> {
+  const active = [...sessions.values()];
+  shutdownMark("lsp-stop-all", { count: active.filter((session) => session.process).length });
+  await Promise.all(active.map((session) => stopLspSession(session, timeoutMs)));
+}
+
+/** Test seam: attach a child without going through lsp:start IPC. */
+export function attachLspProcessForTests(
+  sessionId: string,
+  child: ChildProcessWithoutNullStreams
+): void {
+  sessions.set(sessionId, {
+    id: sessionId,
+    languageId: "typescript",
+    workspaceRoot: ".",
+    process: child,
+    running: true,
+  });
+}
 
 function languageServerCommand(languageId: string): { command: string; args: string[] } | null {
   switch (languageId) {
@@ -98,9 +135,7 @@ export function registerLspHandlers(getBoundWorkspaceRoot: BoundWorkspaceRootGet
     assertTrustedSender(event);
     const session = sessions.get(sessionId);
     if (!session?.process) return { ok: false, error: "Session not found" };
-    session.process.kill();
-    session.running = false;
-    session.process = null;
+    await stopLspSession(session, LSP_STOP_TIMEOUT_MS);
     return { ok: true };
   });
 

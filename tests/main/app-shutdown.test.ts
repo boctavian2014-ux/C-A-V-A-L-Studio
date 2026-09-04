@@ -9,6 +9,8 @@ const parallelDispose = vi.fn(async () => undefined);
 const shutdownAllPreviewSync = vi.fn();
 const stopAllInteractiveTerminalsSync = vi.fn();
 const shutdownAllTasksSync = vi.fn();
+const stopAllMcpServers = vi.fn(async () => undefined);
+const stopAllLspSessions = vi.fn(async () => undefined);
 const stopCadLocalServerAndWait = vi.fn(async () => undefined);
 const stopMarketplaceServerAndWait = vi.fn(async () => undefined);
 const stopManagedOllamaIfStartedAndWait = vi.fn(async () => undefined);
@@ -58,6 +60,12 @@ vi.mock("../../src/main/terminal-handlers", () => ({
 vi.mock("../../src/main/tasks-handlers", () => ({
   shutdownAllTasksSync: () => shutdownAllTasksSync(),
 }));
+vi.mock("../../ai/mcp/mcp-client", () => ({
+  stopAllMcpServers: () => stopAllMcpServers(),
+}));
+vi.mock("../../src/main/lsp-handlers", () => ({
+  stopAllLspSessions: () => stopAllLspSessions(),
+}));
 vi.mock("../../src/main/cad-local-server", () => ({
   stopCadLocalServerAndWait: () => stopCadLocalServerAndWait(),
 }));
@@ -83,6 +91,8 @@ describe("runAppShutdown", () => {
     shutdownAllPreviewSync.mockClear();
     stopAllInteractiveTerminalsSync.mockClear();
     shutdownAllTasksSync.mockClear();
+    stopAllMcpServers.mockClear();
+    stopAllLspSessions.mockClear();
     stopCadLocalServerAndWait.mockClear();
     stopMarketplaceServerAndWait.mockClear();
     stopManagedOllamaIfStartedAndWait.mockClear();
@@ -111,6 +121,8 @@ describe("runAppShutdown", () => {
     expect(shutdownAllPreviewSync).toHaveBeenCalledTimes(1);
     expect(stopAllInteractiveTerminalsSync).toHaveBeenCalledTimes(1);
     expect(shutdownAllTasksSync).toHaveBeenCalledTimes(1);
+    expect(stopAllMcpServers).toHaveBeenCalledTimes(1);
+    expect(stopAllLspSessions).toHaveBeenCalledTimes(1);
     expect(stopCadLocalServerAndWait).toHaveBeenCalledTimes(1);
     expect(stopMarketplaceServerAndWait).toHaveBeenCalledTimes(1);
     expect(stopManagedOllamaIfStartedAndWait).toHaveBeenCalledTimes(1);
@@ -131,6 +143,8 @@ describe("runAppShutdown", () => {
     await runAppShutdown("second");
 
     expect(closeAllAiPersistence).toHaveBeenCalledTimes(1);
+    expect(stopAllMcpServers).toHaveBeenCalledTimes(1);
+    expect(stopAllLspSessions).toHaveBeenCalledTimes(1);
     expect(stopManagedOllamaIfStartedAndWait).toHaveBeenCalledTimes(1);
     expect(preloadDispose).not.toHaveBeenCalled();
   });
