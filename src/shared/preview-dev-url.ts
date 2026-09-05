@@ -16,8 +16,9 @@ function stripTrailingSlash(url: string): string {
 }
 
 /**
- * Normalize loopback hosts for preview health checks.
- * localhost / 0.0.0.0 -> 127.0.0.1; reject non-loopback hosts.
+ * Normalizes preview dev URL:
+ * - Keeps `localhost` as-is (Vite logs `http://localhost:...`)
+ * - Rewrites `0.0.0.0` → `127.0.0.1`
  */
 export function normalizePreviewLoopbackUrl(raw: string, target: PreviewTarget = "web"): string {
   const trimmed = raw.trim();
