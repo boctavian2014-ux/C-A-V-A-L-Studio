@@ -6,6 +6,7 @@ import {
   shouldSkipGenericViteFallback,
 } from "../../ai/composer/code-mode-done-contract";
 import { planFinishDiskWritesForUserMessage } from "../../ai/composer/finish-disk-write-gate";
+import { shouldRecoverProductWorkspaceScaffold } from "../../ai/composer/deterministic-explicit-writes";
 import { shouldBlockScaffoldApplyOnDiff } from "../../ai/composer/finish-scaffold-guard";
 import { looksLikeFileCreationPrompt } from "../../ai/context-engine/context-builder";
 import { isAgenticPipelineMode } from "../../ai/modes/agent-modes";
@@ -156,6 +157,7 @@ describe("Code Mode product brief without listed files", () => {
       expect(plan.applyParsedFences, userMessage).toBe(true);
       expect(plan.applyFallbackScaffold, userMessage).toBe(true);
       expect(shouldSkipGenericViteFallback(userMessage), userMessage).toBe(false);
+      expect(shouldRecoverProductWorkspaceScaffold(userMessage), userMessage).toBe(true);
     }
   });
 

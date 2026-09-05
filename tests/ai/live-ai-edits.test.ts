@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
 import {
+  collectLiveAiEditFilesForDisk,
   computeLiveDiffLines,
   selectActiveAiEditPaths,
   selectLiveEditsList,
@@ -114,6 +115,23 @@ describe("live-ai-edits-store", () => {
     expect(selectActiveAiEditPaths(useLiveAiEditsStore.getState()).has("src/pending.ts")).toBe(
       true
     );
+  });
+
+  it("collectLiveAiEditFilesForDisk persists preview paths and skips propose-only", () => {
+    const store = useLiveAiEditsStore.getState();
+    store.beginEdit("preview://src/components/Contact.tsx");
+    store.progressEdit("preview://src/components/Contact.tsx", "export function Contact() { return null; }");
+    store.setProposed([{ path: "src/Proposed.tsx", content: "propose only", isNew: true }]);
+    expect(collectLiveAiEditFilesForDisk()).toEqual([]);
+    store.clearAll();
+    store.beginEdit("src/App.tsx");
+    store.progressEdit("src/App.tsx", "export default function App() { return <div />; }");
+    store.beginEdit("preview://src/main.tsx");
+    store.progressEdit("preview://src/main.tsx", "import App from './App';");
+    expect(collectLiveAiEditFilesForDisk()).toEqual([
+      { path: "src/App.tsx", content: "export default function App() { return <div />; }" },
+      { path: "src/main.tsx", content: "import App from './App';" },
+    ]);
   });
 });
 

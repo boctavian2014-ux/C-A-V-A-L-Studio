@@ -32,7 +32,7 @@ const PRODUCT_NOUN =
   "(?:site|website|landing|magazin|shop|store|app|aplica[țt]ie|proiect|pagin[ăa]|portal|platform[ăa])";
 const PRODUCT_BUILD_RE = new RegExp(
   `(?:f[ăa]|fa)\\s+(?:un|o|mi|mie)\\s+${PRODUCT_NOUN}` +
-    `|(?:creeaz|genereaz|construie[șs]t|implementeaz|create|build|make)\\w*\\s+(?:(?:un|o|a|an|the|mi)\\s+)?${PRODUCT_NOUN}` +
+    `|(?:creeaz[ăa]?|genereaz[ăa]?|construie[șs]te?|implementeaz[ăa]?|create|build|make)\\w*\\s+(?:(?:un|o|a|an|the|mi)\\s+)?${PRODUCT_NOUN}` +
     `|\\b(?:landing\\s*page|pagin[ăa]\\s+de\\s+prezentare|site\\s+de|magazin\\s+online|e-?commerce|web\\s*app|proiect\\s+nou|app\\s+complet|creeaz[ăa]\\s+proiectul)\\b`,
   "i"
 );
@@ -62,6 +62,9 @@ export function looksLikeExplicitWriteRequest(message: string): boolean {
 /** Create/scaffold a project and write files — not the propose-first edit path. */
 export function looksLikeScaffoldCreate(message: string): boolean {
   const text = message.trim();
+  // Product briefs ("fă un landing / site / magazin") write to the open folder.
+  // The user does not need to say "pe disc" / "în folderul curent".
+  if (looksLikeProductBuildIntent(text)) return true;
   return looksLikeExplicitCreate(text) && looksLikeExplicitWriteRequest(text);
 }
 

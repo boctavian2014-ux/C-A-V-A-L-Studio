@@ -194,12 +194,15 @@ describe("deterministic explicit writes on timeout", () => {
     );
   });
 
-  it("timeout + product prompt writes nothing — no auto-Vite (ee525db)", async () => {
+  it("timeout + product prompt writes Vite in the open folder without pe disc", async () => {
     const result = await simulateTimeoutTree(PRODUCT, "");
-    expect(result.kind).toBe("none");
-    expect(result.usedViteGenerator).toBe(false);
-    expect(result.files).toEqual([]);
-    expect(result.written).toEqual([]);
+    expect(result.kind).toBe("vite");
+    expect(result.complete).toBe(true);
+    expect(result.usedViteGenerator).toBe(true);
+    expect(result.files).toEqual(
+      expect.arrayContaining([...VITE_MANIFEST, "tsconfig.json"])
+    );
+    expect(filesOnDisk.get("package.json")).toContain("vite");
   });
 
   it("does not treat a partial Vite tree as success when a required write fails", async () => {

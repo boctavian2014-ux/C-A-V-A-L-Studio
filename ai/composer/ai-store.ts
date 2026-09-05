@@ -108,7 +108,7 @@ import {
   FALLBACK_SCAFFOLD_TOAST,
   INCOMPLETE_VITE_SCAFFOLD_ERROR,
 } from './fallback-scaffold';
-import { useLiveAiEditsStore } from './live-ai-edits-store';
+import { collectLiveAiEditFilesForDisk, useLiveAiEditsStore } from './live-ai-edits-store';
 import { parseStreamingScaffold, peekStreamingScaffoldPath } from './scaffold-parser';
 import {
   buildUniversalWebContext,
@@ -1799,6 +1799,20 @@ export const useAIStore = create<AIStore>()(
                 for (const err of applied.errors) {
                   const path = err.split(':')[0]?.trim();
                   if (path) useLiveAiEditsStore.getState().failEdit(path);
+                }
+              }
+              const alreadyOnDisk = new Set(
+                writtenFiles.map((file) => file.replace(/\\/g, '/').replace(/^\.\//, ''))
+              );
+              const liveFiles = collectLiveAiEditFilesForDisk().filter(
+                (file) => !alreadyOnDisk.has(file.path.replace(/\\/g, '/'))
+              );
+              if (liveFiles.length > 0) {
+                const appliedLive = await applyScaffoldToWorkspace(projectPath, liveFiles);
+                writtenFiles = [...writtenFiles, ...appliedLive.written];
+                scaffoldErrors = [...scaffoldErrors, ...appliedLive.errors];
+                for (const w of appliedLive.written) {
+                  useLiveAiEditsStore.getState().completeEdit(w);
                 }
               }
             } else if (pipelineWrittenFiles.length === 0) {

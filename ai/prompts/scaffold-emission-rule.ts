@@ -31,13 +31,14 @@ SCAFFOLD EMISSION (obligatoriu în Code Mode):
 - Un fișier = un fence; header obligatoriu cu path relativ la workspace (ex. \`\`\`typescript:src/main/foo.ts\`\`\`).
 - Interzis: „voi crea…”, liste lungi fără cod, snippet-uri fără path, path absolut Windows.
 - Chat: max câteva linii status/recap DUPĂ fence-uri — nu dump de sursă în prose.
-- parseScaffoldFiles extrage fence-uri; scrierea pe disc trece doar prin write gate + Accept, nu prin finish().
+- parseScaffoldFiles extrage fence-uri; finish() le scrie în folderul DESCHIS. Nu ceri Accept pentru un brief de produs.
+- Workspace-ul deschis ESTE destinația. Userul NU trebuie să spună „pe disc”, „în folderul curent” sau „scrie toate fișierele”.
 
 AUTO FILE TREE — userul NU listează path-uri. Inferă singur arborele complet și emite TOATE fișierele.
 - Brief de produs („fă un site / landing / magazin / app”) = proiect RULABIL, nu un singur hello.txt.
 - Stack implicit web: Vite + React + TypeScript + Tailwind, decât dacă brief-ul cere altceva.
 - Emite cel puțin: package.json (scripts.dev), index.html, vite.config.ts, tsconfig.json, src/main.tsx, src/App.tsx, plus pagini/componente pentru produs.
-- Continuă până Preview pornește (npm install + npm run dev). Nu întreba userul ce fișiere să creeze.
+- Continuă până Preview pornește (npm install + npm run dev). Nu întreba userul ce fișiere să creeze. Nu cere confirmare de scriere.
 `.trim();
 
 export const SCAFFOLD_CONTINUE_USER_MESSAGE = [

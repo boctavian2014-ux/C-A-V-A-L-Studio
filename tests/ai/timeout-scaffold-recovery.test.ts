@@ -71,11 +71,14 @@ describe("timeout scaffold recovery apply", () => {
     expect(filesOnDisk.get("index.html")).toContain("CAVAL Hero");
   });
 
-  it("keeps Vite fallback available in the plan, but only explicit Vite requests may run it on timeout", async () => {
+  it("keeps Vite fallback available and runs it for product briefs and explicit Vite", async () => {
     const {
       isExplicitMinimalViteScaffoldRequest,
       shouldSkipGenericViteFallback,
     } = await import("../../ai/composer/code-mode-done-contract");
+    const { shouldRecoverProductWorkspaceScaffold } = await import(
+      "../../ai/composer/deterministic-explicit-writes"
+    );
 
     const productPlan = planFinishDiskWritesForUserMessage({
       userMessage: CREATE_WRITE,
@@ -84,12 +87,19 @@ describe("timeout scaffold recovery apply", () => {
     });
     expect(productPlan.applyFallbackScaffold).toBe(true);
     expect(isExplicitMinimalViteScaffoldRequest(CREATE_WRITE)).toBe(false);
-    // ai-store timeout path uses this compound gate — product briefs must not silent-Vite.
-    expect(
-      productPlan.applyFallbackScaffold &&
-        isExplicitMinimalViteScaffoldRequest(CREATE_WRITE) &&
-        !shouldSkipGenericViteFallback(CREATE_WRITE)
-    ).toBe(false);
+    expect(shouldSkipGenericViteFallback(CREATE_WRITE)).toBe(false);
+    expect(shouldRecoverProductWorkspaceScaffold(CREATE_WRITE, [])).toBe(true);
+
+    const recoveredProduct = await recoverDeterministicExplicitWrites({
+      userMessage: CREATE_WRITE,
+      projectPath: "C:\\proj",
+      writtenFiles: [],
+      projectName: "caval-e2e",
+    });
+    expect(recoveredProduct.kind).toBe("vite");
+    expect(recoveredProduct.complete).toBe(true);
+    expect(recoveredProduct.usedViteGenerator).toBe(true);
+    filesOnDisk.clear();
 
     const explicit = "Creează scaffold Vite minim";
     const explicitPlan = planFinishDiskWritesForUserMessage({
