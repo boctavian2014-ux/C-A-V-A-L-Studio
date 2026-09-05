@@ -81,6 +81,35 @@ describe("ai-store helpers", () => {
     expect(resolved.primary).toBe("Step Flash");
     expect(resolved.secondary).toBe("Auto Balanced");
   });
+
+  it("formatAssistantTurnModelLabel keeps an explicit Qwen pick when runtime routes elsewhere", async () => {
+    const { formatAssistantTurnModelLabel } = await import("../../ai/composer/ai-store.js");
+    const labels = {
+      "qwen2.5-coder:7b": "Qwen 2.5 Coder 7B",
+      "nvidia/deepseek-v4-flash": "DeepSeek V4 Flash (NVIDIA NIM)",
+      "caval-auto/balanced": "Auto Balanced",
+    };
+    expect(
+      formatAssistantTurnModelLabel(
+        "qwen2.5-coder:7b",
+        "nvidia/deepseek-v4-flash",
+        labels,
+        "AI"
+      )
+    ).toBe("Qwen 2.5 Coder 7B → DeepSeek V4 Flash (NVIDIA NIM)");
+    expect(
+      formatAssistantTurnModelLabel("qwen2.5-coder:7b", "qwen2.5-coder:7b", labels, "AI")
+    ).toBe("Qwen 2.5 Coder 7B");
+    expect(
+      formatAssistantTurnModelLabel(
+        "caval-auto/balanced",
+        "nvidia/deepseek-v4-flash",
+        labels,
+        "AI"
+      )
+    ).toBe("Auto Balanced → DeepSeek V4 Flash (NVIDIA NIM)");
+    expect(formatAssistantTurnModelLabel(undefined, undefined, labels, "AI")).toBe("AI");
+  });
 });
 
 describe("ai-store sendMessage readiness gate", () => {

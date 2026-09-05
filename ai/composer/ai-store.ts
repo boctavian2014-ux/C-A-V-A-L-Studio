@@ -3098,6 +3098,24 @@ export function getModelDisplayLabel(id: string, labels: Record<string, string>)
     .replace(/^([^:]+):/, '$1 ');
 }
 
+/**
+ * Assistant-turn chip: never hide an explicit selection behind a routed model.
+ * Auto and explicit picks both show `selection → resolved` when the labels differ.
+ */
+export function formatAssistantTurnModelLabel(
+  selectedModel: string | undefined,
+  resolvedModel: string | undefined,
+  labels: Record<string, string>,
+  fallback: string
+): string {
+  const selectionLabel = selectedModel ? getModelDisplayLabel(selectedModel, labels) : null;
+  const resolvedLabel = resolvedModel ? getModelDisplayLabel(resolvedModel, labels) : null;
+  if (selectionLabel && resolvedLabel && selectionLabel !== resolvedLabel) {
+    return `${selectionLabel} → ${resolvedLabel}`;
+  }
+  return resolvedLabel ?? selectionLabel ?? fallback;
+}
+
 /** Etichetă pentru UI: selecție + model efectiv dacă diferă */
 export function formatWorkingModel(
   selectedModel: ModelSelectionId,
