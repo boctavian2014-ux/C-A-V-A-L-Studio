@@ -8,7 +8,7 @@ const retryLastTurn = vi.fn(async () => undefined);
 
 let aiState = {
   agentMode: "agentic" as string,
-  messages: [{ role: "user" as const, content: "continue", multiAgentStatus: undefined as string | undefined, isStreaming: false }],
+  messages: [{ role: "user" as const, content: "continue", id: "u1", multiAgentStatus: undefined as string | undefined, isStreaming: false }],
   isStreaming: false,
   sendMessage,
   retryLastTurn,
@@ -33,6 +33,7 @@ vi.mock("../../ai/composer/ai-store", async (importOriginal) => {
 });
 
 import { ChatFallbackStatus } from "../../ai/composer/ChatFallbackStatus";
+import { ChatStoppedRetry } from "../../ai/composer/ChatStoppedRetry";
 import { useFallbackStatusStore } from "../../ai/composer/fallback-status-store";
 
 function mount(ui: ReactElement) {
@@ -51,12 +52,23 @@ function mount(ui: ReactElement) {
   };
 }
 
+const stoppedMessages = [
+  { role: "user" as const, content: "long agentic job", id: "u-stop", multiAgentStatus: undefined as string | undefined, isStreaming: false },
+  {
+    id: "a-stop",
+    role: "assistant" as const,
+    content: "■ Oprit. Conversația de mai sus rămâne ca context — poți continua sau reformula cererea.",
+    multiAgentStatus: "Oprit",
+    isStreaming: false,
+  },
+];
+
 afterEach(() => {
   sendMessage.mockClear();
   retryLastTurn.mockClear();
   aiState = {
     agentMode: "agentic",
-    messages: [{ role: "user", content: "continue", multiAgentStatus: undefined, isStreaming: false }],
+    messages: [{ role: "user", content: "continue", id: "u1", multiAgentStatus: undefined, isStreaming: false }],
     isStreaming: false,
     sendMessage,
     retryLastTurn,
@@ -64,8 +76,63 @@ afterEach(() => {
   useFallbackStatusStore.getState().resetRoute();
 });
 
-describe("ChatFallbackStatus", () => {
-  it("shows NVIDIA -> Ollama badge after fallback", () => {
+describe("Retry single surface", () => {
+  it("keeps header Retry for Agentic cooldown only", () => {
+    useFallbackStatusStore.setState({
+      activeProvider: "nvidia",
+      fallbackFrom: null,
+      agenticBlockedProvider: "nvidia",
+      agenticBlockedUntil: Date.now() - 1,
+    });
+    const { container, unmount } = mount(<ChatFallbackStatus />);
+    const retry = container.querySelector('[data-testid="chat-agentic-retry"]') as HTMLButtonElement;
+    expect(retry).toBeTruthy();
+    expect(retry.disabled).toBe(false);
+    act(() => {
+      retry.click();
+    });
+    expect(retryLastTurn).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("does not put Stop Retry in the header", () => {
+    aiState = {
+      agentMode: "code",
+      isStreaming: false,
+      sendMessage,
+      retryLastTurn,
+      messages: stoppedMessages,
+    };
+    const { container, unmount } = mount(<ChatFallbackStatus />);
+    expect(container.querySelector('[data-testid="chat-agentic-retry"]')).toBeNull();
+    unmount();
+  });
+
+  it("shows Stop Retry only on the interrupted bubble and calls retryLastTurn", () => {
+    aiState = {
+      agentMode: "code",
+      isStreaming: false,
+      sendMessage,
+      retryLastTurn,
+      messages: stoppedMessages,
+    };
+    const { container, unmount } = mount(
+      <>
+        <ChatFallbackStatus />
+        <ChatStoppedRetry messageId="a-stop" />
+      </>
+    );
+    const retries = container.querySelectorAll('[data-testid="chat-agentic-retry"]');
+    expect(retries).toHaveLength(1);
+    expect(retries[0]?.closest(".chat-fallback-status")).toBeNull();
+    act(() => {
+      (retries[0] as HTMLButtonElement).click();
+    });
+    expect(retryLastTurn).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("shows NVIDIA -> Ollama badge after fallback without a Retry", () => {
     useFallbackStatusStore.setState({
       activeProvider: "ollama",
       fallbackFrom: "nvidia",
@@ -76,9 +143,7 @@ describe("ChatFallbackStatus", () => {
     expect(container.querySelector('[data-testid="chat-fallback-badge"]')?.textContent).toBe(
       "NVIDIA -> Ollama"
     );
-    expect(container.querySelector('[data-testid="chat-active-provider"]')?.textContent).toBe(
-      "Ollama"
-    );
+    expect(container.querySelector('[data-testid="chat-agentic-retry"]')).toBeNull();
     unmount();
   });
 
@@ -94,35 +159,6 @@ describe("ChatFallbackStatus", () => {
     expect(retry).toBeTruthy();
     expect(retry.disabled).toBe(true);
     expect(retry.textContent).toMatch(/Retry \(/);
-    unmount();
-  });
-
-  it("shows native Retry after Stop and resends without a new typed prompt", () => {
-    aiState = {
-      agentMode: "code",
-      isStreaming: false,
-      sendMessage,
-      retryLastTurn,
-      messages: [
-        { role: "user", content: "long agentic job", multiAgentStatus: undefined, isStreaming: false },
-        {
-          role: "assistant",
-          content: "■ Oprit. Conversația de mai sus rămâne ca context — poți continua sau reformula cererea.",
-          multiAgentStatus: "Oprit",
-          isStreaming: false,
-        },
-      ],
-    };
-    const { container, unmount } = mount(<ChatFallbackStatus />);
-    const retry = container.querySelector('[data-testid="chat-agentic-retry"]') as HTMLButtonElement;
-    expect(retry).toBeTruthy();
-    expect(retry.disabled).toBe(false);
-    expect(retry.textContent).toBe("Retry");
-    act(() => {
-      retry.click();
-    });
-    expect(retryLastTurn).toHaveBeenCalledTimes(1);
-    expect(sendMessage).not.toHaveBeenCalled();
     unmount();
   });
 });

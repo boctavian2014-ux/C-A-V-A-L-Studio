@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useAIStore, formatAssistantTurnModelLabel, findRetryableStoppedTurn, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
 import { ChatFallbackStatus } from './ChatFallbackStatus';
+import { ChatStoppedRetry } from './ChatStoppedRetry';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
 import { useEditorStore } from '../../src/renderer/store/editor-store';
@@ -400,7 +401,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     if (isUser || message.isStreaming || !message.content) return [];
     return extractShellCommandsFromAssistantText(message.content);
   }, [isUser, message.content, message.isStreaming]);
-  const { modelLabels, agentMode, messages: threadMessages, isStreaming: panelStreaming, retryLastTurn } = useAIStore();
+  const { modelLabels, agentMode, messages: threadMessages, isStreaming: panelStreaming } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
   const effectiveModelId = message.resolvedModel ?? message.model ?? '';
   const modelLabel = formatAssistantTurnModelLabel(
@@ -521,6 +522,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           />
         )}
 
+        {showStoppedRetry ? <ChatStoppedRetry messageId={message.id} /> : null}
+
         {!isUser && !arenaMode ? (
           <>
             {nonAgenticTimeline ? <ChatUnifiedTimeline message={message} /> : null}
@@ -593,16 +596,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {!isUser && !message.isStreaming && !message.error && !messageWasStopped && !pipelineLive && (
           <MessageFeedbackButtons messageId={message.id} streamId={message.streamId} />
         )}
-
-        {showStoppedRetry ? (
-          <button
-            type="button"
-            className="chat-fallback-retry"
-            onClick={() => void retryLastTurn()}
-          >
-            {t('ai.fallback.retry')}
-          </button>
-        ) : null}
 
         {message.error && (
           <div className="chat-message-error" role="alert">

@@ -2763,8 +2763,13 @@ export const useAIStore = create<AIStore>()(
       retryLastTurn: async () => {
         if (get().isStreaming) return;
         const turn = findRetryableStoppedTurn(get().messages);
-        if (!turn) return;
-        await get().sendMessage(turn.user.content, { reuseLastUser: true });
+        if (turn) {
+          await get().sendMessage(turn.user.content, { reuseLastUser: true });
+          return;
+        }
+        const lastUser = [...get().messages].reverse().find((m) => m.role === 'user');
+        if (!lastUser?.content.trim()) return;
+        await get().sendMessage(lastUser.content);
       },
 
       stopStreaming: () => {

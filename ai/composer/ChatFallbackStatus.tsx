@@ -10,7 +10,6 @@ import {
 
 export function ChatFallbackStatus() {
   const { t } = useTranslation();
-  const sendMessage = useAIStore((s) => s.sendMessage);
   const retryLastTurn = useAIStore((s) => s.retryLastTurn);
   const messages = useAIStore((s) => s.messages);
   const agentMode = useAIStore((s) => s.agentMode);
@@ -36,9 +35,10 @@ export function ChatFallbackStatus() {
   const blocked = agentMode === "agentic" && Boolean(agenticBlockedProvider);
   const stoppedTurn = isStreaming ? null : findRetryableStoppedTurn(messages);
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const showRetry = Boolean(blocked || stoppedTurn);
+  /** Header Retry is cooldown-only. User Stop is handled on the interrupted bubble. */
+  const showRetry = Boolean(blocked && !stoppedTurn);
 
-  if (!activeProvider && !blocked && !stoppedTurn) return null;
+  if (!activeProvider && !blocked) return null;
 
   return (
     <div
@@ -69,16 +69,11 @@ export function ChatFallbackStatus() {
           type="button"
           className="chat-fallback-retry"
           data-testid="chat-agentic-retry"
-          disabled={remainingMs > 0 || isStreaming || (!lastUser && !stoppedTurn)}
+          disabled={remainingMs > 0 || isStreaming || !lastUser}
           onClick={() => {
-            if (remainingMs > 0 || isStreaming) return;
+            if (remainingMs > 0 || isStreaming || !lastUser) return;
             clearAgenticBlock();
-            if (stoppedTurn) {
-              void retryLastTurn();
-              return;
-            }
-            if (!lastUser) return;
-            void sendMessage(lastUser.content);
+            void retryLastTurn();
           }}
         >
           {remainingMs > 0
