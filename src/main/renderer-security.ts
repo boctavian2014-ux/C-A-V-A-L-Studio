@@ -16,6 +16,8 @@ export const CAVALLO_CSP = [
   "connect-src 'self' https: wss: http://127.0.0.1:* http://localhost:*",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
+  // Preview iframe loads the local Vite/Expo/Next dev server.
+  "frame-src 'self' http://127.0.0.1:* http://localhost:*",
 ].join("; ");
 
 export function getRendererWebPreferences(preloadPath: string) {

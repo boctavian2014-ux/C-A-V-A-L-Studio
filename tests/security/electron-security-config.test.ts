@@ -18,5 +18,6 @@ describe("electron security config", () => {
     expect(CAVALLO_CSP).not.toContain("unsafe-eval");
     expect(CAVALLO_CSP).toContain("worker-src 'self' blob:");
     expect(CAVALLO_CSP).toContain("connect-src 'self' https: wss:");
+    expect(CAVALLO_CSP).toContain("frame-src 'self' http://127.0.0.1:* http://localhost:*");
   });
 });

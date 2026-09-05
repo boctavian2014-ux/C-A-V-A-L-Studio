@@ -56,9 +56,15 @@ import {
 
   detectPreviewWorkspace,
 
+  describeMissingPreview,
+
+  findStaticHtmlPreviewRoot,
+
   type DetectedProject,
 
 } from "./project-detector";
+
+import { startStaticHtmlServer } from "./static-html-server";
 
 
 
@@ -137,6 +143,10 @@ export interface PreviewLauncherOptions {
   healthCheckFn?: PreviewHealthCheckFn;
 
   readyTimeoutMs?: number;
+
+  /** Tests skip `npm install` so fake spawn handles never hang. */
+
+  skipDependencyInstall?: boolean;
 
 }
 
@@ -227,6 +237,44 @@ function notConfiguredState(target: PreviewTarget, message: string): PreviewStat
     lastError: message,
 
   };
+
+}
+
+
+
+function childProcessForStaticServer(closeServer: () => void): ChildProcess {
+
+  const child = new EventEmitter() as ChildProcess;
+
+  Object.assign(child, {
+
+    pid: 1,
+
+    stdout: { on: () => child },
+
+    stderr: { on: () => child },
+
+    kill: () => {
+
+      try {
+
+        closeServer();
+
+      } catch {
+
+        /* already closed */
+
+      }
+
+      queueMicrotask(() => child.emit("exit", 0, null));
+
+      return true;
+
+    },
+
+  });
+
+  return child;
 
 }
 
@@ -330,6 +378,8 @@ export class PreviewLauncher extends EventEmitter {
 
   private openUrlFn?: (url: string) => void | Promise<void>;
 
+  private skipDependencyInstall: boolean;
+
 
 
   constructor(options: PreviewLauncherOptions = {}) {
@@ -349,6 +399,8 @@ export class PreviewLauncher extends EventEmitter {
     );
 
     this.openUrlFn = options.openUrlFn;
+
+    this.skipDependencyInstall = options.skipDependencyInstall === true;
 
   }
 
@@ -549,6 +601,10 @@ export class PreviewLauncher extends EventEmitter {
 
 
   private maybeOpenUrl(info: ProcessInfo): void {
+
+    // Web preview is shown in the in-app iframe. Auto-opening Chrome to 127.0.0.1
+    // while Vite still binds localhost/::1 produces ERR_CONNECTION_REFUSED.
+    if (info.target === "web") return;
 
     const raw = info.state.url;
 
@@ -771,11 +827,23 @@ export class PreviewLauncher extends EventEmitter {
 
     if (!plan) {
 
+      if (target === "web") {
+
+        const htmlRoot = findStaticHtmlPreviewRoot(workspaceRoot);
+
+        if (htmlRoot) {
+
+          return this.startStaticHtmlPreview(target, workspaceRoot, htmlRoot);
+
+        }
+
+      }
+
       return notConfiguredState(
 
         target,
 
-        `No preview command detected for ${target} in ${workspaceRoot}`
+        describeMissingPreview(target, workspaceRoot)
 
       );
 
@@ -784,6 +852,28 @@ export class PreviewLauncher extends EventEmitter {
 
 
     const parsed = parsePreviewCommand(plan.command);
+
+    const deps = await this.ensureNodeModules(plan.cwd);
+
+    if (!deps.ok) {
+
+      return {
+
+        target,
+
+        status: "failed",
+
+        url: null,
+
+        pid: null,
+
+        startedAt: null,
+
+        lastError: deps.error,
+
+      };
+
+    }
 
     const invocation = toPreviewSpawnInvocation(parsed.bin, parsed.args);
 
@@ -1096,6 +1186,188 @@ export class PreviewLauncher extends EventEmitter {
 
   }
 
+
+
+  private async startStaticHtmlPreview(
+
+    target: PreviewTarget,
+
+    workspaceRoot: string,
+
+    htmlRoot: string
+
+  ): Promise<PreviewState> {
+
+    const { server, url } = await startStaticHtmlServer(htmlRoot);
+
+    const proc = childProcessForStaticServer(() => {
+
+      server.close();
+
+    });
+
+    const startedAt = Date.now();
+
+    const info: ProcessInfo = {
+
+      proc,
+
+      target,
+
+      cwd: htmlRoot,
+
+      workspaceRoot,
+
+      startedAt,
+
+      logs: [
+
+        {
+
+          target,
+
+          stream: "stdout",
+
+          line: `Serving ${htmlRoot} at ${url}`,
+
+          timestamp: startedAt,
+
+        },
+
+      ],
+
+      openedUrl: null,
+
+      readyTimeoutMs: 5_000,
+
+      readyCheckGeneration: 0,
+
+      readyCheckActive: false,
+
+      cancelled: false,
+
+      state: {
+
+        target,
+
+        status: "running",
+
+        url,
+
+        pid: proc.pid ?? null,
+
+        startedAt,
+
+        lastError: null,
+
+      },
+
+    };
+
+    this.processes.set(target, info);
+
+    this.emitState(info.state);
+
+    return info.state;
+
+  }
+
+
+
+  private async ensureNodeModules(
+
+    cwd: string
+
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+
+    if (this.skipDependencyInstall) return { ok: true };
+
+    if (existsSync(join(cwd, "node_modules")) || !existsSync(join(cwd, "package.json"))) {
+
+      return { ok: true };
+
+    }
+
+    const parsed = parsePreviewCommand("npm install");
+
+    const invocation = toPreviewSpawnInvocation(parsed.bin, parsed.args);
+
+    const proc = this.spawnFn(invocation.file, invocation.args, {
+
+      cwd,
+
+      shell: false,
+
+      env: { ...sanitizeEnvForTerminal(), FORCE_COLOR: "0", NO_COLOR: "1" },
+
+      stdio: ["ignore", "pipe", "pipe"],
+
+      windowsHide: true,
+
+    });
+
+    const errorChunks: string[] = [];
+
+    proc.stderr?.on("data", (chunk: Buffer | string) => {
+
+      errorChunks.push(String(chunk));
+
+    });
+
+    const result = await new Promise<{ ok: boolean; code: number | null }>((resolvePromise) => {
+
+      const timer = setTimeout(() => {
+
+        try {
+
+          proc.kill();
+
+        } catch {
+
+          /* ignore */
+
+        }
+
+        resolvePromise({ ok: false, code: null });
+
+      }, 120_000);
+
+      proc.on("exit", (code) => {
+
+        clearTimeout(timer);
+
+        resolvePromise({ ok: code === 0, code });
+
+      });
+
+      proc.on("error", () => {
+
+        clearTimeout(timer);
+
+        resolvePromise({ ok: false, code: null });
+
+      });
+
+    });
+
+    if (!result.ok) {
+
+      const tail = errorChunks.join("").trim().slice(-800);
+
+      return {
+
+        ok: false,
+
+        error: `npm install a eșuat${result.code != null ? ` (exit ${result.code})` : ""}${tail ? `:\n${tail}` : ". Instalează Node.js și reîncearcă."}`,
+
+      };
+
+    }
+
+    return { ok: true };
+
+  }
+
 }
 
 
@@ -1111,6 +1383,8 @@ export function createPreviewLauncherForTests(options: PreviewLauncherOptions = 
     healthCheckFn: async () => true,
 
     readyTimeoutMs: 500,
+
+    skipDependencyInstall: true,
 
     ...options,
 

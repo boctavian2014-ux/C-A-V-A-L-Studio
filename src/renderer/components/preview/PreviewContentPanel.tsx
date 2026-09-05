@@ -115,7 +115,7 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
       .then((next) => {
         setState(next);
         setPreviewStatus(target, next.status);
-        if (next.url) activatePreview(target, next.url);
+        if (next.status === "running" && next.url) activatePreview(target, next.url);
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
