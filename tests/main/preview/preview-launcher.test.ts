@@ -358,4 +358,33 @@ describe("preview-launcher", () => {
     expect(healthCheckFn).toHaveBeenCalled();
     expect(healthLauncher.getState("web").status).toBe("running");
   });
+
+  it("marks running when the log rewrites the suggested 5173 port to a healthy URL", async () => {
+    const root = workspace("health-url-rewrite");
+    writeViteProject(root);
+    const child = createFakeChild();
+    const probed: string[] = [];
+    const healthCheckFn = vi.fn(async (url: string) => {
+      probed.push(url);
+      return url.includes("59709");
+    });
+    const spawnFn = vi.fn(() => child as unknown as ReturnType<PreviewSpawn>);
+    const launcher = createPreviewLauncherForTests({
+      spawnFn,
+      healthCheckFn,
+      readyTimeoutMs: 5_000,
+    });
+
+    await launcher.start("web", root);
+    expect(launcher.getState("web").status).toBe("starting");
+    expect(launcher.getState("web").url).toContain("5173");
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    child.emitStdout("  Local: http://localhost:59709/\n");
+    await waitForStatus(launcher, "running");
+
+    expect(launcher.getState("web").status).toBe("running");
+    expect(launcher.getState("web").url).toBe("http://localhost:59709");
+    expect(probed.some((url) => url.includes("59709"))).toBe(true);
+  });
 });
