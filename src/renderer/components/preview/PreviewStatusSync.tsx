@@ -5,6 +5,8 @@ import { usePreviewStore } from "../../store/preview-store";
 
 /**
  * Keeps rail badge status in sync even when the content preview panel is closed.
+ * Does not steal Explorer or another visible preview target; URL binds only when
+ * that target is already showing.
  */
 export function PreviewStatusSync(): null {
   const setPreviewStatus = usePreviewStore((s) => s.setPreviewStatus);
@@ -32,7 +34,16 @@ export function PreviewStatusSync(): null {
     );
 
     const unsub = api.onStateChange((next) => {
-      setPreviewStatus(next.target, next.status);
+      const preview = usePreviewStore.getState();
+      preview.setPreviewStatus(next.target, next.status);
+      if (
+        next.status === "running" &&
+        next.url &&
+        preview.previewPanelOpen &&
+        preview.activePreview === next.target
+      ) {
+        preview.setPreviewUrl(next.url);
+      }
     });
 
     return () => {

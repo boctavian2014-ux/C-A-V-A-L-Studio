@@ -62,6 +62,14 @@ vi.mock("../../src/renderer/ai/explain-controller", () => ({
   startExplainForSelection: vi.fn(async () => undefined),
 }));
 
+const startPreviewFromAi = vi.hoisted(() => vi.fn());
+
+vi.mock("../../src/renderer/components/sidebar/ActivityBar", () => ({
+  startPreviewFromAi,
+  togglePreviewFromRail: vi.fn(),
+  ActivityBar: () => null,
+}));
+
 import { startExplainForSelection } from "../../src/renderer/ai/explain-controller";
 import { AiPanelToolbar } from "../../ai/composer/AiPanelToolbar";
 
@@ -109,6 +117,7 @@ describe("AiPanelToolbar", () => {
     runWorkspaceVerifyAndReport.mockReset();
     runBuildAndReport.mockReset();
     vi.mocked(startExplainForSelection).mockReset();
+    startPreviewFromAi.mockReset();
   });
 
   afterEach(() => {
@@ -229,5 +238,24 @@ describe("AiPanelToolbar", () => {
     expect(onStartChat).not.toHaveBeenCalled();
     expect(startExplainForSelection).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="ai-toolbar-action-hint"]')).toBeNull();
+  });
+
+  it("quick action preview starts preview without chatting or opening the panel", () => {
+    const { container, unmount } = mount(
+      <AiPanelToolbar isStreaming={false} onStartChat={onStartChat} />
+    );
+    mounted = { unmount };
+    act(() => {
+      container
+        .querySelector('[data-testid="ai-toolbar-quick-actions"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    act(() => {
+      container
+        .querySelector('[data-testid="ai-toolbar-quick-preview"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onStartChat).not.toHaveBeenCalled();
+    expect(startPreviewFromAi).toHaveBeenCalledWith("web");
   });
 });

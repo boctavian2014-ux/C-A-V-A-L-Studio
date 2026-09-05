@@ -37,8 +37,7 @@ import { SuggestedCommandsCard } from '../../src/renderer/components/terminal/Su
 import { useTranslation } from '../i18n/useTranslation';
 import { useLiveAiEdits } from './use-live-ai-edits';
 import { joinWorkspaceRelativePath } from './written-files';
-import { dispatchOpenExplorerSidebar } from '../../src/renderer/components/engineering/bootstrap-robotics-project';
-import { usePreviewStore } from '../../src/renderer/store/preview-store';
+import { startPreviewFromAi } from '../../src/renderer/components/sidebar/ActivityBar';
 import { ProductResearchCard } from './ProductResearchCard';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
@@ -578,14 +577,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             activeEditorPath={activeEditorPath}
             projectPath={projectPath}
             onOpenWebPreview={() => {
-              dispatchOpenExplorerSidebar();
-              usePreviewStore.getState().activatePreview('web', null);
-              void window.caval?.preview?.start('web');
+              startPreviewFromAi('web');
             }}
             onOpenMobilePreview={() => {
-              dispatchOpenExplorerSidebar();
-              usePreviewStore.getState().activatePreview('mobile', null);
-              void window.caval?.preview?.start('mobile');
+              startPreviewFromAi('mobile');
             }}
           />
         )}
