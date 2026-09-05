@@ -172,7 +172,7 @@ describe("Preview flow", () => {
     child.emitStdout("VITE v5.0.0  ready in 120 ms\n  Local: http://localhost:5173/\n");
     await waitForRunning(launcher, "web");
     expect(launcher.getState("web").status).toBe("running");
-    expect(launcher.getState("web").url).toMatch(/127\.0\.0\.1:5173/);
+    expect(launcher.getState("web").url).toMatch(/localhost:5173/);
     expect(openUrlFn).not.toHaveBeenCalled();
     expect(launcher.getLogs("web").some((line) => line.line.includes("VITE"))).toBe(true);
 

@@ -37,7 +37,7 @@ import { SuggestedCommandsCard } from '../../src/renderer/components/terminal/Su
 import { useTranslation } from '../i18n/useTranslation';
 import { useLiveAiEdits } from './use-live-ai-edits';
 import { joinWorkspaceRelativePath } from './written-files';
-import { startPreviewFromAi } from '../../src/renderer/components/sidebar/ActivityBar';
+import { togglePreviewFromRail } from '../../src/renderer/components/sidebar/ActivityBar';
 import { ProductResearchCard } from './ProductResearchCard';
 
 const AI_PANEL_WIDTH_KEY = 'caval-ai-panel-width';
@@ -408,7 +408,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     : null;
   const effectiveModelId = message.resolvedModel ?? message.model ?? '';
   const modelLabel = arenaMode
-    ? resolvedLabel ?? t('ai.chat.multiModelShort')
+    ? resolvedLabel ?? selectionLabel ?? t('ai.chat.multiModelShort')
     : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
       ? `${selectionLabel} → ${resolvedLabel}`
       : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
@@ -577,10 +577,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             activeEditorPath={activeEditorPath}
             projectPath={projectPath}
             onOpenWebPreview={() => {
-              startPreviewFromAi('web');
+              togglePreviewFromRail('web');
             }}
             onOpenMobilePreview={() => {
-              startPreviewFromAi('mobile');
+              togglePreviewFromRail('mobile');
             }}
           />
         )}

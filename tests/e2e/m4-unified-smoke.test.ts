@@ -179,7 +179,7 @@ describe.skipIf(!hasGit)("M4 unified smoke (one workspace)", () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       expect(preview.getState("web").status).toBe("running");
-      expect(preview.getState("web").url).toMatch(/127\.0\.0\.1:5173/);
+      expect(preview.getState("web").url).toMatch(/localhost:5173/);
       expect(openUrlFn).not.toHaveBeenCalled();
 
       const pty = createEchoPty();

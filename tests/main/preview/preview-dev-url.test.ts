@@ -9,20 +9,21 @@ describe("preview-dev-url", () => {
   it("parses Vite Local URLs including dynamic ports", () => {
     expect(
       extractDevServerUrlFromLog("  Local: http://localhost:5173/\n")
-    ).toBe("http://127.0.0.1:5173");
+    ).toBe("http://localhost:5173");
     expect(
       extractDevServerUrlFromLog("  Local: http://localhost:5177/\n")
-    ).toBe("http://127.0.0.1:5177");
+    ).toBe("http://localhost:5177");
   });
 
   it("parses Next ready server lines", () => {
     expect(
       extractDevServerUrlFromLog("ready - started server on 0.0.0.0:3000, url: http://localhost:3000")
-    ).toBe("http://127.0.0.1:3000");
+    ).toBe("http://localhost:3000");
   });
 
-  it("normalizes localhost to 127.0.0.1 and rejects non-loopback hosts", () => {
-    expect(normalizePreviewLoopbackUrl("http://localhost:5173/")).toBe("http://127.0.0.1:5173/");
+  it("rewrites 0.0.0.0 to 127.0.0.1 and keeps localhost", () => {
+    expect(normalizePreviewLoopbackUrl("http://localhost:5173/")).toBe("http://localhost:5173/");
+    expect(normalizePreviewLoopbackUrl("http://0.0.0.0:5173/")).toBe("http://127.0.0.1:5173/");
     expect(() => normalizePreviewLoopbackUrl("http://example.com:5173/")).toThrow(
       /loopback/i
     );
@@ -33,6 +34,6 @@ describe("preview-dev-url", () => {
       "Local: http://localhost:5173/",
       "Local: http://localhost:5177/",
     ].join("\n");
-    expect(extractDevServerUrlFromLog(chunk)).toBe("http://127.0.0.1:5177");
+    expect(extractDevServerUrlFromLog(chunk)).toBe("http://localhost:5177");
   });
 });

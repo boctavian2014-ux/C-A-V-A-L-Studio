@@ -1255,27 +1255,15 @@ export function WorkbenchRoot() {
           vertical-align: middle;
         }
         .chat-composer-status-sep { opacity: 0.45; flex-shrink: 0; }
-        .caval-model-select-trigger:hover:not(:disabled) {
-          color: var(--caval-text);
-        }
+        .caval-model-select-trigger:hover:not(:disabled),
         .caval-model-select-trigger:focus-visible {
           color: var(--caval-text);
-          outline: 2px solid var(--caval-accent);
-          outline-offset: 2px;
+          outline: none;
         }
-        .caval-model-menu-item:hover:not([aria-disabled="true"]),
-        .caval-model-menu-item.caval-model-menu-item-selected:not([aria-disabled="true"]) {
-          background: var(--caval-accent-glow);
-        }
-        .caval-model-menu-item:focus-visible,
-        .caval-model-menu-item.caval-model-menu-item-active {
-          outline: 2px solid var(--caval-accent);
-          outline-offset: -2px;
-        }
-        .caval-model-menu-item[aria-disabled="true"] {
-          opacity: 0.65;
-          pointer-events: none;
-          cursor: not-allowed;
+        .caval-model-menu-item:hover,
+        .caval-model-menu-item:focus-visible {
+          background: rgba(59,130,246,0.22) !important;
+          outline: none;
         }
         .chat-composer-send {
           display: inline-flex;

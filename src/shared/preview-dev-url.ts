@@ -30,7 +30,7 @@ export function normalizePreviewLoopbackUrl(raw: string, target: PreviewTarget =
   if (!isLoopbackHost(host)) {
     throw new Error("Preview URL host is not a permitted loopback address");
   }
-  if (host.toLowerCase() === "localhost" || host === "0.0.0.0") {
+  if (host.toLowerCase() === "0.0.0.0") {
     parsed.hostname = "127.0.0.1";
   }
   return assertAllowedPreviewOpenUrl(normalizePreviewUrl(parsed.href), target);
