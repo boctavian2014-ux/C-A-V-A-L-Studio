@@ -1,3 +1,4 @@
+import { togglePreviewFromRail } from '../components/sidebar/ActivityBar';
 import {
   dispatchTerminalAiPalette,
   dispatchTerminalNew,
@@ -167,9 +168,7 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       category: 'Preview',
       keywords: ['preview', 'web', 'run', 'dev', 'browser'],
       run: () => {
-        ctx.setActiveActivity('explorer');
-        ctx.setSidebarOpen(true);
-        void window.caval?.preview?.start('web');
+        togglePreviewFromRail('web');
       },
     },
     {
@@ -178,9 +177,7 @@ export function buildWorkbenchCommands(ctx: WorkbenchCommandContext): WorkbenchC
       category: 'Preview',
       keywords: ['preview', 'mobile', 'expo', 'run'],
       run: () => {
-        ctx.setActiveActivity('explorer');
-        ctx.setSidebarOpen(true);
-        void window.caval?.preview?.start('mobile');
+        togglePreviewFromRail('mobile');
       },
     },
     {

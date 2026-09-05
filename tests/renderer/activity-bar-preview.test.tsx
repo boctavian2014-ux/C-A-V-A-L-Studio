@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ActivityBar,
   mergePreviewRailStatus,
+  startPreviewFromAi,
 } from "../../src/renderer/components/sidebar/ActivityBar";
 import { usePreviewStore } from "../../src/renderer/store/preview-store";
+import { useEditorStore } from "../../src/renderer/store/editor-store";
 
 function mount(ui: ReactElement) {
   const container = document.createElement("div");
@@ -40,6 +42,7 @@ describe("ActivityBar — preview rail", () => {
       previewPanelOpen: false,
       previewStatus: { web: "not-configured", mobile: "not-configured" },
     });
+    useEditorStore.setState({ projectPath: "C:\\proj" });
     window.caval = {
       preview: {
         start: vi.fn(async () => ({
@@ -130,6 +133,44 @@ describe("ActivityBar — preview rail", () => {
     });
     expect(usePreviewStore.getState().activePreview).toBeNull();
     expect(usePreviewStore.getState().previewPanelOpen).toBe(false);
+  });
+
+  it("AI start updates status without opening the preview panel", async () => {
+    await act(async () => {
+      startPreviewFromAi("web");
+      await Promise.resolve();
+    });
+    expect(window.caval.preview.start).toHaveBeenCalledWith("web");
+    expect(usePreviewStore.getState().previewStatus.web).toBe("starting");
+    expect(usePreviewStore.getState().previewPanelOpen).toBe(false);
+    expect(usePreviewStore.getState().activePreview).toBeNull();
+  });
+
+  it("AI start does not overwrite another visible preview target", async () => {
+    usePreviewStore.setState({
+      activePreview: "mobile",
+      previewPanelOpen: true,
+      previewUrl: "http://127.0.0.1:8081",
+    });
+    window.caval = {
+      preview: {
+        start: vi.fn(async () => ({
+          target: "web",
+          status: "running",
+          url: "http://127.0.0.1:5173",
+          pid: 1,
+          startedAt: Date.now(),
+          lastError: null,
+        })),
+      },
+    } as unknown as Window["caval"];
+    await act(async () => {
+      startPreviewFromAi("web");
+      await Promise.resolve();
+    });
+    expect(usePreviewStore.getState().activePreview).toBe("mobile");
+    expect(usePreviewStore.getState().previewUrl).toBe("http://127.0.0.1:8081");
+    expect(usePreviewStore.getState().previewStatus.web).toBe("running");
   });
 
   it("uses neutral settings 3D icon instead of purple settings png", () => {

@@ -293,27 +293,40 @@ function ActivityBarItem({
   );
 }
 
-export function togglePreviewFromRail(kind: PreviewTarget): void {
-  const store = usePreviewStore.getState();
-  const wasSame = store.previewPanelOpen && store.activePreview === kind;
-  store.togglePreviewFromRail(kind);
-  if (wasSame) return;
-
+function startPreviewProcess(kind: PreviewTarget): void {
   const projectPath = useEditorStore.getState().projectPath?.trim();
   if (!projectPath) {
-    store.setPreviewStatus(kind, "failed");
+    usePreviewStore.getState().setPreviewStatus(kind, "failed");
     return;
   }
 
   void getPreviewApi()
     ?.start(kind)
     .then((state) => {
-      store.setPreviewStatus(kind, state.status);
-      if (state.url) store.setPreviewUrl(state.url);
+      const next = usePreviewStore.getState();
+      next.setPreviewStatus(kind, state.status);
+      if (state.url && next.previewPanelOpen && next.activePreview === kind) {
+        next.setPreviewUrl(state.url);
+      }
     })
     .catch(() => {
-      store.setPreviewStatus(kind, "failed");
+      usePreviewStore.getState().setPreviewStatus(kind, "failed");
     });
+}
+
+export function togglePreviewFromRail(kind: PreviewTarget): void {
+  const store = usePreviewStore.getState();
+  const wasSame = store.previewPanelOpen && store.activePreview === kind;
+  store.togglePreviewFromRail(kind);
+  if (wasSame) return;
+  startPreviewProcess(kind);
+}
+
+/** Start preview from AI without switching Explorer or another visible target. */
+export function startPreviewFromAi(kind: PreviewTarget): void {
+  const store = usePreviewStore.getState();
+  store.setPreviewStatus(kind, "starting");
+  startPreviewProcess(kind);
 }
 
 export function ActivityBar({

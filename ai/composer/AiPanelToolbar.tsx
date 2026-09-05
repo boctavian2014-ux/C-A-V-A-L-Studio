@@ -6,6 +6,7 @@ import { AI_ONBOARDING_SUGGESTIONS } from "./AIOnboarding";
 import { AiToolsInfoContent } from "./AiToolsInfoContent";
 import { useTranslation } from "../i18n/useTranslation";
 import { startExplainForSelection } from "../../src/renderer/ai/explain-controller";
+import { startPreviewFromAi } from "../../src/renderer/components/sidebar/ActivityBar";
 
 function ToolbarIconBtn({
   title,
@@ -102,6 +103,11 @@ export function AiPanelToolbar({
     if (id === "explain") {
       setActionHint(null);
       void startExplainForSelection();
+      return;
+    }
+    if (id === "preview") {
+      setActionHint(null);
+      startPreviewFromAi("web");
       return;
     }
     if (suggestion.prompt) {
