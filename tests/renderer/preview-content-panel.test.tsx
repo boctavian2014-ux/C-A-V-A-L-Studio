@@ -214,6 +214,19 @@ describe("PreviewContentPanel", () => {
     expect(iframe?.className).toContain("preview-frame-mobile");
   });
 
+  it("shows a checklist when no folder is open", async () => {
+    useEditorStore.setState({ projectPath: null });
+    const { api } = createPreviewMock({
+      web: idle("web", "failed"),
+      mobile: idle("mobile", "not-configured"),
+    });
+    const { container } = await renderPanel(api);
+    expect(container.querySelector('[data-testid="preview-frame-no-folder"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="preview-checklist"]')?.textContent).toMatch(
+      /open a project folder/i
+    );
+  });
+
   it("unsubscribes state and log listeners on unmount", async () => {
     const { api, unsubscribeState, unsubscribeLog } = createPreviewMock({
       web: idle("web", "stopped"),

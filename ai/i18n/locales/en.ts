@@ -493,6 +493,11 @@ export const en = {
   "preview.logsAria": "Toggle logs for {{label}}",
   "preview.panelAria": "{{label}} Preview",
   "preview.iframeTitle": "{{label}} preview",
+  "preview.checklistTitle": "To see Preview:",
+  "preview.checklist.folder": "Open a project folder (File → Open Folder, Ctrl+Shift+O).",
+  "preview.checklist.app": "The folder must contain a Vite/Next or Expo app (package.json), not only loose files.",
+  "preview.checklist.rail": "Click the Preview icon in the left bar, then Open Web / Open Mobile.",
+  "preview.checklist.runtime": "Node.js and npm must be installed and on the Windows PATH.",
 
   "debug.tab": "DEBUG",
 

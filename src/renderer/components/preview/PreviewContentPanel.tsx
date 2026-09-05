@@ -286,6 +286,31 @@ function TargetControls({ target, label }: { target: PreviewTarget; label: strin
   );
 }
 
+function PreviewChecklist() {
+  const { t } = useTranslation();
+  return (
+    <div data-testid="preview-checklist" style={{ marginTop: 12, textAlign: "left", maxWidth: 360 }}>
+      <p style={{ margin: "0 0 8px", fontWeight: 600, fontSize: 12 }}>
+        {t("preview.checklistTitle")}
+      </p>
+      <ol
+        style={{
+          margin: 0,
+          paddingLeft: 18,
+          fontSize: 12,
+          lineHeight: 1.5,
+          opacity: 0.9,
+        }}
+      >
+        <li>{t("preview.checklist.folder")}</li>
+        <li>{t("preview.checklist.app")}</li>
+        <li>{t("preview.checklist.rail")}</li>
+        <li>{t("preview.checklist.runtime")}</li>
+      </ol>
+    </div>
+  );
+}
+
 function PreviewFrame() {
   const { t } = useTranslation();
   const activePreview = usePreviewStore((s) => s.activePreview);
@@ -297,6 +322,7 @@ function PreviewFrame() {
     return (
       <div className="preview-empty" data-testid="preview-frame-empty">
         <p>{t("preview.selectTarget")}</p>
+        <PreviewChecklist />
       </div>
     );
   }
@@ -310,6 +336,7 @@ function PreviewFrame() {
         <p style={{ fontSize: 12, opacity: 0.75, marginTop: 8 }}>
           {t("preview.openFolderHint")}
         </p>
+        <PreviewChecklist />
       </div>
     );
   }
@@ -325,6 +352,7 @@ function PreviewFrame() {
               ? t("preview.notConfiguredShort", { label })
               : t("preview.starting", { label })}
         </p>
+        <PreviewChecklist />
       </div>
     );
   }
