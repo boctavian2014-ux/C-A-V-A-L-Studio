@@ -512,6 +512,29 @@ function finalizeStoppedAssistantMessage(message: ChatMessage): ChatMessage {
   };
 }
 
+export function isStoppedAssistantMessage(message: ChatMessage): boolean {
+  return (
+    message.role === 'assistant' &&
+    message.multiAgentStatus === 'Oprit' &&
+    !message.isStreaming
+  );
+}
+
+/** Last assistant turn is user-stopped and has a preceding user prompt to resend. */
+export function findRetryableStoppedTurn(
+  messages: ChatMessage[]
+): { user: ChatMessage; assistant: ChatMessage } | null {
+  const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+  if (!lastAssistant || !isStoppedAssistantMessage(lastAssistant)) return null;
+  const assistantIdx = messages.lastIndexOf(lastAssistant);
+  const user = messages
+    .slice(0, assistantIdx)
+    .reverse()
+    .find((m) => m.role === 'user');
+  if (!user?.content.trim()) return null;
+  return { user, assistant: lastAssistant };
+}
+
 function assertSendNotAborted(signal: AbortSignal): void {
   if (signal.aborted || userStoppedStream) {
     throw new DOMException('User stopped send', 'AbortError');
@@ -631,7 +654,8 @@ interface AIStore {
   onWorkspaceChanged: (nextPath: string | null) => void;
 
   pendingProductResearch: PendingProductResearch | null;
-  sendMessage: (userText: string) => Promise<void>;
+  sendMessage: (userText: string, options?: { reuseLastUser?: boolean }) => Promise<void>;
+  retryLastTurn: () => Promise<void>;
   acceptProductResearchAndBuild: () => Promise<void>;
   saveProductResearchBrief: () => Promise<void>;
   chatPrepareDraft: (input: {
@@ -1190,7 +1214,8 @@ export const useAIStore = create<AIStore>()(
         }
       },
 
-      sendMessage: async (userText) => {
+      sendMessage: async (userText, options) => {
+        const reuseLastUser = Boolean(options?.reuseLastUser);
         if (get().isStreaming && !get().messages.some((m) => m.isStreaming)) {
           set({ isStreaming: false });
         }
@@ -1205,6 +1230,7 @@ export const useAIStore = create<AIStore>()(
         const userMsgId = generateId();
         const userTimestamp = Date.now();
         const commitUserBubble = (content: string, extra?: Partial<ChatMessage>) => {
+          if (reuseLastUser) return;
           upsertActiveUserMessage(set, {
             id: userMsgId,
             role: 'user',
@@ -2732,6 +2758,13 @@ export const useAIStore = create<AIStore>()(
         if (err instanceof DOMException && err.name === 'AbortError') return;
         throw err;
       }
+      },
+
+      retryLastTurn: async () => {
+        if (get().isStreaming) return;
+        const turn = findRetryableStoppedTurn(get().messages);
+        if (!turn) return;
+        await get().sendMessage(turn.user.content, { reuseLastUser: true });
       },
 
       stopStreaming: () => {

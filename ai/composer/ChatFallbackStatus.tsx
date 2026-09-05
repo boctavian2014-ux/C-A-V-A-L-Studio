@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import { useTranslation } from "../i18n/useTranslation";
-import { useAIStore } from "./ai-store";
+import { findRetryableStoppedTurn, useAIStore } from "./ai-store";
 import {
   formatFallbackBadge,
   formatProviderLabel,
@@ -11,8 +11,10 @@ import {
 export function ChatFallbackStatus() {
   const { t } = useTranslation();
   const sendMessage = useAIStore((s) => s.sendMessage);
+  const retryLastTurn = useAIStore((s) => s.retryLastTurn);
   const messages = useAIStore((s) => s.messages);
   const agentMode = useAIStore((s) => s.agentMode);
+  const isStreaming = useAIStore((s) => s.isStreaming);
   const {
     activeProvider,
     fallbackFrom,
@@ -32,10 +34,11 @@ export function ChatFallbackStatus() {
   const remainingSec = Math.ceil(remainingMs / 1000);
   const badge = formatFallbackBadge(fallbackFrom, activeProvider);
   const blocked = agentMode === "agentic" && Boolean(agenticBlockedProvider);
-
-  if (!activeProvider && !blocked) return null;
-
+  const stoppedTurn = isStreaming ? null : findRetryableStoppedTurn(messages);
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const showRetry = Boolean(blocked || stoppedTurn);
+
+  if (!activeProvider && !blocked && !stoppedTurn) return null;
 
   return (
     <div
@@ -61,15 +64,20 @@ export function ChatFallbackStatus() {
           {badge}
         </span>
       ) : null}
-      {blocked ? (
+      {showRetry ? (
         <button
           type="button"
           className="chat-fallback-retry"
           data-testid="chat-agentic-retry"
-          disabled={remainingMs > 0 || !lastUser}
+          disabled={remainingMs > 0 || isStreaming || (!lastUser && !stoppedTurn)}
           onClick={() => {
-            if (!lastUser || remainingMs > 0) return;
+            if (remainingMs > 0 || isStreaming) return;
             clearAgenticBlock();
+            if (stoppedTurn) {
+              void retryLastTurn();
+              return;
+            }
+            if (!lastUser) return;
             void sendMessage(lastUser.content);
           }}
         >

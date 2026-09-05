@@ -110,6 +110,32 @@ describe("ai-store helpers", () => {
     ).toBe("Auto Balanced → DeepSeek V4 Flash (NVIDIA NIM)");
     expect(formatAssistantTurnModelLabel(undefined, undefined, labels, "AI")).toBe("AI");
   });
+
+  it("findRetryableStoppedTurn requires a stopped assistant after a user prompt", async () => {
+    const { findRetryableStoppedTurn } = await import("../../ai/composer/ai-store.js");
+    const user = {
+      id: "u1",
+      role: "user" as const,
+      content: "build it",
+      timestamp: 1,
+    };
+    const stopped = {
+      id: "a1",
+      role: "assistant" as const,
+      content: "■ Oprit",
+      timestamp: 2,
+      multiAgentStatus: "Oprit",
+    };
+    expect(findRetryableStoppedTurn([user, stopped])?.user.content).toBe("build it");
+    expect(
+      findRetryableStoppedTurn([
+        user,
+        stopped,
+        { id: "a2", role: "assistant", content: "done", timestamp: 3 },
+      ])
+    ).toBeNull();
+    expect(findRetryableStoppedTurn([user])).toBeNull();
+  });
 });
 
 describe("ai-store sendMessage readiness gate", () => {
@@ -245,6 +271,41 @@ describe("ai-store sendMessage readiness gate", () => {
     );
     expect(contextUserTurns).toHaveLength(1);
     expect(captured?.message).toBe(probe);
+    editorState.projectPath = "/proj/demo";
+  });
+
+  it("retry after Stop resends the same user turn without duplicating the bubble", async () => {
+    const probe = "zxq-retry-after-stop-91";
+    const win = (globalThis as unknown as { window: { caval: Record<string, unknown> } }).window;
+    win.caval.chatStream = vi.fn(() => () => undefined);
+    win.caval.abortChatStream = vi.fn().mockResolvedValue({ ok: true });
+
+    const { useAIStore } = await import("../../ai/composer/ai-store.js");
+    useAIStore.setState({
+      agentMode: "code",
+      messages: [],
+      pendingProductResearch: null,
+      isStreaming: false,
+    });
+    await useAIStore.getState().sendMessage(probe);
+
+    expect(useAIStore.getState().isStreaming).toBe(true);
+    useAIStore.getState().stopStreaming();
+
+    const afterStop = useAIStore.getState();
+    expect(afterStop.isStreaming).toBe(false);
+    expect(afterStop.messages.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(afterStop.messages.some((m) => m.multiAgentStatus === "Oprit")).toBe(true);
+
+    await useAIStore.getState().retryLastTurn();
+
+    const afterRetry = useAIStore.getState();
+    expect(afterRetry.messages.filter((m) => m.role === "user")).toHaveLength(1);
+    expect(afterRetry.messages.filter((m) => m.role === "user")[0]?.content).toBe(probe);
+    const assistants = afterRetry.messages.filter((m) => m.role === "assistant");
+    expect(assistants.length).toBeGreaterThanOrEqual(2);
+    expect(assistants.some((m) => m.multiAgentStatus === "Oprit")).toBe(true);
+    expect(assistants.some((m) => m.isStreaming || m.id !== assistants[0]?.id)).toBe(true);
     editorState.projectPath = "/proj/demo";
   });
 });
