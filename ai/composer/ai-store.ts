@@ -523,6 +523,33 @@ function truncateVerifyOutput(text: string): string {
   return `${text.slice(0, VERIFY_OUTPUT_MAX)}\n\n… (trunchiat, ${text.length - VERIFY_OUTPUT_MAX} caractere omise)`;
 }
 
+function upsertActiveUserMessage(
+  set: (partial: Partial<AIStore> | ((s: AIStore) => Partial<AIStore>)) => void,
+  userMsg: ChatMessage
+): void {
+  set((s) => {
+    const messages = [...s.messages.filter((m) => m.id !== userMsg.id), userMsg];
+    const threads = s.threads.map((t) =>
+      t.id === s.activeThreadId ? { ...t, messages, updatedAt: Date.now() } : t
+    );
+    return { messages, threads };
+  });
+}
+
+function appendAssistantAfterUser(
+  set: (partial: Partial<AIStore> | ((s: AIStore) => Partial<AIStore>)) => void,
+  assistantMsg: ChatMessage,
+  extra?: Partial<AIStore>
+): void {
+  set((s) => {
+    const messages = [...s.messages.filter((m) => m.id !== assistantMsg.id), assistantMsg];
+    const threads = s.threads.map((t) =>
+      t.id === s.activeThreadId ? { ...t, messages, updatedAt: Date.now() } : t
+    );
+    return { messages, threads, ...extra };
+  });
+}
+
 function appendChatReportMessage(
   set: (partial: Partial<AIStore> | ((s: AIStore) => Partial<AIStore>)) => void,
   content: string,
@@ -1175,6 +1202,19 @@ export const useAIStore = create<AIStore>()(
           get().stopStreaming();
         }
 
+        const userMsgId = generateId();
+        const userTimestamp = Date.now();
+        const commitUserBubble = (content: string, extra?: Partial<ChatMessage>) => {
+          upsertActiveUserMessage(set, {
+            id: userMsgId,
+            role: 'user',
+            content,
+            timestamp: userTimestamp,
+            ...extra,
+          });
+        };
+        commitUserBubble(userText);
+
         let continueWorkspaceAugment: string | undefined;
         if (isContinueWorkspaceRequest(userText)) {
           let continueWorkspace = useEditorStore.getState().projectPath;
@@ -1200,29 +1240,14 @@ export const useAIStore = create<AIStore>()(
             caval: window.caval,
           });
           if (flow.handled && flow.earlyReturn) {
-            const userMsg: ChatMessage = {
-              id: generateId(),
-              role: 'user',
-              content: userText,
-              timestamp: Date.now(),
-            };
-            const assistantMsg: ChatMessage = {
+            appendAssistantAfterUser(set, {
               id: generateId(),
               role: 'assistant',
               content: flow.snapshot
                 ? buildWorkspaceDiscoveryUserMessage(flow.snapshot)
                 : 'Nu este deschis niciun folder de proiect. Alege un folder sau creează un proiect.',
               timestamp: Date.now(),
-            };
-            const nextMessages = [...get().messages, userMsg, assistantMsg];
-            set((s) => ({
-              messages: nextMessages,
-              threads: s.threads.map((t) =>
-                t.id === s.activeThreadId
-                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
-                  : t
-              ),
-            }));
+            });
             return;
           }
           if (flow.augmentedUserText) {
@@ -1260,13 +1285,7 @@ export const useAIStore = create<AIStore>()(
           !boundWorkspace?.trim()
         ) {
           if (isSystemContinue || !shouldAutoCreateDesktopWorkspace(userText, get().agentMode)) {
-            const userMsg: ChatMessage = {
-              id: generateId(),
-              role: 'user',
-              content: userText,
-              timestamp: Date.now(),
-            };
-            const assistantMsg: ChatMessage = {
+            appendAssistantAfterUser(set, {
               id: generateId(),
               role: 'assistant',
               content: '',
@@ -1274,27 +1293,12 @@ export const useAIStore = create<AIStore>()(
                 ? 'Workspace lipsă — redeschide folderul de proiect înainte de continuare (SCAFFOLD_CONTINUE).'
                 : 'Workspace lipsă — deschide un folder de proiect. Nu creez proiecte pe Desktop fără o cale de scriere aprobată.',
               timestamp: Date.now(),
-            };
-            const nextMessages = [...get().messages, userMsg, assistantMsg];
-            set((s) => ({
-              messages: nextMessages,
-              threads: s.threads.map((t) =>
-                t.id === s.activeThreadId
-                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
-                  : t
-              ),
-            }));
+            });
             return;
           }
           const ensured = await ensureDesktopProject(projectNameFromPrompt(userText));
           if (!ensured.ok || !ensured.path) {
-            const userMsg: ChatMessage = {
-              id: generateId(),
-              role: 'user',
-              content: userText,
-              timestamp: Date.now(),
-            };
-            const assistantMsg: ChatMessage = {
+            appendAssistantAfterUser(set, {
               id: generateId(),
               role: 'assistant',
               content: '',
@@ -1302,16 +1306,7 @@ export const useAIStore = create<AIStore>()(
                 ensured.error ??
                 'Nu am putut crea un folder pe Desktop sau în Downloads. Deschide un folder manual.',
               timestamp: Date.now(),
-            };
-            const nextMessages = [...get().messages, userMsg, assistantMsg];
-            set((s) => ({
-              messages: nextMessages,
-              threads: s.threads.map((t) =>
-                t.id === s.activeThreadId
-                  ? { ...t, messages: nextMessages, updatedAt: Date.now() }
-                  : t
-              ),
-            }));
+            });
             return;
           }
           editorState = useEditorStore.getState();
@@ -1342,6 +1337,7 @@ export const useAIStore = create<AIStore>()(
           activeThread.workspacePath !== boundWorkspace
         ) {
           get().newThread();
+          commitUserBubble(userText);
           ({
             selectedModel,
             messages,
@@ -1399,33 +1395,23 @@ export const useAIStore = create<AIStore>()(
           agentMode,
         });
         if (researchGate.action === 'show-brief' || researchGate.action === 'update-brief') {
-          const userMsg: ChatMessage = {
-            id: generateId(),
-            role: 'user',
-            content: userText,
-            timestamp: Date.now(),
-            productIntent: researchGate.pending.intent,
-          };
-          const assistantMsg: ChatMessage = {
-            id: researchMessageId,
-            role: 'assistant',
-            content: researchGate.content,
-            timestamp: Date.now(),
-            model: selectedModel,
-            productResearch: researchGate.pending,
-            productIntent: researchGate.pending.intent,
-          };
-          set((s) => {
-            const nextMessages = [...s.messages, userMsg, assistantMsg];
-            return {
-              messages: nextMessages,
+          commitUserBubble(userText, { productIntent: researchGate.pending.intent });
+          appendAssistantAfterUser(
+            set,
+            {
+              id: researchMessageId,
+              role: 'assistant',
+              content: researchGate.content,
+              timestamp: Date.now(),
+              model: selectedModel,
+              productResearch: researchGate.pending,
+              productIntent: researchGate.pending.intent,
+            },
+            {
               pendingProductResearch: researchGate.pending,
               isStreaming: false,
-              threads: s.threads.map((t) =>
-                t.id === s.activeThreadId ? { ...t, messages: nextMessages, updatedAt: Date.now() } : t
-              ),
-            };
-          });
+            }
+          );
           return;
         }
         if (researchGate.action === 'generate') {
@@ -1468,14 +1454,11 @@ export const useAIStore = create<AIStore>()(
         const routeHint = prepReady && prepareState ? prepareState.resolvedModelHint : undefined;
         const prepWarmReady = prepReady && prepareState?.warmContextReady === true;
 
-        const userMsg: ChatMessage = {
-          id: generateId(),
-          role: 'user',
-          content: fashionSeeded
+        commitUserBubble(
+          fashionSeeded
             ? `${userText}\n\n✓ Scaffold creat: fashion-matching-engine/ (${fashionSeedCount} fișiere) — vezi editorul central.`
-            : userText,
-          timestamp: Date.now(),
-        };
+            : userText
+        );
 
         const assistantMsgId = generateId();
         pendingStreamId = generateId();
@@ -1496,13 +1479,12 @@ export const useAIStore = create<AIStore>()(
           activitySteps: createInitialActivitySteps(prepReady, prepReady, routeHint),
         };
 
-        const nextMessages = [...messages, userMsg, assistantMsg];
         sendAbortController?.abort();
         sendAbortController = new AbortController();
         userStoppedStream = false;
         let turnClosed = false;
         const sendSignal = sendAbortController.signal;
-        set({ messages: nextMessages, isStreaming: true, attachedFiles: [] });
+        appendAssistantAfterUser(set, assistantMsg, { isStreaming: true, attachedFiles: [] });
 
         try {
         if (isCavalloModesTestRequest(userText) && !cavalloCfg?.modesTestUseLlm) {
@@ -2596,7 +2578,9 @@ export const useAIStore = create<AIStore>()(
         if (isFastChat) {
           const contextMessages = buildFastChatMessages(
             apiPrompt,
-            messages.map((m) => ({ role: m.role, content: m.content })),
+            messages
+              .filter((m) => m.id !== userMsgId)
+              .map((m) => ({ role: m.role, content: m.content })),
             agentMode
           );
           startIpcStream(
@@ -2689,7 +2673,9 @@ export const useAIStore = create<AIStore>()(
 
         const contextMessages: AIMessage[] = buildContextMessages(
           apiPrompt,
-          messages.map((m) => ({ role: m.role, content: m.content })),
+          messages
+            .filter((m) => m.id !== userMsgId)
+            .map((m) => ({ role: m.role, content: m.content })),
           {
             activeTab,
             selection: selectionText,
