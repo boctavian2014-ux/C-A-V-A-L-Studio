@@ -59,8 +59,16 @@ export async function defaultPreviewHealthCheck(
   return probeOnce(url, signal);
 }
 
+export type PreviewHealthCheckUrl = string | (() => string | null | undefined);
+
+function resolveHealthCheckUrl(url: PreviewHealthCheckUrl): string | null {
+  const raw = typeof url === "function" ? url() : url;
+  const trimmed = raw?.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function waitForPreviewHealthCheck(
-  url: string,
+  url: PreviewHealthCheckUrl,
   options: {
     healthCheckFn?: PreviewHealthCheckFn;
     timeoutMs?: number;
@@ -78,9 +86,19 @@ export async function waitForPreviewHealthCheck(
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (isCancelled?.()) return false;
+    const current = resolveHealthCheckUrl(url);
+    if (!current) return false;
     const controller = new AbortController();
-    if (await healthCheckFn(url, controller.signal)) {
-      return true;
+    const cancelPoll = setInterval(() => {
+      if (isCancelled?.()) controller.abort();
+    }, 50);
+    try {
+      if (await healthCheckFn(current, controller.signal)) {
+        return true;
+      }
+    } finally {
+      clearInterval(cancelPoll);
+      controller.abort();
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
     if (isCancelled?.()) return false;

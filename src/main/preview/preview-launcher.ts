@@ -578,6 +578,10 @@ export class PreviewLauncher extends EventEmitter {
 
         this.emitState(info.state);
 
+        if (info.readyCheckActive) {
+          info.readyCheckGeneration += 1;
+        }
+
         void this.scheduleReadyCheck(info);
 
       }
@@ -634,15 +638,13 @@ export class PreviewLauncher extends EventEmitter {
 
   private async scheduleReadyCheck(info: ProcessInfo): Promise<void> {
 
-    if (info.target !== "web" || info.state.status !== "starting" || info.readyCheckActive) {
+    if (info.target !== "web" || info.state.status !== "starting") {
 
       return;
 
     }
 
-    const url = info.state.url;
-
-    if (!url) return;
+    if (!info.state.url || info.readyCheckActive) return;
 
 
 
@@ -654,7 +656,7 @@ export class PreviewLauncher extends EventEmitter {
 
 
 
-    const ok = await waitForPreviewHealthCheck(url, {
+    const ok = await waitForPreviewHealthCheck(() => info.state.url, {
 
       healthCheckFn: this.healthCheckFn,
 
@@ -688,6 +690,15 @@ export class PreviewLauncher extends EventEmitter {
 
     ) {
 
+      if (
+        !info.cancelled &&
+        generation !== info.readyCheckGeneration &&
+        info.state.status === "starting" &&
+        this.processes.has(info.target)
+      ) {
+        void this.scheduleReadyCheck(info);
+      }
+
       return;
 
     }
@@ -707,7 +718,7 @@ export class PreviewLauncher extends EventEmitter {
     this.setState(
       info,
       "failed",
-      `Preview did not become ready within ${Math.round(info.readyTimeoutMs / 1000)}s on ${url}`
+      `Preview did not become ready within ${Math.round(info.readyTimeoutMs / 1000)}s on ${info.state.url ?? "unknown URL"}`
     );
     this.forceKill(info.proc);
   }
