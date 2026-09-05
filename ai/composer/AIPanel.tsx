@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAIStore, getModelDisplayLabel, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
+import { useAIStore, formatAssistantTurnModelLabel, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
 import { ChatFallbackStatus } from './ChatFallbackStatus';
 import { useModelCatalog } from './use-model-catalog';
@@ -402,16 +402,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   }, [isUser, message.content, message.isStreaming]);
   const { modelLabels, agentMode } = useAIStore();
   const arenaMode = isAgenticPipelineMode(agentMode);
-  const selectionLabel = message.model ? getModelDisplayLabel(message.model, modelLabels) : null;
-  const resolvedLabel = message.resolvedModel
-    ? getModelDisplayLabel(message.resolvedModel, modelLabels)
-    : null;
   const effectiveModelId = message.resolvedModel ?? message.model ?? '';
-  const modelLabel = arenaMode
-    ? resolvedLabel ?? t('ai.chat.multiModelShort')
-    : resolvedLabel && selectionLabel && resolvedLabel !== selectionLabel && message.model?.startsWith('caval-auto/')
-      ? `${selectionLabel} → ${resolvedLabel}`
-      : resolvedLabel ?? selectionLabel ?? t('ai.chat.modelFallback');
+  const modelLabel = formatAssistantTurnModelLabel(
+    message.model,
+    message.resolvedModel,
+    modelLabels,
+    t('ai.chat.modelFallback')
+  );
   const messageWasStopped = message.multiAgentStatus === 'Oprit';
   const pipelineLive = Boolean(
     message.isStreaming ||
@@ -476,7 +473,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {!isUser && modelLabel ? (
           <>
             <span className="chat-message-meta-sep" aria-hidden="true">·</span>
-            <span className="chat-message-model">{modelLabel}</span>
+            <span className="chat-message-model" data-testid="chat-message-model">{modelLabel}</span>
           </>
         ) : null}
       </header>
