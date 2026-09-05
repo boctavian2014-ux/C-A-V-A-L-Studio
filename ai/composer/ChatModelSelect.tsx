@@ -1,8 +1,8 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAIStore, getModelDisplayLabel } from './ai-store';
 import { ApiKeysModal } from './ApiKeysModal';
-import { getChatModelGroups } from '../models/model-catalog';
+import { getChatModelGroups, isAutoTier } from '../models/model-catalog';
 import { getModelProfileSummary, formatProfileChips } from '../models/model-profile-ui';
 import { getModelCodingGuide } from '../models/model-coding-guide';
 import {
@@ -11,22 +11,53 @@ import {
   type ModelHealthStatus,
 } from '../models/model-health';
 import type { CavalModelCatalog, CavalModelCatalogEntry } from '../../src/main/preload';
+import { zIndex } from '../../themes/tokens/z-index';
 
-function healthPrefix(status: ModelHealthStatus | undefined): string {
-  if (!status || status === 'ready') return '● ';
-  if (status === 'missing_key') return '○ ';
-  return '◌ ';
+const UNAVAILABLE_HEALTH: ReadonlySet<ModelHealthStatus> = new Set([
+  'missing_key',
+  'not_installed',
+  'ollama_down',
+]);
+
+function optionDomId(modelId: string): string {
+  return `caval-model-option-${modelId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+}
+
+function isAutoRoute(entry: CavalModelCatalogEntry): boolean {
+  return entry.isAuto === true || isAutoTier(entry.id) || entry.id.startsWith('caval-auto/');
+}
+
+function healthFor(
+  entry: CavalModelCatalogEntry,
+  health: Record<string, ModelHealthStatus>
+): ModelHealthStatus {
+  return health[entry.id] ?? health[entry.id.replace(/^openrouter:/, '')] ?? 'unknown';
+}
+
+function isUnavailable(
+  entry: CavalModelCatalogEntry,
+  status: ModelHealthStatus
+): boolean {
+  if (isAutoRoute(entry)) return false;
+  return UNAVAILABLE_HEALTH.has(status);
+}
+
+function optionCaption(entry: CavalModelCatalogEntry, status: ModelHealthStatus): string {
+  if (!isUnavailable(entry, status)) return entry.label;
+  return `${entry.label} · ${modelHealthLabel(status)}`;
 }
 
 function ModelMenuList({
   groups,
   health,
   selectValue,
+  activeId,
   onPick,
 }: {
   groups: { label: string; entries: CavalModelCatalogEntry[] }[];
   health: Record<string, ModelHealthStatus>;
   selectValue: string;
+  activeId: string | null;
   onPick: (id: string) => void;
 }) {
   return (
@@ -34,26 +65,42 @@ function ModelMenuList({
       {groups.map((group) =>
         group.entries.length === 0 ? null : (
           <div key={group.label} role="group" aria-label={group.label}>
-            <div className="caval-model-menu-group" style={{
-              padding: '6px 12px 4px',
-              fontSize: 10,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              color: 'var(--caval-text-muted, #9a9a9a)',
-            }}>{group.label}</div>
+            <div
+              className="caval-model-menu-group"
+              style={{
+                padding: '6px 12px 4px',
+                fontSize: 10,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'var(--caval-text-muted)',
+              }}
+            >
+              {group.label}
+            </div>
             {group.entries.map((entry) => {
-              const status = health[entry.id];
-              const healthNote = status && status !== 'ready' ? ` — ${modelHealthLabel(status)}` : '';
+              const status = healthFor(entry, health);
+              const unavailable = isUnavailable(entry, status);
+              const caption = optionCaption(entry, status);
               const selected = entry.id === selectValue;
+              const active = entry.id === activeId;
               return (
-                <button
+                <div
                   key={entry.id}
-                  type="button"
+                  id={optionDomId(entry.id)}
                   role="option"
+                  data-model-id={entry.id}
                   aria-selected={selected}
-                  className={`caval-model-menu-item${selected ? ' caval-model-menu-item-selected' : ''}`}
-                  title={`${entry.description ?? entry.label}${healthNote}`}
-                  onClick={() => onPick(entry.id)}
+                  aria-disabled={unavailable || undefined}
+                  aria-label={caption}
+                  title={caption}
+                  className={[
+                    'caval-model-menu-item',
+                    selected ? 'caval-model-menu-item-selected' : '',
+                    active ? 'caval-model-menu-item-active' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={unavailable ? undefined : () => onPick(entry.id)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -61,11 +108,11 @@ function ModelMenuList({
                     width: '100%',
                     padding: '7px 12px',
                     border: 'none',
-                    background: selected ? 'rgba(59,130,246,0.28)' : 'transparent',
-                    color: 'var(--caval-text, #f3f3f3)',
+                    background: 'transparent',
+                    color: 'var(--caval-text)',
                     fontSize: 12,
                     textAlign: 'left',
-                    cursor: 'pointer',
+                    cursor: unavailable ? 'not-allowed' : 'pointer',
                   }}
                 >
                   <span
@@ -75,12 +122,19 @@ function ModelMenuList({
                       height: 7,
                       borderRadius: '50%',
                       flexShrink: 0,
-                      background: modelHealthColor(status ?? 'unknown'),
+                      background: modelHealthColor(status),
                     }}
                     aria-hidden="true"
                   />
-                  <span className="caval-model-menu-label">{entry.label}</span>
-                </button>
+                  <span className="caval-model-menu-label" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {entry.label}
+                    {unavailable ? (
+                      <span className="caval-model-menu-reason" style={{ color: 'var(--caval-text-muted)' }}>
+                        {` · ${modelHealthLabel(status)}`}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
               );
             })}
           </div>
@@ -107,9 +161,16 @@ export function ChatModelSelect({
   const { selectedModel, setModel, activeResolvedModel, modelLabels, agentMode } = useAIStore();
   const [showKeys, setShowKeys] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 320, maxHeight: 360 });
+  const [menuPos, setMenuPos] = useState({
+    top: 0,
+    left: 0,
+    width: 320,
+    maxHeight: 360,
+    placement: 'down' as 'up' | 'down',
+  });
   const [modelHealth, setModelHealth] = useState<Record<string, ModelHealthStatus>>({});
 
   useEffect(() => {
@@ -127,12 +188,27 @@ export function ChatModelSelect({
     [catalog]
   );
 
-  const allEntries = useMemo(
-    () => [...groups.auto, ...groups.free, ...groups.paid, ...groups.coding],
+  const groupedList = useMemo(
+    () => [
+      { label: 'Auto', entries: groups.auto },
+      { label: 'Free', entries: groups.free },
+      { label: 'Paid', entries: groups.paid },
+      { label: 'Coding', entries: groups.coding },
+    ],
     [groups]
   );
 
+  const allEntries = useMemo(
+    () => groupedList.flatMap((group) => group.entries),
+    [groupedList]
+  );
+
   const allIds = useMemo(() => new Set(allEntries.map((e) => e.id)), [allEntries]);
+  const itemIds = useMemo(() => allEntries.map((e) => e.id), [allEntries]);
+  const itemIdsRef = useRef(itemIds);
+  itemIdsRef.current = itemIds;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   const catalogEntry = useMemo(
     () => allEntries.find((e) => e.id === selectedModel) ?? null,
@@ -185,6 +261,33 @@ export function ChatModelSelect({
   const selectedLabel = getModelDisplayLabel(selectValue, modelLabels) ||
     allEntries.find((e) => e.id === selectValue)?.label ||
     selectValue;
+  const selectedEntry = allEntries.find((e) => e.id === selectValue);
+  const selectedStatus = selectedEntry ? healthFor(selectedEntry, modelHealth) : (selectedHealth ?? 'unknown');
+  const selectedUnavailable = selectedEntry ? isUnavailable(selectedEntry, selectedStatus) : false;
+  const triggerHint = selectedUnavailable
+    ? `${selectedLabel} · ${modelHealthLabel(selectedStatus)}`
+    : selectedLabel;
+
+  const closeMenu = useCallback((restoreFocus: boolean) => {
+    setMenuOpen(false);
+    setActiveId(null);
+    if (restoreFocus) {
+      triggerRef.current?.focus();
+    }
+  }, []);
+
+  const pickModel = useCallback((id: string) => {
+    const entry = allEntries.find((item) => item.id === id);
+    if (!entry) return;
+    if (isUnavailable(entry, healthFor(entry, modelHealth))) return;
+    setModel(id);
+    closeMenu(true);
+  }, [allEntries, closeMenu, modelHealth, setModel]);
+
+  const pickModelRef = useRef(pickModel);
+  pickModelRef.current = pickModel;
+  const closeMenuRef = useRef(closeMenu);
+  closeMenuRef.current = closeMenu;
 
   useLayoutEffect(() => {
     if (!menuOpen || !triggerRef.current) return;
@@ -196,18 +299,81 @@ export function ChatModelSelect({
     const maxHeight = Math.max(160, Math.min(380, openUp ? spaceAbove : spaceBelow));
     const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
     const top = openUp ? Math.max(8, r.top - maxHeight - 4) : r.bottom + 4;
-    setMenuPos({ top, left, width, maxHeight });
+    setMenuPos({
+      top,
+      left,
+      width,
+      maxHeight,
+      placement: openUp ? 'up' : 'down',
+    });
   }, [menuOpen, catalog]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    setActiveId((current) => current ?? selectValue);
+  }, [menuOpen, selectValue]);
+
+  useLayoutEffect(() => {
+    if (!menuOpen || !activeId) return;
+    const activeOption = document.getElementById(optionDomId(activeId));
+    activeOption?.scrollIntoView?.({ block: 'nearest' });
+  }, [menuOpen, activeId]);
 
   useEffect(() => {
     if (!menuOpen) return;
     const onDoc = (event: MouseEvent) => {
       const target = event.target as Node;
       if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setMenuOpen(false);
+      closeMenuRef.current(false);
+    };
+    const moveActive = (nextIndex: number) => {
+      const ids = itemIdsRef.current;
+      if (ids.length === 0) return;
+      const clamped = Math.min(ids.length - 1, Math.max(0, nextIndex));
+      setActiveId(ids[clamped]);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false);
+      const target = event.target as Node | null;
+      const inWidget =
+        (target && triggerRef.current?.contains(target)) ||
+        (target && menuRef.current?.contains(target));
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMenuRef.current(true);
+        return;
+      }
+
+      if (!inWidget) return;
+
+      const ids = itemIdsRef.current;
+      const currentIndex = Math.max(0, ids.indexOf(activeIdRef.current ?? ''));
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        moveActive(currentIndex + 1);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        moveActive(currentIndex - 1);
+        return;
+      }
+      if (event.key === 'Home') {
+        event.preventDefault();
+        moveActive(0);
+        return;
+      }
+      if (event.key === 'End') {
+        event.preventDefault();
+        moveActive(ids.length - 1);
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        const id = activeIdRef.current;
+        if (id) pickModelRef.current(id);
+      }
     };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
@@ -216,6 +382,15 @@ export function ChatModelSelect({
       document.removeEventListener('keydown', onKey);
     };
   }, [menuOpen]);
+
+  const onTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (loading) return;
+    if (menuOpen) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      setMenuOpen(true);
+    }
+  };
 
   return (
     <>
@@ -232,18 +407,6 @@ export function ChatModelSelect({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: stacked ? 8 : compact ? 6 : 4, width: compact ? 'auto' : '100%', minWidth: 0 }}>
-          {selectedHealth && (
-            <span
-              title={modelHealthLabel(selectedHealth)}
-              style={{
-                width: stacked ? 8 : compact ? 6 : 7,
-                height: stacked ? 8 : compact ? 6 : 7,
-                borderRadius: '50%',
-                background: healthColor,
-                flexShrink: 0,
-              }}
-            />
-          )}
           <div style={{ position: 'relative', flex: compact ? '0 1 auto' : 1, minWidth: 0 }}>
             <button
               ref={triggerRef}
@@ -251,10 +414,18 @@ export function ChatModelSelect({
               data-testid="chat-model-select"
               className="caval-model-select-trigger"
               disabled={loading}
+              role="combobox"
               aria-haspopup="listbox"
               aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
-              title={profileSummary.description || selectedLabel}
+              aria-controls={menuOpen ? 'caval-model-menu-listbox' : undefined}
+              aria-activedescendant={menuOpen && activeId ? optionDomId(activeId) : undefined}
+              aria-label={triggerHint}
+              onClick={() => {
+                if (loading) return;
+                setMenuOpen((open) => !open);
+              }}
+              onKeyDown={onTriggerKeyDown}
+              title={triggerHint}
               style={{
                 width: compact ? 'auto' : '100%',
                 minWidth: 0,
@@ -273,7 +444,7 @@ export function ChatModelSelect({
                 textAlign: 'left',
               }}
             >
-              {healthPrefix(selectedHealth)}{selectedLabel}
+              {selectedLabel}
             </button>
             <span
               style={{
@@ -285,6 +456,7 @@ export function ChatModelSelect({
                 color: 'var(--caval-text-muted)',
                 pointerEvents: 'none',
               }}
+              aria-hidden="true"
             >
               ▾
             </span>
@@ -292,38 +464,34 @@ export function ChatModelSelect({
               ? createPortal(
                   <div
                     ref={menuRef}
+                    id="caval-model-menu-listbox"
                     role="listbox"
                     aria-label="AI models"
+                    data-testid="chat-model-menu"
+                    data-placement={menuPos.placement}
                     className="caval-model-menu"
                     style={{
                       position: 'fixed',
-                      zIndex: 10000,
+                      zIndex: zIndex.dropdown,
                       top: menuPos.top,
                       left: menuPos.left,
                       width: menuPos.width,
                       maxHeight: menuPos.maxHeight,
                       overflowY: 'auto',
-                      background: 'var(--caval-surface, #1c1c1c)',
-                      color: 'var(--caval-text, #f3f3f3)',
-                      border: '1px solid var(--caval-border, #3a3a3a)',
+                      background: 'var(--caval-surface)',
+                      color: 'var(--caval-text)',
+                      border: '1px solid var(--caval-border)',
                       borderRadius: 8,
                       boxShadow: '0 12px 32px rgba(0,0,0,0.55)',
                       padding: '6px 0',
                     }}
                   >
                     <ModelMenuList
-                      groups={[
-                        { label: 'Auto', entries: groups.auto },
-                        { label: 'Free', entries: groups.free },
-                        { label: 'Paid', entries: groups.paid },
-                        { label: 'Coding', entries: groups.coding },
-                      ]}
+                      groups={groupedList}
                       health={modelHealth}
                       selectValue={selectValue}
-                      onPick={(id) => {
-                        setModel(id);
-                        setMenuOpen(false);
-                      }}
+                      activeId={activeId}
+                      onPick={pickModel}
                     />
                   </div>,
                   document.body

@@ -3,15 +3,10 @@ import { useEffect } from "react";
 import type { PreviewTarget } from "../../../shared/preview-contract";
 import { usePreviewStore } from "../../store/preview-store";
 
-function revealPreviewFromLauncher(target: PreviewTarget, url: string | null | undefined): void {
-  const { previewPanelOpen, activePreview, activatePreview } = usePreviewStore.getState();
-  if (previewPanelOpen && activePreview && activePreview !== target) return;
-  activatePreview(target, url ?? null);
-}
-
 /**
  * Keeps rail badge status in sync even when the content preview panel is closed.
- * Also opens the preview column when the launcher starts from AI tools / palette.
+ * Does not steal Explorer or another visible preview target; URL binds only when
+ * that target is already showing.
  */
 export function PreviewStatusSync(): null {
   const setPreviewStatus = usePreviewStore((s) => s.setPreviewStatus);
@@ -39,11 +34,15 @@ export function PreviewStatusSync(): null {
     );
 
     const unsub = api.onStateChange((next) => {
-      setPreviewStatus(next.target, next.status);
-      if (next.status === "starting") {
-        revealPreviewFromLauncher(next.target, null);
-      } else if (next.status === "running" && next.url) {
-        revealPreviewFromLauncher(next.target, next.url);
+      const preview = usePreviewStore.getState();
+      preview.setPreviewStatus(next.target, next.status);
+      if (
+        next.status === "running" &&
+        next.url &&
+        preview.previewPanelOpen &&
+        preview.activePreview === next.target
+      ) {
+        preview.setPreviewUrl(next.url);
       }
     });
 

@@ -172,13 +172,50 @@ describe("ai-store sendMessage readiness gate", () => {
   it("shows the user bubble before awaiting the stream", async () => {
     const { useAIStore } = await import("../../ai/composer/ai-store.js");
     useAIStore.setState({ agentMode: "ask", messages: [], pendingProductResearch: null });
-    const pending = useAIStore.getState().sendMessage("vreau un scraper tiktok");
+    const pending = useAIStore.getState().sendMessage("zxq-once-only-7f2c");
     const first = useAIStore.getState().messages[0];
     expect(first?.role).toBe("user");
-    expect(first?.content).toBe("vreau un scraper tiktok");
+    expect(first?.content).toBe("zxq-once-only-7f2c");
     await pending;
     const users = useAIStore.getState().messages.filter((m) => m.role === "user");
     expect(users).toHaveLength(1);
+    editorState.projectPath = "/proj/demo";
+  });
+
+  it("sends the new user turn once in Fast Chat request context", async () => {
+    const probe = "zxq-once-only-7f2c";
+    const win = (globalThis as unknown as { window: { caval: Record<string, unknown> } }).window;
+    let captured: {
+      message?: string;
+      messages?: Array<{ role: string; content: string }>;
+    } | null = null;
+    win.caval.chatStream = vi.fn((req: { message?: string; messages?: Array<{ role: string; content: string }> }) => {
+      captured = req;
+      return () => undefined;
+    });
+
+    const { buildFastChatMessages } = await import("../../ai/context-engine/context-builder");
+    const wouldDuplicate = buildFastChatMessages(probe, [{ role: "user", content: probe }], "ask");
+    expect(
+      wouldDuplicate.filter((m) => m.role === "user" && m.content.includes(probe))
+    ).toHaveLength(2);
+
+    const { useAIStore } = await import("../../ai/composer/ai-store.js");
+    useAIStore.setState({
+      agentMode: "ask",
+      messages: [],
+      pendingProductResearch: null,
+      isStreaming: false,
+    });
+    await useAIStore.getState().sendMessage(probe);
+
+    expect(win.caval.chatStream).toHaveBeenCalled();
+    expect(captured).toBeTruthy();
+    const contextUserTurns = (captured?.messages ?? []).filter(
+      (m) => m.role === "user" && m.content.includes(probe)
+    );
+    expect(contextUserTurns).toHaveLength(1);
+    expect(captured?.message).toBe(probe);
     editorState.projectPath = "/proj/demo";
   });
 });

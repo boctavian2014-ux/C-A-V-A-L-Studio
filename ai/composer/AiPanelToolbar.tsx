@@ -6,7 +6,7 @@ import { AI_ONBOARDING_SUGGESTIONS } from "./AIOnboarding";
 import { AiToolsInfoContent } from "./AiToolsInfoContent";
 import { useTranslation } from "../i18n/useTranslation";
 import { startExplainForSelection } from "../../src/renderer/ai/explain-controller";
-import { togglePreviewFromRail } from "../../src/renderer/components/sidebar/ActivityBar";
+import { startPreviewFromAi } from "../../src/renderer/components/sidebar/ActivityBar";
 
 function ToolbarIconBtn({
   title,
@@ -107,7 +107,7 @@ export function AiPanelToolbar({
     }
     if (id === "preview") {
       setActionHint(null);
-      togglePreviewFromRail("web");
+      startPreviewFromAi("web");
       return;
     }
     if (suggestion.prompt) {
