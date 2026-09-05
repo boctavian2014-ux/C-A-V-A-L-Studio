@@ -335,7 +335,7 @@ describe("preview-launcher", () => {
     await launcher.start("web", root);
     child.emitStdout("  Local: http://localhost:5177/\n");
     await waitForStatus(launcher, "running");
-    expect(launcher.getState("web").url).toBe("http://127.0.0.1:5177");
+    expect(launcher.getState("web").url).toBe("http://localhost:5177");
   });
 
   it("waits for HTTP health check before marking web preview running", async () => {
