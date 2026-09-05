@@ -33,16 +33,10 @@ export function ChatModeSelect({ variant = 'default' }: { variant?: 'default' | 
           fontWeight: 500,
           cursor: 'pointer',
           appearance: 'none',
-          colorScheme: 'dark',
         }}
       >
         {AGENT_MODES.map((mode) => (
-          <option
-            key={mode.id}
-            value={mode.id}
-            title={mode.description}
-            style={{ backgroundColor: '#1c1c1c', color: '#f3f3f3' }}
-          >
+          <option key={mode.id} value={mode.id} title={mode.description}>
             {mode.shortLabel}
           </option>
         ))}
