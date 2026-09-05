@@ -495,6 +495,11 @@ export const ro = {
   "preview.logsAria": "Comută logurile pentru {{label}}",
   "preview.panelAria": "Previzualizare {{label}}",
   "preview.iframeTitle": "previzualizare {{label}}",
+  "preview.checklistTitle": "Ca să vezi Preview:",
+  "preview.checklist.folder": "Deschide un folder de proiect (File → Open Folder, Ctrl+Shift+O).",
+  "preview.checklist.app": "Folderul trebuie să conțină o app Vite/Next sau Expo (package.json), nu doar fișiere simple.",
+  "preview.checklist.rail": "Apasă iconița Preview din bara stângă, apoi Open Web / Open Mobile.",
+  "preview.checklist.runtime": "Node.js și npm trebuie să fie instalate pe Windows (PATH).",
 
   "debug.tab": "DEBUG",
 
