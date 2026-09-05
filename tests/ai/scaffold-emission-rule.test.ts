@@ -12,7 +12,9 @@ describe('scaffold-emission-rule', () => {
     expect(SCAFFOLD_EMISSION_RULE).toContain('parseScaffoldFiles');
     expect(SCAFFOLD_EMISSION_RULE).toMatch(/AUTO FILE TREE/i);
     expect(SCAFFOLD_EMISSION_RULE).toContain('package.json');
-    expect(SCAFFOLD_EMISSION_RULE).toContain('src/App.tsx');
+    expect(SCAFFOLD_EMISSION_RULE).toContain('folderul DESCHIS');
+    expect(SCAFFOLD_EMISSION_RULE).toMatch(/NU trebuie să spună/);
+    expect(SCAFFOLD_EMISSION_RULE).not.toMatch(/nu prin finish/i);
   });
 
   it('buildScaffoldContinueUserMessage includes marker and plan ref', () => {

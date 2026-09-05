@@ -170,6 +170,27 @@ export function selectLiveEditsList(state: LiveAiEditsState): LiveAiEdit[] {
   return state.order.map((p) => state.edits[p]).filter(Boolean) as LiveAiEdit[];
 }
 
+/**
+ * Live preview / streaming edits that should land in the open workspace.
+ * Skips propose-only (waiting) and empty buffers. Paths stay workspace-relative.
+ */
+export function collectLiveAiEditFilesForDisk(
+  state: Pick<LiveAiEditsState, "edits" | "order"> = useLiveAiEditsStore.getState()
+): Array<{ path: string; content: string }> {
+  const out: Array<{ path: string; content: string }> = [];
+  for (const raw of state.order) {
+    const edit = state.edits[raw];
+    if (!edit || edit.status === "waiting" || edit.status === "error") continue;
+    if (!edit.content?.trim()) continue;
+    let path = edit.path.replace(/\\/g, "/");
+    if (path.startsWith("preview://")) path = path.slice("preview://".length);
+    path = path.replace(/^\.\//, "").replace(/^\/+/, "");
+    if (!path || path.includes("..") || /:/.test(path)) continue;
+    out.push({ path, content: edit.content });
+  }
+  return out;
+}
+
 export function tabPathMatchesLiveEdit(
   tabPath: string,
   editPath: string,

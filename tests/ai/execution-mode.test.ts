@@ -36,7 +36,7 @@ describe("execution-mode", () => {
   it("routes explicit create to PROPOSE_EDIT, apply to APPLY_EDIT", () => {
     expect(looksLikeExplicitCreate("Creează un index.html simplu")).toBe(true);
     expect(looksLikeExplicitCreate("build app")).toBe(true);
-    expect(resolveExecutionMode("build app")).toBe("PROPOSE_EDIT");
+    expect(resolveExecutionMode("build app")).toBe("SCAFFOLD");
     expect(resolveExecutionMode("Creează un index.html simplu")).toBe("PROPOSE_EDIT");
     expect(allowsDiskWrites(resolveExecutionMode("Creează un index.html simplu"))).toBe(false);
     expect(resolveExecutionMode("Aplică schimbarea")).toBe("APPLY_EDIT");
@@ -92,7 +92,14 @@ describe("execution-mode", () => {
     for (const text of briefs) {
       expect(looksLikeProductBuildIntent(text), text).toBe(true);
       expect(looksLikeExplicitCreate(text), text).toBe(true);
+      expect(looksLikeScaffoldCreate(text), text).toBe(true);
+      expect(looksLikeExplicitWriteRequest(text), text).toBe(false);
+      expect(resolveExecutionMode(text), text).toBe("SCAFFOLD");
       expect(resolveExecutionMode(text, "code"), text).toBe("SCAFFOLD");
+      expect(
+        shouldGrantChatWriteTurn(resolveTrustedExecutionCapability({ userMessage: text })),
+        text
+      ).toBe(true);
       expect(
         shouldGrantChatWriteTurn(resolveTrustedExecutionCapability({ userMessage: text, agentMode: "code" })),
         text
@@ -100,6 +107,7 @@ describe("execution-mode", () => {
     }
     expect(looksLikeProductBuildIntent("Explică-mi rolul fișierului index.html.")).toBe(false);
     expect(looksLikeProductBuildIntent("Creează hello.txt cu Hello")).toBe(false);
+    expect(looksLikeProductBuildIntent("Creează un website de prezentare")).toBe(true);
     expect(looksLikeProductBuildIntent("fă o listă")).toBe(false);
   });
 
