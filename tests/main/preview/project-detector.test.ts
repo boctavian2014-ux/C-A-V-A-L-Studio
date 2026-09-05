@@ -7,6 +7,7 @@ import {
   describeMissingPreview,
   detectPreviewWorkspace,
   detectProject,
+  findStaticHtmlPreviewRoot,
 } from "../../../src/main/preview/project-detector";
 
 describe("project-detector", () => {
@@ -35,6 +36,12 @@ describe("project-detector", () => {
     expect(result.hasPackageJson).toBe(false);
     expect(result.suggestedCommand).toBeNull();
     expect(result.suggestedUrl).toBeNull();
+  });
+
+  it("finds a static landing page index.html", () => {
+    const cwd = mkDir("landing");
+    fs.writeFileSync(path.join(cwd, "index.html"), "<html></html>", "utf8");
+    expect(findStaticHtmlPreviewRoot(cwd)).toBe(cwd);
   });
 
   it("returns unknown with hasPackageJson true when package.json is invalid", () => {

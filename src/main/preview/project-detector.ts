@@ -211,6 +211,19 @@ export function detectPreviewWorkspace(workspaceRoot: string): PreviewWorkspaceD
   return { workspaceRoot, web, mobile };
 }
 
+export function findStaticHtmlPreviewRoot(workspaceRoot: string): string | null {
+  const dirs = [
+    workspaceRoot,
+    join(workspaceRoot, "web"),
+    join(workspaceRoot, "public"),
+    join(workspaceRoot, "src"),
+  ];
+  for (const dir of dirs) {
+    if (existsSync(join(dir, "index.html"))) return dir;
+  }
+  return null;
+}
+
 const SIMPLE_ROOT_FILE_RE = /\.(txt|md)$/i;
 
 /** Root-only notes/docs — not a web/mobile app. Preview must not demand package.json. */

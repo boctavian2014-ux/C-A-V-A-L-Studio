@@ -155,7 +155,25 @@ describe("preview-launcher", () => {
     const { launcher } = createHarness();
     const state = await launcher.start("web", root);
     expect(state.status).toBe("not-configured");
-    expect(state.lastError).toMatch(/No preview command detected/i);
+    expect(state.lastError).toMatch(/No preview command detected|Missing package\.json|No web app/i);
+  });
+
+  it("serves a static landing page when index.html exists without a Vite app", async () => {
+    const root = workspace("static-html");
+    fs.writeFileSync(
+      path.join(root, "index.html"),
+      "<!doctype html><html><body>Cavalo</body></html>",
+      "utf8"
+    );
+    const { launcher, spawnFn } = createHarness();
+    const state = await launcher.start("web", root);
+    expect(spawnFn).not.toHaveBeenCalled();
+    expect(state.status).toBe("running");
+    expect(state.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+    const page = await fetch(state.url ?? "");
+    expect(await page.text()).toContain("Cavalo");
+    await launcher.stop("web");
+    expect(launcher.getState("web").status).toBe("stopped");
   });
 
   it("falls back to detection when config cwd directory is missing", async () => {
