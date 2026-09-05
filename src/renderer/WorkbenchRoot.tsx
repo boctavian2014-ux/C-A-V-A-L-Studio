@@ -8,6 +8,7 @@ const MonacoEditor = lazy(() =>
 import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { useEditorStore } from './store/editor-store';
 import { useAIStore, hydrateApiKeysFromSecrets } from '../../ai/composer/ai-store';
+import { useRestoreChatWorkspace } from './hooks/useRestoreChatWorkspace';
 import { AIPanel } from '../../ai/composer/AIPanel';
 import { GitPanel } from './components/git/GitPanel';
 import { useGitStore } from './store/git-store';
@@ -256,6 +257,7 @@ function RoboticsCadStage() {
 export function WorkbenchRoot() {
   const { t } = useTranslation();
   useAiWorkCanvasController();
+  useRestoreChatWorkspace();
   const [activeActivity, setActiveActivity] = React.useState<ActivityTab>('explorer');
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [aiPanelOpen, setAiPanelOpen] = React.useState(true);

@@ -64,6 +64,24 @@ describe('chat thread archive helpers', () => {
     expect(next).toHaveLength(3);
   });
 
+  it("migrateThreadsOnRehydrate backfills workspacePath from messages", () => {
+    const threads = [
+      thread("a", null, {
+        messages: [
+          {
+            id: "m1",
+            role: "user",
+            content: "fă un landing",
+            timestamp: 1,
+            workspacePath: "C:\\landingpage caval",
+          },
+        ],
+      }),
+    ];
+    const next = migrateThreadsOnRehydrate(threads, "a");
+    expect(next[0]?.workspacePath).toBe("C:\\landingpage caval");
+  });
+
   it('finalizePersistedChatMessage clears leftover Memory/streaming so history is not the live turn', () => {
     const next = finalizePersistedChatMessage({
       id: 'asst-1',

@@ -38,6 +38,8 @@ import { DEFAULT_FULL_DELIVERY_CONFIG, type FullDeliveryConfig } from './multi-a
 import {
   DEFAULT_SESSION_FOCUS,
   isStaleWorkspace,
+  normalizeWorkspacePath,
+  resolveThreadWorkspacePath,
   workspaceFolderTitle,
 } from './workspace-session';
 import { registerWorkspaceChangeHandler } from '../../src/renderer/store/workspace-bridge';
@@ -292,11 +294,15 @@ export function migrateThreadsOnRehydrate(
   threads: ChatThread[],
   activeThreadId: string
 ): ChatThread[] {
-  return threads.map((t) => ({
-    ...t,
-    archived: t.id !== activeThreadId,
-    messages: t.messages.map(finalizePersistedChatMessage),
-  }));
+  return threads.map((t) => {
+    const workspacePath = resolveThreadWorkspacePath(t) ?? t.workspacePath;
+    return {
+      ...t,
+      workspacePath,
+      archived: t.id !== activeThreadId,
+      messages: t.messages.map(finalizePersistedChatMessage),
+    };
+  });
 }
 
 /** Drop leftover streaming / Memory-active flags so history cannot look like the live turn. */
@@ -1065,7 +1071,7 @@ export const useAIStore = create<AIStore>()(
 
         const active = get().threads.find((t) => t.id === get().activeThreadId);
         const alreadyOnWorkspace =
-          active?.workspacePath === nextPath &&
+          normalizeWorkspacePath(active?.workspacePath) === normalizeWorkspacePath(nextPath) &&
           !active?.archived &&
           !get().isStreaming &&
           !get().prepareInFlight;
@@ -1123,11 +1129,16 @@ export const useAIStore = create<AIStore>()(
       selectThread: (id) => {
         const thread = get().threads.find((t) => t.id === id);
         if (!thread) return;
-        set({
+        const workspacePath = resolveThreadWorkspacePath(thread) ?? thread.workspacePath;
+        set((s) => ({
           activeThreadId: id,
           messages: thread.messages,
           ideContextMode: thread.ideContextMode ?? 'enabled',
-        });
+          threads:
+            workspacePath && thread.workspacePath !== workspacePath
+              ? s.threads.map((t) => (t.id === id ? { ...t, workspacePath } : t))
+              : s.threads,
+        }));
       },
 
       deleteThread: (id) => {
@@ -1360,7 +1371,8 @@ export const useAIStore = create<AIStore>()(
         const activeThread = get().threads.find((t) => t.id === activeThreadId);
         if (
           activeThread?.workspacePath != null &&
-          activeThread.workspacePath !== boundWorkspace
+          normalizeWorkspacePath(activeThread.workspacePath) !==
+            normalizeWorkspacePath(boundWorkspace)
         ) {
           get().newThread();
           commitUserBubble(userText);

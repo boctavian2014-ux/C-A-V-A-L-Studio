@@ -6,21 +6,51 @@ import { useGitStore } from '../store/git-store';
 export type WorkspaceOpenSource = 'folder' | 'clone';
 export { projectNameFromPrompt } from './project-name-from-prompt';
 
-export function useOpenWorkspace() {
-  const setProjectPath = useEditorStore((s) => s.setProjectPath);
-  const setFileTree = useEditorStore((s) => s.setFileTree);
+/**
+ * Bind Explorer + sandbox to an existing folder (no picker).
+ * Sets projectPath before workspaceOpen so a restored chat is not wiped by
+ * caval:workspace-session-reset.
+ */
+export async function openBoundWorkspace(
+  folderPath: string,
+  source: WorkspaceOpenSource = 'folder'
+): Promise<{ ok: boolean; error?: string }> {
+  const root = folderPath.trim();
+  if (!root) return { ok: false, error: 'Empty workspace path' };
 
+  const prev = useEditorStore.getState().projectPath;
+  useEditorStore.getState().setProjectPath(root);
+  useAIStore.getState().setIncludeMode('project');
+
+  const opened = await window.caval.workspaceOpen?.(root, { source });
+  if (opened && opened.ok === false) {
+    if (prev?.trim()) {
+      useEditorStore.getState().setProjectPath(prev);
+    } else {
+      useEditorStore.setState({ projectPath: null, fileTree: [] });
+    }
+    return { ok: false, error: opened.error ?? 'Workspace open failed' };
+  }
+
+  const bound = opened?.path ?? root;
+  if (bound !== root) useEditorStore.getState().setProjectPath(bound);
+  await window.caval.workspaceSync?.(bound);
+  try {
+    const tree = await window.caval.fs.readTree(bound);
+    useEditorStore.getState().setFileTree(tree);
+  } catch {
+    /* tree optional if the folder is empty */
+  }
+  await useGitStore.getState().refresh();
+  return { ok: true };
+}
+
+export function useOpenWorkspace() {
   const openWorkspace = useCallback(
     async (folderPath: string, source: WorkspaceOpenSource = 'folder') => {
-      setProjectPath(folderPath);
-      useAIStore.getState().setIncludeMode('project');
-      await window.caval.workspaceOpen?.(folderPath, { source });
-      await window.caval.workspaceSync?.(folderPath);
-      const tree = await window.caval.fs.readTree(folderPath);
-      setFileTree(tree);
-      await useGitStore.getState().refresh();
+      await openBoundWorkspace(folderPath, source);
     },
-    [setProjectPath, setFileTree]
+    []
   );
 
   const pickAndOpenFolder = useCallback(async () => {
