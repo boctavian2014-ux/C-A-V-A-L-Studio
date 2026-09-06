@@ -26,11 +26,19 @@ import {
   formatPrintSettingsMarkdown,
   type PrintMaterial,
 } from '../../../../src/shared/cad-zoo-contract';
+import { useOpenWorkspace } from '../../hooks/useOpenWorkspace';
+import { RoboticsWelcome } from './RoboticsWelcome';
+import { ProviderBadge } from './ProviderBadge';
+import { AiPrintAssistant } from './AiPrintAssistant';
+import type { CadProviderId } from '../../../../src/shared/cad-zoo-contract';
+import { estimateZooCost } from '../../../../src/shared/cad-zoo-contract';
+import type { PrintSuggestion } from '../../../../src/shared/stl-print-analysis';
 
 /** Center-stage Robotics plan / tabs (shared session store). */
 export function RoboticsResponseStage() {
   const { t } = useTranslation();
   const projectPath = useEditorStore((s) => s.projectPath);
+  const { pickAndOpenFolder } = useOpenWorkspace();
   const handoffFromEngineering = useAIStore((s) => s.handoffFromEngineering);
 
   const prompt = useRoboticsSessionStore((s) => s.prompt);
@@ -46,8 +54,10 @@ export function RoboticsResponseStage() {
   const incomplete = useRoboticsSessionStore((s) => s.incomplete);
   const warning = useRoboticsSessionStore((s) => s.warning);
   const error = useRoboticsSessionStore((s) => s.error);
+  const demoMode = useRoboticsSessionStore((s) => s.demoMode);
   const setActiveTab = useRoboticsSessionStore((s) => s.setActiveTab);
   const setUserTabLocked = useRoboticsSessionStore((s) => s.setUserTabLocked);
+  const setDemoMode = useRoboticsSessionStore((s) => s.setDemoMode);
 
   const userPrompt = resolveRoboticsCadUserPrompt({
     lastPrompt,
@@ -70,6 +80,11 @@ export function RoboticsResponseStage() {
     return () => ro.disconnect();
   }, [project, plan, streamProgress, loading]);
 
+  // Leaving demo once a real folder is open.
+  useEffect(() => {
+    if (projectPath && demoMode) setDemoMode(false);
+  }, [projectPath, demoMode, setDemoMode]);
+
   const handleSoftwareHandoff = () => {
     if (!project) return;
     void (async () => {
@@ -88,6 +103,18 @@ export function RoboticsResponseStage() {
   // Final tabs only when plan is committed and we are not mid-stream.
   const showFinalStage = Boolean(project && plan && !loading);
 
+  // No project folder → guided welcome (demo is opt-in, never default).
+  if (!projectPath && !demoMode && !showFinalStage && !showProgressStage) {
+    return (
+      <RoboticsWelcome
+        onOpenFolder={() => {
+          void pickAndOpenFolder();
+        }}
+        onDemoMode={() => setDemoMode(true)}
+      />
+    );
+  }
+
   if (!showFinalStage && !showProgressStage) {
     return (
       <div style={{
@@ -103,7 +130,31 @@ export function RoboticsResponseStage() {
         <div style={{ fontSize: 12.5, color: 'var(--caval-text-muted)', lineHeight: 1.55, maxWidth: 420 }}>
           Scrie cererea în panoul din dreapta și apasă Generează. Planul, BOM-ul și acțiunile CAD
           se afișează pe tot ecranul central.
+          {!projectPath && demoMode ? (
+            <span style={{ display: 'block', marginTop: 8, color: '#A78BFA' }}>
+              Mod demo — fără salvare pe disk. Deschide un folder când vrei STL persistente.
+            </span>
+          ) : null}
         </div>
+        {!projectPath && demoMode ? (
+          <button
+            type="button"
+            onClick={() => void pickAndOpenFolder()}
+            style={{
+              marginTop: 4,
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid rgba(0,224,255,0.4)',
+              background: 'rgba(0,224,255,0.12)',
+              color: 'var(--caval-text)',
+              fontWeight: 600,
+              fontSize: 12.5,
+              cursor: 'pointer',
+            }}
+          >
+            Deschide Folder
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -370,6 +421,9 @@ function RoboticsTabContent({
   const group = ROBOTICS_TAB_GROUPS.find((g) => g.id === tabId);
   const md = group ? tabGroupMarkdown(plan, group.sections) : '';
   const printSettings = useRoboticsSessionStore((s) => s.printSettings);
+  const setPrintSettings = useRoboticsSessionStore((s) => s.setPrintSettings);
+  const stlUrl = useEngineeringCadStore((s) => s.stlUrl);
+  const editedStlBase64 = useEngineeringCadStore((s) => s.editedStlBase64);
 
   if (tabId === 'parts') {
     return (
@@ -384,10 +438,23 @@ function RoboticsTabContent({
   if (tabId === 'cad') {
     const printMd = formatPrintSettingsMarkdown(printSettings, 'ro');
     const cadMd = [md.trim(), printMd].filter(Boolean).join('\n\n');
+    const applyPrintSuggestion = (suggestion: PrintSuggestion) => {
+      setPrintSettings({
+        layerHeight: suggestion.layerHeight.recommended,
+        infill: suggestion.infill.density,
+        supports: suggestion.supports.needed,
+        infillPattern: suggestion.infill.pattern,
+      });
+    };
     return (
       <>
         {bom && <ComponentsBomView bom={bom} />}
         <PrintSettingsControls />
+        <AiPrintAssistant
+          stlBase64={editedStlBase64}
+          stlUrl={stlUrl}
+          onApplySettings={applyPrintSuggestion}
+        />
         <MarkdownSection html={markdownToSimpleHtml(cadMd)} />
         <CadActions
           project={project}
@@ -513,34 +580,51 @@ function ComponentsBomView({ bom }: { bom: RoboticsComponentBom }) {
         Decompose CAD · {summarizeBomModes(bom.components)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {bom.components.map((c) => (
-          <div
-            key={c.id}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-              padding: '7px 10px', borderRadius: 8,
-              border: '1px solid var(--caval-border)',
-              background: 'rgba(255,255,255,0.03)',
-            }}
-          >
-            <span style={{
-              fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
-              background: c.mode === 'standard' ? 'rgba(0,224,255,0.15)' : 'rgba(124,58,237,0.2)',
-              color: c.mode === 'standard' ? 'var(--caval-accent)' : '#A78BFA',
-            }}>
-              {c.mode === 'standard' ? 'Standard' : 'Custom'}
-            </span>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)', flex: 1 }}>
-              {c.name}
-              <span style={{ color: 'var(--caval-text-muted)', fontWeight: 500 }}> ×{c.qty}</span>
-            </span>
-            {c.standardKey && (
-              <span style={{ fontSize: 10, color: 'var(--caval-text-muted)', fontFamily: 'monospace' }}>
-                {c.standardKey}
+        {bom.components.map((c, index) => {
+          const provider: CadProviderId =
+            c.mode === 'standard' ? 'openscad' : 'zoo';
+          return (
+            <div
+              key={c.id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '7px 10px', borderRadius: 8,
+                border: '1px solid var(--caval-border)',
+                background: 'rgba(255,255,255,0.03)',
+              }}
+            >
+              <span style={{
+                fontSize: 10, fontWeight: 700, color: 'var(--caval-text-muted)',
+                minWidth: 14,
+              }}>
+                {index + 1}.
               </span>
-            )}
-          </div>
-        ))}
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                background: c.mode === 'standard' ? 'rgba(0,224,255,0.15)' : 'rgba(124,58,237,0.2)',
+                color: c.mode === 'standard' ? 'var(--caval-accent)' : '#A78BFA',
+              }}>
+                {c.mode === 'standard' ? 'Standard' : 'Custom'}
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--caval-text)', flex: 1 }}>
+                {c.name}
+                <span style={{ color: 'var(--caval-text-muted)', fontWeight: 500 }}> ×{c.qty}</span>
+              </span>
+              <ProviderBadge
+                provider={provider}
+                status="idle"
+                costEstimate={provider === 'zoo' ? estimateZooCost(c.name) : undefined}
+                showCost={provider === 'zoo'}
+                compact
+              />
+              {c.standardKey && (
+                <span style={{ fontSize: 10, color: 'var(--caval-text-muted)', fontFamily: 'monospace' }}>
+                  {c.standardKey}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
       {bom.assemblyHints && (
         <div style={{ marginTop: 8, fontSize: 11, color: 'var(--caval-text-muted)', lineHeight: 1.45 }}>
@@ -635,11 +719,78 @@ function CadActions({
   const createBatchFromBom = useEngineeringCadStore((s) => s.createBatchFromBom);
   const exportBatchZip = useEngineeringCadStore((s) => s.exportBatchZip);
   const retryCadJob = useEngineeringCadStore((s) => s.retryCadJob);
+  const stlUrl = useEngineeringCadStore((s) => s.stlUrl);
+  const { pickAndOpenFolder } = useOpenWorkspace();
   const busy = cadBusy || batchBusy;
   const stopping = phase === 'cancelling';
+  const hasStl = Boolean(stlUrl) || batchParts.some((p) => p.status === 'done');
 
   return (
     <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {!projectPath && (
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.45,
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: '1px solid rgba(167,139,250,0.35)',
+            background: 'rgba(124,58,237,0.1)',
+            color: 'var(--caval-text)',
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Niciun folder deschis</div>
+          <div style={{ color: 'var(--caval-text-muted)', marginBottom: 8 }}>
+            Deschide un folder ca să salvezi STL-urile pe disk. Poți genera planul și în demo, dar
+            exportul rămâne limitat.
+          </div>
+          <button
+            type="button"
+            onClick={() => void pickAndOpenFolder()}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 6,
+              border: 'none',
+              background: 'rgba(0,224,255,0.9)',
+              color: '#0E0E0F',
+              fontWeight: 700,
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            Deschide Folder
+          </button>
+        </div>
+      )}
+
+      {!hasStl && (
+        <div
+          data-testid="cad-stage-empty"
+          style={{
+            fontSize: 12,
+            lineHeight: 1.5,
+            padding: '12px 12px',
+            borderRadius: 8,
+            border: '1px dashed var(--caval-border)',
+            background: 'rgba(255,255,255,0.02)',
+            color: 'var(--caval-text-muted)',
+          }}
+        >
+          <div style={{ fontWeight: 700, color: 'var(--caval-text)', marginBottom: 6 }}>
+            Nicio piesă generată încă
+          </div>
+          <p style={{ margin: '0 0 8px' }}>
+            Scrie în chat ce vrei să construiești, apoi apasă <strong>Generează STL</strong> pentru
+            preview 3D.
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <li>Fii specific: „piuliță M8 hexagonală, 10mm înălțime”</li>
+            <li>Mecanice → Zoo / OpenSCAD · obiecte libere → Trellis</li>
+            <li>Spune dacă vrei piese separate: „din 2 părți”</li>
+          </ul>
+        </div>
+      )}
+
       <div
         style={{
           fontSize: 11,
@@ -663,13 +814,16 @@ function CadActions({
         <button
           type="button"
           onClick={() => void createBatchFromBom({ bom, project, userPrompt, projectPath })}
-          disabled={busy}
+          disabled={busy || !projectPath}
+          title={!projectPath ? 'Deschide mai întâi un folder de proiect' : undefined}
           style={{
             padding: '9px 0', borderRadius: 6, border: 'none',
-            background: busy ? 'rgba(0,224,255,0.25)' : 'linear-gradient(135deg, rgba(0,224,255,0.95), rgba(124,58,237,0.85))',
-            color: busy ? '#fff' : '#0E0E0F',
+            background: busy || !projectPath
+              ? 'rgba(0,224,255,0.25)'
+              : 'linear-gradient(135deg, rgba(0,224,255,0.95), rgba(124,58,237,0.85))',
+            color: busy || !projectPath ? '#fff' : '#0E0E0F',
             fontWeight: 700, fontSize: 12.5,
-            cursor: busy ? 'wait' : 'pointer',
+            cursor: busy ? 'wait' : !projectPath ? 'not-allowed' : 'pointer',
           }}
         >
           {batchBusy
@@ -681,17 +835,21 @@ function CadActions({
       <button
         type="button"
         onClick={() => {
-          if (!userPrompt.trim()) return;
+          if (!projectPath || !userPrompt.trim()) return;
           void createCadJob({ project, userPrompt, projectPath });
         }}
-        disabled={busy || stopping || !userPrompt.trim()}
+        disabled={busy || stopping || !userPrompt.trim() || !projectPath}
+        title={!projectPath ? 'Deschide mai întâi un folder de proiect' : undefined}
         style={{
           padding: '9px 0', borderRadius: 6, border: 'none',
-          background: busy || stopping || !userPrompt.trim()
+          background: busy || stopping || !userPrompt.trim() || !projectPath
             ? 'rgba(0,224,255,0.25)'
             : 'rgba(124,58,237,0.85)',
           color: '#fff', fontWeight: 700, fontSize: 12.5,
-          cursor: busy || stopping || !userPrompt.trim() ? 'not-allowed' : 'pointer',
+          cursor:
+            busy || stopping || !userPrompt.trim() || !projectPath
+              ? 'not-allowed'
+              : 'pointer',
         }}
       >
         {cadBusy && !batchBusy

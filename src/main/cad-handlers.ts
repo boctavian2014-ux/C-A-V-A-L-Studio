@@ -11,6 +11,7 @@ import { tryInstallOpenScad } from "../../engineering/cad-server/openscad-instal
 import { assertTrustedSender } from "./ipc-trust";
 import { assertStlBase64Size, assertTextContentSize, IPC_CONTENT_LIMITS } from "./path-security";
 import { findForbiddenSecretField } from "../shared/secrets-metadata";
+import { analyzeStlForPrint } from "../shared/stl-print-analysis";
 import {
   NETWORK_GUARD_DEFAULTS,
   STL_CONTENT_TYPES,
@@ -925,6 +926,24 @@ export const registerCadHandlers = (
           : `${saveResult.filePath}.stl`;
         await fs.writeFile(target, buffer);
         return { ok: true, path: path.normalize(target) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
+  handle(
+    "cad:analyzeStlPrint",
+    async (_event, input: unknown) => {
+      const payload = input as { base64?: string };
+      if (!payload?.base64?.trim()) return { ok: false, error: "base64 is required" };
+      try {
+        const buffer = assertStlBase64Size(payload.base64);
+        if (buffer.length < 84) {
+          return { ok: false, error: "STL buffer too small" };
+        }
+        const { analysis, suggestions } = analyzeStlForPrint(buffer);
+        return { ok: true, analysis, suggestions };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }

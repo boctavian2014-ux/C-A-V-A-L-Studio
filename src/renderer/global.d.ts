@@ -365,6 +365,12 @@ interface CavalCadApi {
     path?: string;
     error?: string;
   }>;
+  analyzeStlPrint: (input: { base64: string }) => Promise<{
+    ok: boolean;
+    analysis?: import("../shared/stl-print-analysis").StlAnalysis;
+    suggestions?: import("../shared/stl-print-analysis").PrintSuggestion;
+    error?: string;
+  }>;
   fetchStl: (input: { url: string; cavalId?: string }) => Promise<{
     ok: boolean;
     base64?: string;
