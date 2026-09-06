@@ -49,6 +49,7 @@ export interface CadJobPlan {
   attachments?: Array<{ path: string; name: string; content: string }>;
   modelId?: string;
   previousMeshTaskId?: string;
+  previousZooJobId?: string;
   previousScad?: string;
 }
 
@@ -110,6 +111,7 @@ function abortSubmit(): void {
 async function loadCadCredentials(): Promise<{
   openRouterConfigured: boolean;
   meshConfigured: boolean;
+  zooConfigured: boolean;
 }> {
   const caval = window.caval;
   const [settingsResult, secretsResult, health] = await Promise.all([
@@ -138,6 +140,10 @@ async function loadCadCredentials(): Promise<{
       configured.MESHY_API_KEY === true ||
       settings['mesh.configured'] === 'true' ||
       settings['trellis.configured'] === 'true',
+    zooConfigured:
+      Boolean(health?.zooConfigured) ||
+      configured.ZOO_API_TOKEN === true ||
+      settings['zoo.configured'] === 'true',
   };
 }
 
@@ -734,6 +740,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         messages: planMessages,
         latestUserText: geometryPrompt,
         previousMeshTaskId: plan.previousMeshTaskId,
+        previousZooJobId: plan.previousZooJobId,
       });
     } catch (err) {
       patch({
@@ -767,8 +774,10 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     const toyHeli = isToyHelicopterPrompt(geometryPrompt);
     const toyLibrary = toyVehicle || toyHeli;
     const forceOpenScadFallback =
-      toyLibrary || (pipeline === 'mesh' && !credentials.meshConfigured);
-    // Toy cars / helicopters: never Trellis/mesh — always OpenSCAD library template.
+      toyLibrary ||
+      (pipeline === 'mesh' && !credentials.meshConfigured) ||
+      (pipeline === 'zoo' && !credentials.zooConfigured);
+    // Toy cars / helicopters: never Trellis/mesh/zoo — always OpenSCAD library template.
     const generationMode = toyLibrary
       ? 'library'
       : forceOpenScadFallback
@@ -807,7 +816,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       ? `TOY HELICOPTER (library template): ${geometryPrompt}`
       : toyVehicle
         ? `TOY VEHICLE (library template): ${geometryPrompt}`
-      : forceOpenScadFallback && pipeline === 'mesh'
+      : forceOpenScadFallback && (pipeline === 'mesh' || pipeline === 'zoo')
       ? [
           `USER OBJECT (exact): ${geometryPrompt}`,
           'Approximate THIS exact object with OpenSCAD primitives (cubes, cylinders, spheres, hull).',
@@ -816,6 +825,15 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
         ].join('\n\n')
       : generationMode === 'mesh'
         ? meshPrompt
+        : generationMode === 'zoo'
+          ? [
+              `USER OBJECT (exact): ${geometryPrompt}`,
+              plannerMatchesUser ? plannerTech : technicalPrompt,
+              'Mechanical CAD solid suitable for FDM, mm units, manifold.',
+            ]
+              .filter(Boolean)
+              .join('\n\n')
+              .slice(0, 12_000)
         : plannerMatchesUser
           ? plannerTech
           : [
@@ -832,6 +850,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       toyVehicle,
       toyHeli,
       meshConfigured: credentials.meshConfigured,
+      zooConfigured: credentials.zooConfigured,
     });
 
     const userIdResult = await caval.billingUserId?.();
@@ -854,9 +873,20 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
           workspaceRoot: workspaceRootArg,
           conversationHistory: planMessages,
           previousScad: toyScad,
-          previousMeshTaskId: toyLibrary || forceOpenScadFallback ? undefined : plan.previousMeshTaskId,
+          previousMeshTaskId:
+            toyLibrary || forceOpenScadFallback || generationMode === 'zoo'
+              ? undefined
+              : plan.previousMeshTaskId,
+          previousZooJobId:
+            toyLibrary || forceOpenScadFallback || generationMode !== 'zoo'
+              ? undefined
+              : plan.previousZooJobId ??
+                (generationMode === 'zoo' ? plan.previousMeshTaskId : undefined),
           generationMode,
-          meshPrompt: generationMode === 'mesh' ? meshPrompt.slice(0, 12_000) : undefined,
+          meshPrompt:
+            generationMode === 'mesh' || generationMode === 'zoo'
+              ? (generationMode === 'zoo' ? jobPrompt : meshPrompt).slice(0, 12_000)
+              : undefined,
           quality: 'standard',
         });
         if (created?.code === 'cad_job_in_progress') {
@@ -910,11 +940,15 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       : toyVehicle
         ? 'Template mașină solidă (OpenSCAD) — fără Trellis…'
         : forceOpenScadFallback
-        ? 'TRELLIS/Meshy indisponibil — generez previzualizare 3D cu OpenSCAD…'
+        ? pipeline === 'zoo'
+          ? 'Zoo indisponibil — generez previzualizare 3D cu OpenSCAD…'
+          : 'TRELLIS/Meshy indisponibil — generez previzualizare 3D cu OpenSCAD…'
         : planWarnings.length > 0
           ? planWarnings.join(' · ')
           : generationMode === 'mesh'
             ? 'Generez model 3D din text pe cloud (PiAPI Trellis / Meshy)…'
+            : generationMode === 'zoo'
+              ? 'Generez piesă mecanică cu Zoo text-to-CAD…'
             : 'Generez STL pe server cloud (OpenSCAD)…';
     patch({
       phase: 'processing',
@@ -939,6 +973,7 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     await get().createCadJob({
       ...lastPlan,
       previousMeshTaskId: get().meshTaskId ?? lastPlan.previousMeshTaskId,
+      previousZooJobId: get().meshTaskId ?? lastPlan.previousZooJobId,
       previousScad: get().scadContent ?? lastPlan.previousScad,
     });
   },

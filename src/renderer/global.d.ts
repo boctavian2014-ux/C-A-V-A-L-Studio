@@ -272,13 +272,14 @@ interface CavalCadApi {
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     latestUserText: string;
     previousMeshTaskId?: string;
+    previousZooJobId?: string;
   }) => Promise<{
     ok: boolean;
     plan?: {
       action: 'clarify' | 'generate';
       userLanguage: 'ro' | 'en';
       intent: 'mechanical' | 'organic' | 'figurine' | 'mixed';
-      pipeline: 'openscad' | 'mesh';
+      pipeline: 'openscad' | 'mesh' | 'zoo';
       questions?: string[];
       assistantMessage?: string;
       technicalPrompt: string;
@@ -303,9 +304,10 @@ interface CavalCadApi {
     quality?: 'standard' | 'high';
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     previousScad?: string;
-    generationMode?: 'openscad' | 'mesh' | 'library';
+    generationMode?: 'openscad' | 'mesh' | 'library' | 'zoo';
     meshPrompt?: string;
     previousMeshTaskId?: string;
+    previousZooJobId?: string;
   }) => Promise<{
     ok: boolean;
     jobId?: string;

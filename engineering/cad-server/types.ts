@@ -10,7 +10,7 @@ export type CadJobStatus =
 
 export type CadQuality = "standard" | "high";
 
-export type CadGenerationMode = "openscad" | "mesh" | "library";
+export type CadGenerationMode = "openscad" | "mesh" | "library" | "zoo";
 
 export interface CadChatMessage {
   role: "user" | "assistant";
@@ -52,8 +52,10 @@ export interface PlanPrint3DRequest {
   openRouterApiKey?: string;
   meshApiKey?: string;
   piapiApiKey?: string;
+  zooApiToken?: string;
   providerProfileId?: string;
   previousMeshTaskId?: string;
+  previousZooJobId?: string;
 }
 
 export interface CreateCadJobInput {
@@ -68,6 +70,8 @@ export interface CreateCadJobInput {
   meshApiKey?: string;
   /** Per-request PiAPI Trellis key from Electron (never stored). */
   piapiApiKey?: string;
+  /** Per-request Zoo / KittyCAD token from Electron (never stored). */
+  zooApiToken?: string;
   /** Opaque provider profile id (PR1). Secret is resolved server-side. */
   providerProfileId?: string;
   quality?: CadQuality;
@@ -76,6 +80,8 @@ export interface CreateCadJobInput {
   generationMode?: CadGenerationMode;
   meshPrompt?: string;
   previousMeshTaskId?: string;
+  /** Previous Zoo text-to-CAD job id for refine / poll reuse. */
+  previousZooJobId?: string;
   attachments?: CadAttachment[];
 }
 

@@ -1,8 +1,19 @@
 import type { Print3DPlannerResult } from "./print3d-planner";
 import { isMeshGenerationConfigured, resolveMeshApiKey } from "./mesh-client";
 import { isOpenScadInstalled, OPENSCAD_INSTALL_HINT_RO } from "./scad-runner";
+import { isZooGenerationConfigured } from "./zoo-client";
 
 export { resolveMeshApiKey, isMeshGenerationConfigured } from "./mesh-client";
+export { isZooGenerationConfigured } from "./zoo-client";
+
+export const ZOO_PREFERRED_HINT_RO =
+  "Generez piesa mecanică cu Zoo text-to-CAD (fallback OpenSCAD dacă job-ul eșuează — failed calls nu se taxează).";
+export const ZOO_PREFERRED_HINT_EN =
+  "Generating mechanical part with Zoo text-to-CAD (OpenSCAD fallback if the job fails — failed calls are not charged).";
+export const ZOO_REQUIRED_HINT_RO =
+  "Pentru piese mecanice via Zoo, adaugă ZOO_API_TOKEN în Setări → AI & Chei API (sau CAD_ZOO_MOCK=1 pentru teste).";
+export const ZOO_REQUIRED_HINT_EN =
+  "For Zoo mechanical parts, add ZOO_API_TOKEN in Settings → AI & API Keys (or CAD_ZOO_MOCK=1 for local tests).";
 
 /** Free-form / organic / creature / prop objects → text-to-3D (PiAPI Trellis / Meshy). */
 export const FREEFORM_MESH_RE =
@@ -47,10 +58,12 @@ export function isClearlyMechanicalPrompt(text: string): boolean {
 export async function adjustPlanPipeline(
   plan: Print3DPlannerResult,
   meshApiKey?: string,
-  piapiApiKey?: string
+  piapiApiKey?: string,
+  zooApiToken?: string
 ): Promise<Print3DPlannerResult> {
   const openscad = await isOpenScadInstalled();
   const meshReady = isMeshGenerationConfigured(meshApiKey, piapiApiKey);
+  const zooReady = isZooGenerationConfigured(zooApiToken);
   const warnings = [...(plan.warnings ?? [])];
 
   let pipeline = plan.pipeline;
@@ -59,14 +72,15 @@ export async function adjustPlanPipeline(
     plan.intent === "figurine" ||
     suggestMeshFromPrompt(plan.technicalPrompt) ||
     suggestMeshFromPrompt(plan.assistantMessage ?? "");
+  const mechanical =
+    plan.intent === "mechanical" || isClearlyMechanicalPrompt(plan.technicalPrompt);
 
   // Never flip mechanical OpenSCAD plans (toy cars, brackets, etc.) back to mesh —
   // mesh models often hallucinate bathtubs/furniture instead of the requested part.
   if (
     pipeline === "openscad" &&
     wantsMesh &&
-    plan.intent !== "mechanical" &&
-    !isClearlyMechanicalPrompt(plan.technicalPrompt)
+    !mechanical
   ) {
     // Keep mesh intent so the client can show a clear provider requirement when missing.
     pipeline = "mesh";
@@ -77,8 +91,21 @@ export async function adjustPlanPipeline(
     }
   }
 
+  // Prefer Zoo for mechanical custom parts when configured (OpenSCAD remains job-level fallback).
+  if (pipeline === "openscad" && mechanical && zooReady) {
+    pipeline = "zoo";
+    warnings.push(plan.userLanguage === "ro" ? ZOO_PREFERRED_HINT_RO : ZOO_PREFERRED_HINT_EN);
+  }
+
   if (pipeline === "openscad" && !openscad) {
-    if (meshReady) {
+    if (zooReady) {
+      pipeline = "zoo";
+      warnings.push(
+        plan.userLanguage === "ro"
+          ? "OpenSCAD nu e instalat — generez cu Zoo text-to-CAD."
+          : "OpenSCAD not installed — generating with Zoo text-to-CAD."
+      );
+    } else if (meshReady) {
       pipeline = "mesh";
       warnings.push(
         plan.userLanguage === "ro"
@@ -88,6 +115,11 @@ export async function adjustPlanPipeline(
     } else {
       warnings.push(OPENSCAD_INSTALL_HINT_RO);
     }
+  }
+
+  if (pipeline === "zoo" && !zooReady) {
+    pipeline = openscad ? "openscad" : meshReady ? "mesh" : "openscad";
+    warnings.push(plan.userLanguage === "ro" ? ZOO_REQUIRED_HINT_RO : ZOO_REQUIRED_HINT_EN);
   }
 
   if (pipeline === "mesh" && !meshReady) {

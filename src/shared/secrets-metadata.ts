@@ -17,6 +17,7 @@ export const SECRET_PROVIDER_IDS = [
   "MESHY_API_KEY",
   "PIAPI_API_KEY",
   "TRELLIS_API_KEY",
+  "ZOO_API_TOKEN",
   "CAD_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
@@ -45,7 +46,7 @@ export const SETTINGS_FORBIDDEN_SECRET_KEYS = [
 ] as const;
 
 const SECRET_FIELD_NAME_RE =
-  /^(api[_-]?key|token|secret|authorization|password|openrouter.*key|meshy.*key|mesh.*key|piapi.*key|trellis.*key)$/i;
+  /^(api[_-]?key|token|secret|authorization|password|openrouter.*key|meshy.*key|mesh.*key|piapi.*key|trellis.*key|zoo.*token|zoo.*key)$/i;
 
 /** True when an object key name looks like a secret field from the renderer. */
 export function isForbiddenSecretFieldName(key: string): boolean {

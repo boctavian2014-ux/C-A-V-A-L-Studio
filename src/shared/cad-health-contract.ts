@@ -15,6 +15,7 @@ export const CAD_HEALTH_SNAPSHOT_KEYS = [
   "meshyConfigured",
   "meshWorkerConfigured",
   "meshConfigured",
+  "zooConfigured",
   "checkedAt",
 ] as const;
 
@@ -29,6 +30,7 @@ export type CadHealthSnapshot = {
   meshyConfigured: boolean;
   meshWorkerConfigured: boolean;
   meshConfigured: boolean;
+  zooConfigured: boolean;
   checkedAt: string;
 };
 
@@ -47,6 +49,7 @@ const FALSE_FLAGS = {
   meshyConfigured: false,
   meshWorkerConfigured: false,
   meshConfigured: false,
+  zooConfigured: false,
 } as const;
 
 function flag(raw: Record<string, unknown>, key: keyof typeof FALSE_FLAGS): boolean {
@@ -92,6 +95,7 @@ export function mapCadHealthSnapshot(input: CadHealthProbeInput): CadHealthSnaps
     meshyConfigured: flag(raw, "meshyConfigured"),
     meshWorkerConfigured: flag(raw, "meshWorkerConfigured"),
     meshConfigured: flag(raw, "meshConfigured"),
+    zooConfigured: flag(raw, "zooConfigured"),
     checkedAt,
   };
 }
