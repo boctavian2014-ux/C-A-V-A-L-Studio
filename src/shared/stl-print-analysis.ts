@@ -159,7 +159,7 @@ export function analyzeStlTriangles(triangles: StlTriangle[]): StlAnalysis {
     }
 
     // Ensure consistent winding vs facet normal before signed-volume accumulate.
-    let a = tri.v1;
+    const a = tri.v1;
     let b = tri.v2;
     let c = tri.v3;
     const computed = cross(subtract(b, a), subtract(c, a));
