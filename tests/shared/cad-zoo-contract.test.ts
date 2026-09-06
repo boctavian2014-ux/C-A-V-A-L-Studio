@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   clampPrintSettings,
+  estimateZooCost,
   formatPrintSettingsMarkdown,
+  suggestCadProviderFromPrompt,
 } from "../../src/shared/cad-zoo-contract";
 import { LEGACY_CAD_SECRET_FIELDS } from "../../engineering/cad-server/legacy-contract";
 
@@ -12,6 +14,7 @@ describe("cad-zoo-contract", () => {
       infill: 100,
       supports: true,
       material: "PLA",
+      infillPattern: undefined,
     });
   });
 
@@ -26,5 +29,11 @@ describe("cad-zoo-contract", () => {
 
   it("includes zooApiToken in legacy secret strip list (main-only attach)", () => {
     expect(LEGACY_CAD_SECRET_FIELDS).toContain("zooApiToken");
+  });
+
+  it("estimates Zoo cost and suggests provider from prompt", () => {
+    const cost = estimateZooCost("bracket M3");
+    expect(cost.estimatedCostUsd).toBeGreaterThan(0);
+    expect(suggestCadProviderFromPrompt("bracket M3")).toBe("zoo");
   });
 });

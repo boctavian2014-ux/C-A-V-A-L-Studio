@@ -85,6 +85,8 @@ interface RoboticsSessionState {
   incomplete: boolean;
   /** After done/error/abort for the active stream — ignore further updates. */
   streamSettled: boolean;
+  /** Optional browse-without-folder; never the default entry path. */
+  demoMode: boolean;
   /** P2 unified cancel UX. */
   cancelStatus: "idle" | "aborting" | "aborted" | "failed_remote";
   cancelMessage: string | null;
@@ -94,6 +96,7 @@ interface RoboticsSessionState {
   /** Push a submitted prompt into short history (deduped, capped). */
   pushPromptHistory: (prompt: string) => void;
   setPrintSettings: (partial: Partial<PrintSettings>) => void;
+  setDemoMode: (demoMode: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setWarning: (warning: string | null) => void;
@@ -171,6 +174,7 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
   reasoningActive: false,
   incomplete: false,
   streamSettled: false,
+  demoMode: false,
   cancelStatus: "idle",
   cancelMessage: null,
 
@@ -184,6 +188,7 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
   },
   setPrintSettings: (partial) =>
     set({ printSettings: clampPrintSettings({ ...get().printSettings, ...partial }) }),
+  setDemoMode: (demoMode) => set({ demoMode }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   setWarning: (warning) => set({ warning }),
@@ -295,5 +300,6 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
       streamId: null,
       cancelStatus: 'idle',
       cancelMessage: null,
+      // Keep demoMode — user opted in for this session.
     }),
 }));

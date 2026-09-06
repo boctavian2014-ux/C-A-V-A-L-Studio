@@ -19,6 +19,11 @@ import { useRoboticsSessionStore, issueAbortChatStreamOnce } from '../../store/r
 import { CavaloAiMark } from '../brand/CavaloHorseMark';
 import { bootstrapRoboticsDesktopProject } from './bootstrap-robotics-project';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import { ProviderBadge } from './ProviderBadge';
+import {
+  estimateProviderCost,
+  suggestCadProviderFromPrompt,
+} from '../../../shared/cad-zoo-contract';
 
 // ──────────────────────────────────────────────────────────────
 //  Robotics AI ULTRA — composer (dreapta); răspunsul e în centru
@@ -55,6 +60,18 @@ export function EngineeringAIPanel() {
   const [localReadinessHint, setLocalReadinessHint] = useState<string | null>(null);
   const [, setReadiness] = useState<ModelReadiness | null>(null);
   const [openRouterConfigured, setOpenRouterConfigured] = useState(false);
+
+  const likelyProvider = suggestCadProviderFromPrompt(prompt);
+  const costEstimate =
+    prompt.trim().length > 10 ? estimateProviderCost(likelyProvider, prompt) : null;
+  const badgeStatus =
+    loading || cadBusy || batchBusy
+      ? 'generating'
+      : cadPhase === 'failed'
+        ? 'error'
+        : cadPhase === 'completed'
+          ? 'ready'
+          : 'idle';
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -607,6 +624,15 @@ export function EngineeringAIPanel() {
               }}>
                 ULTRA
               </span>
+              {prompt.trim().length > 10 ? (
+                <ProviderBadge
+                  provider={likelyProvider}
+                  status={badgeStatus}
+                  costEstimate={costEstimate}
+                  showCost
+                  compact
+                />
+              ) : null}
             </div>
             <div style={{
               fontSize: 11.5, color: 'var(--caval-text-muted)', lineHeight: 1.45, marginTop: 6,
@@ -805,6 +831,31 @@ export function EngineeringAIPanel() {
           </button>
         </div>
 
+        {costEstimate && likelyProvider === 'zoo' ? (
+          <div
+            data-testid="zoo-cost-hint"
+            style={{
+              fontSize: 11,
+              lineHeight: 1.4,
+              color: 'var(--caval-text-muted)',
+              padding: '6px 8px',
+              borderRadius: 6,
+              background: 'rgba(52,211,153,0.08)',
+              border: '1px solid rgba(52,211,153,0.2)',
+            }}
+          >
+            Estimare Zoo: ~${costEstimate.estimatedCostUsd.toFixed(2)}
+            {' · '}
+            {costEstimate.confidence === 'high'
+              ? 'precis'
+              : costEstimate.confidence === 'medium'
+                ? 'aproximativ'
+                : 'incertain'}
+            {' · '}
+            failed calls gratis · $20 free/mo
+          </div>
+        ) : null}
+
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -821,7 +872,13 @@ export function EngineeringAIPanel() {
             }}>Ctrl+Enter</kbd>
             {' '}trimite
           </span>
-          <span>OpenSCAD & CAD Pipeline</span>
+          <ProviderBadge
+            provider={likelyProvider}
+            status={badgeStatus}
+            costEstimate={costEstimate}
+            showCost={likelyProvider === 'zoo'}
+            compact
+          />
         </div>
       </div>
     </div>

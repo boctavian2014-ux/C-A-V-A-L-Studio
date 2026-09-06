@@ -1234,6 +1234,13 @@ contextBridge.exposeInMainWorld("caval", {
         path?: string;
         error?: string;
       }>,
+    analyzeStlPrint: (input: { base64: string }) =>
+      ipcRenderer.invoke("cad:analyzeStlPrint", input) as Promise<{
+        ok: boolean;
+        analysis?: import("../shared/stl-print-analysis").StlAnalysis;
+        suggestions?: import("../shared/stl-print-analysis").PrintSuggestion;
+        error?: string;
+      }>,
     fetchStl: (input: { url: string; cavalId?: string }) =>
       ipcRenderer.invoke("cad:fetchStl", input) as Promise<{
         ok: boolean;
