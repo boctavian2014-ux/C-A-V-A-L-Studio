@@ -37,6 +37,7 @@ export function EngineeringAIPanel() {
 
   const prompt = useRoboticsSessionStore((s) => s.prompt);
   const setPrompt = useRoboticsSessionStore((s) => s.setPrompt);
+  const promptHistory = useRoboticsSessionStore((s) => s.promptHistory);
   const loading = useRoboticsSessionStore((s) => s.loading);
   const error = useRoboticsSessionStore((s) => s.error);
   const warning = useRoboticsSessionStore((s) => s.warning);
@@ -238,6 +239,7 @@ export function EngineeringAIPanel() {
 
     const submittedPrompt = prompt.trim();
     session.setLastPrompt(submittedPrompt);
+    session.pushPromptHistory(submittedPrompt);
     session.beginGenerate();
     setLocalReadinessHint(null);
     collectorRef.current.reset();
@@ -699,6 +701,38 @@ export function EngineeringAIPanel() {
             gap: 10,
           }}
         >
+          {promptHistory.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {promptHistory.slice(0, 5).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  title={item}
+                  disabled={loading || cadBusy || batchBusy}
+                  onClick={() => {
+                    setPrompt(item);
+                    useRoboticsSessionStore.getState().setError(null);
+                  }}
+                  style={{
+                    maxWidth: '100%',
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid var(--caval-border)',
+                    background: 'rgba(255,255,255,0.04)',
+                    color: 'var(--caval-text-muted)',
+                    fontSize: 11,
+                    lineHeight: 1.3,
+                    cursor: loading || cadBusy || batchBusy ? 'not-allowed' : 'pointer',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {item.length > 42 ? `${item.slice(0, 42)}…` : item}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={prompt}

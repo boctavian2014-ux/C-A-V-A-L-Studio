@@ -2,6 +2,7 @@ export const LEGACY_CAD_SECRET_FIELDS = [
   "openRouterApiKey",
   "meshApiKey",
   "piapiApiKey",
+  "zooApiToken",
 ] as const;
 
 export type LegacyCadSecretField = (typeof LEGACY_CAD_SECRET_FIELDS)[number];

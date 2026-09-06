@@ -18,6 +18,11 @@ export const cadHealthCheck = async () => ({
   openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY),
   meshyConfigured: Boolean(resolveMeshApiKey()),
   piapiConfigured: Boolean(resolvePiapiApiKey()),
+  zooConfigured: Boolean(
+    process.env.CAD_ZOO_MOCK === "1" ||
+      process.env.CAD_ZOO_MOCK === "true" ||
+      process.env.ZOO_API_TOKEN?.trim()
+  ),
   meshWorkerConfigured: Boolean(resolveMeshWorkerUrl()),
   meshConfigured: isMeshGenerationConfigured(),
   openscadInstalled: await isOpenScadInstalled(),

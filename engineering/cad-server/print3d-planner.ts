@@ -9,7 +9,7 @@ import {
 export type Print3DPlannerAction = "clarify" | "generate";
 export type Print3DUserLanguage = "ro" | "en";
 export type Print3DIntent = "mechanical" | "organic" | "figurine" | "mixed";
-export type Print3DPipeline = "openscad" | "mesh";
+export type Print3DPipeline = "openscad" | "mesh" | "zoo";
 
 export interface Print3DPlannerResult {
   action: Print3DPlannerAction;
@@ -30,7 +30,9 @@ export interface PlanPrint3DInput {
   openRouterApiKey?: string;
   meshApiKey?: string;
   piapiApiKey?: string;
+  zooApiToken?: string;
   previousMeshTaskId?: string;
+  previousZooJobId?: string;
 }
 
 const PLANNER_MODEL = process.env.CAD_PLANNER_MODEL ?? "openai/gpt-4o-mini";
@@ -44,7 +46,7 @@ Return ONLY valid JSON (no markdown fences) matching this schema:
   "action": "clarify" | "generate",
   "userLanguage": "ro" | "en",
   "intent": "mechanical" | "organic" | "figurine" | "mixed",
-  "pipeline": "openscad" | "mesh",
+  "pipeline": "openscad" | "mesh" | "zoo",
   "questions": string[] (max 3, in userLanguage, only when action=clarify),
   "assistantMessage": string (friendly message in userLanguage),
   "technicalPrompt": string (always English, detailed mm dimensions, features, FDM constraints),
@@ -61,7 +63,7 @@ Rules:
 - If the user asks for ciocan / hammer / Mjolnir: pipeline=mesh, intent=figurine, technicalPrompt = visual hammer prop description (head + handle). NEVER furniture.
 - DEFAULT PIPELINE CHOICE:
   - pipeline=mesh for ANY free-form / visual object the user describes in plain language: animals, insects, plants, characters, figurines, sculptures, faces, fantasy creatures, toy robots (looks), organic furniture, food, everyday objects without precise mechanical drawings.
-  - pipeline=openscad ONLY for parametric/mechanical parts: brackets, gears, wheels with bore sizes, PCB/IoT enclosures with cutouts, mounts, frames, toy cars/helicopters built from primitives, CNC fixtures.
+  - pipeline=openscad (or zoo when available server-side) for parametric/mechanical parts: brackets, gears, wheels with bore sizes, PCB/IoT enclosures with cutouts, mounts, frames, toy cars/helicopters built from primitives, CNC fixtures. Prefer pipeline=openscad in JSON; server may upgrade mechanical to zoo.
 - Animals / insects / creatures (câine, pisică, fluture, păianjen, dragon, etc.): pipeline=mesh, intent=organic or figurine. technicalPrompt = rich English visual description for text-to-3D (pose, proportions, style, approx size mm), NOT OpenSCAD instructions.
 - Toy cars / sports cars / Ferrari / helicopters (mașină jucărie, ferrari, elicopter): pipeline=openscad, intent=mechanical, with car body+4 wheels or fuselage/rotors/skids. NEVER a bathtub with wheels.
 - Mechanical robots (arm, chassis, actuators, joints): pipeline=openscad. Cute/toy/figurine robots: pipeline=mesh.
@@ -109,7 +111,8 @@ export function parsePlannerResponse(raw: string): Print3DPlannerResult | null {
     const validIntents: Print3DIntent[] = ["mechanical", "organic", "figurine", "mixed"];
     if (!validIntents.includes(intent)) return null;
 
-    const pipeline = json.pipeline === "mesh" ? "mesh" : "openscad";
+    const pipeline =
+      json.pipeline === "mesh" ? "mesh" : json.pipeline === "zoo" ? "zoo" : "openscad";
 
     return {
       action: json.action,
@@ -433,6 +436,9 @@ export async function planPrint3DRequest(
     input.previousMeshTaskId
       ? `\nPrevious mesh task ID for refinement context: ${input.previousMeshTaskId}`
       : "",
+    input.previousZooJobId
+      ? `\nPrevious Zoo text-to-CAD job ID for refinement context: ${input.previousZooJobId}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -448,7 +454,12 @@ export async function planPrint3DRequest(
     const plan = parsePlannerResponse(result.content!);
     if (plan) {
       const aligned = alignPlanWithLatestUserIntent(input.latestUserText, plan);
-      const adjusted = await adjustPlanPipeline(aligned, input.meshApiKey, input.piapiApiKey);
+      const adjusted = await adjustPlanPipeline(
+        aligned,
+        input.meshApiKey,
+        input.piapiApiKey,
+        input.zooApiToken
+      );
       return { ok: true, plan: adjusted };
     }
     lastError = "Planner returned unparseable JSON";

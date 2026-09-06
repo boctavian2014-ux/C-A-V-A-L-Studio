@@ -22,6 +22,10 @@ import {
 } from '../../store/robotics-session-store';
 import { CavalStudioHero } from '../brand/CavaloHorseMark';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
+import {
+  formatPrintSettingsMarkdown,
+  type PrintMaterial,
+} from '../../../../src/shared/cad-zoo-contract';
 
 /** Center-stage Robotics plan / tabs (shared session store). */
 export function RoboticsResponseStage() {
@@ -365,6 +369,7 @@ function RoboticsTabContent({
 }) {
   const group = ROBOTICS_TAB_GROUPS.find((g) => g.id === tabId);
   const md = group ? tabGroupMarkdown(plan, group.sections) : '';
+  const printSettings = useRoboticsSessionStore((s) => s.printSettings);
 
   if (tabId === 'parts') {
     return (
@@ -377,10 +382,13 @@ function RoboticsTabContent({
   }
 
   if (tabId === 'cad') {
+    const printMd = formatPrintSettingsMarkdown(printSettings, 'ro');
+    const cadMd = [md.trim(), printMd].filter(Boolean).join('\n\n');
     return (
       <>
         {bom && <ComponentsBomView bom={bom} />}
-        <MarkdownSection html={markdownToSimpleHtml(md)} />
+        <PrintSettingsControls />
+        <MarkdownSection html={markdownToSimpleHtml(cadMd)} />
         <CadActions
           project={project}
           projectPath={projectPath}
@@ -401,6 +409,98 @@ function RoboticsTabContent({
   }
 
   return <MarkdownSection html={markdownToSimpleHtml(md)} />;
+}
+
+function PrintSettingsControls() {
+  const printSettings = useRoboticsSessionStore((s) => s.printSettings);
+  const setPrintSettings = useRoboticsSessionStore((s) => s.setPrintSettings);
+  const materials: PrintMaterial[] = ['PLA', 'ABS', 'PETG', 'TPU'];
+
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid var(--caval-border)',
+        background: 'rgba(255,255,255,0.03)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--caval-text)', letterSpacing: '0.04em' }}>
+        PRINT SETTINGS
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <label style={{ fontSize: 11, color: 'var(--caval-text-muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          Layer height (mm)
+          <input
+            type="number"
+            min={0.08}
+            max={0.4}
+            step={0.02}
+            value={printSettings.layerHeight}
+            onChange={(e) => setPrintSettings({ layerHeight: Number(e.target.value) })}
+            style={{
+              padding: '6px 8px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: 'var(--caval-bg)',
+              color: 'var(--caval-text)',
+              fontSize: 12,
+            }}
+          />
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--caval-text-muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          Infill (%)
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={5}
+            value={printSettings.infill}
+            onChange={(e) => setPrintSettings({ infill: Number(e.target.value) })}
+            style={{
+              padding: '6px 8px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: 'var(--caval-bg)',
+              color: 'var(--caval-text)',
+              fontSize: 12,
+            }}
+          />
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--caval-text-muted)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          Material
+          <select
+            value={printSettings.material}
+            onChange={(e) => setPrintSettings({ material: e.target.value as PrintMaterial })}
+            style={{
+              padding: '6px 8px',
+              borderRadius: 6,
+              border: '1px solid var(--caval-border)',
+              background: 'var(--caval-bg)',
+              color: 'var(--caval-text)',
+              fontSize: 12,
+            }}
+          >
+            {materials.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--caval-text-muted)', display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
+          <input
+            type="checkbox"
+            checked={printSettings.supports}
+            onChange={(e) => setPrintSettings({ supports: e.target.checked })}
+          />
+          Supports
+        </label>
+      </div>
+    </div>
+  );
 }
 
 function ComponentsBomView({ bom }: { bom: RoboticsComponentBom }) {
@@ -596,7 +696,7 @@ function CadActions({
       >
         {cadBusy && !batchBusy
           ? `Generez STL… (${phase}${cadStatus ? ` / ${cadStatus}` : ''})`
-          : 'Generează STL 3D (mecanice = OpenSCAD · obiecte libere = text-to-3D cloud)'}
+          : 'Generează STL 3D (mecanice = Zoo/OpenSCAD · obiecte libere = text-to-3D cloud)'}
       </button>
 
       {batchParts.length > 0 && (

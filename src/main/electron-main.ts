@@ -1260,6 +1260,7 @@ const SECRET_ENV_KEYS = [
   "MESHY_API_KEY",
   "PIAPI_API_KEY",
   "TRELLIS_API_KEY",
+  "ZOO_API_TOKEN",
   "CAD_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
@@ -1460,6 +1461,7 @@ ipcMain.handle("caval:settings-save", async (event, settings: CadSettingsSaveInp
     "mesh.configured": configured.MESHY_API_KEY ? "true" : "false",
     "trellis.configured":
       configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false",
+    "zoo.configured": configured.ZOO_API_TOKEN ? "true" : "false",
     "cad.configured": configured.CAD_API_KEY ? "true" : "false",
   };
   const { settings: forRenderer, cadConnection } = buildRendererSettingsMap(merged, extras);
@@ -1477,6 +1479,7 @@ ipcMain.handle("caval:settings-load", (event) => {
     "mesh.configured": configured.MESHY_API_KEY ? "true" : "false",
     "trellis.configured":
       configured.PIAPI_API_KEY || configured.TRELLIS_API_KEY ? "true" : "false",
+    "zoo.configured": configured.ZOO_API_TOKEN ? "true" : "false",
     "cad.configured": configured.CAD_API_KEY ? "true" : "false",
   };
   const { settings, cadConnection } = buildRendererSettingsMap(persistedAppSettings, extras);

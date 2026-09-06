@@ -1132,6 +1132,7 @@ contextBridge.exposeInMainWorld("caval", {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       latestUserText: string;
       previousMeshTaskId?: string;
+      previousZooJobId?: string;
     }) =>
       ipcRenderer.invoke("cad:plan", input) as Promise<{
         ok: boolean;
@@ -1139,7 +1140,7 @@ contextBridge.exposeInMainWorld("caval", {
           action: 'clarify' | 'generate';
           userLanguage: 'ro' | 'en';
           intent: 'mechanical' | 'organic' | 'figurine' | 'mixed';
-          pipeline: 'openscad' | 'mesh';
+          pipeline: 'openscad' | 'mesh' | 'zoo';
           questions?: string[];
           assistantMessage?: string;
           technicalPrompt: string;
@@ -1164,9 +1165,10 @@ contextBridge.exposeInMainWorld("caval", {
       quality?: 'standard' | 'high';
       conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
       previousScad?: string;
-      generationMode?: 'openscad' | 'mesh' | 'library';
+      generationMode?: 'openscad' | 'mesh' | 'library' | 'zoo';
       meshPrompt?: string;
       previousMeshTaskId?: string;
+      previousZooJobId?: string;
     }) =>
       ipcRenderer.invoke("cad:createJob", input) as Promise<{
         ok: boolean;

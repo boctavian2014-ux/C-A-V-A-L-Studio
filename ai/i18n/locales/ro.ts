@@ -105,6 +105,8 @@ export const ro = {
   "settings.cad.meshyOptional": "Meshy (fallback): opțional",
   "settings.cad.openRouterOk": "Local — OpenRouter: configurat ✓",
   "settings.cad.openRouterMissing": "Local — OpenRouter: neconfigurat — setează în AI & Chei API",
+  "settings.cad.zooOk": "Local — Zoo text-to-CAD: configurat ✓",
+  "settings.cad.zooMissing": "Local — Zoo: opțional — setează ZOO_API_TOKEN pentru piese mecanice text-to-CAD",
   "settings.cad.cloudHealthHint":
     "Cloud (/health) arată doar variabilele Railway. Apasă „Testează conexiunea” pentru Local vs Cloud.",
 

@@ -1,6 +1,7 @@
 import { generateOpenScad, repairOpenScad } from "./llm-client";
 import { isMeshGenerationConfigured, resolveMeshApiKey } from "./cad-capabilities";
 import { generateMeshFromPrompt } from "./mesh-client";
+import { generateZooStlFromPrompt, isZooGenerationConfigured } from "./zoo-client";
 import {
   createCadJob,
   getCadJob,
@@ -60,6 +61,7 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
   const generationMode = input.generationMode ?? job.generationMode ?? "openscad";
   const meshApiKey = resolveMeshApiKey(input.meshApiKey);
   const meshReady = isMeshGenerationConfigured(input.meshApiKey, input.piapiApiKey);
+  const zooReady = isZooGenerationConfigured(input.zooApiToken);
 
   try {
     failIfAborted(jobId);
@@ -130,7 +132,14 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
           });
           return;
         }
-        if (meshReady) {
+        if (zooReady) {
+          appendJobLog(jobId, {
+            level: "warn",
+            event: "pipeline_fallback",
+            message: "openscad missing → zoo",
+          });
+          mode = "zoo";
+        } else if (meshReady) {
           appendJobLog(jobId, {
             level: "warn",
             event: "pipeline_fallback",
@@ -143,6 +152,11 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
           return;
         }
       }
+    }
+
+    if (mode === "zoo") {
+      await processZooJob(jobId, job, input, signal);
+      return;
     }
 
     if (mode === "mesh") {
@@ -163,6 +177,99 @@ const processCadJob = async (jobId: string, input: CreateCadJobInput): Promise<v
   } finally {
     clearJobAbort(jobId);
   }
+};
+
+const processZooJob = async (
+  jobId: string,
+  job: NonNullable<Awaited<ReturnType<typeof getCadJob>>>,
+  input: CreateCadJobInput,
+  signal: AbortSignal
+): Promise<void> => {
+  failIfAborted(jobId);
+
+  const zooPrompt = input.meshPrompt?.trim() || input.prompt?.trim() || job.prompt;
+  const zoo = await generateZooStlFromPrompt({
+    prompt: zooPrompt,
+    zooApiToken: input.zooApiToken,
+    outputFormat: "stl",
+    previousZooJobId: input.previousZooJobId,
+    signal,
+  });
+
+  if (signal.aborted) throw new Error("Job cancelled");
+
+  if (!zoo.ok || !zoo.stlBuffer) {
+    // Failed Zoo calls are not charged — fall back to OpenSCAD when available.
+    let openscadReady = await isOpenScadInstalled();
+    if (!openscadReady) {
+      await tryInstallOpenScad();
+      openscadReady = await isOpenScadInstalled();
+    }
+    if (openscadReady && input.generationMode !== "library") {
+      appendJobLog(jobId, {
+        level: "warn",
+        event: "pipeline_fallback",
+        message: `zoo failed → openscad: ${(zoo.error ?? "unknown").slice(0, 160)}`,
+      });
+      await processOpenScadJob(
+        jobId,
+        job,
+        {
+          ...input,
+          generationMode: "openscad",
+          planContext: undefined,
+          conversationHistory: undefined,
+          prompt: [
+            `USER OBJECT (exact): ${zooPrompt}`,
+            "Parametric mechanical part in OpenSCAD (cubes/cylinders/difference/hull).",
+            "Watertight, flat base, mm units, explicit dimensions.",
+          ].join("\n"),
+        },
+        signal,
+        resolveMeshApiKey(input.meshApiKey)
+      );
+      return;
+    }
+
+    await updateCadJob(jobId, {
+      status: "failed",
+      errorMessage: redactSensitiveText(zoo.error ?? "Zoo text-to-CAD failed"),
+    });
+    appendJobLog(jobId, { level: "error", event: "job_failed", message: zoo.error });
+    return;
+  }
+
+  // Reuse meshTaskId column for Zoo job id (refinement / poll reuse).
+  await updateCadJob(jobId, { status: "rendering", meshTaskId: zoo.zooJobId ?? null });
+  appendJobLog(jobId, {
+    level: "info",
+    event: "job_updated",
+    message: `rendering (${zoo.provider ?? "zoo"})`,
+  });
+
+  const dimensions = computeStlBoundingBox(zoo.stlBuffer);
+  setLocalStl(jobId, zoo.stlBuffer, dimensions, zoo.zooJobId ?? null);
+
+  const uploaded = await uploadPrivateCadStl({
+    jobId,
+    cavalId: job.cavalId,
+    buffer: zoo.stlBuffer,
+  });
+
+  if (signal.aborted || isJobAborted(jobId)) {
+    await markJobCancelled(jobId);
+    return;
+  }
+
+  await updateCadJob(jobId, {
+    status: "done",
+    stlPath: uploaded.path,
+    generatedScad: null,
+    errorMessage: null,
+    meshTaskId: zoo.zooJobId ?? null,
+  });
+  appendJobLog(jobId, { level: "info", event: "job_completed" });
+  cadLog({ level: "info", event: "job_completed", jobId });
 };
 
 const processMeshJob = async (

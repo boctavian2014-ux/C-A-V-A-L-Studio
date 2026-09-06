@@ -54,6 +54,12 @@ const PROVIDER_SECRET_FIELDS: Array<{
     hint: 'Fallback mesh organic — Robotics CAD',
   },
   {
+    secretKey: 'ZOO_API_TOKEN',
+    label: 'Zoo / KittyCAD (text-to-CAD)',
+    placeholder: 'zoo-...',
+    hint: 'Mechanical text-to-CAD — api.zoo.dev · ~$0.0083/s · $20 free/mo · failed calls free',
+  },
+  {
     secretKey: 'GITHUB_PERSONAL_ACCESS_TOKEN',
     label: 'GitHub PAT (MCP read-only)',
     placeholder: 'github_pat_... sau ghp_...',
@@ -76,6 +82,7 @@ const SECRET_LABELS: Record<string, string> = {
   NORTH_API_KEY: 'North',
   PIAPI_API_KEY: 'PiAPI Trellis',
   MESHY_API_KEY: 'Meshy',
+  ZOO_API_TOKEN: 'Zoo / KittyCAD',
   GITHUB_PERSONAL_ACCESS_TOKEN: 'GitHub PAT',
   SEMGREP_APP_TOKEN: 'Semgrep',
   ANTHROPIC_API_KEY: 'Anthropic',

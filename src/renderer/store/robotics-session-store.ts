@@ -5,10 +5,17 @@ import type { RoboticsComponentBom } from '../../../ai/engineering/robotics-comp
 import type { ParsedRoboticsPlan } from '../../../ai/engineering/robotics-format';
 import { ROBOTICS_TAB_GROUPS } from '../../../ai/engineering/robotics-format';
 import type { SectionStreamSnapshot } from '../../../ai/engineering/streaming-sections';
+import {
+  clampPrintSettings,
+  DEFAULT_PRINT_SETTINGS,
+  type PrintSettings,
+} from '../../../src/shared/cad-zoo-contract';
 
 export type RoboticsTabId = (typeof ROBOTICS_TAB_GROUPS)[number]['id'];
 
 export type RoboticsStreamingMode = 'idle' | 'streaming' | 'fallback';
+
+const PROMPT_HISTORY_MAX = 8;
 
 export {
   issueAbortChatStreamOnce,
@@ -56,6 +63,10 @@ interface RoboticsSessionState {
   prompt: string;
   /** Last successfully submitted prompt (kept after textarea clears, for CAD/handoff). */
   lastPrompt: string;
+  /** Recent composer prompts (newest first), for quick reuse without moving chat left. */
+  promptHistory: string[];
+  /** FDM print settings shown in CAD & Print tab (feeds G-CODE markdown). */
+  printSettings: PrintSettings;
   loading: boolean;
   error: string | null;
   warning: string | null;
@@ -80,6 +91,9 @@ interface RoboticsSessionState {
 
   setPrompt: (prompt: string) => void;
   setLastPrompt: (prompt: string) => void;
+  /** Push a submitted prompt into short history (deduped, capped). */
+  pushPromptHistory: (prompt: string) => void;
+  setPrintSettings: (partial: Partial<PrintSettings>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setWarning: (warning: string | null) => void;
@@ -141,6 +155,8 @@ interface RoboticsSessionState {
 export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get) => ({
   prompt: '',
   lastPrompt: '',
+  promptHistory: [],
+  printSettings: { ...DEFAULT_PRINT_SETTINGS },
   loading: false,
   error: null,
   warning: null,
@@ -160,6 +176,14 @@ export const useRoboticsSessionStore = create<RoboticsSessionState>()((set, get)
 
   setPrompt: (prompt) => set({ prompt }),
   setLastPrompt: (lastPrompt) => set({ lastPrompt }),
+  pushPromptHistory: (raw) => {
+    const prompt = raw.trim();
+    if (!prompt) return;
+    const prev = get().promptHistory.filter((p) => p !== prompt);
+    set({ promptHistory: [prompt, ...prev].slice(0, PROMPT_HISTORY_MAX) });
+  },
+  setPrintSettings: (partial) =>
+    set({ printSettings: clampPrintSettings({ ...get().printSettings, ...partial }) }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   setWarning: (warning) => set({ warning }),

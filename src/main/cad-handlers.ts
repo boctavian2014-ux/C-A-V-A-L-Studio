@@ -401,20 +401,24 @@ export const registerCadHandlers = (
     openRouterApiKey?: string;
     meshApiKey?: string;
     piapiApiKey?: string;
+    zooApiToken?: string;
   } => {
     const {
       openRouterApiKey: _a,
       meshApiKey: _b,
       piapiApiKey: _c,
+      zooApiToken: _d,
       ...rest
     } = input as T & {
       openRouterApiKey?: string;
       meshApiKey?: string;
       piapiApiKey?: string;
+      zooApiToken?: string;
     };
     void _a;
     void _b;
     void _c;
+    void _d;
     return {
       ...(rest as T),
       openRouterApiKey: process.env.OPENROUTER_API_KEY?.trim() || undefined,
@@ -423,6 +427,7 @@ export const registerCadHandlers = (
         process.env.PIAPI_API_KEY?.trim() ||
         process.env.TRELLIS_API_KEY?.trim() ||
         undefined,
+      zooApiToken: process.env.ZOO_API_TOKEN?.trim() || undefined,
     };
   };
 

@@ -15,6 +15,8 @@ describe("cad-capabilities", () => {
     resetOpenScadProbeCacheForTests();
     delete process.env.MESHY_API_KEY;
     delete process.env.MESH_WORKER_URL;
+    delete process.env.CAD_ZOO_MOCK;
+    delete process.env.ZOO_API_TOKEN;
   });
 
   it("suggests mesh for furniture prompts", () => {
@@ -28,6 +30,30 @@ describe("cad-capabilities", () => {
     expect(suggestMeshFromPrompt("păianjen realist")).toBe(true);
     expect(suggestMeshFromPrompt("cute toy robot figurine")).toBe(true);
     expect(suggestMeshFromPrompt("robot arm with M3 mounts")).toBe(false);
+  });
+
+  it("prefers zoo for mechanical when Zoo is configured", async () => {
+    process.env.CAD_ZOO_MOCK = "1";
+    const plan = await adjustPlanPipeline({
+      action: "generate",
+      userLanguage: "en",
+      intent: "mechanical",
+      pipeline: "openscad",
+      technicalPrompt: "L-bracket 40x40x3mm with M3 holes",
+    });
+    expect(plan.pipeline).toBe("zoo");
+  });
+
+  it("keeps mesh for free-form even when Zoo is configured", async () => {
+    process.env.CAD_ZOO_MOCK = "1";
+    const plan = await adjustPlanPipeline({
+      action: "generate",
+      userLanguage: "ro",
+      intent: "organic",
+      pipeline: "mesh",
+      technicalPrompt: "un fluture colorat",
+    });
+    expect(plan.pipeline).toBe("mesh");
   });
 
   it("falls back to mesh when openscad missing and mesh worker present", async () => {

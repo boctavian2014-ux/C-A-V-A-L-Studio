@@ -72,7 +72,9 @@ export const createCadJobSchema = z
     quality: z.enum(["standard", "high"]).optional(),
     conversationHistory: z.array(chatMessageSchema).max(32).optional(),
     previousScad: z.string().max(64_000).optional(),
-    generationMode: z.enum(["openscad", "mesh", "library"]).optional(),
+    generationMode: z.enum(["openscad", "mesh", "library", "zoo"]).optional(),
+    zooApiToken: z.string().max(512).optional(),
+    previousZooJobId: z.string().max(128).optional(),
     meshPrompt: z.string().max(12_000).optional(),
     previousMeshTaskId: z.string().max(128).optional(),
     attachments: z.array(attachmentSchema).max(8).optional(),
@@ -86,8 +88,10 @@ export const planPrint3DSchema = z
     openRouterApiKey: z.string().max(256).optional(),
     meshApiKey: z.string().max(256).optional(),
     piapiApiKey: z.string().max(256).optional(),
+    zooApiToken: z.string().max(512).optional(),
     providerProfileId: z.string().uuid().optional(),
     previousMeshTaskId: z.string().max(128).optional(),
+    previousZooJobId: z.string().max(128).optional(),
   })
   .superRefine((data, ctx) => rejectDisabledLegacyKeys(data as Record<string, unknown>, ctx));
 

@@ -103,6 +103,8 @@ export const en = {
   "settings.cad.meshyOptional": "Meshy (fallback): optional",
   "settings.cad.openRouterOk": "Local — OpenRouter: configured ✓",
   "settings.cad.openRouterMissing": "Local — OpenRouter: not configured — set in AI & API Keys",
+  "settings.cad.zooOk": "Local — Zoo text-to-CAD: configured ✓",
+  "settings.cad.zooMissing": "Local — Zoo: optional — set ZOO_API_TOKEN for mechanical text-to-CAD",
   "settings.cad.cloudHealthHint":
     "Cloud (/health) shows Railway variables only. Press “Test connection” for Local vs Cloud.",
 

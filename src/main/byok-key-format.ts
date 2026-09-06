@@ -12,6 +12,7 @@ export type ByokSecretKey =
   | "NORTH_API_KEY"
   | "MESHY_API_KEY"
   | "PIAPI_API_KEY"
+  | "ZOO_API_TOKEN"
   | "OLLAMA_BASE_URL"
   | "OLLAMA_MODEL"
   | "CUSTOM_PROVIDER_BASE_URL"
@@ -29,6 +30,7 @@ const FORMATTERS: Partial<Record<ByokSecretKey, RegExp>> = {
   NORTH_API_KEY: /^[A-Za-z0-9_-]{16,}$/,
   MESHY_API_KEY: /^[A-Za-z0-9_-]{12,}$/,
   PIAPI_API_KEY: /^[A-Za-z0-9_-]{12,}$/,
+  ZOO_API_TOKEN: /^[A-Za-z0-9._-]{12,}$/,
   OLLAMA_MODEL: /^[A-Za-z0-9._:/-]{1,128}$/,
 };
 

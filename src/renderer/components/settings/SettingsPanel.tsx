@@ -417,6 +417,7 @@ function SectionCadCloud() {
   const [meshyOk, setMeshyOk] = useState(false);
   const [piapiOk, setPiapiOk] = useState(false);
   const [openRouterOk, setOpenRouterOk] = useState(false);
+  const [zooOk, setZooOk] = useState(false);
 
   const envLocked = cadConnection.source === 'env';
 
@@ -447,6 +448,9 @@ function SectionCadCloud() {
       );
       setOpenRouterOk(
         Boolean(configured.OPENROUTER_API_KEY) || s['openrouter.configured'] === 'true'
+      );
+      setZooOk(
+        Boolean(configured.ZOO_API_TOKEN) || s['zoo.configured'] === 'true'
       );
       const mode = await window.caval.cad?.isCloudOnly?.();
       if (mode?.cloudOnly !== undefined) setCloudOnly(mode.cloudOnly);
@@ -693,6 +697,8 @@ function SectionCadCloud() {
           <br />
           {openRouterOk ? t('settings.cad.openRouterOk') : t('settings.cad.openRouterMissing')}
           <br />
+          {zooOk ? t('settings.cad.zooOk') : t('settings.cad.zooMissing')}
+          <br />
           {t('settings.cad.cloudHealthHint')}
         </InfoBox>
       </Section>
@@ -813,7 +819,7 @@ function SectionAbout() {
           ['settings.about.stack.ui', 'React + TypeScript'],
           ['settings.about.stack.editor', 'Monaco Editor'],
           ['settings.about.stack.ai', 'OpenRouter · Ollama · BYOK'],
-          ['settings.about.stack.engineering', 'CAD cloud · OpenSCAD · TRELLIS / Meshy'],
+          ['settings.about.stack.engineering', 'CAD cloud · OpenSCAD · Zoo · TRELLIS / Meshy'],
           ['settings.about.stack.git', t('settings.about.stack.gitValue')],
         ] as const).map(([k, v]) => (
           <Row key={k} label={t(k)}>
