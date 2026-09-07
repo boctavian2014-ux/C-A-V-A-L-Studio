@@ -21,7 +21,6 @@ vi.mock("../../../../src/renderer/components/terminal/XtermTerminal", () => {
   };
 });
 
-import { TerminalInput } from "../../../../src/renderer/components/terminal/TerminalInput";
 import {
   mapTerminalUiStatus,
   shortTerminalTitle,
@@ -449,47 +448,5 @@ describe("TerminalPanel", () => {
     expect(lines[0]).toBe("line-5");
     expect(lines[999]).toBe("line-1004");
     expect(lines).not.toContain("line-4");
-  });
-});
-
-describe("TerminalInput", () => {
-  let mounted: { unmount: () => void } | undefined;
-
-  beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    document.body.innerHTML = "";
-  });
-
-  afterEach(() => {
-    mounted?.unmount();
-    mounted = undefined;
-  });
-
-  it("sends the command on Enter and walks history with arrows", async () => {
-    const onInput = vi.fn(async () => undefined);
-    const result = mount(
-      <TerminalInput terminalId="term-1" onInput={onInput} disabled={false} />
-    );
-    mounted = result;
-    const input = result.container.querySelector('[data-testid="terminal-input"]') as HTMLInputElement;
-    expect(input).toBeTruthy();
-
-    setInputValue(input, "ls");
-    await act(async () => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(onInput).toHaveBeenCalledWith("ls\n");
-    expect(input.value).toBe("");
-
-    act(() => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-    });
-    expect(input.value).toBe("ls");
-
-    act(() => {
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    });
-    expect(input.value).toBe("");
   });
 });

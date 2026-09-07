@@ -11,7 +11,6 @@ declare module "*.jpeg" {
   const src: string;
   export default src;
 }
-declare module "xterm/css/xterm.css";
 declare module "@xterm/xterm/css/xterm.css";
 
 interface CavalFsApi {

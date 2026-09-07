@@ -104,9 +104,6 @@ export interface CadJob {
   expiresAt: string | null;
 }
 
-/** @deprecated Use CadJob — kept for internal migration. */
-export type CadJobRecord = CadJob;
-
 export interface CadJobResult {
   ok: boolean;
   jobId: string;
