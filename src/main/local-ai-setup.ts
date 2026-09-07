@@ -872,8 +872,3 @@ export async function ensureOllamaOnBoot(): Promise<void> {
     await refreshAndEmit(true);
   }
 }
-
-/** @deprecated Use {@link ensureOllamaOnBoot} — kept as alias for older call sites. */
-export async function ensureManagedLocalAiOnBoot(): Promise<void> {
-  return ensureOllamaOnBoot();
-}

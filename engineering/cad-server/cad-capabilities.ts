@@ -29,11 +29,6 @@ export const MESH_REQUIRED_HINT_RO =
 export const MESH_REQUIRED_HINT_EN =
   "For free-form objects (animals, insects, figurines, toy robots, organic furniture) add a PiAPI Trellis key (or Meshy) in Settings → AI & API Keys. OpenSCAD is only for precise mechanical parts.";
 
-/** @deprecated use MESH_REQUIRED_HINT_RO */
-export const MESHY_REQUIRED_HINT_RO = MESH_REQUIRED_HINT_RO;
-/** @deprecated use MESH_REQUIRED_HINT_EN */
-export const MESHY_REQUIRED_HINT_EN = MESH_REQUIRED_HINT_EN;
-
 /** True when the prompt should use text-to-3D mesh, not OpenSCAD. */
 export function suggestMeshFromPrompt(text: string): boolean {
   const t = text.trim();

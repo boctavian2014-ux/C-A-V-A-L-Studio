@@ -1,0 +1,69 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/renderer/workbench-app.tsx",
+    "src/main/electron-main.ts",
+    "src/main/preload.ts",
+    "ai/preload/preload-worker.ts",
+    "ai/context/parallel/parallel-worker.ts",
+    "src/caval-runtime.ts",
+    "src/renderer/components/engineering/CadViewerCanvas.tsx",
+    "src/renderer/components/editor/MonacoEditor.tsx",
+    "ai/composer/live-ai-edit-styles.ts",
+    "ai/composer/validation/syntax-checker.ts",
+    "ai/tools/verify-auto-fix.ts",
+    "engineering/cad-server/standalone.ts",
+    "engineering/cad-server/services/job-registry.ts",
+    "billing/standalone.ts",
+    "marketplace/server/standalone.ts",
+    "scripts/**/*.{js,ts,mjs}",
+    ".cicd/scripts/**/*.ts",
+    "installer/scripts/**/*.ts",
+    "webpack.config.js",
+    "vitest.config.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx,js,jsx}",
+    "ai/**/*.{ts,tsx}",
+    "engineering/**/*.{ts,tsx}",
+    "themes/**/*.{ts,tsx}",
+    "ui-kit/**/*.{ts,tsx}",
+    "components/**/*.{ts,tsx}",
+    "context-engine/**/*.ts",
+    "billing/**/*.{ts,tsx}",
+    "marketplace/**/*.{ts,tsx}",
+    "admin/**/*.{ts,tsx}",
+    "mobile/**/*.{ts,tsx}",
+    "mobile-app/**/*.{ts,tsx}",
+    "romania/**/*.ts",
+    "scripts/**/*.{js,ts,mjs}",
+    ".cicd/scripts/**/*.ts",
+    "installer/scripts/**/*.ts"
+  ],
+  "ignore": [
+    "dist/**",
+    "coverage/**",
+    "build-icons/**",
+    "node_modules/**",
+    "fashion-matching-app/**"
+  ],
+  "ignoreFiles": [
+    "ai/engineering/**",
+    "engineering/cad-server/**",
+    "romania/**"
+  ],
+  "ignoreIssues": {
+    "src/renderer/store/engineering-cad-store.ts": ["files", "exports", "types"],
+    "src/renderer/store/robotics-session-store.ts": ["files", "exports", "types"],
+    "src/main/abort/**": ["files", "exports", "types"],
+    "src/shared/abort-contract.ts": ["files", "exports", "types"]
+  },
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "files": "warn",
+    "exports": "warn",
+    "types": "warn",
+    "duplicates": "warn",
+    "unresolved": "error"
+  }
+}

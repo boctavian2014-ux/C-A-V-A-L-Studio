@@ -74,11 +74,6 @@ export async function workspaceHasRunnableWebProject(projectPath: string): Promi
   }
 }
 
-/** @deprecated Prefer workspaceHasRunnableWebProject */
-export async function workspaceHasCodeFiles(projectPath: string): Promise<boolean> {
-  return workspaceHasRunnableWebProject(projectPath);
-}
-
 export async function looksLikeExpressApi(projectPath: string): Promise<boolean> {
   const candidates = ["src/index.ts", "src/main.ts", "index.ts", "server.ts", "src/server.ts"];
   for (const rel of candidates) {

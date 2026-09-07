@@ -70,11 +70,6 @@ export function CavaloSplashMark({ size = 48 }: { size?: number }) {
   return <CavalBrandImage width={width} height={height} />;
 }
 
-/** @deprecated Use CavaloHorseMark — same asset. */
-export function CavaloNeonMark({ size = 48 }: { size?: number }) {
-  return <CavaloHorseMark size={size} />;
-}
-
 const NEON_FRAME_STYLE: React.CSSProperties = {
   background: 'transparent',
   border: '2px solid rgba(0, 224, 255, 0.92)',
