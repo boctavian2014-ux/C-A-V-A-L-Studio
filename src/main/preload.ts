@@ -373,13 +373,22 @@ contextBridge.exposeInMainWorld("caval", {
     };
     ipcRenderer.on("caval:ai-stream-chunk", listener);
     const cleanup = () => ipcRenderer.removeListener("caval:ai-stream-chunk", listener);
-    void ipcRenderer.invoke("caval:ai-chat-stream", request).then((result: { ok: boolean }) => {
-      if (!result.ok) cleanup();
-    });
+    void ipcRenderer
+      .invoke("caval:ai-chat-stream", request)
+      .then((result: { ok: boolean; error?: string; code?: string }) => {
+        if (!result.ok) {
+          // Must notify the subscriber — otherwise eng/chat stream promises hang forever.
+          onChunk({
+            streamId: request.streamId,
+            type: "error",
+            error: result.error ?? "Stream failed to start",
+            ...(result.code ? { code: result.code } : {}),
+          });
+          cleanup();
+        }
+      });
     return cleanup;
   },
-  abortChatStream: (streamId: string) =>
-    ipcRenderer.invoke("caval:ai-stream-abort", streamId) as Promise<{ ok: boolean }>,
   cancelOperation: (input: {
     operationId?: string;
     streamId?: string;
@@ -389,12 +398,20 @@ contextBridge.exposeInMainWorld("caval", {
   }) =>
     ipcRenderer.invoke("caval:cancel-operation", input) as Promise<{
       ok: boolean;
+      reason?: "already_gone";
       status?: string;
       operationId?: string;
       streamId?: string;
       cadJobId?: string;
       signalAborted?: boolean;
       remoteCancel?: "ok" | "failed" | "skipped";
+      error?: string;
+    }>,
+  abortChatStream: (streamId: string) =>
+    ipcRenderer.invoke("caval:ai-stream-abort", streamId) as Promise<{
+      ok: boolean;
+      reason?: "already_gone";
+      status?: string;
       error?: string;
     }>,
   onPipelineVerifyStatus: (
