@@ -24,6 +24,14 @@ export const STRIPE_CHECKOUT_HOSTS = [
   "pay.stripe.com",
 ];
 
+/** Revolut hosted Payment Links (manual monthly plan activation). */
+export const REVOLUT_PAYMENT_HOSTS = [
+  "checkout.revolut.com",
+  "pay.revolut.com",
+  "merchant.revolut.com",
+  "business.revolut.com",
+];
+
 export const OPENVSX_DOC_HOSTS = ["open-vsx.org", "www.open-vsx.org"];
 
 const SENSITIVE_QUERY_KEYS = new Set([

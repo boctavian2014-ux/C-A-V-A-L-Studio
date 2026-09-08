@@ -965,6 +965,37 @@ contextBridge.exposeInMainWorld("caval", {
     }>,
   billingCheckout: (input: { email: string }) =>
     ipcRenderer.invoke("caval:billing-checkout", input) as Promise<{ ok: boolean; url?: string; error?: string }>,
+  subscriptionsMe: () =>
+    ipcRenderer.invoke("caval:subscriptions-me") as Promise<{
+      ok: boolean;
+      subscription?: {
+        plan: "free" | "pro" | "ultra";
+        status: "active" | "past_due" | "canceled";
+        currentPeriodStart: string;
+        currentPeriodEnd: string;
+      };
+      limits?: {
+        chatTokens: number;
+        cadJobs: number;
+        zooBudgetUsd: number;
+        allowedModelTiers: Array<"fast" | "standard" | "ultra">;
+      };
+      usage?: {
+        chatTokensUsed: number;
+        cadJobsUsed: number;
+        zooCostAccrued: number;
+        requestsUsed: number;
+      };
+      modelUsage?: unknown[];
+      managedProvidersConfigured?: Record<string, boolean>;
+      error?: string;
+    }>,
+  subscriptionsOpenUpgrade: (input: { plan: "pro" | "ultra" }) =>
+    ipcRenderer.invoke("caval:subscriptions-open-upgrade", input) as Promise<{
+      ok: boolean;
+      url?: string;
+      error?: string;
+    }>,
   secretsGet: () =>
     ipcRenderer.invoke("caval:secrets-get") as Promise<{
       ok: boolean;

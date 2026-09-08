@@ -113,8 +113,16 @@ import {
   CAVALLO_TRUSTED_HOSTS,
   openExternalUrl,
   redactUrlForDisplay,
+  REVOLUT_PAYMENT_HOSTS,
   STRIPE_CHECKOUT_HOSTS,
 } from "./external-url-policy";
+import {
+  getSubscriptionSummary,
+  isUpgradePlanTarget,
+  resolveUpgradePaymentLink,
+} from "../../billing/subscriptions/service";
+import { managedProviderEnvConfigured } from "../../billing/model-registry";
+import type { SubscriptionSummary } from "../../billing/subscription-types";
 import { validateSecretsPatchFormats, validateSecretFormat } from "./byok-key-format";
 import { assertOllamaBaseUrl, assertProviderRequestUrl } from "./cloud-provider-registry";
 import { consumeAiRateLimit } from "./ai-rate-limit";
@@ -1714,6 +1722,90 @@ ipcMain.handle("caval:billing-checkout", async (event, input: { email: string })
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
+
+ipcMain.handle("caval:subscriptions-me", async (event) => {
+  assertTrustedSender(event);
+  const settings = getRendererSettings(event.sender.id);
+  const userId = String(settings["caval.userId"] ?? "").trim() || "anonymous";
+  const apiKey = process.env.BILLING_API_KEY ?? process.env.BILLING_ADMIN_KEY;
+
+  if (apiKey) {
+    try {
+      const res = await fetch(
+        `${billingBaseUrl()}/api/subscriptions/me?userId=${encodeURIComponent(userId)}`,
+        { headers: { "x-billing-api-key": apiKey, "x-caval-user-id": userId } }
+      );
+      if (res.ok) {
+        const json = (await res.json()) as SubscriptionSummary & {
+          ok?: boolean;
+          modelUsage?: unknown[];
+          managedProvidersConfigured?: Record<string, boolean>;
+          error?: string;
+        };
+        if (json.ok !== false && json.subscription && json.limits && json.usage) {
+          return {
+            ok: true,
+            subscription: json.subscription,
+            limits: json.limits,
+            usage: json.usage,
+            modelUsage: Array.isArray(json.modelUsage) ? json.modelUsage : [],
+            managedProvidersConfigured:
+              json.managedProvidersConfigured ?? managedProviderEnvConfigured(),
+          };
+        }
+      }
+    } catch {
+      // Fall through to in-process foundation store.
+    }
+  }
+
+  const summary = getSubscriptionSummary(userId);
+  return {
+    ok: true,
+    ...summary,
+    modelUsage: [],
+    managedProvidersConfigured: managedProviderEnvConfigured(),
+  };
+});
+
+ipcMain.handle(
+  "caval:subscriptions-open-upgrade",
+  async (event, input: { plan?: string } | undefined) => {
+    assertTrustedSender(event);
+    const plan = input?.plan;
+    if (!isUpgradePlanTarget(plan)) {
+      return { ok: false, error: "plan must be pro or ultra" };
+    }
+
+    const apiKey = process.env.BILLING_API_KEY ?? process.env.BILLING_ADMIN_KEY;
+    let url: string | undefined;
+    if (apiKey) {
+      try {
+        const res = await fetch(`${billingBaseUrl()}/api/subscriptions/upgrade-link/${plan}`, {
+          headers: { "x-billing-api-key": apiKey },
+        });
+        const json = (await res.json()) as { ok?: boolean; url?: string; error?: string };
+        if (res.ok && json.url) url = json.url;
+      } catch {
+        // Fall through to local env.
+      }
+    }
+    if (!url) {
+      const resolved = resolveUpgradePaymentLink(plan);
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      url = resolved.url;
+    }
+
+    const opened = await openExternalUrl(url, {
+      origin: "USER_INITIATED_TRUSTED",
+      allowedHosts: REVOLUT_PAYMENT_HOSTS,
+    });
+    if (!opened.ok) {
+      return { ok: false, error: opened.error ?? "Upgrade URL blocked by security policy." };
+    }
+    return { ok: true, url: redactUrlForDisplay(url) };
+  }
+);
 
 ipcMain.handle("caval:secrets-get", (event) => {
   try {

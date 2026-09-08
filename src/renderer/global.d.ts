@@ -706,6 +706,35 @@ interface CavalBridge {
     error?: string;
   }>;
   billingCheckout?: (input: { email: string }) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  subscriptionsMe?: () => Promise<{
+    ok: boolean;
+    subscription?: {
+      plan: "free" | "pro" | "ultra";
+      status: "active" | "past_due" | "canceled";
+      currentPeriodStart: string;
+      currentPeriodEnd: string;
+    };
+    limits?: {
+      chatTokens: number;
+      cadJobs: number;
+      zooBudgetUsd: number;
+      allowedModelTiers: Array<"fast" | "standard" | "ultra">;
+    };
+    usage?: {
+      chatTokensUsed: number;
+      cadJobsUsed: number;
+      zooCostAccrued: number;
+      requestsUsed: number;
+    };
+    modelUsage?: unknown[];
+    managedProvidersConfigured?: Record<string, boolean>;
+    error?: string;
+  }>;
+  subscriptionsOpenUpgrade?: (input: { plan: "pro" | "ultra" }) => Promise<{
+    ok: boolean;
+    url?: string;
+    error?: string;
+  }>;
   secretsGet?: () => Promise<{
     ok: boolean;
     providers?: Array<{
