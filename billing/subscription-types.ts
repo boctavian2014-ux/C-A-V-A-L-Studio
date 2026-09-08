@@ -37,7 +37,7 @@ export interface UsageRecord {
   cadJobsUsed: number;
   zooCostAccrued: number;
   chatTokensUsed: number;
-  /** Declared in PR1; always [] until entitlements/metering PR populates it. */
+  /** Populated by metering PR — may be empty for users with no metered traffic. */
   modelUsage: ModelUsageEntry[];
 }
 
@@ -46,6 +46,9 @@ export interface PlanLimits {
   cadJobs: number;
   zooBudgetUsd: number;
   allowedModelTiers: ModelTier[];
+  /** Soft concurrency caps (PR2). */
+  maxConcurrentChatStreams: number;
+  maxConcurrentCadJobs: number;
 }
 
 export interface RevolutSubscriptionRecord {

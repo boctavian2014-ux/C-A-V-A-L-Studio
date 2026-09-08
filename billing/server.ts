@@ -16,7 +16,10 @@ import {
   isUpgradePlanTarget,
   resolveUpgradePaymentLink,
 } from "./subscriptions/service";
+import { getUsageRecord } from "./subscriptions/store";
 import { managedProviderEnvConfigured } from "./model-registry";
+import { requirePlanEntitlement } from "./middleware/require-plan-entitlement";
+import { isPlanEntitlementError } from "./entitlement-errors";
 
 function isAllowedRedirectUrl(url: string): boolean {
   try {
@@ -135,13 +138,46 @@ export const createBillingServer = () => {
       return;
     }
     const summary = getSubscriptionSummary(userId.trim());
+    const usageRow = getUsageRecord(
+      userId.trim(),
+      summary.subscription.currentPeriodStart
+    );
     response.json({
       ok: true,
       ...summary,
-      /** Schema field reserved for metering PR; always empty in foundation. */
-      modelUsage: [],
+      modelUsage: usageRow?.modelUsage ?? [],
       managedProvidersConfigured: managedProviderEnvConfigured(),
     });
+  });
+
+  /** Preflight entitlement — returns 402 with structured upgrade_required payload. */
+  app.post("/api/subscriptions/entitlement-check", requireBillingApiKey, (request, response) => {
+    const body = request.body as {
+      userId?: string;
+      action?: "chat" | "cad_job";
+      modelId?: string;
+      estimatedZooCostUsd?: number;
+    };
+    if (!body.userId?.trim() || (body.action !== "chat" && body.action !== "cad_job")) {
+      response.status(400).json({ ok: false, error: "userId and action=chat|cad_job required" });
+      return;
+    }
+    try {
+      const result = requirePlanEntitlement({
+        userId: body.userId.trim(),
+        action: body.action,
+        modelId: body.modelId,
+        estimatedZooCostUsd: body.estimatedZooCostUsd,
+      });
+      response.json({ ok: true, ...result });
+    } catch (error) {
+      if (isPlanEntitlementError(error)) {
+        response.status(402).json(error.payload);
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(500).json({ ok: false, error: message });
+    }
   });
 
   app.get("/api/subscriptions/upgrade-link/:plan", requireBillingApiKey, (request, response) => {

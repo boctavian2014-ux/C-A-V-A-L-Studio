@@ -92,6 +92,17 @@ import { runProjectHealthSnapshot } from "../../ai/tools/project-health-runner";
 import { parseProjectHealthAction } from "../../src/shared/project-health-check";
 import { assertTrustedSender } from "./ipc-trust";
 import { consumeAiRateLimit, allowAiAbort } from "./ai-rate-limit";
+import {
+  isPlanEntitlementError,
+  entitlementDenialIpc,
+} from "../../billing/entitlement-errors";
+import { requirePlanEntitlement } from "../../billing/middleware/require-plan-entitlement";
+import {
+  trackChatStreamEnd,
+  trackChatStreamStart,
+} from "../../billing/metering/concurrency-tracker";
+import { recordChatUsage } from "../../billing/metering/chat-token-meter";
+import type { MeteredProviderId } from "../../billing/subscription-types";
 import { safeErrorMessageForUi } from "../../ai/providers/provider-errors";
 import type { IdeContextPayload } from "../shared/ai-context-contract";
 import { shouldAttachHeavyChatContext } from "../shared/ai-context-prepare";
@@ -2150,8 +2161,49 @@ export function registerModelHandlers(
         retryAfterMs: limit.retryAfterMs,
       };
     }
+
+    const billingUserId = `caval_sender_${event.sender.id}`;
+    try {
+      requirePlanEntitlement({
+        userId: billingUserId,
+        action: "chat",
+        modelId: request.model,
+      });
+    } catch (error) {
+      if (isPlanEntitlementError(error)) {
+        return entitlementDenialIpc(error.payload);
+      }
+      throw error;
+    }
+
+    trackChatStreamStart(billingUserId, request.streamId);
+    const approxIn = Math.ceil(String(request.message ?? "").length / 4);
+    const providerGuess: MeteredProviderId =
+      /claude|anthropic/i.test(request.model)
+        ? "anthropic"
+        : /gpt|openai|o3/i.test(request.model)
+          ? "openai"
+          : /nvidia|nemotron/i.test(request.model)
+            ? "nvidia"
+            : /stepfun/i.test(request.model)
+              ? "stepfun"
+              : "openrouter";
+    recordChatUsage({
+      userId: billingUserId,
+      idempotencyKey: `${request.streamId}:accept`,
+      provider: providerGuess,
+      model: request.model,
+      inputTokens: approxIn,
+      outputTokens: 0,
+      costAccruedUsd: 0,
+    });
+
     warmOpenRouterConnection();
-    void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getBoundWorkspaceRoot);
+    void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getBoundWorkspaceRoot).finally(
+      () => {
+        trackChatStreamEnd(billingUserId, request.streamId);
+      }
+    );
     return { ok: true, started: true };
   });
 

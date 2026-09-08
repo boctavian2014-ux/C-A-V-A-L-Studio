@@ -14,18 +14,24 @@ export const DEFAULT_PLAN_CATALOG: Record<PlanId, PlanLimits> = {
     cadJobs: 3,
     zooBudgetUsd: 0,
     allowedModelTiers: ["fast"],
+    maxConcurrentChatStreams: 1,
+    maxConcurrentCadJobs: 1,
   },
   pro: {
     chatTokens: 500_000,
     cadJobs: 30,
     zooBudgetUsd: 5,
     allowedModelTiers: ["fast", "standard"],
+    maxConcurrentChatStreams: 3,
+    maxConcurrentCadJobs: 2,
   },
   ultra: {
     chatTokens: 2_000_000,
     cadJobs: 100,
     zooBudgetUsd: 25,
     allowedModelTiers: ALL_TIERS,
+    maxConcurrentChatStreams: 8,
+    maxConcurrentCadJobs: 4,
   },
 };
 
@@ -52,37 +58,27 @@ export function getPlanCatalog(env: NodeJS.ProcessEnv = process.env): Record<Pla
     return parts.length > 0 ? parts : [...fallback];
   };
 
+  const base = (plan: PlanId): PlanLimits => {
+    const d = DEFAULT_PLAN_CATALOG[plan];
+    const prefix =
+      plan === "free" ? "PLAN_FREE" : plan === "pro" ? "PLAN_PRO" : "PLAN_ULTRA";
+    return {
+      chatTokens: parseIntSafe(`${prefix}_CHAT_TOKENS`, d.chatTokens),
+      cadJobs: parseIntSafe(`${prefix}_CAD_JOBS`, d.cadJobs),
+      zooBudgetUsd: parseFloatSafe(`${prefix}_ZOO_BUDGET_USD`, d.zooBudgetUsd),
+      allowedModelTiers: parseTiersSafe(`${prefix}_ALLOWED_TIERS`, d.allowedModelTiers),
+      maxConcurrentChatStreams: parseIntSafe(
+        `${prefix}_MAX_CHAT_STREAMS`,
+        d.maxConcurrentChatStreams
+      ),
+      maxConcurrentCadJobs: parseIntSafe(`${prefix}_MAX_CAD_JOBS`, d.maxConcurrentCadJobs),
+    };
+  };
+
   return {
-    free: {
-      chatTokens: parseIntSafe("PLAN_FREE_CHAT_TOKENS", DEFAULT_PLAN_CATALOG.free.chatTokens),
-      cadJobs: parseIntSafe("PLAN_FREE_CAD_JOBS", DEFAULT_PLAN_CATALOG.free.cadJobs),
-      zooBudgetUsd: parseFloatSafe("PLAN_FREE_ZOO_BUDGET_USD", DEFAULT_PLAN_CATALOG.free.zooBudgetUsd),
-      allowedModelTiers: parseTiersSafe(
-        "PLAN_FREE_ALLOWED_TIERS",
-        DEFAULT_PLAN_CATALOG.free.allowedModelTiers
-      ),
-    },
-    pro: {
-      chatTokens: parseIntSafe("PLAN_PRO_CHAT_TOKENS", DEFAULT_PLAN_CATALOG.pro.chatTokens),
-      cadJobs: parseIntSafe("PLAN_PRO_CAD_JOBS", DEFAULT_PLAN_CATALOG.pro.cadJobs),
-      zooBudgetUsd: parseFloatSafe("PLAN_PRO_ZOO_BUDGET_USD", DEFAULT_PLAN_CATALOG.pro.zooBudgetUsd),
-      allowedModelTiers: parseTiersSafe(
-        "PLAN_PRO_ALLOWED_TIERS",
-        DEFAULT_PLAN_CATALOG.pro.allowedModelTiers
-      ),
-    },
-    ultra: {
-      chatTokens: parseIntSafe("PLAN_ULTRA_CHAT_TOKENS", DEFAULT_PLAN_CATALOG.ultra.chatTokens),
-      cadJobs: parseIntSafe("PLAN_ULTRA_CAD_JOBS", DEFAULT_PLAN_CATALOG.ultra.cadJobs),
-      zooBudgetUsd: parseFloatSafe(
-        "PLAN_ULTRA_ZOO_BUDGET_USD",
-        DEFAULT_PLAN_CATALOG.ultra.zooBudgetUsd
-      ),
-      allowedModelTiers: parseTiersSafe(
-        "PLAN_ULTRA_ALLOWED_TIERS",
-        DEFAULT_PLAN_CATALOG.ultra.allowedModelTiers
-      ),
-    },
+    free: base("free"),
+    pro: base("pro"),
+    ultra: base("ultra"),
   };
 }
 
