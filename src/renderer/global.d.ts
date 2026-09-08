@@ -317,6 +317,11 @@ interface CavalCadApi {
     phase?: string;
     ownerIsCaller?: boolean;
     error?: string;
+    currentPlan?: string;
+    requiredPlan?: string;
+    reason?: string;
+    resetsAt?: string;
+    details?: unknown;
   }>;
   getJob: (input: { jobId: string; cavalId?: string }) => Promise<{
     ok: boolean;

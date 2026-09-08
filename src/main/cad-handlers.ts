@@ -38,6 +38,17 @@ import {
 import type { BoundWorkspaceRootGetter } from "./bound-workspace";
 import { mapCadHealthSnapshot } from "../shared/cad-health-contract";
 import {
+  isPlanEntitlementError,
+  entitlementDenialIpc,
+} from "../../billing/entitlement-errors";
+import { requirePlanEntitlement } from "../../billing/middleware/require-plan-entitlement";
+import {
+  reconcileCadReservationLocked,
+  releaseCadReservationLocked,
+  reserveCadJobLocked,
+} from "../../billing/metering/cad-reserve-reconcile";
+import type { MeteredProviderId } from "../../billing/subscription-types";
+import {
   mapCadHttpFailure,
   mapCadTransportError,
 } from "../shared/cad-transport-error";
@@ -488,6 +499,38 @@ export const registerCadHandlers = (
 
     try {
       const cavalId = resolveCavalId(jobInput.cavalId);
+      const estimatedZoo =
+        typeof (jobInput as { estimatedZooCostUsd?: number }).estimatedZooCostUsd === "number"
+          ? Math.max(0, (jobInput as { estimatedZooCostUsd?: number }).estimatedZooCostUsd ?? 0)
+          : 0.06;
+
+      try {
+        requirePlanEntitlement({
+          userId: cavalId,
+          action: "cad_job",
+          estimatedZooCostUsd: estimatedZoo,
+        });
+      } catch (error) {
+        releaseFailed("aborted");
+        if (isPlanEntitlementError(error)) {
+          return {
+            ...entitlementDenialIpc(error.payload),
+            operationId,
+          };
+        }
+        throw error;
+      }
+
+      const reserved = await reserveCadJobLocked({
+        userId: cavalId,
+        reservationId: operationId,
+        estimatedZooCostUsd: estimatedZoo,
+      });
+      if (!reserved.ok) {
+        releaseFailed("failed");
+        return { ok: false, error: reserved.error, operationId };
+      }
+
       let secured = attachMainCadSecrets({ ...jobInput, cavalId } as Record<string, unknown>);
       const mode = await ensurePiapiCompatibleCad(Boolean(secured.piapiApiKey));
       if (mode === "cloud-legacy") {
@@ -516,6 +559,7 @@ export const registerCadHandlers = (
       }
 
       if (!postedOk) {
+        await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
         releaseFailed("failed");
         return {
           ok: false,
@@ -526,6 +570,7 @@ export const registerCadHandlers = (
 
       const jobId = (json as { jobId?: string }).jobId;
       if (!jobId) {
+        await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
         releaseFailed("failed");
         return {
           ok: false,
@@ -543,6 +588,27 @@ export const registerCadHandlers = (
         workspaceRoot,
       });
       heartbeatCadWorkspaceLock({ operationId, jobId, workspaceRoot });
+
+      // Provisional reconcile at create time; final Zoo cost can refine later via job logs.
+      const modeHint = String(
+        (secured as { generationMode?: string; pipeline?: string }).generationMode ??
+          (secured as { pipeline?: string }).pipeline ??
+          ""
+      ).toLowerCase();
+      const actualProvider: MeteredProviderId = modeHint.includes("zoo")
+        ? "zoo"
+        : modeHint.includes("mesh") || modeHint.includes("piapi")
+          ? "piapi"
+          : modeHint.includes("meshy")
+            ? "meshy"
+            : "zoo";
+      await reconcileCadReservationLocked({
+        reservationId: operationId,
+        idempotencyKey: `${jobId}:create`,
+        actualProvider,
+        actualZooCostUsd: actualProvider === "zoo" ? estimatedZoo : 0,
+        model: `${actualProvider}-job`,
+      });
 
       return {
         ...json,
@@ -572,9 +638,17 @@ export const registerCadHandlers = (
                   senderId: event.sender.id,
                   workspaceRoot,
                 });
+                await reconcileCadReservationLocked({
+                  reservationId: operationId,
+                  idempotencyKey: `${jobId}:create-local`,
+                  actualProvider: "zoo",
+                  actualZooCostUsd: 0,
+                  model: "openscad-local",
+                });
                 return { ...retry.json, ok: true, jobId, operationId };
               }
             }
+            await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
             releaseFailed("failed");
             return {
               ok: false,
@@ -586,6 +660,7 @@ export const registerCadHandlers = (
           /* fall through */
         }
       }
+      await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
       releaseFailed("failed");
       return { ...mapFetchError(error), operationId };
     }

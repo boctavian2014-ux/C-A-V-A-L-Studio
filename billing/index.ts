@@ -12,3 +12,8 @@ export * from "./model-registry";
 export * from "./plan-catalog";
 export * from "./subscriptions/service";
 export * from "./subscriptions/store";
+export * from "./entitlement-errors";
+export * from "./middleware/require-plan-entitlement";
+export * from "./metering/chat-token-meter";
+export * from "./metering/cad-reserve-reconcile";
+export * from "./metering/concurrency-tracker";

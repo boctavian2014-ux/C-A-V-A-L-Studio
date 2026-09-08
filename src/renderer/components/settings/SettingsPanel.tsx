@@ -28,6 +28,7 @@ import {
 import type { MessageKey } from '../../../../ai/i18n/locales/en';
 import type { CadConnectionSettingsSnapshot, CadConnectionSource } from '../../../shared/cad-connection-settings-contract';
 import { showWorkbenchToast } from '../../commands/workbench-toast';
+import { useEntitlementStatusStore } from '../../../../ai/composer/entitlement-status-store';
 
 const NAV_ITEMS: { id: SettingsSection; labelKey: MessageKey; icon: React.ReactNode }[] = [
   {
@@ -769,6 +770,7 @@ function SectionHealth() {
 
 function SectionSubscription() {
   const { t } = useTranslation();
+  const usageRefreshEpoch = useEntitlementStatusStore((s) => s.usageRefreshEpoch);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [upgradeBusy, setUpgradeBusy] = useState<'pro' | 'ultra' | null>(null);
@@ -793,7 +795,7 @@ function SectionSubscription() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      if (usageRefreshEpoch === 0) setLoading(true);
       setError(null);
       try {
         const me = await window.caval.subscriptionsMe?.();
@@ -822,7 +824,7 @@ function SectionSubscription() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t, usageRefreshEpoch]);
 
   const openUpgrade = async (plan: 'pro' | 'ultra') => {
     setUpgradeBusy(plan);
@@ -847,6 +849,51 @@ function SectionSubscription() {
   const resetLabel = summary?.currentPeriodEnd
     ? new Date(summary.currentPeriodEnd).toLocaleString()
     : '—';
+
+  const usageBar = (
+    used: number,
+    limit: number,
+    testId: string,
+    opts?: { currency?: boolean }
+  ) => {
+    const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : used > 0 ? 100 : 0;
+    const label = opts?.currency
+      ? `$${used.toFixed(2)} / $${limit.toFixed(2)}`
+      : `${used} / ${limit}`;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 160 }}>
+        <div
+          data-testid={testId}
+          style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--caval-text)' }}
+        >
+          {label}
+          <span style={{ marginLeft: 8, color: 'var(--caval-text-muted)' }}>{pct}%</span>
+        </div>
+        <div
+          data-testid={`${testId}-bar`}
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          style={{
+            height: 6,
+            borderRadius: 999,
+            background: 'rgba(255,255,255,0.08)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              width: `${pct}%`,
+              height: '100%',
+              background: pct >= 100 ? 'rgba(248,113,113,0.9)' : 'var(--caval-accent)',
+              transition: 'width 200ms ease',
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -894,19 +941,15 @@ function SectionSubscription() {
       {summary && (
         <Section title={t('settings.subscription.usageTitle')}>
           <Row label={t('settings.subscription.chatTokens')}>
-            <span data-testid="usage-chat-tokens" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-              {summary.usage.chatTokensUsed} / {summary.limits.chatTokens}
-            </span>
+            {usageBar(summary.usage.chatTokensUsed, summary.limits.chatTokens, 'usage-chat-tokens')}
           </Row>
           <Row label={t('settings.subscription.cadJobs')}>
-            <span data-testid="usage-cad-jobs" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-              {summary.usage.cadJobsUsed} / {summary.limits.cadJobs}
-            </span>
+            {usageBar(summary.usage.cadJobsUsed, summary.limits.cadJobs, 'usage-cad-jobs')}
           </Row>
           <Row label={t('settings.subscription.zooBudget')}>
-            <span data-testid="usage-zoo" style={{ fontSize: 12, fontFamily: 'monospace' }}>
-              ${summary.usage.zooCostAccrued.toFixed(2)} / ${summary.limits.zooBudgetUsd.toFixed(2)}
-            </span>
+            {usageBar(summary.usage.zooCostAccrued, summary.limits.zooBudgetUsd, 'usage-zoo', {
+              currency: true,
+            })}
           </Row>
           <Row label={t('settings.subscription.requests')}>
             <span data-testid="usage-requests" style={{ fontSize: 12, fontFamily: 'monospace' }}>

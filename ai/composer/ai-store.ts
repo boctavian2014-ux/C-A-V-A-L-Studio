@@ -22,6 +22,11 @@ import {
 } from '../context-engine/context-builder';
 import { mergeProjectContextWithBootstrap } from '../context/workspace-bootstrap-shared';
 import { useFallbackStatusStore } from './fallback-status-store';
+import {
+  useEntitlementStatusStore,
+  type EntitlementDenialReason,
+  type PlanId,
+} from './entitlement-status-store';
 import { isScaffoldContinueRequest, buildScaffoldContinueUserMessage } from '../prompts/scaffold-emission-rule';
 import { isArenaContinueRequest } from '../prompts/arena-continue';
 import { isAgenticRepairRequest, buildAgenticRepairMessage } from '../prompts/agentic-repair';
@@ -2399,6 +2404,16 @@ export const useAIStore = create<AIStore>()(
           }
           if (chunk.type === 'error') {
             if (userStoppedStream || chunk.error === 'Aborted') return;
+            if (chunk.code === 'upgrade_required') {
+              useEntitlementStatusStore.getState().noteUpgradeRequired({
+                reason: (chunk.reason as EntitlementDenialReason) ?? 'monthly_chat_tokens_exhausted',
+                currentPlan: (chunk.currentPlan as PlanId) ?? 'free',
+                requiredPlan: (chunk.requiredPlan as PlanId) ?? 'pro',
+                resetsAt: chunk.resetsAt ?? new Date().toISOString(),
+                message: chunk.error,
+                source: 'chat',
+              });
+            }
             finish(`Eroare: ${chunk.error ?? 'necunoscută'}`, {
               error: chunk.error,
               errorCode: chunk.code,

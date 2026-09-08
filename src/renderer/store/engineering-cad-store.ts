@@ -15,6 +15,11 @@ import {
 } from '../../../ai/engineering/toy-helicopter-scad';
 import type { EngProject } from '../../../ai/engineering/engineering-generator';
 import { useAIStore } from '../../../ai/composer/ai-store';
+import {
+  useEntitlementStatusStore,
+  type EntitlementDenialReason,
+  type PlanId,
+} from '../../../ai/composer/entitlement-status-store';
 import { useEditorStore } from './editor-store';
 import type {
   CadChatMessage,
@@ -889,6 +894,21 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
               : undefined,
           quality: 'standard',
         });
+        if (created?.code === 'upgrade_required') {
+          useEntitlementStatusStore.getState().noteUpgradeRequired({
+            reason: (created.reason as EntitlementDenialReason) ?? 'monthly_cad_jobs_exhausted',
+            currentPlan: (created.currentPlan as PlanId) ?? 'free',
+            requiredPlan: (created.requiredPlan as PlanId) ?? 'pro',
+            resetsAt: created.resetsAt ?? new Date().toISOString(),
+            message: created.error,
+            source: 'cad',
+          });
+          patch({
+            phase: 'failed',
+            error: created.error ?? 'Plan limit reached — upgrade required.',
+          });
+          return;
+        }
         if (created?.code === 'cad_job_in_progress') {
           patch({
             phase: 'failed',

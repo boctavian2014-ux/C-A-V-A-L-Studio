@@ -155,6 +155,11 @@ export interface CavalStreamChunk {
   timedOut?: boolean;
   resolvedModel?: string;
   reason?: string;
+  /** Entitlement 402 fields (upgrade_required). */
+  currentPlan?: string;
+  requiredPlan?: string;
+  resetsAt?: string;
+  details?: unknown;
   model?: string;
   provider?: string;
   toolName?: string;
@@ -373,9 +378,37 @@ contextBridge.exposeInMainWorld("caval", {
     };
     ipcRenderer.on("caval:ai-stream-chunk", listener);
     const cleanup = () => ipcRenderer.removeListener("caval:ai-stream-chunk", listener);
-    void ipcRenderer.invoke("caval:ai-chat-stream", request).then((result: { ok: boolean }) => {
-      if (!result.ok) cleanup();
-    });
+    void ipcRenderer.invoke("caval:ai-chat-stream", request).then(
+      (result: {
+        ok: boolean;
+        error?: string;
+        code?: string;
+        currentPlan?: string;
+        requiredPlan?: string;
+        reason?: string;
+        resetsAt?: string;
+        details?: unknown;
+      }) => {
+        if (!result?.ok) {
+          onChunk({
+            streamId: request.streamId,
+            type: "error",
+            error: result?.error ?? "stream_start_failed",
+            code: result?.code,
+            reason: result?.reason,
+            ...(result?.code === "upgrade_required"
+              ? {
+                  currentPlan: result.currentPlan,
+                  requiredPlan: result.requiredPlan,
+                  resetsAt: result.resetsAt,
+                  details: result.details,
+                }
+              : {}),
+          } as CavalStreamChunk);
+          cleanup();
+        }
+      }
+    );
     return cleanup;
   },
   abortChatStream: (streamId: string) =>
@@ -1210,6 +1243,11 @@ contextBridge.exposeInMainWorld("caval", {
         phase?: string;
         ownerIsCaller?: boolean;
         error?: string;
+        currentPlan?: string;
+        requiredPlan?: string;
+        reason?: string;
+        resetsAt?: string;
+        details?: unknown;
       }>,
     getJob: (input: { jobId: string; cavalId?: string }) =>
       ipcRenderer.invoke("cad:getJob", input) as Promise<{
