@@ -183,6 +183,7 @@ describe('robotics stream HTTP telemetry', () => {
       .filter((args) => String(args[0]).startsWith('[robotics]'))
       .map((args) => JSON.parse(String(args[1])).event);
     expect(events).toEqual([
+      'robotics_route_vs_transport',
       'robotics_stream_http_start',
       'robotics_stream_http_headers',
       'robotics_stream_first_byte',
