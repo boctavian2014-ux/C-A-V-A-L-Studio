@@ -73,7 +73,10 @@ export interface CompleteModelTextInput {
   signal?: AbortSignal;
   /** Chat abort root — tool-loop registers as a child of this id. */
   abortParentId?: string;
-  /** Chat UI mode — drives NVIDIA ↔ Ollama fallback policy. */
+  /**
+   * Chat UI mode — channel (ask = no tools), not a provider override.
+   * Mode-aware NVIDIA ↔ Ollama fallback applies only to Auto tiers.
+   */
   chatMode?: "ask" | "code" | "agentic" | "plan" | "debug";
 }
 
@@ -347,9 +350,24 @@ function formatCompletionError(
   return ['Modelul nu a răspuns.', '', errors.join('\n')].join('\n');
 }
 
-function inferFallbackChatMode(
-  input: CompleteModelTextInput
-): "agentic" | "code" | "ask" | null {
+export type ModeAwareFallbackMode = "agentic" | "code" | "ask";
+
+type CompletionRoutingInput = Pick<
+  CompleteModelTextInput,
+  "model" | "chatMode" | "intent" | "capability"
+>;
+
+/**
+ * Mode-aware provider fallback is Auto-tier policy only.
+ * An explicit per-turn model (e.g. Robotics live StepFun) must not be
+ * replaced by chatMode=ask → NVIDIA before the first attempt.
+ */
+export function inferFallbackChatMode(
+  input: CompletionRoutingInput
+): ModeAwareFallbackMode | null {
+  if (!isAutoTier(input.model)) {
+    return null;
+  }
   if (input.chatMode === "agentic" || input.chatMode === "code" || input.chatMode === "ask") {
     return input.chatMode;
   }
@@ -357,6 +375,33 @@ function inferFallbackChatMode(
   if (input.capability === "code") return "code";
   if (input.capability === "debug" || input.capability === "planning") return null;
   return "ask";
+}
+
+/** First model id that would be passed to attempt/fetch, before rank(). */
+export function resolveCompletionAttemptPlan(
+  input: CompletionRoutingInput,
+  resolvedModelId: string
+): {
+  usesModeAwareFallback: boolean;
+  fallbackMode: ModeAwareFallbackMode | null;
+  firstAttemptModelId: string;
+} {
+  const fallbackMode = inferFallbackChatMode(input);
+  if (!fallbackMode) {
+    return {
+      usesModeAwareFallback: false,
+      fallbackMode: null,
+      firstAttemptModelId: resolvedModelId,
+    };
+  }
+  const config = DEFAULT_CAVAL_CONFIG.models?.fallback ?? DEFAULT_MODEL_FALLBACK;
+  const providerId = config.chains[fallbackMode][0];
+  const mapped = providerId ? modelIdsForRegistryProvider(providerId)[0] : undefined;
+  return {
+    usesModeAwareFallback: true,
+    fallbackMode,
+    firstAttemptModelId: mapped ?? resolvedModelId,
+  };
 }
 
 export async function executeModelCompletion(

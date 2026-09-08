@@ -164,6 +164,9 @@ export class ModelRouter {
         };
         return [pinnedRanked, ...ranked.filter((r) => r.model.id !== preferred)];
       }
+      // Explicit pin that cannot be resolved: fail closed. Do not
+      // substitute a different provider before the first attempt.
+      return [];
     }
 
     return ranked;
