@@ -78,6 +78,10 @@ export interface CavalChatStreamRequest {
   streamId: string;
   workspaceRoot?: string;
   messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  /** Robotics live retry index (0 = first attempt). Log-only. */
+  retryAttempt?: number;
+  /** First eng-* stream id of the user turn. */
+  parentTurnId?: string;
   /** Force OpenRouter json_object — Engineering AI */
   jsonMode?: boolean;
   maxTokens?: number;

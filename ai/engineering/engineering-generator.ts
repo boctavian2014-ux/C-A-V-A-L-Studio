@@ -140,6 +140,7 @@ async function runRoboticsCompletion(params: {
   const caval = (window as unknown as { caval?: { aiComplete?: CavalAiComplete } }).caval;
 
   params.onStreamingMode?.('streaming');
+  let parentTurnId: string | undefined;
   let streamResult = await completeViaChatStream({
     model: live.modelId,
     intent: live.intent,
@@ -148,9 +149,13 @@ async function runRoboticsCompletion(params: {
     workspaceRoot: params.workspaceRoot,
     signal: params.signal,
     onDelta: params.onDelta,
-    onStreamStart: params.onStreamStart,
+    onStreamStart: (id) => {
+      parentTurnId = parentTurnId ?? id;
+      params.onStreamStart?.(id);
+    },
     onReasoningActivity: params.onReasoningActivity,
     retryAttempt: 0,
+    parentTurnId,
   });
 
   // Retry at most once, and only before the first document delta.
@@ -177,6 +182,7 @@ async function runRoboticsCompletion(params: {
       onStreamStart: params.onStreamStart,
       onReasoningActivity: params.onReasoningActivity,
       retryAttempt: 1,
+      parentTurnId,
     });
   }
 

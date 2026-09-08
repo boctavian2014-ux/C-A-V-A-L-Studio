@@ -66,6 +66,12 @@ export interface ModelRequest {
     resolvedModel?: string;
     selectionId?: string;
     responseFormat?: "json_object";
+    /** Robotics stream retry index (0 = first live attempt). Log-only. */
+    retryAttempt?: number;
+    /** First eng-* stream id of the turn; retry uses a new requestId. */
+    parentTurnId?: string;
+    /** Chat UI mode for Robotics HTTP telemetry. */
+    chatMode?: "ask" | "plan" | "code" | "agentic" | "debug";
   };
 }
 

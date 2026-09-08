@@ -2,6 +2,10 @@ import { resolveProviderModelId } from "../models/provider-model-id";
 import { extractReasoningFromDelta } from "./stream-reasoning";
 import { SafeProviderError, safeErrorFromHttpStatus, toSafeProviderError } from "./provider-errors";
 import { assertProviderRequestUrl } from "../../src/main/cloud-provider-registry";
+import {
+  createRoboticsStreamHttpObserver,
+  snapshotResponseHeaders,
+} from "../engineering/robotics-stream-http-telemetry";
 import type {
   ChatMessage,
   ModelDescriptor,
@@ -23,6 +27,28 @@ function isAbortError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = "name" in error ? String((error as { name?: unknown }).name) : "";
   return name === "AbortError";
+}
+
+function roboticsHttpErrorFields(error: unknown): {
+  error_code: string;
+  error_name: string;
+  http_status?: number;
+} {
+  if (error instanceof SafeProviderError) {
+    return {
+      error_code: error.code,
+      error_name: error.name,
+      http_status: error.httpStatus,
+    };
+  }
+  if (isAbortError(error)) {
+    return { error_code: "aborted", error_name: "AbortError" };
+  }
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: unknown }).name || "Error")
+      : "Error";
+  return { error_code: "fetch_failed", error_name: name };
 }
 
 async function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
@@ -114,9 +140,20 @@ export abstract class HttpChatProvider implements ModelProvider {
 
   async *stream(request: ModelRequest, model: ModelDescriptor, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamChunk> {
     this.assertEndpointAllowed(model.endpoint);
+    const observer = createRoboticsStreamHttpObserver({
+      requestId: request.metadata?.requestId,
+      parentTurnId: request.metadata?.parentTurnId,
+      retryAttempt: request.metadata?.retryAttempt,
+      provider: this.name,
+      model: model.id,
+      mode: request.metadata?.chatMode,
+      intent: request.intent,
+    });
     if (options.signal?.aborted) {
+      observer.abort();
       return;
     }
+    observer.httpStart();
     let response: Response;
     try {
       response = await fetch(model.endpoint, {
@@ -127,14 +164,24 @@ export abstract class HttpChatProvider implements ModelProvider {
       });
     } catch (err) {
       if (options.signal?.aborted || isAbortError(err)) {
+        observer.abort(roboticsHttpErrorFields(err));
         return;
       }
+      observer.error(roboticsHttpErrorFields(toSafeProviderError(err, this.name)));
       throw toSafeProviderError(err, this.name);
     }
 
+    observer.httpHeaders(snapshotResponseHeaders(response));
+
     if (!response.ok || !response.body) {
       await response.text().catch(() => "");
-      throw safeErrorFromHttpStatus(this.name, response.status || 502, undefined, response.headers);
+      const statusError = safeErrorFromHttpStatus(this.name, response.status || 502, undefined, response.headers);
+      observer.error({
+        error_code: statusError.code,
+        error_name: statusError.name,
+        http_status: response.status || 502,
+      });
+      throw statusError;
     }
 
     const reader = response.body.getReader();
@@ -144,6 +191,7 @@ export abstract class HttpChatProvider implements ModelProvider {
     try {
       while (true) {
         if (options.signal?.aborted) {
+          observer.abort();
           await cancelReader(reader);
           return;
         }
@@ -153,13 +201,19 @@ export abstract class HttpChatProvider implements ModelProvider {
           ({ value, done } = await reader.read());
         } catch (err) {
           if (options.signal?.aborted || isAbortError(err)) {
+            observer.abort(roboticsHttpErrorFields(err));
             await cancelReader(reader);
             return;
           }
+          observer.error(roboticsHttpErrorFields(toSafeProviderError(err, this.name)));
           throw toSafeProviderError(err, this.name);
         }
         if (done) {
           break;
+        }
+
+        if (value) {
+          observer.firstByte(value.byteLength);
         }
 
         buffer += decoder.decode(value, { stream: true });
@@ -183,6 +237,9 @@ export abstract class HttpChatProvider implements ModelProvider {
               }>;
             };
             const deltaObj = json.choices?.[0]?.delta;
+            observer.firstSseEvent("message", {
+              delta_keys: deltaObj && typeof deltaObj === "object" ? Object.keys(deltaObj).sort() : [],
+            });
             const reasoning = extractReasoningFromDelta(deltaObj);
             if (reasoning) {
               yield { kind: "reasoning", text: reasoning };
@@ -191,6 +248,7 @@ export abstract class HttpChatProvider implements ModelProvider {
               (typeof deltaObj?.content === "string" ? deltaObj.content : undefined) ??
               json.choices?.[0]?.message?.content;
             if (content) {
+              observer.firstContentDelta(content.length);
               yield { kind: "content", text: content };
             }
           } catch {
@@ -198,6 +256,7 @@ export abstract class HttpChatProvider implements ModelProvider {
           }
         }
       }
+      observer.done();
     } finally {
       try {
         reader.releaseLock();

@@ -26,6 +26,8 @@ export async function completeViaChatStream(params: {
   onReasoningActivity?: () => void;
   /** 0 = first live attempt, 1 = retry before first token. */
   retryAttempt?: number;
+  /** First eng-* stream id of this user turn. */
+  parentTurnId?: string;
 }): Promise<
   | { ok: true; text: string; resolvedModel?: string; deltaChars: number }
   | { ok: false; error: string; aborted?: boolean; deltaChars: number; partialText?: string }
@@ -38,13 +40,15 @@ export async function completeViaChatStream(params: {
           model: string;
           mode?: string;
           intent?: import('../types').RoutingIntent;
-          streamId: string;
-          workspaceRoot?: string;
-          jsonMode?: boolean;
-          maxTokens?: number;
-          temperature?: number;
-          timeoutMs?: number;
-          messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      streamId: string;
+      workspaceRoot?: string;
+      messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      jsonMode?: boolean;
+      maxTokens?: number;
+      temperature?: number;
+      timeoutMs?: number;
+      retryAttempt?: number;
+      parentTurnId?: string;
         },
         onChunk: (chunk: CavalStreamChunk) => void
       ) => () => void;
@@ -142,6 +146,8 @@ export async function completeViaChatStream(params: {
         maxTokens: params.maxTokens ?? 16_384,
         temperature: 0.2,
         timeoutMs: 180_000,
+        retryAttempt: params.retryAttempt ?? 0,
+        parentTurnId: params.parentTurnId,
       },
       (chunk: CavalStreamChunk) => {
         if (params.signal?.aborted) {

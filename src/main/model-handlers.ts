@@ -170,6 +170,12 @@ export interface CavalChatStreamRequest {
 
   streamId: string;
 
+  /** Robotics live retry index (0 = first attempt). Log-only. */
+  retryAttempt?: number;
+
+  /** First eng-* stream id of the user turn (retry has a new streamId). */
+  parentTurnId?: string;
+
   workspaceRoot?: string;
 
   messages?: ChatStreamMessage[];
@@ -614,6 +620,8 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
       request.mode === "agentic" || request.mode === "code" || request.mode === "ask"
         ? request.mode
         : undefined,
+    retryAttempt: request.retryAttempt,
+    parentTurnId: request.parentTurnId,
 
   };
 
