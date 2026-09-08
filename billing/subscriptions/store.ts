@@ -84,6 +84,21 @@ export function activateRevolutSubscription(
     if (existingOwner && existingOwner !== userId) {
       throw new Error(`revolutPaymentReference already used by another user`);
     }
+    const existing = subscriptions.get(userId);
+    if (
+      existing &&
+      existingOwner === userId &&
+      existing.revolutPaymentReference === ref &&
+      existing.status === "active"
+    ) {
+      // Same user + same payment ref: idempotent only when plan matches.
+      if (existing.plan !== plan) {
+        throw new Error(
+          `revolutPaymentReference already activates plan "${existing.plan}"; cannot re-activate as "${plan}"`
+        );
+      }
+      return existing;
+    }
   }
 
   const activatedAt = input.activatedAt ?? new Date().toISOString();
