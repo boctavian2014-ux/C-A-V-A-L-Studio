@@ -73,6 +73,18 @@ export const ro = {
   "settings.subscription.upgradeError": "Nu s-a putut deschide linkul de upgrade.",
   "settings.subscription.loadError": "Nu s-a putut încărca statusul abonamentului.",
 
+  "ai.entitlement.title": "Limită de plan atinsă",
+  "ai.entitlement.dismiss": "Închide",
+  "ai.entitlement.planLine": "Curent: {{current}} · Necesar: {{required}}",
+  "ai.entitlement.resetsAt": "Se resetează {{date}}",
+  "ai.entitlement.reason.generic": "Planul curent nu permite această acțiune.",
+  "ai.entitlement.reason.model_tier_not_allowed": "Acest tier de model nu este inclus în plan.",
+  "ai.entitlement.reason.monthly_chat_tokens_exhausted": "Cota lunară de tokeni chat este epuizată.",
+  "ai.entitlement.reason.monthly_cad_jobs_exhausted": "Cota lunară de joburi CAD este epuizată.",
+  "ai.entitlement.reason.monthly_zoo_budget_exhausted": "Bugetul lunar Zoo este epuizat.",
+  "ai.entitlement.reason.plan_concurrency_limit": "Limita de cereri concurente pentru acest plan a fost atinsă.",
+  "ai.entitlement.reason.plan_rate_limit": "Limita de rată a planului a fost atinsă.",
+
   "settings.editor.title": "Monaco Editor",
   "settings.editor.fontSize": "Dimensiune font",
   "settings.editor.fontSizeDesc": "Dimensiunea fontului în editor",

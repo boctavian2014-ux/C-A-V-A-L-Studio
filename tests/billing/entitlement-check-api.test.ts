@@ -30,9 +30,16 @@ describe("entitlement-check HTTP 402", () => {
       .send({ userId: "caval_x", action: "chat", modelId: "claude-opus-5" });
     expect(response.status).toBe(402);
     expect(response.body.error).toBe("upgrade_required");
+    expect(response.body.code).toBe("upgrade_required");
     expect(response.body.reason).toBe("model_tier_not_allowed");
     expect(response.body.requiredPlan).toBe("ultra");
     expect(response.body.resetsAt).toBeTruthy();
+    // Runtime JSON shape — not only TS types
+    expect(JSON.parse(JSON.stringify(response.body))).toMatchObject({
+      error: "upgrade_required",
+      code: "upgrade_required",
+      reason: "model_tier_not_allowed",
+    });
   });
 
   it("returns ok for allowed fast model", async () => {

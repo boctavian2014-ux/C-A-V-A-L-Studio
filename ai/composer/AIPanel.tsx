@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useAIStore, formatAssistantTurnModelLabel, findRetryableStoppedTurn, isChatStopIntent, ensurePipelineVerifyListener, type ChatMessage } from './ai-store';
 import { ChatModelSelect } from './ChatModelSelect';
 import { ChatFallbackStatus } from './ChatFallbackStatus';
+import { ChatUpgradeBanner } from './ChatUpgradeBanner';
 import { ChatStoppedRetry } from './ChatStoppedRetry';
 import { useModelCatalog } from './use-model-catalog';
 import { useCavalTheme } from '../../themes/theme-provider';
@@ -1115,6 +1116,8 @@ export function AIPanel({ onClose, onOpenComposer }: { onClose?: () => void; onO
           }}
         />
       </header>
+
+      <ChatUpgradeBanner />
 
       {showAiSettings ? (
         <AiSettingsPanel onClose={() => setShowAiSettings(false)} />

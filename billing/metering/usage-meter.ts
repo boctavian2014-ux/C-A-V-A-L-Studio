@@ -1,5 +1,8 @@
 /**
  * Idempotent usage mutations + CAD reservations (in-memory PR2).
+ *
+ * All zooCostAccrued / cadJobsUsed updates go through mutateUsage under a
+ * per-user lock so concurrent jobs cannot lost-update the same period row.
  */
 
 import type { MeteredProviderId, ModelUsageEntry, UsageRecord } from "../subscription-types";
@@ -27,13 +30,58 @@ const cadReservations = new Map<
   }
 >();
 
+/** Per-user async mutex tail — serializes mutateUsage across await boundaries. */
+const usageLockTails = new Map<string, Promise<void>>();
+/** Reentrant sync depth so nested mutateUsage on the same stack is allowed. */
+const usageLockDepth = new Map<string, number>();
+
 export function resetMeteringStateForTests(): void {
   idempotencyKeys.clear();
   cadReservations.clear();
+  usageLockTails.clear();
+  usageLockDepth.clear();
+}
+
+function normalizeUserId(userId: string): string {
+  return userId.trim() || "anonymous";
+}
+
+/**
+ * Serialize work that reads/writes the same user's usage row.
+ * Sync callers use the reentrant depth path; async callers chain on the tail.
+ */
+export async function withUserUsageLock<T>(
+  userId: string,
+  fn: () => T | Promise<T>
+): Promise<T> {
+  const id = normalizeUserId(userId);
+  const prev = usageLockTails.get(id) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const linked = prev.then(() => gate);
+  usageLockTails.set(
+    id,
+    linked.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  await prev;
+  usageLockDepth.set(id, (usageLockDepth.get(id) ?? 0) + 1);
+  try {
+    return await fn();
+  } finally {
+    const depth = (usageLockDepth.get(id) ?? 1) - 1;
+    if (depth <= 0) usageLockDepth.delete(id);
+    else usageLockDepth.set(id, depth);
+    release();
+  }
 }
 
 function activeUsage(userId: string, now = new Date()): UsageRecord {
-  const id = userId.trim() || "anonymous";
+  const id = normalizeUserId(userId);
   const plan = resolveEffectivePlan(id, now);
   const sub = getRevolutSubscription(id);
   if (plan !== "free" && sub) {
@@ -46,10 +94,31 @@ function activeUsage(userId: string, now = new Date()): UsageRecord {
   return ensureUsageRecord(id, periodStart, periodEnd);
 }
 
+/**
+ * Atomic in-place update of the live UsageRecord for this user.
+ * Never clone-then-write: mutator receives the shared store object.
+ */
 function mutateUsage(userId: string, mutator: (u: UsageRecord) => void, now = new Date()): UsageRecord {
-  const usage = activeUsage(userId, now);
-  mutator(usage);
-  return usage;
+  const id = normalizeUserId(userId);
+  const enter = () => {
+    usageLockDepth.set(id, (usageLockDepth.get(id) ?? 0) + 1);
+  };
+  const leave = () => {
+    const depth = (usageLockDepth.get(id) ?? 1) - 1;
+    if (depth <= 0) usageLockDepth.delete(id);
+    else usageLockDepth.set(id, depth);
+  };
+
+  // Sync path: Node cannot interleave two sync mutators on the same stack.
+  // Depth tracks nesting; async withUserUsageLock awaits before entering.
+  enter();
+  try {
+    const usage = activeUsage(id, now);
+    mutator(usage);
+    return usage;
+  } finally {
+    leave();
+  }
 }
 
 export function recordChatUsage(input: {
@@ -126,7 +195,7 @@ export function reserveCadJob(input: {
   );
 
   cadReservations.set(input.reservationId, {
-    userId: input.userId.trim() || "anonymous",
+    userId: normalizeUserId(input.userId),
     periodStart: usage.periodStart,
     reservedZooUsd: estimated,
     reservedCadJob: true,
@@ -169,6 +238,7 @@ export function reconcileCadReservation(input: {
   const actual = Math.max(0, input.actualZooCostUsd);
   const delta = actual - res.reservedZooUsd;
 
+  // Single atomic update: adjust accrued by delta (not read-clone-write).
   mutateUsage(res.userId, (u) => {
     u.zooCostAccrued = Math.max(0, u.zooCostAccrued + delta);
     const model = input.model ?? `${input.actualProvider}-job`;
@@ -192,6 +262,32 @@ export function reconcileCadReservation(input: {
   res.reservedZooUsd = actual;
   trackCadReservationEnd(res.userId, input.reservationId);
   return { ok: true, applied: true };
+}
+
+/**
+ * Locked variants — hold the per-user mutex across the full check + mutate
+ * so concurrent CAD jobs cannot interleave zooCostAccrued updates.
+ */
+export async function reserveCadJobLocked(
+  input: Parameters<typeof reserveCadJob>[0]
+): Promise<ReturnType<typeof reserveCadJob>> {
+  return withUserUsageLock(input.userId, () => reserveCadJob(input));
+}
+
+export async function releaseCadReservationLocked(
+  input: Parameters<typeof releaseCadReservation>[0]
+): Promise<ReturnType<typeof releaseCadReservation>> {
+  const res = cadReservations.get(input.reservationId);
+  if (!res) return { ok: false };
+  return withUserUsageLock(res.userId, () => releaseCadReservation(input));
+}
+
+export async function reconcileCadReservationLocked(
+  input: Parameters<typeof reconcileCadReservation>[0]
+): Promise<{ ok: boolean; applied: boolean }> {
+  const res = cadReservations.get(input.reservationId);
+  if (!res) return { ok: false, applied: false };
+  return withUserUsageLock(res.userId, () => reconcileCadReservation(input));
 }
 
 export function getCadReservation(reservationId: string) {

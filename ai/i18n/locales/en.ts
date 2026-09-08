@@ -71,6 +71,18 @@ export const en = {
   "settings.subscription.upgradeError": "Could not open the upgrade link.",
   "settings.subscription.loadError": "Could not load subscription status.",
 
+  "ai.entitlement.title": "Plan limit reached",
+  "ai.entitlement.dismiss": "Dismiss",
+  "ai.entitlement.planLine": "Current: {{current}} · Need: {{required}}",
+  "ai.entitlement.resetsAt": "Resets {{date}}",
+  "ai.entitlement.reason.generic": "Your current plan cannot run this action.",
+  "ai.entitlement.reason.model_tier_not_allowed": "This model tier is not included in your plan.",
+  "ai.entitlement.reason.monthly_chat_tokens_exhausted": "Monthly chat token quota is exhausted.",
+  "ai.entitlement.reason.monthly_cad_jobs_exhausted": "Monthly CAD job quota is exhausted.",
+  "ai.entitlement.reason.monthly_zoo_budget_exhausted": "Monthly Zoo budget is exhausted.",
+  "ai.entitlement.reason.plan_concurrency_limit": "Concurrent request limit reached for this plan.",
+  "ai.entitlement.reason.plan_rate_limit": "Plan rate limit reached.",
+
   "settings.editor.title": "Monaco Editor",
   "settings.editor.fontSize": "Font size",
   "settings.editor.fontSizeDesc": "Editor font size",

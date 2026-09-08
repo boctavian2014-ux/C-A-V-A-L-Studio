@@ -32,7 +32,9 @@ export interface RequirePlanEntitlementInput {
 }
 
 function denial(
-  partial: Omit<UpgradeRequiredPayload, "error"> & { code?: UpgradeRequiredPayload["code"] }
+  partial: Omit<UpgradeRequiredPayload, "error" | "code"> & {
+    code?: UpgradeRequiredPayload["code"];
+  }
 ): never {
   throw new PlanEntitlementError({
     error: "upgrade_required",

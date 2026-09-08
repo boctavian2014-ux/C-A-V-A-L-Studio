@@ -7,14 +7,21 @@ import {
   entitlementDenialIpc,
 } from "../../billing/entitlement-errors";
 import { activatePlan } from "../../billing/subscriptions/service";
-import { resetRevolutSubscriptionsForTests } from "../../billing/subscriptions/store";
+import {
+  getRevolutSubscription,
+  getUsageRecord,
+  resetRevolutSubscriptionsForTests,
+} from "../../billing/subscriptions/store";
 import { resetConcurrencyTrackerForTests } from "../../billing/metering/concurrency-tracker";
 import {
   recordChatUsage,
   reserveCadJob,
   releaseCadReservation,
   reconcileCadReservation,
+  reconcileCadReservationLocked,
+  withUserUsageLock,
   resetMeteringStateForTests,
+  getCadReservation,
 } from "../../billing/metering/usage-meter";
 import { trackChatStreamStart } from "../../billing/metering/concurrency-tracker";
 
@@ -40,6 +47,7 @@ describe("requirePlanEntitlement + metering", () => {
         expect(error.payload.error).toBe("upgrade_required");
         expect(error.payload.reason).toBe("model_tier_not_allowed");
         expect(error.payload.requiredPlan).toBe("ultra");
+        expect(error.payload.code).toBe("upgrade_required");
         expect(entitlementDenialIpc(error.payload).code).toBe("upgrade_required");
       }
     }
@@ -101,6 +109,8 @@ describe("requirePlanEntitlement + metering", () => {
       reason: "failed_before_exec",
     });
     expect(released.ok).toBe(true);
+    const res = getCadReservation("op-1");
+    expect(res?.status).toBe("released");
   });
 
   it("reconciles CAD reservation to actual zoo cost", () => {
@@ -124,6 +134,63 @@ describe("requirePlanEntitlement + metering", () => {
     });
     expect(done.ok).toBe(true);
     expect(done.applied).toBe(true);
+  });
+
+  it("withUserUsageLock serializes classic read-yield-write lost updates", async () => {
+    let accrued = 0;
+    await Promise.all(
+      [0, 1, 2, 3, 4].map(() =>
+        withUserUsageLock("u_lock", async () => {
+          const snap = accrued;
+          await new Promise((r) => setTimeout(r, 8));
+          accrued = snap + 1;
+        })
+      )
+    );
+    expect(accrued).toBe(5);
+  });
+
+  it("reconcileCadReservationLocked keeps zooCostAccrued correct under concurrency", async () => {
+    activatePlan({
+      userId: "u_race",
+      plan: "ultra",
+      activatedAt: "2026-09-08T00:00:00.000Z",
+    });
+    const now = new Date("2026-09-08T12:00:00.000Z");
+    reserveCadJob({
+      userId: "u_race",
+      reservationId: "op-a",
+      estimatedZooCostUsd: 0.1,
+      now,
+    });
+    reserveCadJob({
+      userId: "u_race",
+      reservationId: "op-b",
+      estimatedZooCostUsd: 0.1,
+      now,
+    });
+
+    await Promise.all([
+      reconcileCadReservationLocked({
+        reservationId: "op-a",
+        idempotencyKey: "job-a",
+        actualProvider: "zoo",
+        actualZooCostUsd: 0.05,
+        model: "zoo-a",
+      }),
+      reconcileCadReservationLocked({
+        reservationId: "op-b",
+        idempotencyKey: "job-b",
+        actualProvider: "zoo",
+        actualZooCostUsd: 0.08,
+        model: "zoo-b",
+      }),
+    ]);
+
+    const periodStart = getRevolutSubscription("u_race")!.currentPeriodStart;
+    const usage = getUsageRecord("u_race", periodStart);
+    // Soft-reserved 0.20, then deltas -0.05 and -0.02 → 0.13
+    expect(usage?.zooCostAccrued).toBeCloseTo(0.13, 6);
   });
 
   it("denies when chat concurrency exceeded", () => {

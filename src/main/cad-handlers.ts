@@ -43,9 +43,9 @@ import {
 } from "../../billing/entitlement-errors";
 import { requirePlanEntitlement } from "../../billing/middleware/require-plan-entitlement";
 import {
-  reconcileCadReservation,
-  releaseCadReservation,
-  reserveCadJob,
+  reconcileCadReservationLocked,
+  releaseCadReservationLocked,
+  reserveCadJobLocked,
 } from "../../billing/metering/cad-reserve-reconcile";
 import type { MeteredProviderId } from "../../billing/subscription-types";
 import {
@@ -521,7 +521,7 @@ export const registerCadHandlers = (
         throw error;
       }
 
-      const reserved = reserveCadJob({
+      const reserved = await reserveCadJobLocked({
         userId: cavalId,
         reservationId: operationId,
         estimatedZooCostUsd: estimatedZoo,
@@ -559,7 +559,7 @@ export const registerCadHandlers = (
       }
 
       if (!postedOk) {
-        releaseCadReservation({ reservationId: operationId, reason: "failed_before_exec" });
+        await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
         releaseFailed("failed");
         return {
           ok: false,
@@ -570,7 +570,7 @@ export const registerCadHandlers = (
 
       const jobId = (json as { jobId?: string }).jobId;
       if (!jobId) {
-        releaseCadReservation({ reservationId: operationId, reason: "failed_before_exec" });
+        await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
         releaseFailed("failed");
         return {
           ok: false,
@@ -602,7 +602,7 @@ export const registerCadHandlers = (
           : modeHint.includes("meshy")
             ? "meshy"
             : "zoo";
-      reconcileCadReservation({
+      await reconcileCadReservationLocked({
         reservationId: operationId,
         idempotencyKey: `${jobId}:create`,
         actualProvider,
@@ -638,7 +638,7 @@ export const registerCadHandlers = (
                   senderId: event.sender.id,
                   workspaceRoot,
                 });
-                reconcileCadReservation({
+                await reconcileCadReservationLocked({
                   reservationId: operationId,
                   idempotencyKey: `${jobId}:create-local`,
                   actualProvider: "zoo",
@@ -648,7 +648,7 @@ export const registerCadHandlers = (
                 return { ...retry.json, ok: true, jobId, operationId };
               }
             }
-            releaseCadReservation({ reservationId: operationId, reason: "failed_before_exec" });
+            await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
             releaseFailed("failed");
             return {
               ok: false,
@@ -660,7 +660,7 @@ export const registerCadHandlers = (
           /* fall through */
         }
       }
-      releaseCadReservation({ reservationId: operationId, reason: "failed_before_exec" });
+      await releaseCadReservationLocked({ reservationId: operationId, reason: "failed_before_exec" });
       releaseFailed("failed");
       return { ...mapFetchError(error), operationId };
     }
