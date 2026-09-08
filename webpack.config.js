@@ -87,6 +87,9 @@ module.exports = [
           __dirname,
           "node_modules/@monaco-editor/loader/lib/es/index.js"
         ),
+        // Force a single Three.js copy. A second copy (async STLLoader chunk)
+        // makes R3F applyProps assign Object3D.position (read-only) instead of copy/set.
+        three: path.resolve(__dirname, "node_modules/three"),
         // Bundling compatibility (Linux webpack): ProvidePlugin requires a module path, not a Node package.
         globalThis: path.resolve(__dirname, "src/renderer/provide-global.js"),
       },

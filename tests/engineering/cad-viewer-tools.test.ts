@@ -7,6 +7,7 @@ import {
   explodeOffsets,
   formatDistanceMm,
   isTransformDirty,
+  toR3fPosition,
 } from "../../src/renderer/components/engineering/cad-viewer-tools";
 import {
   arrayBufferToBase64,
@@ -21,6 +22,10 @@ describe("cad-viewer-tools", () => {
   it("computes distance in mm", () => {
     expect(distanceMm({ x: 0, y: 0, z: 0 }, { x: 3, y: 4, z: 0 })).toBe(5);
     expect(formatDistanceMm(12.345)).toBe("12.35 mm");
+  });
+
+  it("converts Vector3-like values to R3F position tuples", () => {
+    expect(toR3fPosition({ x: 1.5, y: -2, z: 8 })).toEqual([1.5, -2, 8]);
   });
 
   it("builds clip plane normal and constant", () => {
