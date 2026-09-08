@@ -155,13 +155,13 @@ async function runRoboticsCompletion(params: {
 
   // Retry at most once, and only before the first document delta.
   // After deltas started, idle/watchdog is an interrupted stream — retry would duplicate content.
-  const canRetryBeforeFirstToken =
+  // Keep the `!streamResult.ok` check inline so the failure union (and `.error`) is narrowed.
+  if (
     !streamResult.ok &&
     !streamResult.aborted &&
     !params.signal?.aborted &&
-    (streamResult.deltaChars ?? 0) === 0;
-
-  if (canRetryBeforeFirstToken) {
+    (streamResult.deltaChars ?? 0) === 0
+  ) {
     console.warn(
       '[robotics] chatStream attempt 1 failed before first token, retrying once:',
       streamResult.error ?? 'unknown'
