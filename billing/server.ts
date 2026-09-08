@@ -10,6 +10,13 @@ import {
   getSubscriptionByCavalId,
   listSubscriptionsFromDb,
 } from "./supabase/repository";
+import {
+  activatePlan,
+  getSubscriptionSummary,
+  isUpgradePlanTarget,
+  resolveUpgradePaymentLink,
+} from "./subscriptions/service";
+import { managedProviderEnvConfigured } from "./model-registry";
 
 function isAllowedRedirectUrl(url: string): boolean {
   try {
@@ -114,6 +121,71 @@ export const createBillingServer = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       response.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  /** Renderer-facing summary — limits/usage computed server-side. */
+  app.get("/api/subscriptions/me", requireBillingApiKey, (request, response) => {
+    const userId =
+      (typeof request.query.userId === "string" && request.query.userId) ||
+      request.header("x-caval-user-id") ||
+      "";
+    if (!userId.trim()) {
+      response.status(400).json({ ok: false, error: "userId is required" });
+      return;
+    }
+    const summary = getSubscriptionSummary(userId.trim());
+    response.json({
+      ok: true,
+      ...summary,
+      /** Schema field reserved for metering PR; always empty in foundation. */
+      modelUsage: [],
+      managedProvidersConfigured: managedProviderEnvConfigured(),
+    });
+  });
+
+  app.get("/api/subscriptions/upgrade-link/:plan", requireBillingApiKey, (request, response) => {
+    const planParam = Array.isArray(request.params.plan)
+      ? request.params.plan[0]
+      : request.params.plan;
+    if (!isUpgradePlanTarget(planParam)) {
+      response.status(400).json({ ok: false, error: "plan must be pro or ultra" });
+      return;
+    }
+    const resolved = resolveUpgradePaymentLink(planParam);
+    if (!resolved.ok) {
+      response.status(503).json({ ok: false, error: resolved.error });
+      return;
+    }
+    response.json({ ok: true, plan: planParam, url: resolved.url });
+  });
+
+  app.post("/api/subscriptions/activate", requireBillingAdmin, (request, response) => {
+    try {
+      const body = request.body as {
+        userId?: string;
+        plan?: string;
+        revolutPaymentReference?: string;
+        periodDays?: number;
+      };
+      if (!body.userId?.trim() || !isUpgradePlanTarget(body.plan)) {
+        response.status(400).json({ ok: false, error: "userId and plan=pro|ultra required" });
+        return;
+      }
+      const record = activatePlan({
+        userId: body.userId.trim(),
+        plan: body.plan,
+        revolutPaymentReference: body.revolutPaymentReference,
+        periodDays: body.periodDays,
+      });
+      response.json({
+        ok: true,
+        subscription: record,
+        summary: getSubscriptionSummary(record.userId),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.status(400).json({ ok: false, error: message });
     }
   });
 

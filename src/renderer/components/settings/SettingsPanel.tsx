@@ -80,6 +80,16 @@ const NAV_ITEMS: { id: SettingsSection; labelKey: MessageKey; icon: React.ReactN
     ),
   },
   {
+    id: 'subscription',
+    labelKey: 'settings.nav.subscription',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="2" y="5" width="20" height="14" rx="2" />
+        <path d="M2 10h20M6 15h4" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     id: 'health',
     labelKey: 'settings.nav.health',
     icon: (
@@ -757,6 +767,207 @@ function SectionHealth() {
   return <ProjectHealthPanel />;
 }
 
+function SectionSubscription() {
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [upgradeBusy, setUpgradeBusy] = useState<'pro' | 'ultra' | null>(null);
+  const [summary, setSummary] = useState<{
+    plan: 'free' | 'pro' | 'ultra';
+    status: string;
+    currentPeriodEnd: string;
+    limits: {
+      chatTokens: number;
+      cadJobs: number;
+      zooBudgetUsd: number;
+      allowedModelTiers: string[];
+    };
+    usage: {
+      chatTokensUsed: number;
+      cadJobsUsed: number;
+      zooCostAccrued: number;
+      requestsUsed: number;
+    };
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const me = await window.caval.subscriptionsMe?.();
+        if (cancelled) return;
+        if (!me?.ok || !me.subscription || !me.limits || !me.usage) {
+          setError(me?.error ?? t('settings.subscription.loadError'));
+          setSummary(null);
+          return;
+        }
+        setSummary({
+          plan: me.subscription.plan,
+          status: me.subscription.status,
+          currentPeriodEnd: me.subscription.currentPeriodEnd,
+          limits: me.limits,
+          usage: me.usage,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+          setSummary(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openUpgrade = async (plan: 'pro' | 'ultra') => {
+    setUpgradeBusy(plan);
+    setError(null);
+    try {
+      const res = await window.caval.subscriptionsOpenUpgrade?.({ plan });
+      if (!res?.ok) {
+        setError(res?.error ?? t('settings.subscription.upgradeError'));
+        showWorkbenchToast(res?.error ?? t('settings.subscription.upgradeError'));
+      } else {
+        showWorkbenchToast(t('settings.subscription.upgradeOpened'));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      showWorkbenchToast(msg);
+    } finally {
+      setUpgradeBusy(null);
+    }
+  };
+
+  const resetLabel = summary?.currentPeriodEnd
+    ? new Date(summary.currentPeriodEnd).toLocaleString()
+    : '—';
+
+  return (
+    <>
+      <Section title={t('settings.subscription.title')}>
+        <InfoBox>{t('settings.subscription.manualBillingHint')}</InfoBox>
+        {loading && (
+          <div style={{ fontSize: 12, color: 'var(--caval-text-muted)' }}>{t('common.loading')}</div>
+        )}
+        {error && (
+          <div style={{ fontSize: 12, color: 'var(--caval-danger, #f87171)' }} data-testid="subscription-error">
+            {error}
+          </div>
+        )}
+        {summary && (
+          <div data-testid="subscription-summary" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Row label={t('settings.subscription.plan')} desc={t('settings.subscription.planDesc')}>
+              <span
+                data-testid="subscription-plan"
+                data-plan={summary.plan}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  color: 'var(--caval-accent)',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                {summary.plan}
+              </span>
+            </Row>
+            <Row label={t('settings.subscription.status')}>
+              <span data-testid="subscription-status" style={{ fontSize: 12, color: 'var(--caval-text-muted)' }}>
+                {summary.status}
+              </span>
+            </Row>
+            <Row label={t('settings.subscription.resetAt')} desc={t('settings.subscription.resetAtDesc')}>
+              <span data-testid="subscription-reset" style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>
+                {resetLabel}
+              </span>
+            </Row>
+          </div>
+        )}
+      </Section>
+
+      {summary && (
+        <Section title={t('settings.subscription.usageTitle')}>
+          <Row label={t('settings.subscription.chatTokens')}>
+            <span data-testid="usage-chat-tokens" style={{ fontSize: 12, fontFamily: 'monospace' }}>
+              {summary.usage.chatTokensUsed} / {summary.limits.chatTokens}
+            </span>
+          </Row>
+          <Row label={t('settings.subscription.cadJobs')}>
+            <span data-testid="usage-cad-jobs" style={{ fontSize: 12, fontFamily: 'monospace' }}>
+              {summary.usage.cadJobsUsed} / {summary.limits.cadJobs}
+            </span>
+          </Row>
+          <Row label={t('settings.subscription.zooBudget')}>
+            <span data-testid="usage-zoo" style={{ fontSize: 12, fontFamily: 'monospace' }}>
+              ${summary.usage.zooCostAccrued.toFixed(2)} / ${summary.limits.zooBudgetUsd.toFixed(2)}
+            </span>
+          </Row>
+          <Row label={t('settings.subscription.requests')}>
+            <span data-testid="usage-requests" style={{ fontSize: 12, fontFamily: 'monospace' }}>
+              {summary.usage.requestsUsed}
+            </span>
+          </Row>
+          <Row label={t('settings.subscription.modelTiers')} desc={t('settings.subscription.modelTiersDesc')}>
+            <span style={{ fontSize: 11.5, color: 'var(--caval-text-muted)' }}>
+              {summary.limits.allowedModelTiers.join(', ')}
+            </span>
+          </Row>
+        </Section>
+      )}
+
+      <Section title={t('settings.subscription.upgradeTitle')}>
+        <InfoBox>{t('settings.subscription.upgradeHint')}</InfoBox>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            data-testid="subscription-upgrade-pro"
+            disabled={upgradeBusy !== null || summary?.plan === 'pro' || summary?.plan === 'ultra'}
+            onClick={() => void openUpgrade('pro')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--caval-border)',
+              background: 'rgba(0,224,255,0.08)',
+              color: 'var(--caval-text)',
+              cursor: upgradeBusy ? 'wait' : 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+              opacity: summary?.plan === 'pro' || summary?.plan === 'ultra' ? 0.45 : 1,
+            }}
+          >
+            {upgradeBusy === 'pro' ? t('common.loading') : t('settings.subscription.upgradePro')}
+          </button>
+          <button
+            type="button"
+            data-testid="subscription-upgrade-ultra"
+            disabled={upgradeBusy !== null || summary?.plan === 'ultra'}
+            onClick={() => void openUpgrade('ultra')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--caval-border)',
+              background: 'rgba(124,58,237,0.12)',
+              color: 'var(--caval-text)',
+              cursor: upgradeBusy ? 'wait' : 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+              opacity: summary?.plan === 'ultra' ? 0.45 : 1,
+            }}
+          >
+            {upgradeBusy === 'ultra' ? t('common.loading') : t('settings.subscription.upgradeUltra')}
+          </button>
+        </div>
+      </Section>
+    </>
+  );
+}
+
 function SectionAbout() {
   const { t } = useTranslation();
   return (
@@ -847,6 +1058,7 @@ export function SettingsPanel({ onClose }: { onClose?: () => void }) {
       case 'ai': return <SectionAi />;
       case 'arena': return <SectionArena />;
       case 'cad-cloud': return <SectionCadCloud />;
+      case 'subscription': return <SectionSubscription />;
       case 'health': return <SectionHealth />;
       case 'shortcuts': return <SectionShortcuts />;
       case 'about': return <SectionAbout />;

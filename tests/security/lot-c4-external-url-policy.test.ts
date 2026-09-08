@@ -10,6 +10,7 @@ import {
   parseExternalUrl,
   redactUrlForDisplay,
   STRIPE_CHECKOUT_HOSTS,
+  REVOLUT_PAYMENT_HOSTS,
 } from "../../src/main/external-url-policy";
 
 describe("Lot C4 external-url-policy", () => {
@@ -41,6 +42,19 @@ describe("Lot C4 external-url-policy", () => {
   });
 
   describe("origin policy", () => {
+    it("USER_INITIATED_TRUSTED allows Revolut payment hosts", () => {
+      const e = evaluateExternalUrl(
+        "https://checkout.revolut.com/pay/abc",
+        "USER_INITIATED_TRUSTED",
+        {
+          allowedHosts: REVOLUT_PAYMENT_HOSTS,
+          isProduction: true,
+        }
+      );
+      expect(e.decision).toBe("allow");
+      expect(e.allowlisted).toBe(true);
+    });
+
     it("INTERNAL_CONSTANT allowlisted → allow", () => {
       const e = evaluateExternalUrl("https://caval.studio", "INTERNAL_CONSTANT", {
         allowedHosts: CAVALLO_TRUSTED_HOSTS,
