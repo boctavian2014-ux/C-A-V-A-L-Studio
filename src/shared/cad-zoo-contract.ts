@@ -55,7 +55,8 @@ const FREEFORM_RE =
   /(figurin|sculptur|animal|insect|fluture|dragon|organic|character|personaj|ciocan|hammer)/iu;
 
 /**
- * Likely CAD provider for UI badges — planner / job-processor remain source of truth.
+ * Idle-composer hint only. Live badges must use the CAD job's actual/resolved
+ * provider (`cad-job-lineage`); empty prompt defaults to OpenSCAD.
  */
 export function suggestCadProviderFromPrompt(prompt: string): CadProviderId {
   const t = prompt.trim();
