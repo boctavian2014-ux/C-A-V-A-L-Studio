@@ -9,7 +9,9 @@ export type RoboticsStreamHttpEvent =
   | 'robotics_stream_first_content_delta'
   | 'robotics_stream_done'
   | 'robotics_stream_error'
-  | 'robotics_stream_abort';
+  | 'robotics_stream_abort'
+  | 'robotics_route_resolve'
+  | 'robotics_route_vs_transport';
 
 export type RoboticsStreamHttpContext = {
   requestId?: string;
@@ -37,6 +39,8 @@ const SHORT: Record<RoboticsStreamHttpEvent, string> = {
   robotics_stream_done: 'done',
   robotics_stream_error: 'error',
   robotics_stream_abort: 'abort',
+  robotics_route_resolve: 'route_resolve',
+  robotics_route_vs_transport: 'route_vs_transport',
 };
 
 export function isRoboticsStreamHttpEnabled(requestId: string | undefined): boolean {
@@ -50,6 +54,60 @@ export function snapshotResponseHeaders(response: Response): RoboticsStreamHttpH
     content_encoding: response.headers.get('content-encoding'),
     transfer_encoding: response.headers.get('transfer-encoding'),
   };
+}
+
+function emitRoboticsDiag(event: RoboticsStreamHttpEvent, payload: Record<string, unknown>): void {
+  const requestId = typeof payload.request_id === 'string' ? payload.request_id : undefined;
+  if (!isRoboticsStreamHttpEnabled(requestId)) return;
+  console.info(
+    `[robotics] ${SHORT[event]}`,
+    JSON.stringify({ event, ...payload })
+  );
+}
+
+/** After Auto/fallback list is built, before any provider fetch. */
+export function logRoboticsRouteResolve(payload: {
+  request_id?: string;
+  retry_attempt?: number;
+  input_model?: string;
+  resolved_model?: string;
+  resolved_reason?: string;
+  try_models?: string[];
+  needs_fallback?: boolean;
+  openrouter_configured?: boolean;
+}): void {
+  emitRoboticsDiag('robotics_route_resolve', {
+    request_id: payload.request_id ?? null,
+    retry_attempt: payload.retry_attempt ?? 0,
+    input_model: payload.input_model ?? null,
+    resolved_model: payload.resolved_model ?? null,
+    resolved_reason: payload.resolved_reason ?? null,
+    try_models: payload.try_models ?? [],
+    needs_fallback: payload.needs_fallback ?? null,
+    openrouter_configured: payload.openrouter_configured ?? null,
+  });
+}
+
+/** Immediately before fetch — routed live model vs HTTP target. */
+export function logRoboticsRouteVsTransport(payload: {
+  request_id?: string;
+  retry_attempt?: number;
+  routed_model?: string;
+  attempt_model?: string;
+  transport_provider?: string;
+  transport_model?: string;
+}): void {
+  const routed = payload.routed_model ?? null;
+  const transport = payload.transport_model ?? null;
+  emitRoboticsDiag('robotics_route_vs_transport', {
+    request_id: payload.request_id ?? null,
+    retry_attempt: payload.retry_attempt ?? 0,
+    routed_model: routed,
+    attempt_model: payload.attempt_model ?? null,
+    transport_provider: payload.transport_provider ?? null,
+    transport_model: transport,
+    mismatch: Boolean(routed && transport && routed !== transport),
+  });
 }
 
 export function createRoboticsStreamHttpObserver(ctx: RoboticsStreamHttpContext) {

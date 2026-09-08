@@ -4,6 +4,7 @@ import { SafeProviderError, safeErrorFromHttpStatus, toSafeProviderError } from 
 import { assertProviderRequestUrl } from "../../src/main/cloud-provider-registry";
 import {
   createRoboticsStreamHttpObserver,
+  logRoboticsRouteVsTransport,
   snapshotResponseHeaders,
 } from "../engineering/robotics-stream-http-telemetry";
 import type {
@@ -153,6 +154,14 @@ export abstract class HttpChatProvider implements ModelProvider {
       observer.abort();
       return;
     }
+    logRoboticsRouteVsTransport({
+      request_id: request.metadata?.requestId,
+      retry_attempt: request.metadata?.retryAttempt,
+      routed_model: request.metadata?.selectionId,
+      attempt_model: request.metadata?.preferredModel,
+      transport_provider: this.name,
+      transport_model: model.id,
+    });
     observer.httpStart();
     let response: Response;
     try {

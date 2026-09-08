@@ -39,6 +39,7 @@ import type { ChatActivityPhase } from '../composer/chat-activity-types';
 import { pickBestEngineeringOutput } from '../engineering/engineering-json';
 import { pickCodeStreamOutput } from '../composer/scaffold-parser';
 import { REASONING_CHAT_ADDON } from '../prompts/reasoning-layer';
+import { logRoboticsRouteResolve } from '../engineering/robotics-stream-http-telemetry';
 
 const aiClient = new AIClient();
 
@@ -538,6 +539,17 @@ export async function executeModelCompletion(
       return toAgenticUiError(new AgenticProviderRequiredError());
     }
   }
+
+  logRoboticsRouteResolve({
+    request_id: requestId,
+    retry_attempt: input.retryAttempt,
+    input_model: input.model,
+    resolved_model: resolved.modelId,
+    resolved_reason: resolved.reason,
+    try_models: modelIdsToTry,
+    needs_fallback: needsModelFallback,
+    openrouter_configured: hasOpenRouterKey(),
+  });
 
   const attemptModel = async (modelId: string): Promise<CompleteModelTextResult> => {
     if (signal?.aborted) {

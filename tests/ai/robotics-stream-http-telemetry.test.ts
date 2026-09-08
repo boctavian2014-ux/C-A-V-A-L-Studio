@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createRoboticsStreamHttpObserver,
   isRoboticsStreamHttpEnabled,
+  logRoboticsRouteResolve,
+  logRoboticsRouteVsTransport,
 } from '../../ai/engineering/robotics-stream-http-telemetry';
 import { OpenRouterProvider } from '../../ai/providers/openrouter';
 import type { ModelDescriptor, ModelRequest } from '../../ai/types';
@@ -118,6 +120,37 @@ describe('robotics stream HTTP telemetry', () => {
     expect(headers.event).toBe('robotics_stream_http_headers');
     expect(headers.http_status).toBe(200);
     expect(headers.content_type).toBe('text/event-stream');
+  });
+
+  it('logs route_vs_transport mismatch without secrets', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    logRoboticsRouteResolve({
+      request_id: 'eng-route-1',
+      retry_attempt: 0,
+      input_model: 'stepfun-step-3-7-flash',
+      resolved_model: 'nvidia-deepseek-v4-flash',
+      resolved_reason: 'test',
+      try_models: ['nvidia-deepseek-v4-flash'],
+      needs_fallback: true,
+      openrouter_configured: false,
+    });
+    logRoboticsRouteVsTransport({
+      request_id: 'eng-route-1',
+      retry_attempt: 0,
+      routed_model: 'stepfun-step-3-7-flash',
+      attempt_model: 'nvidia-deepseek-v4-flash',
+      transport_provider: 'nvidia',
+      transport_model: 'nvidia-deepseek-v4-flash',
+    });
+    const payloads = info.mock.calls.map((args) => String(args[1] ?? ''));
+    expect(payloads.join('\n')).not.toMatch(/sk-or-|Bearer|NVIDIA_API_KEY/i);
+    const resolve = JSON.parse(payloads[0]!);
+    expect(resolve.event).toBe('robotics_route_resolve');
+    expect(resolve.input_model).toBe('stepfun-step-3-7-flash');
+    const vs = JSON.parse(payloads[1]!);
+    expect(vs.event).toBe('robotics_route_vs_transport');
+    expect(vs.mismatch).toBe(true);
+    expect(vs.transport_model).toBe('nvidia-deepseek-v4-flash');
   });
 
   it('logs first_byte, first_sse_event, first_content_delta on OpenAI-compatible SSE', async () => {
