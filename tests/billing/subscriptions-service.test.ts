@@ -73,6 +73,41 @@ describe("subscriptions service", () => {
     ).toThrow(/already used/);
   });
 
+  it("is idempotent for same user + same revolutPaymentReference", () => {
+    const first = activatePlan({
+      userId: "u_idem",
+      plan: "pro",
+      revolutPaymentReference: "rv_pay_idem",
+      activatedAt: "2026-09-08T12:00:00.000Z",
+    });
+    const second = activatePlan({
+      userId: "u_idem",
+      plan: "pro",
+      revolutPaymentReference: "rv_pay_idem",
+      activatedAt: "2026-09-09T12:00:00.000Z",
+    });
+    expect(second.currentPeriodStart).toBe(first.currentPeriodStart);
+    expect(second.currentPeriodEnd).toBe(first.currentPeriodEnd);
+    expect(second.activatedAt).toBe(first.activatedAt);
+  });
+
+  it("rejects same ref when active plan differs (operator mismatch)", () => {
+    activatePlan({
+      userId: "u_mismatch",
+      plan: "pro",
+      revolutPaymentReference: "rv_pay_mismatch",
+      activatedAt: "2026-09-08T12:00:00.000Z",
+    });
+    expect(() =>
+      activatePlan({
+        userId: "u_mismatch",
+        plan: "ultra",
+        revolutPaymentReference: "rv_pay_mismatch",
+        activatedAt: "2026-09-09T12:00:00.000Z",
+      })
+    ).toThrow(/already activates plan "pro"/);
+  });
+
   it("resolves upgrade payment links from env", () => {
     const missing = resolveUpgradePaymentLink("pro", {} as NodeJS.ProcessEnv);
     expect(missing.ok).toBe(false);
