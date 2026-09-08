@@ -27,6 +27,17 @@ import {
   runRoboticsCadBatch,
   type CadBatchPart,
 } from './engineering-cad-batch';
+import {
+  estimateProviderCost,
+  suggestCadProviderFromPrompt,
+  type CadProviderId,
+  type ProviderCostEstimate,
+} from '../../shared/cad-zoo-contract';
+import {
+  cadProviderFromCadMode,
+  inferCadActualProvider,
+  logCadJob,
+} from '../../shared/cad-job-lineage';
 
 export type { CadJobStatus };
 
@@ -70,6 +81,48 @@ const MAX_CREATE_RETRIES = 3;
 function log(message: string, extra?: unknown): void {
   if (extra !== undefined) console.info(LOG_PREFIX, message, extra);
   else console.info(LOG_PREFIX, message);
+}
+
+async function readCadFallbackMessage(
+  cad: NonNullable<typeof window.caval>['cad'],
+  jobId: string,
+  cavalId?: string
+): Promise<string | null> {
+  if (!cad?.getJobLogs) return null;
+  try {
+    const logs = await cad.getJobLogs({ jobId, cavalId });
+    const hit = [...(logs?.logs ?? [])]
+      .reverse()
+      .find((entry) => entry.event === 'pipeline_fallback');
+    return typeof hit?.message === 'string' ? hit.message : null;
+  } catch {
+    return null;
+  }
+}
+
+function emitCadJobDone(input: {
+  actualProvider: CadProviderId;
+  resolvedProvider: CadProviderId | null;
+  requestedProvider: CadProviderId | null;
+  cost: number;
+  status: string;
+  hasStl: boolean;
+  hasScad: boolean;
+  fallbackMessage?: string | null;
+}): void {
+  logCadJob('cad_job_done', {
+    actualProvider: input.actualProvider,
+    cost: input.cost,
+    requestedProvider: input.requestedProvider,
+    resolvedProvider: input.resolvedProvider,
+    status: input.status,
+    hasStl: input.hasStl,
+    hasScad: input.hasScad,
+    fallback: input.fallbackMessage ?? null,
+    mismatch: Boolean(
+      input.resolvedProvider && input.resolvedProvider !== input.actualProvider
+    ),
+  });
 }
 
 function serverStatusToPhase(status: CadJobStatus | null | undefined): CadStorePhase {
@@ -211,6 +264,13 @@ interface EngineeringCadState {
   batchSummary: string | null;
   batchBusy: boolean;
   activeBatchJobIds: string[];
+  /** Planner/pipeline request (not the composer prompt guess). */
+  requestedProvider: CadProviderId | null;
+  /** generationMode actually POSTed after client fallback. */
+  resolvedProvider: CadProviderId | null;
+  /** Artifact/log inference of what produced the STL. */
+  actualProvider: CadProviderId | null;
+  jobCostEstimate: ProviderCostEstimate | null;
 
   /** @deprecated use phase !== 'idle' */
   cadBusy: boolean;
@@ -324,6 +384,10 @@ function resetJobFields(): Partial<EngineeringCadState> {
     batchSummary: null,
     batchBusy: false,
     activeBatchJobIds: [],
+    requestedProvider: null,
+    resolvedProvider: null,
+    actualProvider: null,
+    jobCostEstimate: null,
   });
 }
 
@@ -353,6 +417,10 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
   batchSummary: null,
   batchBusy: false,
   activeBatchJobIds: [],
+  requestedProvider: null,
+  resolvedProvider: null,
+  actualProvider: null,
+  jobCostEstimate: null,
 
   cadBusy: false,
   cadStatus: null,
@@ -562,6 +630,16 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
       if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
         stopPolling();
+        const resolvedProvider = get().resolvedProvider ?? 'openscad';
+        emitCadJobDone({
+          actualProvider: resolvedProvider,
+          resolvedProvider,
+          requestedProvider: get().requestedProvider,
+          cost: 0,
+          status: 'timeout',
+          hasStl: Boolean(get().stlUrl),
+          hasScad: Boolean(get().scadContent),
+        });
         patch({
           phase: 'failed',
           serverStatus: 'failed',
@@ -611,11 +689,44 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
 
         if (isTerminalStatus(status)) {
           stopPolling();
+          const resolvedProvider = get().resolvedProvider ?? 'openscad';
+          const requestedProvider = get().requestedProvider;
+          const hasScad = Boolean(job.scad ?? get().scadContent);
+          const hasStl = Boolean(job.stlUrl);
+          const fallbackMessage = await readCadFallbackMessage(
+            cad,
+            jobId,
+            userIdResult?.userId
+          );
+          const actualProvider = inferCadActualProvider({
+            resolvedProvider,
+            hasScad,
+            hasStl,
+            fallbackMessage,
+          });
+          const jobCostEstimate =
+            actualProvider === 'zoo'
+              ? estimateProviderCost('zoo', get().lastPlan?.userPrompt ?? '')
+              : null;
+          emitCadJobDone({
+            actualProvider,
+            resolvedProvider,
+            requestedProvider,
+            cost: jobCostEstimate?.estimatedCostUsd ?? 0,
+            status,
+            hasStl,
+            hasScad,
+            fallbackMessage,
+          });
+          patch({
+            actualProvider,
+            jobCostEstimate,
+          });
           log('poll terminal', {
             jobId,
             status,
             error: job.error ?? null,
-            hasStl: Boolean(job.stlUrl),
+            hasStl,
           });
           return;
         }
@@ -706,6 +817,8 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       return;
     }
 
+    const suggestedProvider = suggestCadProviderFromPrompt(geometryPrompt);
+
     patch({
       phase: 'submitting',
       jobId: null,
@@ -722,6 +835,11 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       lastPlan: plan,
       retryCount: 0,
       activeBatchJobIds: [],
+      requestedProvider: suggestedProvider,
+      resolvedProvider: null,
+      actualProvider: suggestedProvider,
+      jobCostEstimate:
+        suggestedProvider === 'zoo' ? estimateProviderCost('zoo', geometryPrompt) : null,
     });
 
     await warmCadPipeline(resolvedModel, workspaceRoot);
@@ -783,6 +901,26 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       : forceOpenScadFallback
         ? 'openscad'
         : pipeline;
+
+    const requestedProvider = cadProviderFromCadMode(pipeline);
+    const resolvedProvider = cadProviderFromCadMode(generationMode);
+    const jobCostEstimate =
+      resolvedProvider === 'zoo' ? estimateProviderCost('zoo', geometryPrompt) : null;
+    logCadJob('cad_job_start', {
+      requestedProvider,
+      resolvedProvider,
+      suggestedProvider,
+      pipeline,
+      generationMode,
+      zooConfigured: credentials.zooConfigured,
+      forceOpenScadFallback,
+    });
+    patch({
+      requestedProvider,
+      resolvedProvider,
+      actualProvider: resolvedProvider,
+      jobCostEstimate,
+    });
 
     // Prefer planner tech only when it still mentions the user's subject; else raw chat.
     const plannerTech = planResult.plan.technicalPrompt?.trim() ?? '';
@@ -924,6 +1062,15 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
     }
 
     if (!created?.ok || !created.jobId) {
+      emitCadJobDone({
+        actualProvider: resolvedProvider,
+        resolvedProvider,
+        requestedProvider,
+        cost: 0,
+        status: 'create_failed',
+        hasStl: false,
+        hasScad: false,
+      });
       patch({
         phase: 'failed',
         error: normalizeCadErrorMessage(created?.error ?? 'Nu am putut crea job-ul CAD.'),
@@ -956,6 +1103,10 @@ export const useEngineeringCadStore = create<EngineeringCadState>()((set, get) =
       serverStatus: status,
       meshTaskId,
       statusMessage,
+      requestedProvider,
+      resolvedProvider,
+      actualProvider: resolvedProvider,
+      jobCostEstimate,
     });
 
     log('job created', { jobId, status, projectType });

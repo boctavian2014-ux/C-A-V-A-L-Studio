@@ -20,10 +20,8 @@ import { CavaloAiMark } from '../brand/CavaloHorseMark';
 import { bootstrapRoboticsDesktopProject } from './bootstrap-robotics-project';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
 import { ProviderBadge } from './ProviderBadge';
-import {
-  estimateProviderCost,
-  suggestCadProviderFromPrompt,
-} from '../../../shared/cad-zoo-contract';
+import { suggestCadProviderFromPrompt } from '../../../shared/cad-zoo-contract';
+import { resolveCadBadgeCost, resolveCadBadgeProvider } from '../../../shared/cad-job-lineage';
 
 // ──────────────────────────────────────────────────────────────
 //  Robotics AI ULTRA — composer (dreapta); răspunsul e în centru
@@ -56,14 +54,26 @@ export function EngineeringAIPanel() {
   const cadBusy = useEngineeringCadStore((s) => s.cadBusy);
   const batchBusy = useEngineeringCadStore((s) => s.batchBusy);
   const cancelCadJob = useEngineeringCadStore((s) => s.cancelCadJob);
+  const actualProvider = useEngineeringCadStore((s) => s.actualProvider);
+  const resolvedProvider = useEngineeringCadStore((s) => s.resolvedProvider);
+  const jobCostEstimate = useEngineeringCadStore((s) => s.jobCostEstimate);
+  const lastCadPrompt = useEngineeringCadStore((s) => s.lastPlan?.userPrompt ?? '');
 
   const [localReadinessHint, setLocalReadinessHint] = useState<string | null>(null);
   const [, setReadiness] = useState<ModelReadiness | null>(null);
   const [openRouterConfigured, setOpenRouterConfigured] = useState(false);
 
-  const likelyProvider = suggestCadProviderFromPrompt(prompt);
-  const costEstimate =
-    prompt.trim().length > 10 ? estimateProviderCost(likelyProvider, prompt) : null;
+  const suggestedProvider = suggestCadProviderFromPrompt(prompt);
+  const likelyProvider = resolveCadBadgeProvider({
+    suggestedProvider,
+    resolvedProvider,
+    actualProvider,
+  });
+  const costEstimate = resolveCadBadgeCost({
+    provider: likelyProvider,
+    jobCost: jobCostEstimate,
+    prompt: prompt.trim() || lastCadPrompt,
+  });
   const badgeStatus =
     loading || cadBusy || batchBusy
       ? 'generating'
@@ -624,12 +634,12 @@ export function EngineeringAIPanel() {
               }}>
                 ULTRA
               </span>
-              {prompt.trim().length > 10 ? (
+              {prompt.trim().length > 10 || actualProvider || resolvedProvider ? (
                 <ProviderBadge
                   provider={likelyProvider}
                   status={badgeStatus}
                   costEstimate={costEstimate}
-                  showCost
+                  showCost={likelyProvider === 'zoo'}
                   compact
                 />
               ) : null}
