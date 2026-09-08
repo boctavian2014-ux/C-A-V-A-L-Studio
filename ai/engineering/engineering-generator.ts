@@ -7,8 +7,13 @@ import type { ApiKeys } from '../multi-model/provider';
 import type { ModelSelectionId } from '../models/model-catalog';
 import { completeViaChatStream } from './engineering-stream';
 import {
+  describeRoboticsStreamRoute,
+  resolveRoboticsDeepCompleteRoute,
+  resolveRoboticsLiveStreamRoute,
+  roboticsRetryUserSuffix,
+} from './robotics-stream-routing';
+import {
   ROBOTICS_AI_ULTRA_RETRY_SUFFIX,
-  ROBOTICS_AI_ULTRA_SYSTEM_PROMPT,
 } from '../prompts/robotics-ai-ultra';
 import {
   CAVALLO_MODES_TEST_ROBOTICS_FIXTURE,
@@ -85,8 +90,6 @@ export interface GenerateResult {
   streamingMode?: 'streaming' | 'fallback';
 }
 
-const ROBOTICS_INTENT = 'deep_thinking' as const;
-
 type CavalAiComplete = (input: {
   model: string;
   intent?: string;
@@ -113,30 +116,75 @@ async function runRoboticsCompletion(params: {
   onReasoningActivity?: () => void;
   onStreamingMode?: (mode: 'streaming' | 'fallback') => void;
 }): Promise<
-  | { ok: true; text: string; resolvedModel?: string; streamingMode: 'streaming' | 'fallback' }
-  | { ok: false; error: string }
+  | {
+      ok: true;
+      text: string;
+      resolvedModel?: string;
+      streamingMode: 'streaming' | 'fallback';
+      warning?: string;
+    }
+  | { ok: false; error: string; aborted?: boolean }
 > {
+  const live = resolveRoboticsLiveStreamRoute(params.modelId);
+  console.log(describeRoboticsStreamRoute(live, params.modelId));
+
   const userContent = params.retryIncomplete
-    ? `${params.prompt.trim()}${ROBOTICS_AI_ULTRA_RETRY_SUFFIX}`
+    ? `${params.prompt.trim()}${roboticsRetryUserSuffix(live.promptProfile)}`
     : params.prompt.trim();
 
-  const messages = [
-    { role: 'system' as const, content: ROBOTICS_AI_ULTRA_SYSTEM_PROMPT },
+  const streamMessages = [
+    { role: 'system' as const, content: live.systemPrompt },
     { role: 'user' as const, content: userContent },
   ];
 
   const caval = (window as unknown as { caval?: { aiComplete?: CavalAiComplete } }).caval;
 
   params.onStreamingMode?.('streaming');
-  const streamResult = await completeViaChatStream({
-    model: params.modelId,
-    messages,
+  let parentTurnId: string | undefined;
+  let streamResult = await completeViaChatStream({
+    model: live.modelId,
+    intent: live.intent,
+    maxTokens: live.maxTokens,
+    messages: streamMessages,
     workspaceRoot: params.workspaceRoot,
     signal: params.signal,
     onDelta: params.onDelta,
-    onStreamStart: params.onStreamStart,
+    onStreamStart: (id) => {
+      parentTurnId = parentTurnId ?? id;
+      params.onStreamStart?.(id);
+    },
     onReasoningActivity: params.onReasoningActivity,
+    retryAttempt: 0,
+    parentTurnId,
   });
+
+  // Retry at most once, and only before the first document delta.
+  // After deltas started, idle/watchdog is an interrupted stream — retry would duplicate content.
+  // Keep the `!streamResult.ok` check inline so the failure union (and `.error`) is narrowed.
+  if (
+    !streamResult.ok &&
+    !streamResult.aborted &&
+    !params.signal?.aborted &&
+    (streamResult.deltaChars ?? 0) === 0
+  ) {
+    console.warn(
+      '[robotics] chatStream attempt 1 failed before first token, retrying once:',
+      streamResult.error ?? 'unknown'
+    );
+    streamResult = await completeViaChatStream({
+      model: live.modelId,
+      intent: live.intent,
+      maxTokens: live.maxTokens,
+      messages: streamMessages,
+      workspaceRoot: params.workspaceRoot,
+      signal: params.signal,
+      onDelta: params.onDelta,
+      onStreamStart: params.onStreamStart,
+      onReasoningActivity: params.onReasoningActivity,
+      retryAttempt: 1,
+      parentTurnId,
+    });
+  }
 
   // Stream path: document text is delta-only (never reasoning-merged).
   if (streamResult.ok) {
@@ -148,26 +196,56 @@ async function runRoboticsCompletion(params: {
     };
   }
 
-  // Non-stream fallback: explicit mode, no fake live section progress.
-  if (caval?.aiComplete) {
+  // Interrupted after deltas: keep partial document, do not retry or aiComplete.
+  if (!streamResult.aborted && (streamResult.deltaChars ?? 0) > 0) {
+    const partial = streamResult.partialText?.trim() ?? '';
+    console.warn(
+      '[robotics] stream interrupted after deltas — keeping partial, no retry/fallback',
+      streamResult.error ?? 'unknown'
+    );
+    return {
+      ok: true,
+      text: partial,
+      resolvedModel: undefined,
+      streamingMode: 'streaming',
+      warning: streamResult.error,
+    };
+  }
+
+  // Last-resort non-stream fallback: ULTRA + caller model (deep path).
+  if (caval?.aiComplete && !streamResult.aborted) {
+    const reason = streamResult.error ?? 'unknown';
+    const deep = resolveRoboticsDeepCompleteRoute(params.modelId);
+    console.warn(
+      '[robotics] chatStream failed before first token ×2 → aiComplete fallback:',
+      reason,
+      `deep model=${deep.modelId} prompt=${deep.promptProfile}`
+    );
     params.onStreamingMode?.('fallback');
+    const deepUser = params.retryIncomplete
+      ? `${params.prompt.trim()}${ROBOTICS_AI_ULTRA_RETRY_SUFFIX}`
+      : params.prompt.trim();
     const completeResult = await caval.aiComplete({
-      model: params.modelId,
-      intent: ROBOTICS_INTENT,
+      model: deep.modelId,
+      intent: deep.intent,
       capability: 'planning',
       workspaceRoot: params.workspaceRoot ?? undefined,
-      maxTokens: 16384,
+      maxTokens: deep.maxTokens,
       temperature: 0.2,
       timeoutMs: 180_000,
-      messages,
+      messages: [
+        { role: 'system', content: deep.systemPrompt },
+        { role: 'user', content: deepUser },
+      ],
     });
 
-    if (completeResult.ok) {
+    if (completeResult.ok && completeResult.text.trim()) {
       return {
         ok: true,
         text: completeResult.text,
         resolvedModel: completeResult.resolvedModel,
         streamingMode: 'fallback',
+        warning: `Stream indisponibil (${reason}) — răspuns livrat fără progres live.`,
       };
     }
   }
@@ -220,12 +298,13 @@ export async function generateEngineering(params: {
   }
 
   try {
+    const liveGuard = resolveRoboticsLiveStreamRoute(modelId);
     assertRendererChatAllowed({
       prompt: prompt.trim(),
-      system: ROBOTICS_AI_ULTRA_SYSTEM_PROMPT,
+      system: liveGuard.systemPrompt,
       workspaceRoot: workspaceRoot ?? undefined,
       capability: 'chat',
-      intent: 'kilocode',
+      intent: liveGuard.intent,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -391,7 +470,11 @@ export async function generateEngineering(params: {
     bomWarning = err instanceof Error ? err.message : String(err);
   }
 
-  const warnings = [recommendedWarning, bomWarning].filter(Boolean);
+  const warnings = [
+    result.ok ? result.warning : undefined,
+    recommendedWarning,
+    bomWarning,
+  ].filter(Boolean);
 
   return {
     ok: true,

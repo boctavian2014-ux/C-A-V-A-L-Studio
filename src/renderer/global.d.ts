@@ -490,6 +490,8 @@ interface CavalBridge {
       maxTokens?: number;
       temperature?: number;
       timeoutMs?: number;
+      retryAttempt?: number;
+      parentTurnId?: string;
       scaffoldMode?: boolean;
       skipMultiAgent?: boolean;
       strictReview?: boolean;

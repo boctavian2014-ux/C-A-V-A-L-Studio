@@ -77,6 +77,7 @@ import { TURN_WATCHDOG_ABORT_REASON } from "../shared/turn-watchdog";
 import {
   armTurnWatchdog,
   disarmTurnWatchdog,
+  noteTurnWatchdogProgress,
   wasTurnWatchdogEmitted,
 } from "./ai/turn-watchdog-runtime";
 import { cancelCadJobRemote } from "./cad-handlers";
@@ -168,6 +169,12 @@ export interface CavalChatStreamRequest {
   intent?: RoutingIntent;
 
   streamId: string;
+
+  /** Robotics live retry index (0 = first attempt). Log-only. */
+  retryAttempt?: number;
+
+  /** First eng-* stream id of the user turn (retry has a new streamId). */
+  parentTurnId?: string;
 
   workspaceRoot?: string;
 
@@ -501,12 +508,19 @@ function buildMessages(request: CavalChatStreamRequest): ChatStreamMessage[] {
     if (!hasSystem) {
       msgs.unshift({ role: "system", content: system });
     } else if (directChatMode) {
-      const sysIdx = msgs.findIndex((m) => m.role === "system");
-      if (sysIdx >= 0) {
-        msgs[sysIdx] = {
-          ...msgs[sysIdx]!,
-          content: systemPromptForMode(directChatMode, request.workspaceRoot),
-        };
+      // Preserve caller system prompts (Robotics ULTRA / eng-* streams). Arena ask/code
+      // still replace when the caller did not supply a specialized system message intent.
+      const preserveCallerSystem =
+        request.intent === "deep_thinking" ||
+        (typeof request.streamId === "string" && request.streamId.startsWith("eng-"));
+      if (!preserveCallerSystem) {
+        const sysIdx = msgs.findIndex((m) => m.role === "system");
+        if (sysIdx >= 0) {
+          msgs[sysIdx] = {
+            ...msgs[sysIdx]!,
+            content: systemPromptForMode(directChatMode, request.workspaceRoot),
+          };
+        }
       }
     }
 
@@ -606,6 +620,8 @@ function toCompletionInput(request: CavalChatStreamRequest): CompleteModelTextIn
       request.mode === "agentic" || request.mode === "code" || request.mode === "ask"
         ? request.mode
         : undefined,
+    retryAttempt: request.retryAttempt,
+    parentTurnId: request.parentTurnId,
 
   };
 
@@ -892,6 +908,22 @@ function assertStreamOwnedBySender(
     return { ok: false, error: "Cross-workspace stream control denied" };
   }
   return { ok: true };
+}
+
+/** Abort/cancel after watchdog or done — treat as success, not UI error. */
+function isIdempotentMissingStreamError(error: string | undefined): boolean {
+  return error === "Stream not found for this sender";
+}
+
+function idempotentAlreadyGoneResponse(streamId: string, via: "abort" | "cancel") {
+  console.debug(`[stream] ${via} idempotent already_gone streamId=${streamId}`);
+  return {
+    ok: true as const,
+    reason: "already_gone" as const,
+    status: "unknown" as const,
+    streamId,
+    remoteCancel: "skipped" as const,
+  };
 }
 
 export function abortAllStreamsForSender(senderId: number): void {
@@ -1721,10 +1753,13 @@ async function streamToRenderer(
     },
     onDelta: (delta) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
+      noteTurnWatchdogProgress(streamId);
       sendAssistantDelta(stream, delta);
     },
     onReasoning: (reasoningDelta) => {
       if (!stream.isAlive() || getStreamAbortSignal(streamId)?.aborted) return;
+      // Auto Frontier often streams reasoning for a long time before document deltas.
+      noteTurnWatchdogProgress(streamId);
       if (!emittedReasoningTimeline && reasoningDelta.trim()) {
         emittedReasoningTimeline = true;
         emitTimelineEvent(stream, streamId, {
@@ -2141,14 +2176,20 @@ export function registerModelHandlers(
       return resolved;
     }
     const boundRoot = resolved.workspaceRoot;
-    const limit = consumeAiRateLimit("stream_start", event.sender.id, boundRoot);
-    if (!limit.ok) {
-      return {
-        ok: false,
-        error: "rate_limited",
-        code: "rate_limited_local",
-        retryAfterMs: limit.retryAfterMs,
-      };
+    // Robotics (eng-*) must not share Arena's stream_start burst — otherwise planning
+    // silently falls back to non-streaming aiComplete after a few chat turns.
+    const isRoboticsStream =
+      typeof request.streamId === "string" && request.streamId.startsWith("eng-");
+    if (!isRoboticsStream) {
+      const limit = consumeAiRateLimit("stream_start", event.sender.id, boundRoot);
+      if (!limit.ok) {
+        return {
+          ok: false,
+          error: "rate_limited",
+          code: "rate_limited_local",
+          retryAfterMs: limit.retryAfterMs,
+        };
+      }
     }
     warmOpenRouterConnection();
     void streamToRenderer(event.sender, event.sender.id, request.streamId, request, getBoundWorkspaceRoot);
@@ -2164,6 +2205,10 @@ export function registerModelHandlers(
     }
     const owned = assertStreamOwnedBySender(event.sender.id, parsed.streamId);
     if (!owned.ok) {
+      // Watchdog/done already untracked — abort is idempotent.
+      if (isIdempotentMissingStreamError(owned.error)) {
+        return idempotentAlreadyGoneResponse(parsed.streamId, "abort");
+      }
       return { ok: false, error: owned.error };
     }
     discardIncompleteStreamTimeline(parsed.streamId);
@@ -2206,6 +2251,10 @@ export function registerModelHandlers(
           input?.workspaceRoot
         );
         if (!owned.ok && !cadJobId) {
+          // Stream already finished/watchdog-cleared — cancel is a no-op success.
+          if (isIdempotentMissingStreamError(owned.error)) {
+            return idempotentAlreadyGoneResponse(streamId, "cancel");
+          }
           return { ok: false, error: owned.error, status: "unknown" as const };
         }
       }

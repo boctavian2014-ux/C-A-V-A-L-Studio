@@ -39,6 +39,7 @@ import type { ChatActivityPhase } from '../composer/chat-activity-types';
 import { pickBestEngineeringOutput } from '../engineering/engineering-json';
 import { pickCodeStreamOutput } from '../composer/scaffold-parser';
 import { REASONING_CHAT_ADDON } from '../prompts/reasoning-layer';
+import { logRoboticsRouteResolve } from '../engineering/robotics-stream-http-telemetry';
 
 const aiClient = new AIClient();
 
@@ -75,6 +76,10 @@ export interface CompleteModelTextInput {
   abortParentId?: string;
   /** Chat UI mode — drives NVIDIA ↔ Ollama fallback policy. */
   chatMode?: "ask" | "code" | "agentic" | "plan" | "debug";
+  /** Robotics live retry index (0 = first attempt). Log-only. */
+  retryAttempt?: number;
+  /** First eng-* stream id of the user turn. */
+  parentTurnId?: string;
 }
 
 /** Code / Agentic / Debug: run write_file when a registry is attached. */
@@ -162,6 +167,9 @@ function buildModelRequest(
       resolvedModel: modelId,
       selectionId: input.model,
       workspaceRoot: input.workspaceRoot,
+      retryAttempt: input.retryAttempt,
+      parentTurnId: input.parentTurnId,
+      chatMode: input.chatMode,
       ...(input.jsonMode ? { responseFormat: 'json_object' as const } : {}),
     },
     messages: input.messages,
@@ -531,6 +539,17 @@ export async function executeModelCompletion(
       return toAgenticUiError(new AgenticProviderRequiredError());
     }
   }
+
+  logRoboticsRouteResolve({
+    request_id: requestId,
+    retry_attempt: input.retryAttempt,
+    input_model: input.model,
+    resolved_model: resolved.modelId,
+    resolved_reason: resolved.reason,
+    try_models: modelIdsToTry,
+    needs_fallback: needsModelFallback,
+    openrouter_configured: hasOpenRouterKey(),
+  });
 
   const attemptModel = async (modelId: string): Promise<CompleteModelTextResult> => {
     if (signal?.aborted) {

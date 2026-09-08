@@ -11,6 +11,10 @@ export async function completeViaChatStream(params: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   workspaceRoot?: string | null;
   signal?: AbortSignal;
+  /** Light intent for live stream TTFT; never deep_thinking on smoke path. */
+  intent?: import('../types').RoutingIntent;
+  /** Cap completion length on live/smoke path. */
+  maxTokens?: number;
   /** Incremental markdown deltas for progressive section UI (document content only). */
   onDelta?: (chunk: string) => void;
   /** Fired once when the stream id is known (for abortChatStream + stale guards). */
@@ -20,9 +24,13 @@ export async function completeViaChatStream(params: {
    * Callers must not append this into accumulated markdown / plan / sections.
    */
   onReasoningActivity?: () => void;
+  /** 0 = first live attempt, 1 = retry before first token. */
+  retryAttempt?: number;
+  /** First eng-* stream id of this user turn. */
+  parentTurnId?: string;
 }): Promise<
   | { ok: true; text: string; resolvedModel?: string; deltaChars: number }
-  | { ok: false; error: string; aborted?: boolean }
+  | { ok: false; error: string; aborted?: boolean; deltaChars: number; partialText?: string }
 > {
   const caval = (window as unknown as {
     caval?: {
@@ -32,13 +40,15 @@ export async function completeViaChatStream(params: {
           model: string;
           mode?: string;
           intent?: import('../types').RoutingIntent;
-          streamId: string;
-          workspaceRoot?: string;
-          jsonMode?: boolean;
-          maxTokens?: number;
-          temperature?: number;
-          timeoutMs?: number;
-          messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      streamId: string;
+      workspaceRoot?: string;
+      messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      jsonMode?: boolean;
+      maxTokens?: number;
+      temperature?: number;
+      timeoutMs?: number;
+      retryAttempt?: number;
+      parentTurnId?: string;
         },
         onChunk: (chunk: CavalStreamChunk) => void
       ) => () => void;
@@ -47,32 +57,53 @@ export async function completeViaChatStream(params: {
   }).caval;
 
   if (!caval?.chatStream) {
-    return { ok: false, error: 'Pipeline AI indisponibil (chatStream).' };
+    return { ok: false, error: 'Pipeline AI indisponibil (chatStream).', deltaChars: 0 };
   }
 
   const userMessage =
     [...params.messages].reverse().find((m) => m.role === 'user')?.content?.trim() ?? '';
 
   if (!userMessage) {
-    return { ok: false, error: 'Mesaj utilizator lipsă.' };
+    return { ok: false, error: 'Mesaj utilizator lipsă.', deltaChars: 0 };
   }
 
   // Abort already produced before subscribe — never leave a pending promise.
   if (params.signal?.aborted) {
-    return { ok: false, error: 'Generare anulată.', aborted: true };
+    return { ok: false, error: 'Generare anulată.', aborted: true, deltaChars: 0 };
   }
 
   return new Promise((resolve) => {
     const streamId = generateStreamId();
+    const streamStartMs = Date.now();
+    let firstDeltaMs: number | undefined;
+    let lastDeltaMs: number | undefined;
     let buffer = '';
     let resolvedModel: string | undefined;
     let settled = false;
     const cleanupHolder: { fn?: () => void } = {};
 
+    const telemetry = (extra: Record<string, unknown>) => {
+      console.info(
+        '[robotics] turn',
+        JSON.stringify({
+          request_id: streamId,
+          model: params.model,
+          mode: 'ask',
+          intent: params.intent ?? 'planning',
+          stream_start: streamStartMs,
+          first_delta: firstDeltaMs ?? null,
+          ttft_ms: firstDeltaMs != null ? firstDeltaMs - streamStartMs : null,
+          last_delta: lastDeltaMs ?? null,
+          retry_attempt: params.retryAttempt ?? 0,
+          ...extra,
+        })
+      );
+    };
+
     const finish = (
       result:
         | { ok: true; text: string; resolvedModel?: string; deltaChars: number }
-        | { ok: false; error: string; aborted?: boolean }
+        | { ok: false; error: string; aborted?: boolean; deltaChars: number; partialText?: string }
     ) => {
       if (settled) return;
       settled = true;
@@ -84,7 +115,8 @@ export async function completeViaChatStream(params: {
     const onAbort = () => {
       // Best-effort, once per streamId — main cancel is P2.
       issueAbortChatStreamOnce(streamId);
-      finish({ ok: false, error: 'Generare anulată.', aborted: true });
+      telemetry({ fallback_reason: 'aborted', watchdog_reason: null });
+      finish({ ok: false, error: 'Generare anulată.', aborted: true, deltaChars: buffer.length });
     };
 
     // Attach listener first, then check aborted (race with pre-aborted signal).
@@ -95,6 +127,7 @@ export async function completeViaChatStream(params: {
     }
 
     params.onStreamStart?.(streamId);
+    telemetry({ event: 'stream_start' });
     if (params.signal?.aborted) {
       onAbort();
       return;
@@ -107,12 +140,14 @@ export async function completeViaChatStream(params: {
         mode: 'ask',
         streamId,
         workspaceRoot: params.workspaceRoot ?? undefined,
-        intent: 'deep_thinking',
+        intent: params.intent ?? 'planning',
         messages: params.messages,
         jsonMode: false,
-        maxTokens: 16_384,
+        maxTokens: params.maxTokens ?? 16_384,
         temperature: 0.2,
         timeoutMs: 180_000,
+        retryAttempt: params.retryAttempt ?? 0,
+        parentTurnId: params.parentTurnId,
       },
       (chunk: CavalStreamChunk) => {
         if (params.signal?.aborted) {
@@ -127,19 +162,46 @@ export async function completeViaChatStream(params: {
           params.onReasoningActivity?.();
         }
         if (chunk.type === 'delta' && chunk.delta) {
+          const now = Date.now();
+          if (firstDeltaMs == null) firstDeltaMs = now;
+          lastDeltaMs = now;
           buffer += chunk.delta;
           params.onDelta?.(chunk.delta);
         }
         if (chunk.type === 'error') {
-          finish({ ok: false, error: chunk.error ?? 'Eroare necunoscută' });
+          const watchdog =
+            chunk.timedOut || chunk.code === 'turn_watchdog_timeout' ? 'watchdog' : null;
+          telemetry({
+            event: 'stream_error',
+            fallback_reason: chunk.error ?? 'unknown',
+            watchdog_reason: watchdog,
+          });
+          finish({
+            ok: false,
+            error: chunk.error ?? 'Eroare necunoscută',
+            deltaChars: buffer.length,
+            partialText: buffer,
+          });
         }
         if (chunk.type === 'done') {
-          // Delta channel is the sole source for final markdown document.
+          // Prefer live deltas; if the provider only delivered the final body
+          // (composeText / no incremental chunks), still accept the document.
+          const finalText =
+            buffer.trim().length > 0
+              ? buffer
+              : (typeof chunk.composeText === 'string' ? chunk.composeText : '') || buffer;
+          if (finalText && !buffer.trim() && params.onDelta) {
+            const now = Date.now();
+            if (firstDeltaMs == null) firstDeltaMs = now;
+            lastDeltaMs = now;
+            params.onDelta(finalText);
+          }
+          telemetry({ event: 'stream_done', fallback_reason: null, watchdog_reason: null });
           finish({
             ok: true,
-            text: buffer,
+            text: finalText,
             resolvedModel: chunk.model ?? resolvedModel,
-            deltaChars: buffer.length,
+            deltaChars: finalText.length,
           });
         }
       }
@@ -147,7 +209,7 @@ export async function completeViaChatStream(params: {
 
     if (!cleanupHolder.fn) {
       params.signal?.removeEventListener('abort', onAbort);
-      finish({ ok: false, error: 'IPC streaming indisponibil.' });
+      finish({ ok: false, error: 'IPC streaming indisponibil.', deltaChars: 0 });
     }
   });
 }
