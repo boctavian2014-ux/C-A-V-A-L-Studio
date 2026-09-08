@@ -18,7 +18,6 @@ import {
   Html,
 } from '@react-three/drei';
 import * as THREE from 'three';
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { CadViewerToolbar } from './CadViewerToolbar';
 import { dimensionsFromBox3, type StlDimensions } from './cad-viewer-utils';
 import {
@@ -75,6 +74,12 @@ function loadStlGeometry(
 ): Promise<THREE.BufferGeometry | null> {
   return (async () => {
     try {
+      // STLLoader is ESM-only (TS1479 forbids a static require). webpackMode
+      // "eager" keeps it in this chunk so it shares the same Three copy.
+      const { STLLoader } = await import(
+        /* webpackMode: "eager" */
+        'three/examples/jsm/loaders/STLLoader.js'
+      );
       const loader = new STLLoader();
       logCadViewer('stl_parse_start', {
         three_revision: THREE.REVISION,
