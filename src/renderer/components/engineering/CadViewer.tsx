@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StlDimensions } from './cad-viewer-utils';
 import type {
   CadCameraPreset,
@@ -9,6 +9,53 @@ import type {
 import type { CadBatchViewerPart, CadViewerCanvasHandle } from './CadViewerCanvas';
 import { CavalStudioHero } from '../brand/CavaloHorseMark';
 import { useTranslation } from '../../../../ai/i18n/useTranslation';
+
+class CadViewerErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { error: string | null }
+> {
+  state = { error: null as string | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error: error.message };
+  }
+
+  componentDidCatch(error: Error) {
+    console.info(
+      '[cad-viewer]',
+      JSON.stringify({
+        event: 'render_error',
+        name: error.name,
+        message: error.message,
+        readonly_position: /read only property ['"]position['"]/i.test(error.message),
+      })
+    );
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            minHeight: 280,
+            display: 'grid',
+            placeItems: 'center',
+            background: '#0a0a0b',
+            color: 'var(--caval-text-muted)',
+            fontSize: 12,
+            padding: 16,
+            textAlign: 'center',
+          }}
+        >
+          Viewer error
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 type ViewerCanvasProps = {
   stlUrl: string;
@@ -84,6 +131,7 @@ export function CadViewer({
     }
     let alive = true;
     void import('./CadViewerCanvas.js').then((mod) => {
+      console.info('[cad-viewer]', JSON.stringify({ event: 'canvas_chunk_loaded' }));
       if (alive) setViewerCanvas(() => mod.CadViewerCanvas);
     });
     return () => {
@@ -207,37 +255,39 @@ export function CadViewer({
   }
 
   return (
-    <ViewerCanvas
-      ref={canvasRef}
-      stlUrl={stlUrl}
-      batchParts={batchParts}
-      wireframe={wireframe}
-      autoRotate={autoRotate}
-      showGrid={showGrid}
-      toolMode={toolMode}
-      gizmoMode={gizmoMode}
-      sectionAxis={sectionAxis}
-      sectionOffset={sectionOffset}
-      explodeAmount={explodeAmount}
-      dirty={dirty}
-      hasEditedStl={hasEditedStl}
-      dimensionsLabel={dimensions?.label ?? null}
-      statusLabel={statusLabel}
-      onDimensions={handleDimensions}
-      onToggleWireframe={() => setWireframe((v) => !v)}
-      onToggleAutoRotate={() => setAutoRotate((v) => !v)}
-      onToggleGrid={() => setShowGrid((v) => !v)}
-      onSetToolMode={setToolMode}
-      onSetGizmoMode={setGizmoMode}
-      onSectionAxis={setSectionAxis}
-      onSectionOffset={setSectionOffset}
-      onExplodeAmount={setExplodeAmount}
-      onDirtyChange={handleDirty}
-      onSaveEdits={handleSaveEdits}
-      onExportPng={handleExportPng}
-      onCameraPreset={() => {}}
-      onResetTransform={() => setDirty(false)}
-      onMeasureLabel={setMeasureLabel}
-    />
+    <CadViewerErrorBoundary>
+      <ViewerCanvas
+        ref={canvasRef}
+        stlUrl={stlUrl}
+        batchParts={batchParts}
+        wireframe={wireframe}
+        autoRotate={autoRotate}
+        showGrid={showGrid}
+        toolMode={toolMode}
+        gizmoMode={gizmoMode}
+        sectionAxis={sectionAxis}
+        sectionOffset={sectionOffset}
+        explodeAmount={explodeAmount}
+        dirty={dirty}
+        hasEditedStl={hasEditedStl}
+        dimensionsLabel={dimensions?.label ?? null}
+        statusLabel={statusLabel}
+        onDimensions={handleDimensions}
+        onToggleWireframe={() => setWireframe((v) => !v)}
+        onToggleAutoRotate={() => setAutoRotate((v) => !v)}
+        onToggleGrid={() => setShowGrid((v) => !v)}
+        onSetToolMode={setToolMode}
+        onSetGizmoMode={setGizmoMode}
+        onSectionAxis={setSectionAxis}
+        onSectionOffset={setSectionOffset}
+        onExplodeAmount={setExplodeAmount}
+        onDirtyChange={handleDirty}
+        onSaveEdits={handleSaveEdits}
+        onExportPng={handleExportPng}
+        onCameraPreset={() => {}}
+        onResetTransform={() => setDirty(false)}
+        onMeasureLabel={setMeasureLabel}
+      />
+    </CadViewerErrorBoundary>
   );
 }

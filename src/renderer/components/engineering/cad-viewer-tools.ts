@@ -21,6 +21,15 @@ export function formatDistanceMm(distance: number): string {
   return `${rounded} mm`;
 }
 
+/**
+ * R3F `position` must be a tuple. Passing a THREE.Vector3 makes applyProps
+ * do `object.position = vector`, which throws because Object3D.position is
+ * defined as a non-writable property (Three r152+).
+ */
+export function toR3fPosition(v: Vec3Like): [number, number, number] {
+  return [v.x, v.y, v.z];
+}
+
 /** Unit normal for a section clip plane. */
 export function clipPlaneNormal(axis: CadSectionAxis): Vec3Like {
   if (axis === 'x') return { x: 1, y: 0, z: 0 };

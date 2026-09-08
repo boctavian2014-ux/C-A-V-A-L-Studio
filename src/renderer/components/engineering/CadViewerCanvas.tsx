@@ -18,6 +18,7 @@ import {
   Html,
 } from '@react-three/drei';
 import * as THREE from 'three';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { CadViewerToolbar } from './CadViewerToolbar';
 import { dimensionsFromBox3, type StlDimensions } from './cad-viewer-utils';
 import {
@@ -28,6 +29,7 @@ import {
   explodeOffsets,
   formatDistanceMm,
   isTransformDirty,
+  toR3fPosition,
   type CadCameraPreset,
   type CadGizmoMode,
   type CadSectionAxis,
@@ -57,14 +59,29 @@ type OrbitControlsLike = {
   enabled: boolean;
 };
 
+function windowThreeRevision(): string | null {
+  if (typeof window === 'undefined') return null;
+  const w = window as Window & { __THREE__?: string };
+  return typeof w.__THREE__ === 'string' ? w.__THREE__ : null;
+}
+
+function logCadViewer(event: string, extra: Record<string, unknown> = {}): void {
+  console.info('[cad-viewer]', JSON.stringify({ event, ...extra }));
+}
+
 function loadStlGeometry(
   url: string,
   onDimensions?: (dims: StlDimensions) => void
 ): Promise<THREE.BufferGeometry | null> {
   return (async () => {
     try {
-      const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader.js');
       const loader = new STLLoader();
+      logCadViewer('stl_parse_start', {
+        three_revision: THREE.REVISION,
+        window_three: windowThreeRevision(),
+        same_three: windowThreeRevision() === THREE.REVISION,
+        url_kind: /^https?:\/\//i.test(url) && /\/cad\/jobs\//i.test(url) ? 'cad_job' : 'direct',
+      });
 
       const applyGeo = (geo: THREE.BufferGeometry) => {
         geo.computeVertexNormals();
@@ -74,6 +91,10 @@ function loadStlGeometry(
         if (geo.boundingBox && onDimensions) {
           onDimensions(dimensionsFromBox3(geo.boundingBox));
         }
+        logCadViewer('stl_geometry_ready', {
+          has_box: Boolean(geo.boundingBox),
+          attr_count: geo.attributes.position?.count ?? 0,
+        });
         return geo;
       };
 
@@ -97,7 +118,13 @@ function loadStlGeometry(
           () => resolve(null)
         );
       });
-    } catch {
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logCadViewer('stl_parse_error', {
+        name: err.name,
+        message: err.message,
+        readonly_position: /read only property ['"]position['"]/i.test(err.message),
+      });
       return null;
     }
   })();
@@ -122,9 +149,11 @@ function StlMeshObject({
 }) {
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const localRef = useRef<THREE.Mesh>(null);
+  const commitLogged = useRef(false);
 
   useEffect(() => {
     let alive = true;
+    commitLogged.current = false;
     void loadStlGeometry(url, onDimensions).then((geo) => {
       if (!alive) {
         geo?.dispose();
@@ -150,6 +179,15 @@ function StlMeshObject({
   });
 
   if (!geometry) return null;
+
+  if (!commitLogged.current) {
+    commitLogged.current = true;
+    logCadViewer('mesh_commit', {
+      position_kind: Array.isArray(position) ? 'tuple' : typeof position,
+      three_revision: THREE.REVISION,
+      window_three: windowThreeRevision(),
+    });
+  }
 
   return (
     <mesh
@@ -195,13 +233,13 @@ function MeasureOverlay({
         />
       )}
       {points.map((p, i) => (
-        <mesh key={i} position={p}>
+        <mesh key={i} position={toR3fPosition(p)}>
           <sphereGeometry args={[1.2, 12, 12]} />
           <meshBasicMaterial color="#fbbf24" />
         </mesh>
       ))}
       {label && (
-        <Html position={mid} style={{ pointerEvents: 'none' }}>
+        <Html position={toR3fPosition(mid)} style={{ pointerEvents: 'none' }}>
           <div style={{
             padding: '4px 8px',
             borderRadius: 6,
@@ -667,8 +705,14 @@ export const CadViewerCanvas = forwardRef<
           glRef.current = gl;
           gl.setClearColor(new THREE.Color('#0a0a0b'));
           gl.localClippingEnabled = true;
+          logCadViewer('webgl_created', {
+            three_revision: THREE.REVISION,
+            window_three: windowThreeRevision(),
+            same_three: windowThreeRevision() === THREE.REVISION,
+          });
           gl.domElement.addEventListener('webglcontextlost', (e) => {
             e.preventDefault();
+            logCadViewer('webgl_context_lost');
           });
         }}
       >
